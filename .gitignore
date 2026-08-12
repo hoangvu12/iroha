@@ -1,0 +1,13 @@
+node_modules/
+ui/dist/
+ui/node_modules/.tmp/
+
+# Local deployment state. `DATABASE_URL=file:./data/iroha.db` writes here.
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Real secrets. `.env.example` is the tracked template.
+.env
+.env.local

@@ -1,0 +1,3 @@
+# Owner sessions are database-backed cookies with a per-session CSRF token
+
+The Owner signs in with a `HttpOnly`, `SameSite=Strict` cookie holding a session ID and a random secret whose SHA-256 hash is stored in the database, so a copied database yields no usable session, expiry slides on use, and revocation is immediate and durable. We rejected stateless signed tokens, which cannot be revoked or listed, and a double-submit cookie, which a signed-in browser could not distinguish from a forged one; management mutations instead require the session's CSRF token in `x-iroha-csrf` and a same-origin `Origin`, and the token is delivered only in authenticated JSON responses.

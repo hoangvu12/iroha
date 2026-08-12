@@ -10,8 +10,10 @@ import {
   BackgroundScheduleSettingsService,
   type BackgroundScheduler,
 } from '../jobs/index.ts'
-import { ModelCatalogService } from '../models/index.ts'
+import { ModelCatalogService, templateKnowledgeFromRegistry } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
+import type { AdapterRegistry } from '../providers/adapter-registry.ts'
+import { createBuiltInAdapterRegistry } from '../providers/adapter-registry.ts'
 import type { ProviderConnectionRegistry } from '../providers/index.ts'
 import type { Timer } from '../runtime/timer.ts'
 import { UsageService, type UsageAdapter } from '../usage/index.ts'
@@ -42,6 +44,13 @@ export interface AppOptions {
   readonly frontendDirectory?: string | undefined
   /** The inference surface's transport. Omit for the runtime's real fetch. */
   readonly inference?: InferenceAdapter | undefined
+  /**
+   * The Adapter Registry that supplies Provider Templates for the admin
+   * picker and template knowledge for the catalog service. Defaults to the
+   * built-in registry when omitted, so test apps that assemble their own
+   * services can skip the wiring without losing any default.
+   */
+  readonly adapterRegistry?: AdapterRegistry | undefined
   /** Replaces the catalog service built from the other options. */
   readonly modelCatalog?: ModelCatalogService | undefined
   /** Replaces the Usage Adapter the Usage Service polls. */
@@ -90,6 +99,7 @@ export function createApp(options: AppOptions) {
     ? createFrontendHandler(options.frontendDirectory)
     : null
   const inference = options.inference ?? createGenericInferenceAdapter()
+  const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry()
   // The catalog shares the inference adapter so a test transport override
   // governs discovery exactly as it governs inference.
   const modelCatalog =
@@ -98,7 +108,12 @@ export function createApp(options: AppOptions) {
       if (options.secretCipher === undefined) {
         throw new Error('createApp requires a modelCatalog or a secretCipher')
       }
-      return new ModelCatalogService({ database, cipher: options.secretCipher, inference })
+      return new ModelCatalogService({
+        database,
+        cipher: options.secretCipher,
+        inference,
+        templateKnowledge: templateKnowledgeFromRegistry(adapterRegistry),
+      })
     })()
   const usageService =
     options.usageService ??
@@ -124,7 +139,7 @@ export function createApp(options: AppOptions) {
   return new Elysia()
     .use(openapi({ path: '/docs', documentation: { info: { title: 'Iroha', version: '0.1.0' } } }))
     .use(createAuthRoutes({ identity }))
-    .use(createAdminRoutes({ identity, providers, gatewayKeys }))
+    .use(createAdminRoutes({ identity, providers, gatewayKeys, adapterRegistry }))
     .use(createDirectoryRoutes({ gatewayKeys }))
     .use(createCatalogRoutes({ identity, modelCatalog }))
     .use(

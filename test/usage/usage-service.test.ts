@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createSecretCipher } from '../../src/crypto/index.ts'
-import { ProviderConnectionRegistry } from '../../src/providers/index.ts'
+import {
+  createBuiltInAdapterRegistry,
+  ProviderConnectionRegistry,
+} from '../../src/providers/index.ts'
 import { createGenericUsageAdapter } from '../../src/usage/generic-adapter.ts'
 import {
   createMockCreditUsageAdapter,
@@ -33,6 +36,7 @@ async function buildFixture(
     database: opened.database,
     cipher,
     keyProbe: { async test() { return { verdict: 'usable', reason: null } } },
+    adapterRegistry: createBuiltInAdapterRegistry(),
     clock,
   })
   const created = await registry.create({

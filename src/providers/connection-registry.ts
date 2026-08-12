@@ -13,8 +13,10 @@ import type {
 } from '../persistence/index.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
 import type { UsageRecoveryEvidence } from '../usage/adapter.ts'
+import type { AdapterRegistry } from './adapter-registry.ts'
 import type { UpstreamKeyProbe } from './key-probe.ts'
 import { RoundRobinSelector } from './round-robin.ts'
+import type { ProviderTemplate } from './templates.ts'
 
 export interface FieldProblem {
   readonly field: string
@@ -115,6 +117,12 @@ export interface ConnectionView {
   readonly retryMaxAttempts: number
   readonly retryAmbiguousNetwork: boolean
   readonly archived: boolean
+  /**
+   * The Provider Template whose defaults seeded this connection, or null
+   * when the Owner built it by hand. The id is stable and matches the
+   * Adapter Registry's template list exactly.
+   */
+  readonly templateId: string | null
   readonly authHeader: string
   readonly authPrefix: string
   /** Static header names only; the values stay encrypted at rest. */
@@ -138,6 +146,13 @@ export interface ProviderConnectionRegistryOptions {
   readonly database: Database
   readonly cipher: SecretCipher
   readonly keyProbe: UpstreamKeyProbe
+  /**
+   * The Adapter Registry the registry consults when an Owner submits a
+   * `templateId`. Required: a connection created from a template cannot be
+   * validated without the registry, and a registry missing the templates the
+   * built-in set promises would silently drop Owner-supplied IDs.
+   */
+  readonly adapterRegistry: AdapterRegistry
   readonly clock?: Clock
 }
 
@@ -178,6 +193,7 @@ export class ProviderConnectionRegistry {
   readonly #cipher: SecretCipher
   readonly #probe: UpstreamKeyProbe
   readonly #clock: Clock
+  readonly #adapterRegistry: AdapterRegistry
   /**
    * The volatile round-robin cursor. It is deliberately not persisted: it only
    * spreads consecutive selections evenly, and a restart that resets it changes
@@ -191,6 +207,7 @@ export class ProviderConnectionRegistry {
     this.#cipher = options.cipher
     this.#probe = options.keyProbe
     this.#clock = options.clock ?? systemClock
+    this.#adapterRegistry = options.adapterRegistry
     this.#selector = new RoundRobinSelector()
   }
 
@@ -215,11 +232,20 @@ export class ProviderConnectionRegistry {
    * Creates a connection with one Upstream Key. The key is stored encrypted
    * and Unverified first, then tested; a usable test activates it, anything
    * else keeps the key and records why.
+   *
+   * When `templateId` is supplied, the Adapter Registry looks it up and
+   * prefills safe endpoint, authentication, and capability defaults. The
+   * Owner may override every field; the template only seeds defaults and is
+   * recorded on the connection so the UI can show where the defaults came
+   * from. An unknown template id is a validation error, never a silent
+   * fallback.
    */
   async create(input: {
     displayName: unknown
     baseUrl: unknown
     upstreamKey: unknown
+    /** Provider Template id, or null when the Owner is configuring by hand. */
+    templateId?: unknown
     allowInsecureHttp?: unknown
     authHeader?: unknown
     authPrefix?: unknown
@@ -257,12 +283,31 @@ export class ProviderConnectionRegistry {
     const staticHeadersResult = readStaticHeaders(input.staticHeaders, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
+    let template: ProviderTemplate | null = null
+    if (input.templateId !== undefined && input.templateId !== null) {
+      if (typeof input.templateId !== 'string' || input.templateId.trim() === '') {
+        problems.push({ field: 'templateId', message: 'must be a known Provider Template id or null' })
+      } else {
+        template = this.#adapterRegistry.providerTemplate(input.templateId.trim())
+        if (template === null) {
+          problems.push({ field: 'templateId', message: 'must be a known Provider Template id or null' })
+        }
+      }
+    }
+    if (problems.length > 0) return failed({ code: 'validation_failed', problems })
+
     const displayName = (input.displayName as string).trim()
     const baseUrl = (input.baseUrl as string).trim()
     const upstreamKey = (input.upstreamKey as string).trim()
-    const authHeaderName = (authHeader as string).trim()
-    const authPrefixValue = (authPrefix as string)
-    const idempotencyHeaderName = (idempotencyHeader as string).trim()
+    const authHeaderName = (input.authHeader === undefined && template !== null
+      ? template.authHeader
+      : (authHeader as string).trim())
+    const authPrefixValue = input.authPrefix === undefined && template !== null
+      ? template.authPrefix
+      : (authPrefix as string)
+    const idempotencyHeaderName = input.idempotencyHeader === undefined
+      ? 'Idempotency-Key'
+      : (idempotencyHeader as string).trim()
     const connectionTimeoutMs = numericDefault(input.connectionTimeoutMs, 10_000)
     const firstByteTimeoutMs = numericDefault(input.firstByteTimeoutMs, 20_000)
     const nonStreamingTotalTimeoutMs = numericDefault(input.nonStreamingTotalTimeoutMs, 120_000)
@@ -273,6 +318,9 @@ export class ProviderConnectionRegistry {
     const staticHeadersEncrypted = await this.#encryptStaticHeaders(staticHeadersResult)
     const at = this.#clock.now()
     const connectionId = newId('pc')
+    const capabilities: ConnectionCapabilities = template !== null
+      ? { ...template.capabilities }
+      : defaultCapabilities()
 
     await this.#database.transaction(async (repositories) => {
       await repositories.providers.insertConnection({
@@ -284,8 +332,8 @@ export class ProviderConnectionRegistry {
         retryMaxAttempts: 3,
         retryAmbiguousNetwork: false,
         archivedAt: null,
-        templateId: null,
-        capabilities: defaultCapabilities(),
+        templateId: template?.id ?? null,
+        capabilities,
         authHeader: authHeaderName,
         authPrefix: authPrefixValue,
         staticHeadersEncrypted,
@@ -1399,6 +1447,7 @@ function summaryOf(connection: {
   retryMaxAttempts: number
   retryAmbiguousNetwork: boolean
   archivedAt: Date | null
+  templateId: string | null
   authHeader: string
   authPrefix: string
   staticHeadersEncrypted: string
@@ -1421,6 +1470,7 @@ function summaryOf(connection: {
     retryMaxAttempts: connection.retryMaxAttempts,
     retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
     archived: connection.archivedAt !== null,
+    templateId: connection.templateId,
     authHeader: connection.authHeader,
     authPrefix: connection.authPrefix,
     redirectAllowSameOrigin: connection.redirectAllowSameOrigin,

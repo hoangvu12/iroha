@@ -4,6 +4,7 @@
  */
 export {
   ModelCatalogService,
+  templateKnowledgeFromRegistry,
   type CatalogEntryView,
   type CatalogSyncView,
   type CatalogView,

@@ -7,6 +7,7 @@ import type {
   ModelCatalogSyncRecord,
   ProviderConnectionRecord,
 } from '../persistence/index.ts'
+import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
 
 export interface FieldProblem {
@@ -74,6 +75,20 @@ export interface ModelCatalogServiceOptions {
    * Defaults to no template knowledge until built-in templates exist.
    */
   readonly templateKnowledge?: (templateId: string) => readonly string[] | Promise<readonly string[]>
+}
+
+/**
+ * Builds a `templateKnowledge` function from an Adapter Registry: every
+ * built-in template declares the model list it was reviewed against, so the
+ * catalog service can fill gaps when discovery returns less or before it has
+ * run. Unknown template ids return an empty list rather than throw, because a
+ * removed template must never break a previously-created connection's
+ * catalog.
+ */
+export function templateKnowledgeFromRegistry(
+  registry: AdapterRegistry,
+): (templateId: string) => readonly string[] {
+  return (templateId) => registry.providerTemplate(templateId)?.knownModels ?? []
 }
 
 const MODEL_ID_MAXIMUM = 128

@@ -16,9 +16,11 @@ import {
   buildDefaultJobs,
 } from '../jobs/index.ts'
 import { GatewayKeyRegistry } from '../keys/index.ts'
-import { ModelCatalogService } from '../models/index.ts'
+import { ModelCatalogService, templateKnowledgeFromRegistry } from '../models/index.ts'
 import { openDatabase, type Database } from '../persistence/index.ts'
 import {
+  AdapterRegistry,
+  createBuiltInAdapterRegistry,
   createGenericKeyProbe,
   ProviderConnectionRegistry,
   type UpstreamKeyProbe,
@@ -42,6 +44,12 @@ export interface StartOptions {
   readonly passwordHasher?: PasswordHasher
   readonly keyProbe?: UpstreamKeyProbe
   readonly usageAdapter?: UsageAdapter
+  /**
+   * Replaces the built-in Adapter Registry. Tests inject their own to assert
+   * validation behaviour; production uses the built-in set with the generic
+   * Inference Adapter and the reactive-only generic Usage Adapter.
+   */
+  readonly adapterRegistry?: AdapterRegistry
   /** Replaces the fully assembled app the runtime listens on. */
   readonly appFactory?: typeof createApp
   /** Replaces the request-history service the scheduler reaches for. */
@@ -116,10 +124,13 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
       : '  No Owner yet: first-run setup is open in the browser.',
   )
 
+  const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry()
+
   const providers = new ProviderConnectionRegistry({
     database,
     cipher: createSecretCipher(configuration.masterKey),
     keyProbe: options.keyProbe ?? createGenericKeyProbe(),
+    adapterRegistry,
   })
 
   const gatewayKeys = new GatewayKeyRegistry({
@@ -140,6 +151,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     database,
     cipher: secretCipher,
     inference: createGenericInferenceAdapter({ fetch: globalThis.fetch }),
+    templateKnowledge: templateKnowledgeFromRegistry(adapterRegistry),
   })
   const backgroundSchedule = new BackgroundScheduleSettingsService({
     database,

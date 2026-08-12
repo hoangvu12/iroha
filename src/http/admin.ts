@@ -5,8 +5,10 @@ import {
   type KeyView,
   type ProviderConnectionRegistry,
   type ProviderFailure,
+  type ProviderTemplate,
   type UpstreamAccountView,
 } from '../providers/index.ts'
+import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import type {
   CreatedGatewayKey,
   GatewayKeyFailure,
@@ -19,6 +21,13 @@ export interface AdminRoutesOptions {
   readonly identity: OwnerIdentity
   readonly providers: ProviderConnectionRegistry
   readonly gatewayKeys: GatewayKeyRegistry
+  /**
+   * The Adapter Registry that supplies the Provider Templates the Owner
+   * may seed a new connection from. Required: the picker and the template
+   * validation are two sides of the same registry, and skipping it would
+   * leave the picker empty without the Owner noticing.
+   */
+  readonly adapterRegistry: AdapterRegistry
 }
 
 /**
@@ -30,7 +39,12 @@ export interface AdminRoutesOptions {
  * value, and on these routes that value can be an Upstream Key. Responses are
  * typed and appear in the generated OpenAPI document.
  */
-export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRoutesOptions) {
+export function createAdminRoutes({
+  identity,
+  providers,
+  gatewayKeys,
+  adapterRegistry,
+}: AdminRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
   return new Elysia({ name: 'iroha/admin', prefix: '/api/v1/admin' })
@@ -64,6 +78,27 @@ export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRou
         response: { 200: connectionListResponse, 401: errorResponse, 403: errorResponse },
       },
     )
+    .get(
+      '/provider-templates',
+      async ({ request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
+        if ('response' in guardResult) {
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        return status(200, { templates: adapterRegistry.listProviderTemplates().map(toTemplateDto) })
+      },
+      {
+        detail: {
+          summary: 'List built-in Provider Templates',
+          description:
+            'Lists the Provider Templates Iroha ships with. Each one carries safe defaults the Owner may override; the template never contains an account, secret, or per-tenant URL.',
+        },
+        response: { 200: templateListResponse, 401: errorResponse, 403: errorResponse },
+      },
+    )
     .post(
       '/provider-connections',
       async ({ body, request, cookie, status }) => {
@@ -81,6 +116,7 @@ export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRou
           displayName: input.displayName,
           baseUrl: input.baseUrl,
           upstreamKey: input.upstreamKey,
+          ...('templateId' in input ? { templateId: input.templateId } : {}),
           allowInsecureHttp: input.allowInsecureHttp,
           ...('authHeader' in input ? { authHeader: input.authHeader } : {}),
           ...('authPrefix' in input ? { authPrefix: input.authPrefix } : {}),
@@ -112,7 +148,7 @@ export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRou
         detail: {
           summary: 'Create a Provider Connection',
           description:
-            'Creates one OpenAI-compatible Provider Connection with an immutable ID and one Upstream Key. The key is encrypted with the installation master key, saved as Unverified, and tested once with a low-cost probe; a usable test activates it, any other outcome keeps it with the reason.',
+            'Creates one OpenAI-compatible Provider Connection with an immutable ID and one Upstream Key. The key is encrypted with the installation master key, saved as Unverified, and tested once with a low-cost probe; a usable test activates it, any other outcome keeps it with the reason. Supplying a templateId prefills safe defaults; the Owner may override every field.',
         },
         response: { 201: connectionResponse, ...errorResponses },
       },
@@ -768,6 +804,7 @@ const connectionResponse = t.Object({
   retryMaxAttempts: t.Number(),
   retryAmbiguousNetwork: t.Boolean(),
   archived: t.Boolean(),
+  templateId: t.Union([t.Null(), t.String()]),
   authHeader: t.String(),
   authPrefix: t.String(),
   staticHeaders: t.Array(staticHeaderNameResponse),
@@ -786,6 +823,29 @@ const connectionResponse = t.Object({
 })
 
 const connectionListResponse = t.Object({ connections: t.Array(connectionResponse) })
+
+const templateCapabilitiesResponse = t.Object({
+  chat: t.Boolean(),
+  streaming: t.Boolean(),
+  tools: t.Boolean(),
+  structuredOutput: t.Boolean(),
+  responses: t.Boolean(),
+})
+
+const templateDto = t.Object({
+  id: t.String(),
+  displayName: t.String(),
+  description: t.String(),
+  baseUrl: t.String(),
+  authHeader: t.String(),
+  authPrefix: t.String(),
+  capabilities: templateCapabilitiesResponse,
+  knownModels: t.Array(t.String()),
+  inferenceAdapterId: t.String(),
+  usageAdapterId: t.Union([t.Null(), t.String()]),
+})
+
+const templateListResponse = t.Object({ templates: t.Array(templateDto) })
 
 const gatewayKeyScopeResponse = t.Object({
   connectionId: t.String(),
@@ -848,6 +908,7 @@ function toConnectionDto(view: ConnectionView): ConnectionDto {
     retryMaxAttempts: view.retryMaxAttempts,
     retryAmbiguousNetwork: view.retryAmbiguousNetwork,
     archived: view.archived,
+    templateId: view.templateId,
     authHeader: view.authHeader,
     authPrefix: view.authPrefix,
     staticHeaders: view.staticHeaders.map((header) => ({ name: header.name })),
@@ -863,6 +924,21 @@ function toConnectionDto(view: ConnectionView): ConnectionDto {
     updatedAt: view.updatedAt.toISOString(),
     keys: view.keys.map(toKeyDto),
     accounts: view.accounts.map(toAccountDto),
+  }
+}
+
+function toTemplateDto(template: ProviderTemplate): typeof templateDto.static {
+  return {
+    id: template.id,
+    displayName: template.displayName,
+    description: template.description,
+    baseUrl: template.baseUrl,
+    authHeader: template.authHeader,
+    authPrefix: template.authPrefix,
+    capabilities: { ...template.capabilities },
+    knownModels: [...template.knownModels],
+    inferenceAdapterId: template.inferenceAdapterId,
+    usageAdapterId: template.usageAdapterId,
   }
 }
 

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createSecretCipher } from '../../src/crypto/index.ts'
-import { ProviderConnectionRegistry } from '../../src/providers/index.ts'
+import {
+  createBuiltInAdapterRegistry,
+  ProviderConnectionRegistry,
+} from '../../src/providers/index.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
 import { fakeKeyProbe, TEST_MASTER_KEY } from '../support/app.ts'
 import { testClock, type TestClock } from '../support/identity.ts'
@@ -19,6 +22,7 @@ describe('durable scoped Key Health', () => {
       database: opened.database,
       cipher: createSecretCipher(TEST_MASTER_KEY),
       keyProbe: fakeKeyProbe(),
+      adapterRegistry: createBuiltInAdapterRegistry(),
       clock,
     })
     const created = await registry.create({
@@ -102,6 +106,7 @@ describe('durable scoped Key Health', () => {
       database: opened.database,
       cipher: createSecretCipher(TEST_MASTER_KEY),
       keyProbe: fakeKeyProbe(),
+      adapterRegistry: createBuiltInAdapterRegistry(),
       clock,
     })
 

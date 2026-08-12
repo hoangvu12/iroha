@@ -6,13 +6,15 @@ import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
 import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
 import { BackgroundScheduleSettingsService } from '../../src/jobs/index.ts'
-import { ModelCatalogService } from '../../src/models/index.ts'
+import { ModelCatalogService, templateKnowledgeFromRegistry } from '../../src/models/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import {
+  createBuiltInAdapterRegistry,
   ProviderConnectionRegistry,
   type KeyProbeResult,
   type UpstreamKeyProbe,
 } from '../../src/providers/index.ts'
+import type { AdapterRegistry } from '../../src/providers/adapter-registry.ts'
 import type { Timer } from '../../src/runtime/timer.ts'
 import { UsageService, type UsageAdapter } from '../../src/usage/index.ts'
 import { createGenericUsageAdapter } from '../../src/usage/generic-adapter.ts'
@@ -36,6 +38,8 @@ export interface TestApp {
   readonly upstreamKeyProbe: UpstreamKeyProbe
   readonly gatewayKeys: GatewayKeyRegistry
   readonly modelCatalog: ModelCatalogService
+  /** The Adapter Registry the assembled app is using. */
+  readonly adapterRegistry: AdapterRegistry
   /** The Usage Adapter the assembled app is using; tests usually inject one. */
   readonly usageAdapter: UsageAdapter
   /** The Usage Service the assembled app is using. */
@@ -56,6 +60,11 @@ export interface TestAppOptions {
   /** Replaces the inference upstream transport; defaults to a closed stub. */
   readonly upstreamTransport?: typeof fetch | undefined
   readonly secretCipher?: SecretCipher
+  /**
+   * Replaces the Adapter Registry. Defaults to the built-in one; tests can
+   * supply a registry with a malformed declaration to assert validation.
+   */
+  readonly adapterRegistry?: AdapterRegistry
   /** Replaces the Usage Adapter; defaults to the reactive-only generic one. */
   readonly usageAdapter?: UsageAdapter
   /** Replaces the background schedule settings service. */
@@ -104,6 +113,7 @@ export function providerRegistryFor(database: Database): ProviderConnectionRegis
     database,
     cipher: createSecretCipher(TEST_MASTER_KEY),
     keyProbe: fakeKeyProbe(),
+    adapterRegistry: createBuiltInAdapterRegistry(),
   })
 }
 
@@ -113,11 +123,15 @@ export function gatewayKeyRegistryFor(database: Database): GatewayKeyRegistry {
 }
 
 /** The standard model catalog service for tests that assemble an app by hand. */
-export function modelCatalogFor(database: Database): ModelCatalogService {
+export function modelCatalogFor(
+  database: Database,
+  adapterRegistry: AdapterRegistry = createBuiltInAdapterRegistry(),
+): ModelCatalogService {
   return new ModelCatalogService({
     database,
     cipher: createSecretCipher(TEST_MASTER_KEY),
     inference: createGenericInferenceAdapter({ fetch: stubUpstreamTransport() }),
+    templateKnowledge: templateKnowledgeFromRegistry(adapterRegistry),
   })
 }
 
@@ -154,10 +168,12 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   // server, so every test request shares the throttle's unknown source.
 
   const upstreamKeyProbe = options.upstreamKeyProbe ?? fakeKeyProbe()
+  const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry()
   const providers = new ProviderConnectionRegistry({
     database,
     cipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
     keyProbe: upstreamKeyProbe,
+    adapterRegistry,
     clock,
   })
 
@@ -172,6 +188,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     database,
     cipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
     inference,
+    templateKnowledge: templateKnowledgeFromRegistry(adapterRegistry),
   })
   const usageAdapter = options.usageAdapter ?? createGenericUsageAdapter()
   const usageService = new UsageService({
@@ -195,6 +212,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     gatewayKeys,
     secretCipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
     inference,
+    adapterRegistry,
     modelCatalog,
     usageAdapter,
     usageService,
@@ -226,6 +244,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     upstreamKeyProbe,
     gatewayKeys,
     modelCatalog,
+    adapterRegistry,
     usageAdapter,
     usageService,
 

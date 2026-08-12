@@ -200,6 +200,47 @@ export interface ProviderRepository {
   deleteKeysForConnection(connectionId: string): Promise<number>
 }
 
+/**
+ * One Provider Connection a Gateway Key permits its application to use and
+ * discover. `models` is `null` when every model on the connection is allowed,
+ * or the exact upstream model IDs the key is restricted to.
+ */
+export interface GatewayKeyScopeEntry {
+  readonly connectionId: string
+  readonly models: readonly string[] | null
+}
+
+/**
+ * One application credential. The usable secret never reaches storage: only the
+ * hash of the high-entropy secret part is kept, and the full credential the
+ * application presents is `<id>.<secret>`, revealed once on creation.
+ */
+export interface GatewayKeyRecord {
+  /** The public lookup identity, safe to show in lists and logs. */
+  readonly id: string
+  readonly name: string
+  /** SHA-256 of the secret half of the credential, never the plaintext. */
+  readonly secretHash: string
+  /** Which Provider Connections the key may use and discover, and how. */
+  readonly scope: readonly GatewayKeyScopeEntry[]
+  readonly createdAt: Date
+  /** The last time the key successfully authenticated a caller. */
+  readonly lastUsedAt: Date | null
+  /** Set once the Owner revokes the key; revoked keys never authenticate. */
+  readonly revokedAt: Date | null
+}
+
+export interface GatewayKeyRepository {
+  /** Every key, most recently created first, revoked ones included. */
+  list(): Promise<readonly GatewayKeyRecord[]>
+  get(id: string): Promise<GatewayKeyRecord | null>
+  insert(key: GatewayKeyRecord): Promise<GatewayKeyRecord>
+  /** Records that a key authenticated. Returns whether the key still existed. */
+  markUsed(id: string, at: Date): Promise<boolean>
+  /** Revokes the key. Returns `null` when no such key exists. */
+  revoke(id: string, at: Date): Promise<GatewayKeyRecord | null>
+}
+
 /** The repositories reachable inside and outside a transaction alike. */
 export interface Repositories {
   readonly settings: SettingsRepository
@@ -207,6 +248,7 @@ export interface Repositories {
   readonly sessions: SessionRepository
   readonly audit: AuditRepository
   readonly providers: ProviderRepository
+  readonly gatewayKeys: GatewayKeyRepository
 }
 
 export interface Database extends Repositories {

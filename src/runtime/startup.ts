@@ -9,6 +9,7 @@ import { createSecretCipher } from '../crypto/index.ts'
 import { createApp } from '../http/app.ts'
 import { ReadinessState } from '../http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../identity/index.ts'
+import { GatewayKeyRegistry } from '../keys/index.ts'
 import { openDatabase, type Database } from '../persistence/index.ts'
 import {
   createGenericKeyProbe,
@@ -102,11 +103,17 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     keyProbe: options.keyProbe ?? createGenericKeyProbe(),
   })
 
+  const gatewayKeys = new GatewayKeyRegistry({
+    database,
+    ...(options.clock ? { clock: options.clock } : {}),
+  })
+
   const app = createApp({
     database,
     readiness,
     identity,
     providers,
+    gatewayKeys,
     frontendDirectory: options.frontendDirectory ?? DEFAULT_FRONTEND_DIRECTORY,
   })
 

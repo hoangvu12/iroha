@@ -77,3 +77,18 @@ export const upstreamKeys = pgTable('upstream_keys', {
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
 })
+
+/**
+ * An application credential the Owner issues. The secret itself never lands
+ * here: only its hash is stored, and the public id is what applications and
+ * lists refer to.
+ */
+export const gatewayKeys = pgTable('gateway_keys', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  secretHash: text('secret_hash').notNull(),
+  scope: jsonb('scope').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true, mode: 'date' }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+})

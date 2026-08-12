@@ -6,11 +6,18 @@ import {
   type ProviderConnectionRegistry,
   type ProviderFailure,
 } from '../providers/index.ts'
+import type {
+  CreatedGatewayKey,
+  GatewayKeyFailure,
+  GatewayKeyRegistry,
+  GatewayKeyView,
+} from '../keys/index.ts'
 import { createOwnerGuard, managementError, type ManagementError } from './owner-guard.ts'
 
 export interface AdminRoutesOptions {
   readonly identity: OwnerIdentity
   readonly providers: ProviderConnectionRegistry
+  readonly gatewayKeys: GatewayKeyRegistry
 }
 
 /**
@@ -22,7 +29,7 @@ export interface AdminRoutesOptions {
  * value, and on these routes that value can be an Upstream Key. Responses are
  * typed and appear in the generated OpenAPI document.
  */
-export function createAdminRoutes({ identity, providers }: AdminRoutesOptions) {
+export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
   return new Elysia({ name: 'iroha/admin', prefix: '/api/v1/admin' })
@@ -344,6 +351,126 @@ export function createAdminRoutes({ identity, providers }: AdminRoutesOptions) {
         },
       },
     )
+    .get(
+      '/gateway-keys',
+      async ({ request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        return status(200, { keys: (await gatewayKeys.list()).map(toGatewayKeyDto) })
+      },
+      {
+        detail: {
+          summary: 'List Gateway Keys',
+          description:
+            'Lists every Gateway Key with its name, creation and last-used times, scope, and revocation state. Secrets are never listed or stored in plaintext.',
+        },
+        response: { 200: gatewayKeyListResponse, 401: errorResponse, 403: errorResponse },
+      },
+    )
+    .post(
+      '/gateway-keys',
+      async ({ body, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const input = asObject(body)
+        const result = await gatewayKeys.create({
+          name: input.name,
+          scope: input.scope,
+        })
+
+        if (!result.ok) {
+          const failure = toGatewayKeyFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(201, toCreatedGatewayKeyDto(result.value))
+      },
+      {
+        detail: {
+          summary: 'Create a Gateway Key',
+          description:
+            'Issues a named application credential restricted to the requested Provider Connections and exact model IDs. The usable secret is returned exactly once; only its hash is stored.',
+        },
+        response: { 201: gatewayKeyCreatedResponse, ...errorResponses },
+      },
+    )
+    .get(
+      '/gateway-keys/:id',
+      async ({ params, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const key = await gatewayKeys.get(params.id)
+        if (key === null) {
+          return status(404, adminError('gateway_key_not_found', 'No such Gateway Key.'))
+        }
+
+        return status(200, toGatewayKeyDto(key))
+      },
+      {
+        detail: {
+          summary: 'Inspect a Gateway Key',
+          description:
+            'Returns one Gateway Key with its metadata and scope. The usable secret was shown once at creation and is never returned again.',
+        },
+        response: {
+          200: gatewayKeyResponse,
+          401: errorResponse,
+          403: errorResponse,
+          404: errorResponse,
+        },
+      },
+    )
+    .post(
+      '/gateway-keys/:id/revoke',
+      async ({ params, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const result = await gatewayKeys.revoke(params.id)
+        if (!result.ok) {
+          const failure = toGatewayKeyFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(200, toGatewayKeyDto(result.value))
+      },
+      {
+        detail: {
+          summary: 'Revoke a Gateway Key',
+          description:
+            'Ends an application credential permanently. The key stays listed with its metadata so the Owner can see what was revoked.',
+        },
+        response: {
+          200: gatewayKeyResponse,
+          ...errorResponses,
+        },
+      },
+    )
 }
 
 export type AdminRoutes = ReturnType<typeof createAdminRoutes>
@@ -380,6 +507,28 @@ const connectionResponse = t.Object({
 
 const connectionListResponse = t.Object({ connections: t.Array(connectionResponse) })
 
+const gatewayKeyScopeResponse = t.Object({
+  connectionId: t.String(),
+  models: t.Union([t.Null(), t.Array(t.String())]),
+})
+
+const gatewayKeyResponse = t.Object({
+  id: t.String(),
+  name: t.String(),
+  scope: t.Array(gatewayKeyScopeResponse),
+  createdAt: t.String(),
+  lastUsedAt: t.Union([t.Null(), t.String()]),
+  revoked: t.Boolean(),
+})
+
+/** The one response that carries the usable secret. Every later one omits it. */
+const gatewayKeyCreatedResponse = t.Object({
+  ...gatewayKeyResponse.properties,
+  secret: t.String(),
+})
+
+const gatewayKeyListResponse = t.Object({ keys: t.Array(gatewayKeyResponse) })
+
 const errorResponse = t.Object({
   error: t.Object({
     code: t.String(),
@@ -405,6 +554,7 @@ const errorResponses = {
 type ConnectionDto = typeof connectionResponse.static
 type KeyDto = typeof keyResponse.static
 type ErrorDto = typeof errorResponse.static
+type GatewayKeyDto = typeof gatewayKeyResponse.static
 
 function toConnectionDto(view: ConnectionView): ConnectionDto {
   return {
@@ -435,6 +585,24 @@ function toKeyDto(key: KeyView): KeyDto {
     createdAt: key.createdAt.toISOString(),
     updatedAt: key.updatedAt.toISOString(),
   }
+}
+
+function toGatewayKeyDto(key: GatewayKeyView): GatewayKeyDto {
+  return {
+    id: key.id,
+    name: key.name,
+    scope: key.scope.map((entry) => ({
+      connectionId: entry.connectionId,
+      models: entry.models === null ? null : [...entry.models],
+    })),
+    createdAt: key.createdAt.toISOString(),
+    lastUsedAt: key.lastUsedAt === null ? null : key.lastUsedAt.toISOString(),
+    revoked: key.revokedAt !== null,
+  }
+}
+
+function toCreatedGatewayKeyDto(created: CreatedGatewayKey): typeof gatewayKeyCreatedResponse.static {
+  return { ...toGatewayKeyDto(created.key), secret: created.secret }
 }
 
 function adminError(code: string, message: string): ErrorDto {
@@ -489,19 +657,32 @@ function toFailure(failure: ProviderFailure): { statusCode: 400 | 404 | 409 | 50
         ),
       }
     case 'validation_failed':
+      return { statusCode: 400, body: validationFailureBody(failure.problems) }
+  }
+}
+
+function toGatewayKeyFailure(failure: GatewayKeyFailure): { statusCode: 400 | 404; body: ErrorDto } {
+  switch (failure.code) {
+    case 'gateway_key_not_found':
       return {
-        statusCode: 400,
-        body: {
-          error: {
-            code: 'validation_failed',
-            message: 'The submitted values are not acceptable.',
-            problems: failure.problems.map((problem) => ({
-              field: problem.field,
-              message: problem.message,
-            })),
-          },
-        },
+        statusCode: 404,
+        body: adminError('gateway_key_not_found', 'No such Gateway Key.'),
       }
+    case 'validation_failed':
+      return { statusCode: 400, body: validationFailureBody(failure.problems) }
+  }
+}
+
+/** The shared validation envelope, carrying field rules but never the values. */
+function validationFailureBody(
+  problems: readonly { readonly field: string; readonly message: string }[],
+): ErrorDto {
+  return {
+    error: {
+      code: 'validation_failed',
+      message: 'The submitted values are not acceptable.',
+      problems: problems.map((problem) => ({ field: problem.field, message: problem.message })),
+    },
   }
 }
 

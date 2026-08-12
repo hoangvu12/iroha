@@ -2,6 +2,7 @@ import { createSecretCipher, type SecretCipher } from '../../src/crypto/index.ts
 import { createApp } from '../../src/http/app.ts'
 import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
+import { GatewayKeyRegistry } from '../../src/keys/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import {
   ProviderConnectionRegistry,
@@ -23,6 +24,7 @@ export interface TestApp {
   readonly clock: TestClock
   /** The probe the app's Provider Connection registry is using. */
   readonly upstreamKeyProbe: UpstreamKeyProbe
+  readonly gatewayKeys: GatewayKeyRegistry
   /** Sends a request the way a same-origin browser would. */
   fetch(path: string, init?: RequestInit & { csrf?: string }): Promise<Response>
   dispose(): Promise<void>
@@ -76,6 +78,11 @@ export function providerRegistryFor(database: Database): ProviderConnectionRegis
   })
 }
 
+/** The standard Gateway Key registry for tests that assemble an app by hand. */
+export function gatewayKeyRegistryFor(database: Database): GatewayKeyRegistry {
+  return new GatewayKeyRegistry({ database })
+}
+
 /**
  * The seam the spec names: the assembled application driven through its Web
  * `fetch` interface, over a real database, with only time, password cost, the
@@ -107,9 +114,11 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     clock,
   })
 
+  const gatewayKeys = new GatewayKeyRegistry({ database, clock })
+
   const readiness = new ReadinessState()
   readiness.markMigrated()
-  const app = createApp({ database, readiness, identity, providers })
+  const app = createApp({ database, readiness, identity, providers, gatewayKeys })
 
   const cookies = new Map<string, string>()
 
@@ -119,6 +128,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     identity,
     clock,
     upstreamKeyProbe,
+    gatewayKeys,
 
     async fetch(path, init = {}) {
       const { csrf, headers, ...rest } = init

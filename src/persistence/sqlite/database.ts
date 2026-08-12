@@ -12,6 +12,9 @@ import {
   type AuditOutcome,
   type AuditRepository,
   type Database,
+  type GatewayKeyRecord,
+  type GatewayKeyRepository,
+  type GatewayKeyScopeEntry,
   type KeyProbeVerdict,
   type OwnerRecord,
   type OwnerRepository,
@@ -27,7 +30,15 @@ import {
   type UpstreamKeyPatch,
   type UpstreamKeyRecord,
 } from '../repository.ts'
-import { auditEvents, owner, ownerSessions, providerConnections, settings, upstreamKeys } from './schema.ts'
+import {
+  auditEvents,
+  gatewayKeys,
+  owner,
+  ownerSessions,
+  providerConnections,
+  settings,
+  upstreamKeys,
+} from './schema.ts'
 
 const MIGRATIONS_FOLDER = join(import.meta.dir, '../../../migrations/sqlite')
 
@@ -66,6 +77,7 @@ class SqliteDatabase implements Database {
   readonly sessions: SessionRepository
   readonly audit: AuditRepository
   readonly providers: ProviderRepository
+  readonly gatewayKeys: GatewayKeyRepository
 
   /**
    * `bun:sqlite` is one synchronous connection, so two overlapping
@@ -85,6 +97,7 @@ class SqliteDatabase implements Database {
     this.sessions = new SqliteSessionRepository(handle)
     this.audit = new SqliteAuditRepository(handle)
     this.providers = new SqliteProviderRepository(handle)
+    this.gatewayKeys = new SqliteGatewayKeyRepository(handle)
   }
 
   /**
@@ -98,6 +111,7 @@ class SqliteDatabase implements Database {
       sessions: this.sessions,
       audit: this.audit,
       providers: this.providers,
+      gatewayKeys: this.gatewayKeys,
     }
   }
 
@@ -450,6 +464,71 @@ class SqliteProviderRepository implements ProviderRepository {
       .where(eq(upstreamKeys.connectionId, connectionId))
       .returning({ id: upstreamKeys.id })
     return removed.length
+  }
+}
+
+class SqliteGatewayKeyRepository implements GatewayKeyRepository {
+  constructor(private readonly handle: Handle) {}
+
+  async list(): Promise<readonly GatewayKeyRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(gatewayKeys)
+      .orderBy(desc(gatewayKeys.createdAt), desc(gatewayKeys.id))
+    return rows.map(toGatewayKey)
+  }
+
+  async get(id: string): Promise<GatewayKeyRecord | null> {
+    const [row] = await this.handle.select().from(gatewayKeys).where(eq(gatewayKeys.id, id)).limit(1)
+    return row ? toGatewayKey(row) : null
+  }
+
+  async insert(key: GatewayKeyRecord): Promise<GatewayKeyRecord> {
+    const [row] = await this.handle
+      .insert(gatewayKeys)
+      .values({
+        id: key.id,
+        name: key.name,
+        secretHash: key.secretHash,
+        scope: JSON.stringify(key.scope),
+        createdAt: key.createdAt,
+        lastUsedAt: key.lastUsedAt,
+        revokedAt: key.revokedAt,
+      })
+      .returning()
+    return row === undefined ? toGatewayKey({ ...key, scope: JSON.stringify(key.scope) }) : toGatewayKey(row)
+  }
+
+  async markUsed(id: string, at: Date): Promise<boolean> {
+    const touched = await this.handle
+      .update(gatewayKeys)
+      .set({ lastUsedAt: at })
+      .where(eq(gatewayKeys.id, id))
+      .returning({ id: gatewayKeys.id })
+    return touched.length > 0
+  }
+
+  async revoke(id: string, at: Date): Promise<GatewayKeyRecord | null> {
+    const [row] = await this.handle
+      .update(gatewayKeys)
+      .set({ revokedAt: at })
+      .where(eq(gatewayKeys.id, id))
+      .returning()
+    return row ? toGatewayKey(row) : null
+  }
+}
+
+type GatewayKeyRow = typeof gatewayKeys.$inferSelect
+
+function toGatewayKey(row: GatewayKeyRow): GatewayKeyRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    secretHash: row.secretHash,
+    scope: JSON.parse(row.scope) as readonly GatewayKeyScopeEntry[],
+    createdAt: row.createdAt,
+    lastUsedAt: row.lastUsedAt,
+    revokedAt: row.revokedAt,
   }
 }
 

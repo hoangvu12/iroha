@@ -1,10 +1,12 @@
 import { openapi } from '@elysiajs/openapi'
 import { Elysia, t } from 'elysia'
 import type { OwnerIdentity } from '../identity/index.ts'
+import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { Database } from '../persistence/index.ts'
 import type { ProviderConnectionRegistry } from '../providers/index.ts'
 import { createAdminRoutes } from './admin.ts'
 import { createAuthRoutes } from './auth.ts'
+import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
 import { ReadinessState } from './readiness.ts'
 
@@ -13,6 +15,7 @@ export interface AppOptions {
   readonly readiness: ReadinessState
   readonly identity: OwnerIdentity
   readonly providers: ProviderConnectionRegistry
+  readonly gatewayKeys: GatewayKeyRegistry
   /** Directory holding the built management UI. Omit to serve the API alone. */
   readonly frontendDirectory?: string | undefined
 }
@@ -40,7 +43,7 @@ const notReadyResponse = t.Object({
  * seam the spec names: real repositories, real routing, no network.
  */
 export function createApp(options: AppOptions) {
-  const { database, readiness, identity, providers } = options
+  const { database, readiness, identity, providers, gatewayKeys } = options
   const frontend: FrontendHandler | null = options.frontendDirectory
     ? createFrontendHandler(options.frontendDirectory)
     : null
@@ -48,7 +51,8 @@ export function createApp(options: AppOptions) {
   return new Elysia()
     .use(openapi({ path: '/docs', documentation: { info: { title: 'Iroha', version: '0.1.0' } } }))
     .use(createAuthRoutes({ identity }))
-    .use(createAdminRoutes({ identity, providers }))
+    .use(createAdminRoutes({ identity, providers, gatewayKeys }))
+    .use(createDirectoryRoutes({ gatewayKeys }))
     .get('/health/live', () => ({ status: 'alive' as const }), {
       detail: {
         summary: 'Process liveness',

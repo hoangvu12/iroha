@@ -77,3 +77,18 @@ export const upstreamKeys = sqliteTable('upstream_keys', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 })
+
+/**
+ * An application credential the Owner issues. The secret itself never lands
+ * here: only its hash is stored, and the public id is what applications and
+ * lists refer to. Scope is JSON text, owned by the repository like settings.
+ */
+export const gatewayKeys = sqliteTable('gateway_keys', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  secretHash: text('secret_hash').notNull(),
+  scope: text('scope').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
+  revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
+})

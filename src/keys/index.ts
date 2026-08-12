@@ -13,4 +13,5 @@ export {
   type GatewayKeyRegistryOptions,
   type GatewayKeyResult,
   type GatewayKeyView,
+  type InferenceAuthorization,
 } from './gateway-key-registry.ts'

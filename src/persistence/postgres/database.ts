@@ -10,11 +10,16 @@ import {
   type AuditEventRecord,
   type AuditOutcome,
   type AuditRepository,
+  type ConnectionCapabilities,
   type Database,
   type GatewayKeyRecord,
   type GatewayKeyRepository,
   type GatewayKeyScopeEntry,
   type KeyProbeVerdict,
+  type ModelCatalogEntryRecord,
+  type ModelCatalogRepository,
+  type ModelCatalogSource,
+  type ModelCatalogSyncRecord,
   type OwnerRecord,
   type OwnerRepository,
   type ProviderConnectionPatch,
@@ -32,6 +37,8 @@ import {
 import {
   auditEvents,
   gatewayKeys,
+  modelCatalogEntries,
+  modelCatalogSync,
   owner,
   ownerSessions,
   providerConnections,
@@ -63,6 +70,7 @@ class PostgresDatabase implements Database {
   readonly audit: AuditRepository
   readonly providers: ProviderRepository
   readonly gatewayKeys: GatewayKeyRepository
+  readonly modelCatalog: ModelCatalogRepository
 
   constructor(
     config: PostgresConfiguration,
@@ -76,6 +84,7 @@ class PostgresDatabase implements Database {
     this.audit = new PostgresAuditRepository(handle)
     this.providers = new PostgresProviderRepository(handle)
     this.gatewayKeys = new PostgresGatewayKeyRepository(handle)
+    this.modelCatalog = new PostgresModelCatalogRepository(handle)
   }
 
   async migrate(): Promise<void> {
@@ -105,6 +114,7 @@ class PostgresDatabase implements Database {
         audit: new PostgresAuditRepository(tx),
         providers: new PostgresProviderRepository(tx),
         gatewayKeys: new PostgresGatewayKeyRepository(tx),
+        modelCatalog: new PostgresModelCatalogRepository(tx),
       }),
     )
   }
@@ -357,8 +367,11 @@ class PostgresProviderRepository implements ProviderRepository {
   async insertConnection(
     connection: ProviderConnectionRecord,
   ): Promise<ProviderConnectionRecord> {
-    const [row] = await this.handle.insert(providerConnections).values(connection).returning()
-    return toConnection(row ?? connection)
+    const [row] = await this.handle
+      .insert(providerConnections)
+      .values({ ...connection, capabilities: JSON.stringify(connection.capabilities) })
+      .returning()
+    return toConnection(row ?? { ...connection, capabilities: JSON.stringify(connection.capabilities) })
   }
 
   async updateConnection(
@@ -366,7 +379,12 @@ class PostgresProviderRepository implements ProviderRepository {
     patch: ProviderConnectionPatch,
     at: Date,
   ): Promise<ProviderConnectionRecord | null> {
-    const changed = { ...patch, updatedAt: at }
+    const { capabilities, ...rest } = patch
+    const changed = {
+      ...rest,
+      ...(capabilities === undefined ? {} : { capabilities: JSON.stringify(capabilities) }),
+      updatedAt: at,
+    }
     const [row] = await this.handle
       .update(providerConnections)
       .set(changed)
@@ -494,6 +512,8 @@ function toConnection(row: ConnectionRow): ProviderConnectionRecord {
     allowInsecureHttp: row.allowInsecureHttp,
     enabled: row.enabled,
     archivedAt: row.archivedAt,
+    templateId: row.templateId,
+    capabilities: parseCapabilities(row.capabilities),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -510,5 +530,279 @@ function toKey(row: KeyRow): UpstreamKeyRecord {
     lastProbeReason: row.lastProbeReason,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  }
+}
+
+class PostgresModelCatalogRepository implements ModelCatalogRepository {
+  constructor(private readonly handle: Handle) {}
+
+  async listEntries(connectionId: string): Promise<readonly ModelCatalogEntryRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(modelCatalogEntries)
+      .where(eq(modelCatalogEntries.connectionId, connectionId))
+      .orderBy(modelCatalogEntries.createdAt, modelCatalogEntries.modelId)
+    return rows.map(toModelEntry)
+  }
+
+  async syncDiscovered(connectionId: string, modelIds: readonly string[], at: Date): Promise<void> {
+    const desired = new Set(modelIds)
+
+    for (const modelId of modelIds) {
+      const [existing] = await this.handle
+        .select({ id: modelCatalogEntries.modelId })
+        .from(modelCatalogEntries)
+        .where(
+          eq(modelCatalogEntries.connectionId, connectionId) &&
+            eq(modelCatalogEntries.modelId, modelId),
+        )
+        .limit(1)
+
+      if (existing === undefined) {
+        await this.handle.insert(modelCatalogEntries).values({
+          connectionId,
+          modelId,
+          source: 'discovered',
+          excluded: false,
+          overrides: null,
+          createdAt: at,
+          updatedAt: at,
+        })
+      } else {
+        await this.handle
+          .update(modelCatalogEntries)
+          .set({ source: 'discovered', updatedAt: at })
+          .where(
+            eq(modelCatalogEntries.connectionId, connectionId) &&
+              eq(modelCatalogEntries.modelId, modelId),
+          )
+      }
+    }
+
+    const rows = await this.handle
+      .select({ modelId: modelCatalogEntries.modelId, excluded: modelCatalogEntries.excluded })
+      .from(modelCatalogEntries)
+      .where(eq(modelCatalogEntries.connectionId, connectionId))
+    for (const row of rows) {
+      if (!row.excluded && !desired.has(row.modelId)) {
+        await this.handle
+          .delete(modelCatalogEntries)
+          .where(
+            eq(modelCatalogEntries.connectionId, connectionId) &&
+              eq(modelCatalogEntries.modelId, row.modelId) &&
+              eq(modelCatalogEntries.source, 'discovered'),
+          )
+      }
+    }
+  }
+
+  async addOwnerModel(connectionId: string, modelId: string, at: Date): Promise<void> {
+    const [existing] = await this.handle
+      .select({ source: modelCatalogEntries.source })
+      .from(modelCatalogEntries)
+      .where(
+        eq(modelCatalogEntries.connectionId, connectionId) &&
+          eq(modelCatalogEntries.modelId, modelId),
+      )
+      .limit(1)
+
+    if (existing === undefined) {
+      await this.handle.insert(modelCatalogEntries).values({
+        connectionId,
+        modelId,
+        source: 'owner_added',
+        excluded: false,
+        overrides: null,
+        createdAt: at,
+        updatedAt: at,
+      })
+      return
+    }
+
+    if (existing.source === 'excluded') {
+      await this.handle
+        .update(modelCatalogEntries)
+        .set({ source: 'owner_added', excluded: false, updatedAt: at })
+        .where(
+          eq(modelCatalogEntries.connectionId, connectionId) &&
+            eq(modelCatalogEntries.modelId, modelId),
+        )
+    }
+  }
+
+  async removeOwnerModel(connectionId: string, modelId: string): Promise<boolean> {
+    const removed = await this.handle
+      .delete(modelCatalogEntries)
+      .where(
+        eq(modelCatalogEntries.connectionId, connectionId) &&
+          eq(modelCatalogEntries.modelId, modelId) &&
+          eq(modelCatalogEntries.source, 'owner_added'),
+      )
+      .returning({ id: modelCatalogEntries.modelId })
+    return removed.length > 0
+  }
+
+  async setExcluded(connectionId: string, modelId: string, excluded: boolean, at: Date): Promise<void> {
+    const [existing] = await this.handle
+      .select({ source: modelCatalogEntries.source })
+      .from(modelCatalogEntries)
+      .where(
+        eq(modelCatalogEntries.connectionId, connectionId) &&
+          eq(modelCatalogEntries.modelId, modelId),
+      )
+      .limit(1)
+
+    if (excluded) {
+      if (existing === undefined) {
+        await this.handle.insert(modelCatalogEntries).values({
+          connectionId,
+          modelId,
+          source: 'excluded',
+          excluded: true,
+          overrides: null,
+          createdAt: at,
+          updatedAt: at,
+        })
+      } else {
+        await this.handle
+          .update(modelCatalogEntries)
+          .set({ excluded: true, updatedAt: at })
+          .where(
+            eq(modelCatalogEntries.connectionId, connectionId) &&
+              eq(modelCatalogEntries.modelId, modelId),
+          )
+      }
+      return
+    }
+
+    if (existing === undefined) return
+
+    if (existing.source === 'excluded') {
+      await this.handle
+        .delete(modelCatalogEntries)
+        .where(
+          eq(modelCatalogEntries.connectionId, connectionId) &&
+            eq(modelCatalogEntries.modelId, modelId),
+        )
+    } else {
+      await this.handle
+        .update(modelCatalogEntries)
+        .set({ excluded: false, updatedAt: at })
+        .where(
+          eq(modelCatalogEntries.connectionId, connectionId) &&
+            eq(modelCatalogEntries.modelId, modelId),
+        )
+    }
+  }
+
+  async updateOverrides(
+    connectionId: string,
+    modelId: string,
+    overrides: Readonly<Partial<ConnectionCapabilities>>,
+    at: Date,
+  ): Promise<void> {
+    const [existing] = await this.handle
+      .select({ id: modelCatalogEntries.modelId })
+      .from(modelCatalogEntries)
+      .where(
+        eq(modelCatalogEntries.connectionId, connectionId) &&
+          eq(modelCatalogEntries.modelId, modelId),
+      )
+      .limit(1)
+
+    if (existing === undefined) {
+      await this.handle.insert(modelCatalogEntries).values({
+        connectionId,
+        modelId,
+        source: 'owner_added',
+        excluded: false,
+        overrides,
+        createdAt: at,
+        updatedAt: at,
+      })
+    } else {
+      await this.handle
+        .update(modelCatalogEntries)
+        .set({ overrides, updatedAt: at })
+        .where(
+          eq(modelCatalogEntries.connectionId, connectionId) &&
+            eq(modelCatalogEntries.modelId, modelId),
+        )
+    }
+  }
+
+  async isExcluded(connectionId: string, modelId: string): Promise<boolean> {
+    const [row] = await this.handle
+      .select({ excluded: modelCatalogEntries.excluded })
+      .from(modelCatalogEntries)
+      .where(
+        eq(modelCatalogEntries.connectionId, connectionId) &&
+          eq(modelCatalogEntries.modelId, modelId),
+      )
+      .limit(1)
+    return row?.excluded === true
+  }
+
+  async getSync(connectionId: string): Promise<ModelCatalogSyncRecord | null> {
+    const [row] = await this.handle
+      .select()
+      .from(modelCatalogSync)
+      .where(eq(modelCatalogSync.connectionId, connectionId))
+      .limit(1)
+    return row ? toSyncRecord(row) : null
+  }
+
+  async putSync(record: ModelCatalogSyncRecord): Promise<void> {
+    await this.handle
+      .insert(modelCatalogSync)
+      .values(record)
+      .onConflictDoUpdate({
+        target: modelCatalogSync.connectionId,
+        set: {
+          syncedAt: record.syncedAt,
+          lastSuccessAt: record.lastSuccessAt,
+          lastFailureAt: record.lastFailureAt,
+          lastFailureMessage: record.lastFailureMessage,
+        },
+      })
+  }
+}
+
+type ModelEntryRow = typeof modelCatalogEntries.$inferSelect
+type SyncRow = typeof modelCatalogSync.$inferSelect
+
+function toModelEntry(row: ModelEntryRow): ModelCatalogEntryRecord {
+  return {
+    connectionId: row.connectionId,
+    modelId: row.modelId,
+    source: row.source as ModelCatalogSource,
+    excluded: row.excluded,
+    overrides: row.overrides as Readonly<Partial<ConnectionCapabilities>> | null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
+function toSyncRecord(row: SyncRow): ModelCatalogSyncRecord {
+  return {
+    connectionId: row.connectionId,
+    syncedAt: row.syncedAt,
+    lastSuccessAt: row.lastSuccessAt,
+    lastFailureAt: row.lastFailureAt,
+    lastFailureMessage: row.lastFailureMessage,
+  }
+}
+
+/** jsonb -> capabilities. A corrupted row must not silently become defaults. */
+function parseCapabilities(value: unknown): ConnectionCapabilities {
+  const parsed = (typeof value === 'object' && value !== null
+    ? value
+    : {}) as Partial<ConnectionCapabilities>
+  return {
+    chat: parsed.chat === true,
+    streaming: parsed.streaming === true,
+    tools: parsed.tools === true,
+    structuredOutput: parsed.structuredOutput === true,
+    responses: parsed.responses === true,
   }
 }

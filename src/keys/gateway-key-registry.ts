@@ -53,6 +53,18 @@ export type DiscoveryResult =
   | { readonly ok: true; readonly value: readonly DirectoryProvider[] }
   | { readonly ok: false }
 
+/**
+ * Whether one Gateway Key may drive one provider-scoped inference request.
+ * `keyId` names the authenticated key so the routing layer can record which
+ * credential served the call.
+ */
+export type InferenceAuthorization =
+  | { readonly ok: true; readonly keyId: string }
+  | {
+      readonly ok: false
+      readonly code: 'gateway_key_invalid' | 'connection_not_allowed' | 'model_not_allowed'
+    }
+
 export interface GatewayKeyRegistryOptions {
   readonly database: Database
   readonly clock?: Clock
@@ -184,7 +196,32 @@ export class GatewayKeyRegistry {
     return { ok: true, value: providers }
   }
 
-  async #locateKey(token: string): Promise<GatewayKeyRecord | null> {
+  /**
+   * Authorizes one provider-scoped inference call. The key must be live, the
+   * connection must be inside its scope, and the requested model must be one
+   * the scope allows. A missing, revoked, or wrong secret is indistinguishable
+   * from the discovery failure, so probing cannot learn which keys exist.
+   */
+  async authorizeInference(
+    connectionId: string,
+    model: string,
+    token: string | null,
+  ): Promise<InferenceAuthorization> {
+    const key = await this.#locateKey(token)
+    if (key === null) return { ok: false, code: 'gateway_key_invalid' }
+
+    const entry = key.scope.find((candidate) => candidate.connectionId === connectionId)
+    if (entry === undefined) return { ok: false, code: 'connection_not_allowed' }
+
+    if (entry.models !== null && !entry.models.includes(model)) {
+      return { ok: false, code: 'model_not_allowed' }
+    }
+
+    await this.#database.gatewayKeys.markUsed(key.id, this.#clock.now())
+    return { ok: true, keyId: key.id }
+  }
+
+  async #locateKey(token: string | null): Promise<GatewayKeyRecord | null> {
     if (typeof token !== 'string') return null
 
     const separator = token.indexOf('.')

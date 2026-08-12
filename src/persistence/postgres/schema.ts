@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { boolean, integer, jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core'
 
 /**
  * The PostgreSQL schema. It has its own migration history under
@@ -56,6 +56,8 @@ export const providerConnections = pgTable('provider_connections', {
   allowInsecureHttp: boolean('allow_insecure_http').notNull(),
   enabled: boolean('enabled').notNull(),
   archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'date' }),
+  templateId: text('template_id'),
+  capabilities: jsonb('capabilities').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
 })
@@ -91,4 +93,36 @@ export const gatewayKeys = pgTable('gateway_keys', {
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true, mode: 'date' }),
   revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+})
+
+/**
+ * One model known to a Provider Connection's catalog. Excluded rows are kept so
+ * an Owner block survives synchronization. Capability overrides are a nullable
+ * JSON object of booleans.
+ */
+export const modelCatalogEntries = pgTable(
+  'model_catalog_entries',
+  {
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => providerConnections.id, { onDelete: 'cascade' }),
+    modelId: text('model_id').notNull(),
+    source: text('source').notNull(),
+    excluded: boolean('excluded').notNull(),
+    overrides: jsonb('overrides'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (table) => ({ pk: primaryKey({ columns: [table.connectionId, table.modelId] }) }),
+)
+
+/** The last synchronization outcome of one connection's catalog. */
+export const modelCatalogSync = pgTable('model_catalog_sync', {
+  connectionId: text('connection_id')
+    .primaryKey()
+    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+  syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }),
+  lastSuccessAt: timestamp('last_success_at', { withTimezone: true, mode: 'date' }),
+  lastFailureAt: timestamp('last_failure_at', { withTimezone: true, mode: 'date' }),
+  lastFailureMessage: text('last_failure_message'),
 })

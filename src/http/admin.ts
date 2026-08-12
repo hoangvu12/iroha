@@ -658,6 +658,13 @@ function toFailure(failure: ProviderFailure): { statusCode: 400 | 404 | 409 | 50
       }
     case 'validation_failed':
       return { statusCode: 400, body: validationFailureBody(failure.problems) }
+    // Registry failures that administrative routes cannot reach (for example
+    // inference-only key resolution) stay stable rather than throwing.
+    default:
+      return {
+        statusCode: 500,
+        body: adminError('internal_error', 'The operation could not be completed.'),
+      }
   }
 }
 

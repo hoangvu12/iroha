@@ -125,8 +125,28 @@ export interface ProviderConnectionRecord {
   readonly enabled: boolean
   /** Set when the connection is archived; null while it is in active use. */
   readonly archivedAt: Date | null
+  /**
+   * The Provider Template whose defaults seeded this connection, or null for a
+   * hand-configured connection. Template knowledge contributes catalog models.
+   */
+  readonly templateId: string | null
+  /** Connection-wide capability defaults; per-model overrides may replace them. */
+  readonly capabilities: ConnectionCapabilities
   readonly createdAt: Date
   readonly updatedAt: Date
+}
+
+/**
+ * The inference capabilities a connection claims by default. Every one is a
+ * boolean so the catalog can honestly mark support as unknown-off rather than
+ * silently assuming a Provider behaves like a different one.
+ */
+export interface ConnectionCapabilities {
+  readonly chat: boolean
+  readonly streaming: boolean
+  readonly tools: boolean
+  readonly structuredOutput: boolean
+  readonly responses: boolean
 }
 
 /**
@@ -167,6 +187,8 @@ export interface ProviderConnectionPatch {
   readonly allowInsecureHttp?: boolean
   readonly enabled?: boolean
   readonly archivedAt?: Date | null
+  /** Replaces the connection-wide capability defaults. */
+  readonly capabilities?: ConnectionCapabilities
 }
 
 export interface UpstreamKeyPatch {
@@ -241,6 +263,72 @@ export interface GatewayKeyRepository {
   revoke(id: string, at: Date): Promise<GatewayKeyRecord | null>
 }
 
+/**
+ * Where a catalog model's knowledge came from. `excluded` marks an Owner block
+ * of a model Iroha otherwise has no knowledge of; the model stays listed so the
+ * exclusion can be reviewed and lifted.
+ */
+export type ModelCatalogSource = 'discovered' | 'template' | 'owner_added' | 'excluded'
+
+/**
+ * One model in a connection's catalog. Excluded rows are kept so Owner intent
+ * survives synchronization, but they never join the effective catalog.
+ */
+export interface ModelCatalogEntryRecord {
+  readonly connectionId: string
+  readonly modelId: string
+  readonly source: ModelCatalogSource
+  readonly excluded: boolean
+  /** Per-model capability overrides; null means inherit the connection defaults. */
+  readonly overrides: Readonly<Partial<ConnectionCapabilities>> | null
+  readonly createdAt: Date
+  readonly updatedAt: Date
+}
+
+/**
+ * The synchronization outcome of a connection's catalog. `lastSuccessAt` is
+ * retained across failures, which is what lets a failed refresh leave the last
+ * good catalog in place and only mark it stale.
+ */
+export interface ModelCatalogSyncRecord {
+  readonly connectionId: string
+  /** The last time a synchronization was attempted, successful or not. */
+  readonly syncedAt: Date | null
+  readonly lastSuccessAt: Date | null
+  readonly lastFailureAt: Date | null
+  /** A structural description, never free upstream text that could echo a secret. */
+  readonly lastFailureMessage: string | null
+}
+
+export interface ModelCatalogRepository {
+  /** Every catalog row of one connection, insertion order. */
+  listEntries(connectionId: string): Promise<readonly ModelCatalogEntryRecord[]>
+  /**
+   * Replaces the connection's discovered knowledge. Newly discovered models are
+   * upserted, existing overrides and exclusions are kept, and discovered models
+   * no longer seen are removed — unless the Owner excluded them, so a block
+   * survives a discovery that stops reporting the model.
+   */
+  syncDiscovered(connectionId: string, modelIds: readonly string[], at: Date): Promise<void>
+  /** Marks a model as an Owner addition. Unknown models become `owner_added`. */
+  addOwnerModel(connectionId: string, modelId: string, at: Date): Promise<void>
+  /** Removes an Owner addition. Returns whether an owner-added row was removed. */
+  removeOwnerModel(connectionId: string, modelId: string): Promise<boolean>
+  /** Blocks or unblocks a model. Unblocking an unknown blocked model removes it. */
+  setExcluded(connectionId: string, modelId: string, excluded: boolean, at: Date): Promise<void>
+  /** Replaces per-model overrides, creating an owner-added row when absent. */
+  updateOverrides(
+    connectionId: string,
+    modelId: string,
+    overrides: Readonly<Partial<ConnectionCapabilities>>,
+    at: Date,
+  ): Promise<void>
+  /** Whether the Owner has blocked this model on this connection. */
+  isExcluded(connectionId: string, modelId: string): Promise<boolean>
+  getSync(connectionId: string): Promise<ModelCatalogSyncRecord | null>
+  putSync(record: ModelCatalogSyncRecord): Promise<void>
+}
+
 /** The repositories reachable inside and outside a transaction alike. */
 export interface Repositories {
   readonly settings: SettingsRepository
@@ -249,6 +337,7 @@ export interface Repositories {
   readonly audit: AuditRepository
   readonly providers: ProviderRepository
   readonly gatewayKeys: GatewayKeyRepository
+  readonly modelCatalog: ModelCatalogRepository
 }
 
 export interface Database extends Repositories {

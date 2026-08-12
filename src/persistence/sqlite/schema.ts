@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 /**
  * The SQLite schema. It has its own migration history under
@@ -56,6 +56,9 @@ export const providerConnections = sqliteTable('provider_connections', {
   allowInsecureHttp: integer('allow_insecure_http', { mode: 'boolean' }).notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull(),
   archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+  templateId: text('template_id'),
+  /** JSON text owned by the repository, like the gateway key scope. */
+  capabilities: text('capabilities').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 })
@@ -91,4 +94,35 @@ export const gatewayKeys = sqliteTable('gateway_keys', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
   revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
+})
+
+/**
+ * One model known to a Provider Connection's catalog. Excluded rows are kept so
+ * an Owner block survives synchronization. Capability overrides are JSON text.
+ */
+export const modelCatalogEntries = sqliteTable(
+  'model_catalog_entries',
+  {
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => providerConnections.id, { onDelete: 'cascade' }),
+    modelId: text('model_id').notNull(),
+    source: text('source').notNull(),
+    excluded: integer('excluded', { mode: 'boolean' }).notNull(),
+    overrides: text('overrides'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => ({ pk: primaryKey({ columns: [table.connectionId, table.modelId] }) }),
+)
+
+/** The last synchronization outcome of one connection's catalog. */
+export const modelCatalogSync = sqliteTable('model_catalog_sync', {
+  connectionId: text('connection_id')
+    .primaryKey()
+    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+  syncedAt: integer('synced_at', { mode: 'timestamp_ms' }),
+  lastSuccessAt: integer('last_success_at', { mode: 'timestamp_ms' }),
+  lastFailureAt: integer('last_failure_at', { mode: 'timestamp_ms' }),
+  lastFailureMessage: text('last_failure_message'),
 })

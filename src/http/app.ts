@@ -1,5 +1,6 @@
 import { openapi } from '@elysiajs/openapi'
 import { Elysia, t } from 'elysia'
+import type { InferenceAdapter } from '../inference/index.ts'
 import type { OwnerIdentity } from '../identity/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { Database } from '../persistence/index.ts'
@@ -8,7 +9,9 @@ import { createAdminRoutes } from './admin.ts'
 import { createAuthRoutes } from './auth.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
+import { createInferenceRoutes } from './inference.ts'
 import { ReadinessState } from './readiness.ts'
+import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
 
 export interface AppOptions {
   readonly database: Database
@@ -18,6 +21,8 @@ export interface AppOptions {
   readonly gatewayKeys: GatewayKeyRegistry
   /** Directory holding the built management UI. Omit to serve the API alone. */
   readonly frontendDirectory?: string | undefined
+  /** The inference surface's transport. Omit for the runtime's real fetch. */
+  readonly inference?: InferenceAdapter | undefined
 }
 
 const liveResponse = t.Object({ status: t.Literal('alive') })
@@ -47,12 +52,14 @@ export function createApp(options: AppOptions) {
   const frontend: FrontendHandler | null = options.frontendDirectory
     ? createFrontendHandler(options.frontendDirectory)
     : null
+  const inference = options.inference ?? createGenericInferenceAdapter()
 
   return new Elysia()
     .use(openapi({ path: '/docs', documentation: { info: { title: 'Iroha', version: '0.1.0' } } }))
     .use(createAuthRoutes({ identity }))
     .use(createAdminRoutes({ identity, providers, gatewayKeys }))
     .use(createDirectoryRoutes({ gatewayKeys }))
+    .use(createInferenceRoutes({ gatewayKeys, providers, inference }))
     .get('/health/live', () => ({ status: 'alive' as const }), {
       detail: {
         summary: 'Process liveness',

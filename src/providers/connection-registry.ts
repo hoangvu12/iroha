@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { SecretCipherError, type SecretCipher } from '../crypto/index.ts'
 import type {
+  ConnectionCapabilities,
   Database,
   KeyProbeVerdict,
   ProviderConnectionRecord,
@@ -21,6 +22,10 @@ export type ProviderFailure =
   | { readonly code: 'key_not_found' }
   /** The connection is archived; only duplication and purge still apply to it. */
   | { readonly code: 'connection_archived' }
+  /** The Owner has disabled the connection; it serves no inference. */
+  | { readonly code: 'connection_disabled' }
+  /** No Upstream Key on the connection is currently eligible to serve. */
+  | { readonly code: 'no_eligible_key' }
   /** Purge is archive-first: only an archived connection can be purged. */
   | { readonly code: 'not_archived' }
   /** Encrypted material could not be read; the master key likely changed. */
@@ -42,6 +47,15 @@ export interface KeyView {
   } | null
   readonly createdAt: Date
   readonly updatedAt: Date
+}
+
+/** What one provider-scoped inference call needs, ready for an Inference Adapter. */
+export interface InferenceTarget {
+  readonly keyId: string
+  readonly baseUrl: string
+  readonly allowInsecureHttp: boolean
+  /** The decrypted Upstream Key; it exists only for the duration of the call. */
+  readonly upstreamKey: string
 }
 
 export interface ConnectionView {
@@ -144,6 +158,8 @@ export class ProviderConnectionRegistry {
         allowInsecureHttp,
         enabled: true,
         archivedAt: null,
+        templateId: null,
+        capabilities: defaultCapabilities(),
         createdAt: at,
         updatedAt: at,
       })
@@ -303,6 +319,8 @@ export class ProviderConnectionRegistry {
         allowInsecureHttp: source.allowInsecureHttp,
         enabled: true,
         archivedAt: null,
+        templateId: source.templateId,
+        capabilities: source.capabilities,
         createdAt: at,
         updatedAt: at,
       })
@@ -415,6 +433,44 @@ export class ProviderConnectionRegistry {
     }
 
     return { ok: true, value: await this.#viewOf(connectionId) }
+  }
+
+  /**
+   * Resolves which Upstream Key serves one provider-scoped inference call.
+   * Only an Active key is eligible; the winner's material is decrypted just
+   * long enough for the request, the connection must be enabled and
+   * unarchived, and an undisabled connection with no eligible key is reported
+   * rather than guessed at.
+   */
+  async resolveInference(connectionId: string): Promise<ProviderResult<InferenceTarget>> {
+    const connection = await this.#database.providers.getConnection(connectionId)
+    if (connection === null) return failed({ code: 'connection_not_found' })
+    if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
+    if (!connection.enabled) return failed({ code: 'connection_disabled' })
+
+    const key =
+      (await this.#database.providers.listKeys(connectionId)).find(
+        (candidate) => candidate.health === 'active',
+      ) ?? null
+    if (key === null) return failed({ code: 'no_eligible_key' })
+
+    let upstreamKey: string
+    try {
+      upstreamKey = await this.#cipher.decrypt(key.encryptedKey)
+    } catch (cause) {
+      if (cause instanceof SecretCipherError) return failed({ code: 'stored_key_unreadable' })
+      throw cause
+    }
+
+    return {
+      ok: true,
+      value: {
+        keyId: key.id,
+        baseUrl: connection.baseUrl,
+        allowInsecureHttp: connection.allowInsecureHttp,
+        upstreamKey,
+      },
+    }
   }
 
   async #locateKey(
@@ -604,6 +660,22 @@ function copiedName(displayName: string): string {
   const suffix = ' (copy)'
   const stem = displayName.slice(0, DISPLAY_NAME_MAXIMUM - suffix.length)
   return `${stem}${suffix}`
+}
+
+/**
+ * The honest default capability claim for a connection created without a
+ * Provider Template: unknown-off, never assumed. Template and catalog work can
+ * enrich these claims later without Iroha silently assuming a Provider behaves
+ * like a different one.
+ */
+function defaultCapabilities(): ConnectionCapabilities {
+  return {
+    chat: false,
+    streaming: false,
+    tools: false,
+    structuredOutput: false,
+    responses: false,
+  }
 }
 
 function newId(prefix: string): string {

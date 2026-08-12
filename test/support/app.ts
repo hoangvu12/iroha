@@ -2,6 +2,7 @@ import { createSecretCipher, type SecretCipher } from '../../src/crypto/index.ts
 import { createApp } from '../../src/http/app.ts'
 import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
+import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import {
@@ -11,6 +12,7 @@ import {
 } from '../../src/providers/index.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
 import { testClock, testPasswordHasher, type TestClock } from './identity.ts'
+import { stubUpstreamTransport } from './inference.ts'
 
 export const ORIGIN = 'http://iroha.test'
 
@@ -38,6 +40,8 @@ export interface TestAppOptions {
   readonly passwordHasher?: PasswordHasher
   /** Replaces the key probe; defaults to one that answers "usable". */
   readonly upstreamKeyProbe?: UpstreamKeyProbe | undefined
+  /** Replaces the inference upstream transport; defaults to a closed stub. */
+  readonly upstreamTransport?: typeof fetch | undefined
   readonly secretCipher?: SecretCipher
 }
 
@@ -118,7 +122,17 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
 
   const readiness = new ReadinessState()
   readiness.markMigrated()
-  const app = createApp({ database, readiness, identity, providers, gatewayKeys })
+  const inference = createGenericInferenceAdapter({
+    fetch: options.upstreamTransport ?? stubUpstreamTransport(),
+  })
+  const app = createApp({
+    database,
+    readiness,
+    identity,
+    providers,
+    gatewayKeys,
+    inference,
+  })
 
   const cookies = new Map<string, string>()
 
@@ -152,6 +166,18 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
 
     dispose,
   }
+}
+
+/**
+ * Drives the assembled application the way a plain HTTP client would, so an
+ * external library (for example the OpenAI SDK) can reach the app through its
+ * own `fetch`.
+ */
+export function appFetch(app: ReturnType<typeof createApp>): typeof fetch {
+  return (async (input: Request | URL | string, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input)
+    return await app.handle(new Request(url, init))
+  }) as unknown as typeof fetch
 }
 
 /** A minimal cookie jar: enough to behave like the browser for these flows. */

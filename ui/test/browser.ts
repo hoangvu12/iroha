@@ -32,6 +32,8 @@ export function registerDom(): void {
     Headers: globalThis.Headers,
     FormData: globalThis.FormData,
     Blob: globalThis.Blob,
+    AbortController: globalThis.AbortController,
+    AbortSignal: globalThis.AbortSignal,
   }
 
   GlobalRegistrator.register({ url: 'http://iroha.test' })

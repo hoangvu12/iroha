@@ -6,6 +6,7 @@ export {
   ProviderConnectionRegistry,
   type ConnectionView,
   type FieldProblem,
+  type InferenceTarget,
   type KeyView,
   type ProviderConnectionRegistryOptions,
   type ProviderFailure,

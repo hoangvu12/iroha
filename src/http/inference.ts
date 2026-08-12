@@ -72,107 +72,138 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
     )
     .post(
       '/:connectionId/v1/chat/completions',
-      async ({ request, params }) => {
-        const correlationId = newRequestId()
-        const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
-
-        const envelope = readEnvelope(await request.text())
-        if (!envelope.ok) {
-          return error(
-            envelope.status,
-            baseHeaders,
-            { code: envelope.code, message: envelope.message },
-            correlationId,
-          )
-        }
-
-        const token = bearerToken(request.headers)
-        const authorization = await gatewayKeys.authorizeInference(
-          params.connectionId,
-          envelope.model,
-          token,
-        )
-        if (!authorization.ok) {
-          const refusal = authorizationRefusal(authorization)
-          return error(refusal.status, baseHeaders, refusal, correlationId)
-        }
-
-        // An Owner exclusion blocks a model the same way the Key Scope does,
-        // and it applies to unknown and catalogued models alike.
-        if (await modelCatalog.isExcluded(params.connectionId, envelope.model)) {
-          return error(
-            403,
-            baseHeaders,
-            {
-              code: 'model_excluded',
-              message: 'This model is excluded on this Provider Connection.',
-            },
-            correlationId,
-          )
-        }
-
-        const target = await providers.resolveInference(params.connectionId, envelope.model)
-        if (!target.ok) {
-          const refusal = resolutionRefusal(target.failure)
-          return error(refusal.status, baseHeaders, refusal, correlationId)
-        }
-
-        const forwardRequest: InferenceForwardRequest = {
-          baseUrl: target.value.baseUrl,
-          allowInsecureHttp: target.value.allowInsecureHttp,
-          path: '/chat/completions',
-          method: 'POST',
-          body: envelope.raw,
-          headers: headersOf(request),
-          upstreamKey: target.value.upstreamKey,
-          signal: request.signal,
-        }
-
-        if (envelope.stream) {
-          return await streamChatCompletion(
-            inference,
-            timer,
-            timeouts,
-            forwardRequest,
-            baseHeaders,
-            correlationId,
-          )
-        }
-
-        let upstream
-        try {
-          upstream = await inference.forward(forwardRequest)
-        } catch (cause) {
-          // The caller went away: propagating the abort is the honest answer,
-          // and any response would reach nobody anyway.
-          if (isAbort(cause)) throw cause
-          return error(
-            502,
-            baseHeaders,
-            { code: 'upstream_unreachable', message: 'The Provider could not be reached.' },
-            correlationId,
-          )
-        }
-
-        if (upstream.status >= 200 && upstream.status < 300) {
-          // A buffered request never asks for a stream, but if an adapter
-          // streamed anyway the bytes flow through exactly as they arrive.
-          return new Response(upstream.kind === 'stream' ? upstream.stream : upstream.body, {
-            status: upstream.status,
-            headers: {
-              'content-type': upstream.headers['content-type'] ?? 'application/json',
-              'x-request-id': correlationId,
-            },
-          })
-        }
-
-        const refusal = upstreamRefusal(upstream.status, upstream.headers)
-        return error(refusal.status, { ...baseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) }, refusal, correlationId)
-      },
+      async ({ request, params }) =>
+        await forwardGeneration({
+          request,
+          connectionId: params.connectionId,
+          upstreamPath: '/chat/completions',
+          gatewayKeys,
+          providers,
+          inference,
+          modelCatalog,
+          timer,
+          timeouts,
+        }),
+    )
+    .post(
+      '/:connectionId/v1/responses',
+      async ({ request, params }) =>
+        await forwardGeneration({
+          request,
+          connectionId: params.connectionId,
+          upstreamPath: '/responses',
+          gatewayKeys,
+          providers,
+          inference,
+          modelCatalog,
+          timer,
+          timeouts,
+        }),
     )
 }
 
 export type InferenceRoutes = ReturnType<typeof createInferenceRoutes>
+
+async function forwardGeneration(options: {
+  request: Request
+  connectionId: string
+  upstreamPath: '/chat/completions' | '/responses'
+  gatewayKeys: GatewayKeyRegistry
+  providers: ProviderConnectionRegistry
+  inference: InferenceAdapter
+  modelCatalog: ModelCatalogService
+  timer: Timer
+  timeouts: StreamingTimeouts
+}): Promise<Response> {
+  const { request, connectionId, upstreamPath, gatewayKeys, providers, inference, modelCatalog, timer, timeouts } = options
+  const correlationId = newRequestId()
+  const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
+  const envelope = readEnvelope(await request.text())
+
+  if (!envelope.ok) {
+    return error(
+      envelope.status,
+      baseHeaders,
+      { code: envelope.code, message: envelope.message },
+      correlationId,
+    )
+  }
+
+  const token = bearerToken(request.headers)
+  const authorization = await gatewayKeys.authorizeInference(connectionId, envelope.model, token)
+  if (!authorization.ok) {
+    const refusal = authorizationRefusal(authorization)
+    return error(refusal.status, baseHeaders, refusal, correlationId)
+  }
+
+  if (await modelCatalog.isExcluded(connectionId, envelope.model)) {
+    return error(
+      403,
+      baseHeaders,
+      { code: 'model_excluded', message: 'This model is excluded on this Provider Connection.' },
+      correlationId,
+    )
+  }
+
+  const target = await providers.resolveInference(connectionId, envelope.model)
+  if (!target.ok) {
+    const refusal = resolutionRefusal(target.failure)
+    return error(refusal.status, baseHeaders, refusal, correlationId)
+  }
+
+  const forwardRequest: InferenceForwardRequest = {
+    baseUrl: target.value.baseUrl,
+    allowInsecureHttp: target.value.allowInsecureHttp,
+    path: upstreamPath,
+    method: 'POST',
+    body: envelope.raw,
+    headers: headersOf(request),
+    upstreamKey: target.value.upstreamKey,
+    signal: request.signal,
+  }
+
+  if (envelope.stream) {
+    return await streamChatCompletion(
+      inference,
+      timer,
+      timeouts,
+      forwardRequest,
+      baseHeaders,
+      correlationId,
+    )
+  }
+
+  let upstream
+  try {
+    upstream = await inference.forward(forwardRequest)
+  } catch (cause) {
+    if (isAbort(cause)) throw cause
+    return error(
+      502,
+      baseHeaders,
+      { code: 'upstream_unreachable', message: 'The Provider could not be reached.' },
+      correlationId,
+    )
+  }
+
+  if (upstream.status >= 200 && upstream.status < 300) {
+    return new Response(upstream.kind === 'stream' ? upstream.stream : upstream.body, {
+      status: upstream.status,
+      headers: {
+        'content-type': upstream.headers['content-type'] ?? 'application/json',
+        'x-request-id': correlationId,
+      },
+    })
+  }
+
+  const refusal = upstreamRefusal(upstream.status, upstream.headers)
+  return error(
+    refusal.status,
+    { ...baseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) },
+    refusal,
+    correlationId,
+  )
+}
 
 /**
  * The routing-critical envelope: the exact request model. Everything else is

@@ -110,12 +110,103 @@ export interface AuditRepository {
   list(options?: { limit?: number }): Promise<readonly AuditEventRecord[]>
 }
 
+/**
+ * One Owner-configured account or server the Gateway reaches a Provider
+ * through. The ID is immutable for the connection's whole life because client
+ * URLs are built on it; everything else may change.
+ */
+export interface ProviderConnectionRecord {
+  readonly id: string
+  readonly displayName: string
+  /** The Provider's OpenAI-compatible base URL, exactly as the Owner gave it. */
+  readonly baseUrl: string
+  /** The explicit per-connection exception that permits plain HTTP. */
+  readonly allowInsecureHttp: boolean
+  readonly enabled: boolean
+  /** Set when the connection is archived; null while it is in active use. */
+  readonly archivedAt: Date | null
+  readonly createdAt: Date
+  readonly updatedAt: Date
+}
+
+/**
+ * The durable result of the last low-cost test of an Upstream Key. Reasons are
+ * structural descriptions and never contain the key or any secret.
+ */
+export type KeyProbeVerdict = 'usable' | 'rejected' | 'inconclusive'
+
+/**
+ * The Key Health states a key can hold before the full Key Health engine
+ * exists: Unverified until tested or manually activated, Active once usable,
+ * Disabled when the Owner turns it off. Later tickets widen this without
+ * renaming it.
+ */
+export type UpstreamKeyHealth = 'unverified' | 'active' | 'disabled'
+
+/**
+ * One Upstream Key attached to a Provider Connection. The key material itself
+ * appears only as cipher output, so copying the database does not copy the
+ * Provider's keys.
+ */
+export interface UpstreamKeyRecord {
+  readonly id: string
+  readonly connectionId: string
+  readonly encryptedKey: string
+  readonly health: UpstreamKeyHealth
+  readonly lastProbeAt: Date | null
+  readonly lastProbeVerdict: KeyProbeVerdict | null
+  readonly lastProbeReason: string | null
+  readonly createdAt: Date
+  readonly updatedAt: Date
+}
+
+/** Only fields the Owner may edit. The ID is never patchable. */
+export interface ProviderConnectionPatch {
+  readonly displayName?: string
+  readonly baseUrl?: string
+  readonly allowInsecureHttp?: boolean
+  readonly enabled?: boolean
+  readonly archivedAt?: Date | null
+}
+
+export interface UpstreamKeyPatch {
+  readonly health?: UpstreamKeyHealth
+  readonly lastProbeAt?: Date | null
+  readonly lastProbeVerdict?: KeyProbeVerdict | null
+  readonly lastProbeReason?: string | null
+}
+
+export interface ProviderRepository {
+  /** Every connection, most recently created first, archived ones included. */
+  listConnections(): Promise<readonly ProviderConnectionRecord[]>
+  getConnection(id: string): Promise<ProviderConnectionRecord | null>
+  insertConnection(connection: ProviderConnectionRecord): Promise<ProviderConnectionRecord>
+  /** Applies only the supplied fields and moves `updatedAt`. Null when unknown. */
+  updateConnection(
+    id: string,
+    patch: ProviderConnectionPatch,
+    at: Date,
+  ): Promise<ProviderConnectionRecord | null>
+  /** Returns whether a connection existed to remove. */
+  deleteConnection(id: string): Promise<boolean>
+
+  /** Keys of one connection, oldest first. */
+  listKeys(connectionId: string): Promise<readonly UpstreamKeyRecord[]>
+  getKey(id: string): Promise<UpstreamKeyRecord | null>
+  insertKey(key: UpstreamKeyRecord): Promise<UpstreamKeyRecord>
+  /** Applies only the supplied fields and moves `updatedAt`. Null when unknown. */
+  updateKey(id: string, patch: UpstreamKeyPatch, at: Date): Promise<UpstreamKeyRecord | null>
+  /** Removes every key of a connection, returning how many were removed. */
+  deleteKeysForConnection(connectionId: string): Promise<number>
+}
+
 /** The repositories reachable inside and outside a transaction alike. */
 export interface Repositories {
   readonly settings: SettingsRepository
   readonly owner: OwnerRepository
   readonly sessions: SessionRepository
   readonly audit: AuditRepository
+  readonly providers: ProviderRepository
 }
 
 export interface Database extends Repositories {

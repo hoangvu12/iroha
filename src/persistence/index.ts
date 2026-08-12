@@ -8,13 +8,20 @@ export type {
   AuditOutcome,
   AuditRepository,
   Database,
+  KeyProbeVerdict,
   OwnerRecord,
   OwnerRepository,
+  ProviderConnectionPatch,
+  ProviderConnectionRecord,
+  ProviderRepository,
   Repositories,
   SessionRecord,
   SessionRepository,
   SettingRecord,
   SettingsRepository,
+  UpstreamKeyPatch,
+  UpstreamKeyRecord,
+  UpstreamKeyHealth,
 } from './repository.ts'
 export { DatabaseUnavailableError } from './repository.ts'
 

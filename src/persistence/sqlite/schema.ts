@@ -44,3 +44,36 @@ export const auditEvents = sqliteTable('audit_events', {
   /** JSON text, like `settings.value`. Never holds a secret value. */
   detail: text('detail'),
 })
+
+/**
+ * One Owner-configured account or server. The ID is immutable and client URLs
+ * are built on it; the display name, base URL, and lifecycle state are not.
+ */
+export const providerConnections = sqliteTable('provider_connections', {
+  id: text('id').primaryKey(),
+  displayName: text('display_name').notNull(),
+  baseUrl: text('base_url').notNull(),
+  allowInsecureHttp: integer('allow_insecure_http', { mode: 'boolean' }).notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+/**
+ * An Upstream Key attached to one Provider Connection. Only cipher output is
+ * stored, so a copy of the database does not copy the Provider's keys.
+ */
+export const upstreamKeys = sqliteTable('upstream_keys', {
+  id: text('id').primaryKey(),
+  connectionId: text('connection_id')
+    .notNull()
+    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+  encryptedKey: text('encrypted_key').notNull(),
+  health: text('health').notNull(),
+  lastProbeAt: integer('last_probe_at', { mode: 'timestamp_ms' }),
+  lastProbeVerdict: text('last_probe_verdict'),
+  lastProbeReason: text('last_probe_reason'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})

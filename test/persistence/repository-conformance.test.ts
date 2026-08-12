@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import type { Database, SessionRecord } from '../../src/persistence/index.ts'
+import type {
+  Database,
+  ProviderConnectionRecord,
+  SessionRecord,
+  UpstreamKeyRecord,
+} from '../../src/persistence/index.ts'
 import { availableEngines, POSTGRES_URL } from './engines.ts'
 
 /**
@@ -342,6 +347,183 @@ for (const engine of availableEngines) {
           .catch(() => undefined)
 
         expect(await database.audit.list()).toEqual([])
+      })
+    })
+
+    describe('providers', () => {
+      const at = new Date('2026-01-01T00:00:00.000Z')
+
+      const connection = (
+        id: string,
+        overrides: Partial<ProviderConnectionRecord> = {},
+      ): ProviderConnectionRecord => ({
+        id,
+        displayName: 'Example',
+        baseUrl: 'https://api.example.com/v1',
+        allowInsecureHttp: false,
+        enabled: true,
+        archivedAt: null,
+        createdAt: at,
+        updatedAt: at,
+        ...overrides,
+      })
+
+      const key = (
+        id: string,
+        connectionId: string,
+        overrides: Partial<UpstreamKeyRecord> = {},
+      ): UpstreamKeyRecord => ({
+        id,
+        connectionId,
+        encryptedKey: `v1.stored.${id}`,
+        health: 'unverified',
+        lastProbeAt: null,
+        lastProbeVerdict: null,
+        lastProbeReason: null,
+        createdAt: at,
+        updatedAt: at,
+        ...overrides,
+      })
+
+      test('round-trips a connection', async () => {
+        const created = await database.providers.insertConnection(connection('pc_one'))
+
+        expect(created).toEqual(connection('pc_one'))
+        expect(await database.providers.getConnection('pc_one')).toEqual(connection('pc_one'))
+      })
+
+      test('preserves booleans and a null archive', async () => {
+        await database.providers.insertConnection(connection('pc_flags'))
+
+        const stored = await database.providers.getConnection('pc_flags')
+        expect(stored?.allowInsecureHttp).toBe(false)
+        expect(stored?.enabled).toBe(true)
+        expect(stored?.archivedAt).toBeNull()
+      })
+
+      test('returns null for an unknown connection', async () => {
+        expect(await database.providers.getConnection('pc_absent')).toBeNull()
+      })
+
+      test('lists connections most recently created first', async () => {
+        await database.providers.insertConnection(
+          connection('pc_older', { createdAt: new Date('2026-01-01T00:00:00.000Z') }),
+        )
+        await database.providers.insertConnection(
+          connection('pc_newer', { createdAt: new Date('2026-01-02T00:00:00.000Z') }),
+        )
+
+        expect(
+          (await database.providers.listConnections()).map((record) => record.id),
+        ).toEqual(['pc_newer', 'pc_older'])
+      })
+
+      test('patches only the supplied connection fields and moves updatedAt', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        const later = new Date('2026-02-01T00:00:00.000Z')
+
+        const updated = await database.providers.updateConnection(
+          'pc_one',
+          { displayName: 'Renamed', enabled: false },
+          later,
+        )
+
+        expect(updated).toEqual(
+          connection('pc_one', { displayName: 'Renamed', enabled: false, updatedAt: later }),
+        )
+      })
+
+      test('records an archive and clears it', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        const archivedAt = new Date('2026-02-01T00:00:00.000Z')
+
+        await database.providers.updateConnection('pc_one', { archivedAt }, archivedAt)
+        expect((await database.providers.getConnection('pc_one'))?.archivedAt).toEqual(archivedAt)
+
+        await database.providers.updateConnection('pc_one', { archivedAt: null }, archivedAt)
+        expect((await database.providers.getConnection('pc_one'))?.archivedAt).toBeNull()
+      })
+
+      test('reports an update or removal against an unknown connection', async () => {
+        expect(await database.providers.updateConnection('pc_absent', { enabled: false }, at)).toBeNull()
+        expect(await database.providers.deleteConnection('pc_absent')).toBe(false)
+      })
+
+      test('round-trips an Upstream Key', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        const created = await database.providers.insertKey(key('uk_one', 'pc_one'))
+
+        expect(created).toEqual(key('uk_one', 'pc_one'))
+        expect(await database.providers.getKey('uk_one')).toEqual(key('uk_one', 'pc_one'))
+      })
+
+      test('lists only the keys of one connection, oldest first', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertConnection(connection('pc_two'))
+
+        await database.providers.insertKey(
+          key('uk_newer', 'pc_one', { createdAt: new Date('2026-01-02T00:00:00.000Z') }),
+        )
+        await database.providers.insertKey(key('uk_other', 'pc_two'))
+        await database.providers.insertKey(
+          key('uk_older', 'pc_one', { createdAt: new Date('2026-01-01T00:00:00.000Z') }),
+        )
+
+        expect((await database.providers.listKeys('pc_one')).map((record) => record.id)).toEqual([
+          'uk_older',
+          'uk_newer',
+        ])
+      })
+
+      test('patches key health without touching the stored secret', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertKey(key('uk_one', 'pc_one'))
+        const later = new Date('2026-02-01T00:00:00.000Z')
+
+        const updated = await database.providers.updateKey(
+          'uk_one',
+          {
+            health: 'active',
+            lastProbeAt: later,
+            lastProbeVerdict: 'usable',
+            lastProbeReason: null,
+          },
+          later,
+        )
+
+        expect(updated?.health).toBe('active')
+        expect(updated?.lastProbeAt).toEqual(later)
+        expect(updated?.lastProbeVerdict).toBe('usable')
+        expect(updated?.encryptedKey).toBe('v1.stored.uk_one')
+      })
+
+      test('reports an unknown key', async () => {
+        expect(await database.providers.getKey('uk_absent')).toBeNull()
+        expect(await database.providers.updateKey('uk_absent', { health: 'active' }, at)).toBeNull()
+      })
+
+      test('removes every key of a connection', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertKey(key('uk_one', 'pc_one'))
+        await database.providers.insertKey(key('uk_two', 'pc_one'))
+
+        expect(await database.providers.deleteKeysForConnection('pc_one')).toBe(2)
+        expect(await database.providers.listKeys('pc_one')).toEqual([])
+      })
+
+      test('takes a connection and its keys with it, inside a transaction', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertKey(key('uk_one', 'pc_one'))
+
+        const removed = await database.transaction(async (repositories) => {
+          const keys = await repositories.providers.deleteKeysForConnection('pc_one')
+          const gone = await repositories.providers.deleteConnection('pc_one')
+          return { keys, gone }
+        })
+
+        expect(removed).toEqual({ keys: 1, gone: true })
+        expect(await database.providers.listConnections()).toEqual([])
+        expect(await database.providers.listKeys('pc_one')).toEqual([])
       })
     })
   })

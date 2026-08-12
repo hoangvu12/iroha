@@ -1,17 +1,28 @@
+import { createSecretCipher, type SecretCipher } from '../../src/crypto/index.ts'
 import { createApp } from '../../src/http/app.ts'
 import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
+import {
+  ProviderConnectionRegistry,
+  type KeyProbeResult,
+  type UpstreamKeyProbe,
+} from '../../src/providers/index.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
 import { testClock, testPasswordHasher, type TestClock } from './identity.ts'
 
 export const ORIGIN = 'http://iroha.test'
+
+/** Long and stable so tests can both encrypt and decrypt stored material. */
+export const TEST_MASTER_KEY = 'test-master-key-do-not-use-in-production-01234'
 
 export interface TestApp {
   readonly app: ReturnType<typeof createApp>
   readonly database: Database
   readonly identity: OwnerIdentity
   readonly clock: TestClock
+  /** The probe the app's Provider Connection registry is using. */
+  readonly upstreamKeyProbe: UpstreamKeyProbe
   /** Sends a request the way a same-origin browser would. */
   fetch(path: string, init?: RequestInit & { csrf?: string }): Promise<Response>
   dispose(): Promise<void>
@@ -23,15 +34,52 @@ export interface TestAppOptions {
   readonly sessionIdleSeconds?: number
   /** Replaces the cheap test hasher, for tests that watch how it is used. */
   readonly passwordHasher?: PasswordHasher
+  /** Replaces the key probe; defaults to one that answers "usable". */
+  readonly upstreamKeyProbe?: UpstreamKeyProbe | undefined
+  readonly secretCipher?: SecretCipher
 }
 
 export const SETUP_TOKEN = 'setup-token-for-tests-0123456789abcdef'
 export const RECOVERY_TOKEN = 'recovery-token-for-tests-0123456789abcd'
 
 /**
+ * A probe whose answer the test controls. It also records what it was asked,
+ * so a test can prove the key under test actually reached the Provider seam.
+ */
+export interface FakeKeyProbe extends UpstreamKeyProbe {
+  readonly calls: readonly { readonly baseUrl: string; readonly upstreamKey: string }[]
+  respondWith(result: KeyProbeResult): void
+}
+
+export function fakeKeyProbe(initial: KeyProbeResult = { verdict: 'usable', reason: null }): FakeKeyProbe {
+  let answer = initial
+  const calls: { baseUrl: string; upstreamKey: string }[] = []
+
+  return {
+    calls,
+    respondWith(result: KeyProbeResult): void {
+      answer = result
+    },
+    async test(request) {
+      calls.push(request)
+      return answer
+    },
+  }
+}
+
+/** The standard Provider Connection registry for tests that only need one to exist. */
+export function providerRegistryFor(database: Database): ProviderConnectionRegistry {
+  return new ProviderConnectionRegistry({
+    database,
+    cipher: createSecretCipher(TEST_MASTER_KEY),
+    keyProbe: fakeKeyProbe(),
+  })
+}
+
+/**
  * The seam the spec names: the assembled application driven through its Web
- * `fetch` interface, over a real database, with only time and password cost
- * replaced.
+ * `fetch` interface, over a real database, with only time, password cost, the
+ * master key, and the upstream transport replaced.
  */
 export async function createTestApp(options: TestAppOptions = {}): Promise<TestApp> {
   const { database, dispose } = await sqliteEngine.open()
@@ -51,9 +99,17 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   // Elysia cannot report a caller address for a request handled without a
   // server, so every test request shares the throttle's unknown source.
 
+  const upstreamKeyProbe = options.upstreamKeyProbe ?? fakeKeyProbe()
+  const providers = new ProviderConnectionRegistry({
+    database,
+    cipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
+    keyProbe: upstreamKeyProbe,
+    clock,
+  })
+
   const readiness = new ReadinessState()
   readiness.markMigrated()
-  const app = createApp({ database, readiness, identity })
+  const app = createApp({ database, readiness, identity, providers })
 
   const cookies = new Map<string, string>()
 
@@ -62,6 +118,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     database,
     identity,
     clock,
+    upstreamKeyProbe,
 
     async fetch(path, init = {}) {
       const { csrf, headers, ...rest } = init

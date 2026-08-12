@@ -11,7 +11,17 @@ import type { TestApp } from '../../test/support/app.ts'
  * `HttpOnly`, `SameSite`, and `Secure` are asserted on the `Set-Cookie` header
  * itself in `test/http/`, because only a real browser could enforce them.
  */
+/**
+ * Registers happy-dom exactly once per process.
+ *
+ * It is deliberately never unregistered mid-suite: user-event captures
+ * `document` at import time, and an unregister would strand that reference
+ * permanently — a later register creates a different document than the one
+ * those modules hold.
+ */
 export function registerDom(): void {
+  if (registered) return
+
   // happy-dom brings its own HTTP primitives. Iroha's own `Request`/`Response`
   // handling must stay on Bun's, or `app.handle` would receive a different
   // object than it does in production.
@@ -27,11 +37,10 @@ export function registerDom(): void {
   GlobalRegistrator.register({ url: 'http://iroha.test' })
 
   Object.assign(globalThis, native)
+  registered = true
 }
 
-export async function unregisterDom(): Promise<void> {
-  await GlobalRegistrator.unregister()
-}
+let registered = false
 
 /**
  * Points the page's `fetch` at the running application, so the components under

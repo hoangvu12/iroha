@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import {
   completeSetup,
   createTestApp,
@@ -6,7 +6,7 @@ import {
   SETUP_TOKEN,
   type TestApp,
 } from '../../test/support/app.ts'
-import { registerDom, unregisterDom, useGatewayAsFetch } from './browser.ts'
+import { registerDom, useGatewayAsFetch } from './browser.ts'
 
 registerDom()
 
@@ -19,14 +19,24 @@ const PASSWORD = 'correct horse battery staple'
 describe('the management application in a browser', () => {
   let iroha: TestApp
   let restoreFetch: () => void
-  const user = userEvent.setup({ delay: null })
+  let user: ReturnType<typeof userEvent.setup>
 
   const start = async (options: Parameters<typeof createTestApp>[0] = {}) => {
     iroha = await createTestApp(options)
     restoreFetch = useGatewayAsFetch(iroha)
   }
 
+  beforeAll(() => {
+    // The DOM is registered once per process and never unregistered mid-suite:
+    // user-event captures `document` at import time, and an unregister would
+    // strand that reference (see browser.ts).
+    registerDom()
+  })
+
   beforeEach(() => {
+    // user-event resolves `window` from the DOM it is set up against, so it
+    // must be created after the DOM for this file is registered.
+    user = userEvent.setup({ delay: null })
     document.body.innerHTML = ''
   })
 
@@ -34,10 +44,6 @@ describe('the management application in a browser', () => {
     cleanup()
     restoreFetch?.()
     await iroha?.dispose()
-  })
-
-  afterAll(async () => {
-    await unregisterDom()
   })
 
   describe('first-run setup', () => {

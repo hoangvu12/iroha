@@ -23,7 +23,7 @@ export interface NavigationItem {
  */
 export const PRIMARY_NAVIGATION: readonly NavigationItem[] = [
   { id: 'overview', label: 'Overview', icon: Activity, available: true },
-  { id: 'providers', label: 'Providers', icon: Server, available: false },
+  { id: 'providers', label: 'Providers', icon: Server, available: true },
   { id: 'gateway-keys', label: 'Gateway Keys', icon: KeyRound, available: false },
   { id: 'requests', label: 'Requests', icon: SquareChartGantt, available: false },
   { id: 'audit', label: 'Audit', icon: ScrollText, available: false },

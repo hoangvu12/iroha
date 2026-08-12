@@ -12,15 +12,22 @@ import {
   type AuditOutcome,
   type AuditRepository,
   type Database,
+  type KeyProbeVerdict,
   type OwnerRecord,
   type OwnerRepository,
+  type ProviderConnectionPatch,
+  type ProviderConnectionRecord,
+  type ProviderRepository,
   type Repositories,
   type SessionRecord,
   type SessionRepository,
   type SettingRecord,
   type SettingsRepository,
+  type UpstreamKeyHealth,
+  type UpstreamKeyPatch,
+  type UpstreamKeyRecord,
 } from '../repository.ts'
-import { auditEvents, owner, ownerSessions, settings } from './schema.ts'
+import { auditEvents, owner, ownerSessions, providerConnections, settings, upstreamKeys } from './schema.ts'
 
 const MIGRATIONS_FOLDER = join(import.meta.dir, '../../../migrations/sqlite')
 
@@ -58,6 +65,7 @@ class SqliteDatabase implements Database {
   readonly owner: OwnerRepository
   readonly sessions: SessionRepository
   readonly audit: AuditRepository
+  readonly providers: ProviderRepository
 
   /**
    * `bun:sqlite` is one synchronous connection, so two overlapping
@@ -76,6 +84,7 @@ class SqliteDatabase implements Database {
     this.owner = new SqliteOwnerRepository(handle)
     this.sessions = new SqliteSessionRepository(handle)
     this.audit = new SqliteAuditRepository(handle)
+    this.providers = new SqliteProviderRepository(handle)
   }
 
   /**
@@ -88,6 +97,7 @@ class SqliteDatabase implements Database {
       owner: this.owner,
       sessions: this.sessions,
       audit: this.audit,
+      providers: this.providers,
     }
   }
 
@@ -349,5 +359,126 @@ function toAuditEvent(row: {
     action: row.action,
     outcome: row.outcome as AuditOutcome,
     detail: row.detail === null ? null : (JSON.parse(row.detail) as unknown),
+  }
+}
+
+class SqliteProviderRepository implements ProviderRepository {
+  constructor(private readonly handle: Handle) {}
+
+  async listConnections(): Promise<readonly ProviderConnectionRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(providerConnections)
+      .orderBy(desc(providerConnections.createdAt), desc(providerConnections.id))
+    return rows.map(toConnection)
+  }
+
+  async getConnection(id: string): Promise<ProviderConnectionRecord | null> {
+    const [row] = await this.handle
+      .select()
+      .from(providerConnections)
+      .where(eq(providerConnections.id, id))
+      .limit(1)
+    return row ? toConnection(row) : null
+  }
+
+  async insertConnection(
+    connection: ProviderConnectionRecord,
+  ): Promise<ProviderConnectionRecord> {
+    const [row] = await this.handle.insert(providerConnections).values(connection).returning()
+    return toConnection(row ?? connection)
+  }
+
+  async updateConnection(
+    id: string,
+    patch: ProviderConnectionPatch,
+    at: Date,
+  ): Promise<ProviderConnectionRecord | null> {
+    const changed = { ...patch, updatedAt: at }
+    const [row] = await this.handle
+      .update(providerConnections)
+      .set(changed)
+      .where(eq(providerConnections.id, id))
+      .returning()
+    return row ? toConnection(row) : null
+  }
+
+  async deleteConnection(id: string): Promise<boolean> {
+    const removed = await this.handle
+      .delete(providerConnections)
+      .where(eq(providerConnections.id, id))
+      .returning({ id: providerConnections.id })
+    return removed.length > 0
+  }
+
+  async listKeys(connectionId: string): Promise<readonly UpstreamKeyRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(upstreamKeys)
+      .where(eq(upstreamKeys.connectionId, connectionId))
+      .orderBy(upstreamKeys.createdAt, upstreamKeys.id)
+    return rows.map(toKey)
+  }
+
+  async getKey(id: string): Promise<UpstreamKeyRecord | null> {
+    const [row] = await this.handle.select().from(upstreamKeys).where(eq(upstreamKeys.id, id)).limit(1)
+    return row ? toKey(row) : null
+  }
+
+  async insertKey(key: UpstreamKeyRecord): Promise<UpstreamKeyRecord> {
+    const [row] = await this.handle.insert(upstreamKeys).values(key).returning()
+    return toKey(row ?? key)
+  }
+
+  async updateKey(
+    id: string,
+    patch: UpstreamKeyPatch,
+    at: Date,
+  ): Promise<UpstreamKeyRecord | null> {
+    const changed = { ...patch, updatedAt: at }
+    const [row] = await this.handle
+      .update(upstreamKeys)
+      .set(changed)
+      .where(eq(upstreamKeys.id, id))
+      .returning()
+    return row ? toKey(row) : null
+  }
+
+  async deleteKeysForConnection(connectionId: string): Promise<number> {
+    const removed = await this.handle
+      .delete(upstreamKeys)
+      .where(eq(upstreamKeys.connectionId, connectionId))
+      .returning({ id: upstreamKeys.id })
+    return removed.length
+  }
+}
+
+type ConnectionRow = typeof providerConnections.$inferSelect
+type KeyRow = typeof upstreamKeys.$inferSelect
+
+function toConnection(row: ConnectionRow): ProviderConnectionRecord {
+  return {
+    id: row.id,
+    displayName: row.displayName,
+    baseUrl: row.baseUrl,
+    allowInsecureHttp: row.allowInsecureHttp,
+    enabled: row.enabled,
+    archivedAt: row.archivedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
+function toKey(row: KeyRow): UpstreamKeyRecord {
+  return {
+    id: row.id,
+    connectionId: row.connectionId,
+    encryptedKey: row.encryptedKey,
+    health: row.health as UpstreamKeyHealth,
+    lastProbeAt: row.lastProbeAt,
+    lastProbeVerdict: row.lastProbeVerdict as KeyProbeVerdict | null,
+    lastProbeReason: row.lastProbeReason,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   }
 }

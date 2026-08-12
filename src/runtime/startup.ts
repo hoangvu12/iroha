@@ -5,10 +5,16 @@ import {
   type EnvironmentSource,
   type IrohaConfiguration,
 } from '../config/environment.ts'
+import { createSecretCipher } from '../crypto/index.ts'
 import { createApp } from '../http/app.ts'
 import { ReadinessState } from '../http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../identity/index.ts'
 import { openDatabase, type Database } from '../persistence/index.ts'
+import {
+  createGenericKeyProbe,
+  ProviderConnectionRegistry,
+  type UpstreamKeyProbe,
+} from '../providers/index.ts'
 import type { Clock } from './clock.ts'
 
 const DEFAULT_FRONTEND_DIRECTORY = join(import.meta.dir, '../../ui/dist')
@@ -21,6 +27,7 @@ export interface StartOptions {
   /** Injected at the composition boundary; production uses the real ones. */
   readonly clock?: Clock
   readonly passwordHasher?: PasswordHasher
+  readonly keyProbe?: UpstreamKeyProbe
 }
 
 export interface RunningIroha {
@@ -89,10 +96,17 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
       : '  No Owner yet: first-run setup is open in the browser.',
   )
 
+  const providers = new ProviderConnectionRegistry({
+    database,
+    cipher: createSecretCipher(configuration.masterKey),
+    keyProbe: options.keyProbe ?? createGenericKeyProbe(),
+  })
+
   const app = createApp({
     database,
     readiness,
     identity,
+    providers,
     frontendDirectory: options.frontendDirectory ?? DEFAULT_FRONTEND_DIRECTORY,
   })
 

@@ -6,6 +6,7 @@ import { createApp } from '../../src/http/app.ts'
 import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity } from '../../src/identity/index.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
+import { providerRegistryFor } from '../support/app.ts'
 
 const cleanups: Array<() => void | Promise<void>> = []
 
@@ -39,6 +40,7 @@ async function appWith(frontendDirectory: string | undefined) {
     database,
     readiness,
     identity: new OwnerIdentity({ database }),
+    providers: providerRegistryFor(database),
     frontendDirectory,
   })
   return (path: string) => app.handle(new Request(`http://iroha.test${path}`))

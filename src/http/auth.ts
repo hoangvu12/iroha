@@ -1,6 +1,5 @@
 import { Elysia } from 'elysia'
 import {
-  secretsMatch,
   UNKNOWN_SOURCE,
   type AttemptSource,
   type AuthenticatedSession,
@@ -8,24 +7,16 @@ import {
   type IssuedSession,
   type OwnerIdentity,
 } from '../identity/index.ts'
+import {
+  clearSessionCookie,
+  createOwnerGuard,
+  managementError,
+  requireSameOrigin,
+  setSessionCookie,
+  type ManagementError,
+} from './owner-guard.ts'
 
-/** The Owner's session cookie. Its value is `<session id>.<secret>`. */
-export const SESSION_COOKIE = 'iroha_session'
-
-/** The header carrying the session's CSRF token on state-changing requests. */
-export const CSRF_HEADER = 'x-iroha-csrf'
-
-/**
- * Management errors use a small stable envelope. The OpenAI-shaped error body
- * belongs to the inference surface, which later tickets add.
- */
-export interface ManagementError {
-  readonly error: {
-    readonly code: string
-    readonly message: string
-    readonly problems?: readonly { readonly field: string; readonly message: string }[]
-  }
-}
+export { CSRF_HEADER, SESSION_COOKIE, type ManagementError } from './owner-guard.ts'
 
 /**
  * Everything the Owner's browser needs to know which screen to show. It is
@@ -53,57 +44,7 @@ export interface AuthRoutesOptions {
  * and written through the jar so that several `Set-Cookie` headers compose.
  */
 export function createAuthRoutes({ identity }: AuthRoutesOptions) {
-  /**
-   * Resolves the session and, when its idle expiry moved, reissues the cookie
-   * so the browser's copy expires no sooner than the stored one. Without this
-   * a browser in daily use would still be signed out on the seventh day.
-   */
-  const resolveSession = async (
-    request: Request,
-    cookie: CookieJar,
-  ): Promise<AuthenticatedSession | null> => {
-    const cookieValue = readCookie(request, SESSION_COOKIE)
-    const authenticated = await identity.authenticate(cookieValue)
-
-    if (authenticated?.renewed && cookieValue !== undefined) {
-      setSessionCookie(cookie, request, cookieValue, identity.sessionIdleSeconds)
-    }
-
-    return authenticated
-  }
-
-  /**
-   * The rule every Owner-only route shares: a same-origin request, a live
-   * session, and — for anything that changes state — the session's CSRF token.
-   */
-  const requireOwner = async (
-    context: { request: Request; cookie: CookieJar },
-    options: { csrf: boolean },
-  ): Promise<{ authenticated: AuthenticatedSession } | GuardResponse> => {
-    const crossOrigin = requireSameOrigin(context.request)
-    if (crossOrigin !== null) return { response: { status: 403, body: crossOrigin } }
-
-    const authenticated = await resolveSession(context.request, context.cookie)
-    if (authenticated === null) {
-      return {
-        response: { status: 401, body: error('authentication_required', 'Sign in to continue.') },
-      }
-    }
-
-    if (options.csrf) {
-      const supplied = context.request.headers.get(CSRF_HEADER) ?? ''
-      if (!secretsMatch(authenticated.session.csrfToken, supplied)) {
-        return {
-          response: {
-            status: 403,
-            body: error('csrf_token_invalid', 'This request is missing its session token.'),
-          },
-        }
-      }
-    }
-
-    return { authenticated }
-  }
+  const guard = createOwnerGuard(identity)
 
   const state = async (authenticated: AuthenticatedSession | IssuedSession | null) => {
     const owner = await identity.owner()
@@ -123,14 +64,14 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       // Elysia's own validation report quotes the offending value, which for
       // these routes could be a password. Nothing but a stable code leaves here.
       if (code === 'VALIDATION' || code === 'PARSE') {
-        return status(400, error('invalid_request', 'The request body could not be read.'))
+        return status(400, managementError('invalid_request', 'The request body could not be read.'))
       }
 
       return undefined
     })
     .get(
       '/state',
-      async ({ request, cookie }) => await state(await resolveSession(request, cookie)),
+      async ({ request, cookie }) => await state(await guard.resolveSession(request, cookie)),
       {
         detail: {
           summary: 'Authentication state',
@@ -197,10 +138,10 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
     .post(
       '/logout',
       async ({ request, cookie, status }) => {
-        const guard = await requireOwner({ request, cookie }, { csrf: true })
-        if ('response' in guard) return status(guard.response.status, guard.response.body)
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) return status(guardResult.response.status, guardResult.response.body)
 
-        await identity.revokeSession(guard.authenticated.session.id, 'logout')
+        await identity.revokeSession(guardResult.authenticated.session.id, 'logout')
         clearSessionCookie(cookie, request)
         return status(204, undefined)
       },
@@ -214,10 +155,10 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
     .get(
       '/sessions',
       async ({ request, cookie, status }) => {
-        const guard = await requireOwner({ request, cookie }, { csrf: false })
-        if ('response' in guard) return status(guard.response.status, guard.response.body)
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
+        if ('response' in guardResult) return status(guardResult.response.status, guardResult.response.body)
 
-        return { sessions: await identity.sessions(guard.authenticated.session.id) }
+        return { sessions: await identity.sessions(guardResult.authenticated.session.id) }
       },
       {
         detail: {
@@ -230,8 +171,8 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
     .delete(
       '/sessions',
       async ({ request, cookie, status }) => {
-        const guard = await requireOwner({ request, cookie }, { csrf: true })
-        if ('response' in guard) return status(guard.response.status, guard.response.body)
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) return status(guardResult.response.status, guardResult.response.body)
 
         const revoked = await identity.revokeAllSessions()
         clearSessionCookie(cookie, request)
@@ -247,15 +188,15 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
     .delete(
       '/sessions/:id',
       async ({ params, request, cookie, status }) => {
-        const guard = await requireOwner({ request, cookie }, { csrf: true })
-        if ('response' in guard) return status(guard.response.status, guard.response.body)
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) return status(guardResult.response.status, guardResult.response.body)
 
         const revoked = await identity.revokeSession(params.id, 'revoked')
         if (!revoked) {
-          return status(404, error('session_not_found', 'That session is no longer signed in.'))
+          return status(404, managementError('session_not_found', 'That session is no longer signed in.'))
         }
 
-        if (params.id === guard.authenticated.session.id) clearSessionCookie(cookie, request)
+        if (params.id === guardResult.authenticated.session.id) clearSessionCookie(cookie, request)
         return status(204, undefined)
       },
       {
@@ -281,8 +222,8 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
 
         if (!result.ok) return respondToFailure(status, result.failure)
 
-        // Recovery deliberately does not sign the browser in: the Owner proves
-        // the new password immediately by logging in with it.
+        // Recovery deliberately does not sign the browser in: the Owner proves the
+        // new password immediately by logging in with it.
         return { sessionsRevoked: result.value.sessionsRevoked }
       },
       {
@@ -297,38 +238,12 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
 
 export type AuthRoutes = ReturnType<typeof createAuthRoutes>
 
-interface GuardResponse {
-  readonly response: { readonly status: 401 | 403; readonly body: ManagementError }
-}
-
 function sessionOf(
   authenticated: AuthenticatedSession | IssuedSession,
 ): { id: string; csrfToken: string } {
   return 'session' in authenticated
     ? { id: authenticated.session.id, csrfToken: authenticated.session.csrfToken }
     : { id: authenticated.sessionId, csrfToken: authenticated.csrfToken }
-}
-
-/**
- * Management traffic is same-origin only. A browser always sends `Origin` on a
- * state-changing request, so a mismatch is a cross-site attempt rather than an
- * ordinary client.
- */
-function requireSameOrigin(request: Request): ManagementError | null {
-  const origin = request.headers.get('origin')
-  if (origin === null) return null
-
-  // `Host` is what the browser was told to reach; the request URL carries the
-  // same authority when a runtime supplies it instead of a header.
-  const host = request.headers.get('host') ?? new URL(request.url).host
-
-  try {
-    if (new URL(origin).host === host) return null
-  } catch {
-    // An unparseable Origin is not a same-origin request.
-  }
-
-  return error('cross_origin_denied', 'Management requests must be same-origin.')
 }
 
 function respondToFailure(
@@ -339,16 +254,16 @@ function respondToFailure(
     case 'setup_closed':
       return status(
         409,
-        error('setup_closed', 'This installation already has an Owner. Sign in instead.'),
+        managementError('setup_closed', 'This installation already has an Owner. Sign in instead.'),
       )
     case 'setup_token_invalid':
-      return status(403, error('setup_token_invalid', 'The setup token is not correct.'))
+      return status(403, managementError('setup_token_invalid', 'The setup token is not correct.'))
     case 'invalid_credentials':
-      return status(401, error('invalid_credentials', 'That username and password do not match.'))
+      return status(401, managementError('invalid_credentials', 'That username and password do not match.'))
     case 'recovery_unavailable':
       return status(
         403,
-        error('recovery_unavailable', 'Recovery is unavailable or the token is not correct.'),
+        managementError('recovery_unavailable', 'Recovery is unavailable or the token is not correct.'),
       )
     case 'validation_failed':
       return status(400, {
@@ -360,54 +275,10 @@ function respondToFailure(
       } satisfies ManagementError)
     case 'too_many_attempts':
       return Response.json(
-        error('too_many_attempts', 'Too many attempts. Wait before trying again.'),
+        managementError('too_many_attempts', 'Too many attempts. Wait before trying again.'),
         { status: 429, headers: { 'retry-after': String(failure.retryAfterSeconds) } },
       )
   }
-}
-
-function error(code: string, message: string): ManagementError {
-  return { error: { code, message } }
-}
-
-type CookieJar = Record<string, { set(config: Record<string, unknown>): unknown } | undefined>
-
-function setSessionCookie(
-  cookie: CookieJar,
-  request: Request,
-  value: string,
-  maxAgeSeconds: number,
-): void {
-  cookie[SESSION_COOKIE]?.set({
-    value,
-    httpOnly: true,
-    sameSite: 'strict',
-    secure: isSecureRequest(request),
-    path: '/',
-    maxAge: maxAgeSeconds,
-  })
-}
-
-function clearSessionCookie(cookie: CookieJar, request: Request): void {
-  // A browser only replaces a cookie when the path and security attributes
-  // match the one it holds, so expiry repeats them rather than clearing alone.
-  setSessionCookie(cookie, request, '', 0)
-}
-
-/**
- * Whether the browser reached Iroha over TLS, including through a terminating
- * proxy. Marking the cookie `Secure` on a plain-HTTP installation would make it
- * unusable, so the flag follows the connection rather than a fixed setting.
- *
- * Either signal alone is enough: a forwarded header can only ever add `Secure`,
- * so a client that sends a false one cannot strip the flag from a real TLS
- * connection.
- */
-function isSecureRequest(request: Request): boolean {
-  if (new URL(request.url).protocol === 'https:') return true
-
-  const forwarded = request.headers.get('x-forwarded-proto')
-  return forwarded !== null && forwarded.split(',')[0]?.trim() === 'https'
 }
 
 /**
@@ -427,20 +298,6 @@ function sourceOf(server: AddressLookup | null, request: Request): AttemptSource
  */
 interface AddressLookup {
   requestIP(request: Request): { address: string } | null
-}
-
-function readCookie(request: Request, name: string): string | undefined {
-  const header = request.headers.get('cookie')
-  if (header === null) return undefined
-
-  for (const part of header.split(';')) {
-    const separator = part.indexOf('=')
-    if (separator < 0) continue
-    if (part.slice(0, separator).trim() !== name) continue
-    return decodeURIComponent(part.slice(separator + 1).trim())
-  }
-
-  return undefined
 }
 
 /** A short, non-identifying description of the client for the session list. */

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AccountSettings } from '@/components/account-settings'
 import { AppShell } from '@/components/app-shell'
 import { AuthScreen } from '@/components/auth-screen'
+import { ProvidersArea } from '@/components/providers-area'
 import { ReadinessPill } from '@/components/readiness-pill'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -91,6 +92,11 @@ export default function App() {
     >
       {activeId === 'settings' ? (
         <AccountSettings state={auth} onSignedOut={() => void reloadAuth()} />
+      ) : activeId === 'providers' ? (
+        <ProvidersArea
+          csrfToken={auth.session?.csrfToken ?? ''}
+          onSignedOut={() => void reloadAuth()}
+        />
       ) : (
         <Overview readiness={readiness} auth={auth} />
       )}
@@ -100,6 +106,7 @@ export default function App() {
 
 const AREAS: Record<string, { title: string; description: string }> = {
   overview: { title: 'Overview', description: 'Gateway runtime and configuration state' },
+  providers: { title: 'Providers', description: 'Provider Connections and their Upstream Keys' },
   settings: { title: 'Settings', description: 'Owner account and signed-in sessions' },
 }
 
@@ -138,8 +145,8 @@ function Overview({ readiness, auth }: { readiness: Readiness | null; auth: Auth
       <section>
         <h2 className="text-base font-semibold tracking-tight">Not configured yet</h2>
         <p className="text-muted-foreground mt-1 text-sm">
-          This installation has no Provider Connections or Gateway Keys. Those areas arrive with the
-          tickets that build them; nothing here is inferred or simulated.
+          Provider Connections live in the Providers area. Gateway Keys, request history, and audit
+          arrive with the tickets that build them; nothing here is inferred or simulated.
         </p>
       </section>
     </div>

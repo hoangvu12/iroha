@@ -1,4 +1,4 @@
-import { integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { boolean, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 
 /**
  * The PostgreSQL schema. It has its own migration history under
@@ -43,4 +43,37 @@ export const auditEvents = pgTable('audit_events', {
   outcome: text('outcome').notNull(),
   /** Never holds a secret value. */
   detail: jsonb('detail'),
+})
+
+/**
+ * One Owner-configured account or server. The ID is immutable and client URLs
+ * are built on it; the display name, base URL, and lifecycle state are not.
+ */
+export const providerConnections = pgTable('provider_connections', {
+  id: text('id').primaryKey(),
+  displayName: text('display_name').notNull(),
+  baseUrl: text('base_url').notNull(),
+  allowInsecureHttp: boolean('allow_insecure_http').notNull(),
+  enabled: boolean('enabled').notNull(),
+  archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'date' }),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
+})
+
+/**
+ * An Upstream Key attached to one Provider Connection. Only cipher output is
+ * stored, so a copy of the database does not copy the Provider's keys.
+ */
+export const upstreamKeys = pgTable('upstream_keys', {
+  id: text('id').primaryKey(),
+  connectionId: text('connection_id')
+    .notNull()
+    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+  encryptedKey: text('encrypted_key').notNull(),
+  health: text('health').notNull(),
+  lastProbeAt: timestamp('last_probe_at', { withTimezone: true, mode: 'date' }),
+  lastProbeVerdict: text('last_probe_verdict'),
+  lastProbeReason: text('last_probe_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
 })

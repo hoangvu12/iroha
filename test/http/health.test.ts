@@ -4,6 +4,7 @@ import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity } from '../../src/identity/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
+import { providerRegistryFor } from '../support/app.ts'
 
 describe('health endpoints', () => {
   let database: Database
@@ -14,7 +15,12 @@ describe('health endpoints', () => {
   beforeEach(async () => {
     ;({ database, dispose } = await sqliteEngine.open())
     readiness = new ReadinessState()
-    app = createApp({ database, readiness, identity: new OwnerIdentity({ database }) })
+    app = createApp({
+      database,
+      readiness,
+      identity: new OwnerIdentity({ database }),
+      providers: providerRegistryFor(database),
+    })
   })
 
   afterEach(async () => {
@@ -86,6 +92,7 @@ describe('generated API documentation', () => {
       database,
       readiness: new ReadinessState(),
       identity: new OwnerIdentity({ database }),
+      providers: providerRegistryFor(database),
     })
 
     try {

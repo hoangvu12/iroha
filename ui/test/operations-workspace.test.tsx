@@ -263,6 +263,11 @@ describe('operations workspace in the browser', () => {
     expect(await screen.findByRole('heading', { name: 'Attention required' })).toBeDefined()
     expect(await screen.findByText('Disabled')).toBeDefined()
 
+    // The Refresh button in the Runtime header re-reads every section.
+    const refresh = await screen.findByRole('button', { name: 'Refresh overview' })
+    await user.click(refresh)
+    await waitFor(() => expect(refresh.textContent).toBe('Refresh'))
+
     // The volume section renders its header even when the data is empty.
     expect(await screen.findByRole('heading', { name: 'Volume' })).toBeDefined()
     expect(await screen.findByRole('heading', { name: 'Key Health' })).toBeDefined()

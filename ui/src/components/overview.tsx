@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { RefreshCcw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -51,6 +52,15 @@ export function Overview({ auth, readiness, csrfToken }: OverviewProps) {
     }
   }, [])
 
+  const manualReload = async () => {
+    setBusy('refresh-overview')
+    try {
+      await reload()
+    } finally {
+      setBusy(null)
+    }
+  }
+
   useEffect(() => {
     void reload()
   }, [reload])
@@ -81,11 +91,26 @@ export function Overview({ auth, readiness, csrfToken }: OverviewProps) {
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h2 className="text-base font-semibold tracking-tight">Runtime</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Iroha validated its configuration, applied every pending migration, and bound its
-          port before accepting this request.
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">Runtime</h2>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Iroha validated its configuration, applied every pending migration, and bound its
+              port before accepting this request.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void manualReload()}
+            disabled={busy !== null}
+            aria-label="Refresh overview"
+          >
+            <RefreshCcw className="size-3.5" aria-hidden />
+            {busy === 'refresh-overview' ? 'Refreshing…' : 'Refresh'}
+          </Button>
+        </div>
         <Separator className="my-4" />
 
         {error && (

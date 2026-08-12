@@ -1,5 +1,5 @@
 import type { Readiness } from '@/lib/health'
-import { cn } from '@/lib/utils'
+import { Dot } from '@/components/dot'
 
 const UNREADY_LABEL: Record<string, string> = {
   migrations_pending: 'Migrating',
@@ -15,7 +15,7 @@ export function ReadinessPill({ readiness }: { readiness: Readiness | null }) {
   if (readiness === null) {
     return (
       <span className="text-muted-foreground flex items-center gap-1.5 text-xs" role="status">
-        <Dot className="bg-status-neutral animate-pulse" />
+        <Dot tone="neutral" className="animate-pulse" />
         Checking
       </span>
     )
@@ -25,27 +25,27 @@ export function ReadinessPill({ readiness }: { readiness: Readiness | null }) {
 
   return (
     <span className="flex items-center gap-1.5 text-xs" role="status">
-      <Dot className={tone} />
+      <Dot tone={tone} />
       <span className="text-foreground font-medium">{label}</span>
       {detail && <span className="text-muted-foreground hidden sm:inline">{detail}</span>}
     </span>
   )
 }
 
-function describe(readiness: Readiness): { label: string; tone: string; detail?: string } {
+function describe(readiness: Readiness): {
+  label: string
+  tone: 'healthy' | 'warning' | 'danger'
+  detail?: string
+} {
   switch (readiness.state) {
     case 'ready':
-      return { label: 'Ready', tone: 'bg-status-healthy', detail: readiness.dialect }
+      return { label: 'Ready', tone: 'healthy', detail: readiness.dialect }
     case 'not_ready':
       return {
         label: UNREADY_LABEL[readiness.reason] ?? 'Not ready',
-        tone: 'bg-status-warning',
+        tone: 'warning',
       }
     case 'unreachable':
-      return { label: 'Unreachable', tone: 'bg-status-danger' }
+      return { label: 'Unreachable', tone: 'danger' }
   }
-}
-
-function Dot({ className }: { className?: string }) {
-  return <span aria-hidden className={cn('size-1.5 rounded-full', className)} />
 }

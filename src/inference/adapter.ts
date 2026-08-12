@@ -22,14 +22,32 @@ export interface InferenceForwardRequest {
   readonly allowInsecureHttp: boolean
   /** The caller's cancellation, propagated to the upstream transport. */
   readonly signal?: AbortSignal | null
+  /** Asks for the live upstream body instead of a fully buffered one. */
+  readonly stream?: boolean
 }
 
 /** One upstream answer, as raw material the routing layer may interpret. */
-export interface InferenceForwardResult {
+export type InferenceForwardResult = InferenceBufferedResult | InferenceStreamResult
+
+/** A fully buffered answer, used for non-streaming calls and read-only discovery. */
+export interface InferenceBufferedResult {
+  readonly kind: 'buffered'
   readonly status: number
   /** Headers are surfaced structurally so retry and content information survive. */
   readonly headers: Readonly<Record<string, string>>
   readonly body: string
+}
+
+/**
+ * A live upstream body. Only a caller that asked for `stream` receives this,
+ * and the bytes flow through as-is, never accumulated and replayed.
+ */
+export interface InferenceStreamResult {
+  readonly kind: 'stream'
+  readonly status: number
+  /** Headers are surfaced structurally so content type and error information survive. */
+  readonly headers: Readonly<Record<string, string>>
+  readonly stream: ReadableStream<Uint8Array>
 }
 
 export interface InferenceAdapter {

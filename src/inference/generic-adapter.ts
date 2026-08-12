@@ -67,7 +67,17 @@ export function createGenericInferenceAdapter(
         signal: request.signal ?? null,
       })
 
+      if (request.stream === true) {
+        return {
+          kind: 'stream',
+          status: response.status,
+          headers: Object.fromEntries(response.headers.entries()),
+          stream: response.body ?? new ReadableStream<Uint8Array>(),
+        }
+      }
+
       return {
+        kind: 'buffered',
         status: response.status,
         headers: Object.fromEntries(response.headers.entries()),
         body: await response.text(),

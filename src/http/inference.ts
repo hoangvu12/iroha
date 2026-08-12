@@ -1,16 +1,31 @@
 import { randomBytes } from 'node:crypto'
 import { Elysia } from 'elysia'
-import type { InferenceAdapter } from '../inference/index.ts'
+import type { InferenceAdapter, InferenceForwardRequest } from '../inference/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
 import type { ProviderConnectionRegistry } from '../providers/index.ts'
+import { systemTimer, type Timer } from '../runtime/timer.ts'
+
+/** The streaming deadlines, deliberately separate knobs from any buffered total timeout. */
+export interface StreamingTimeouts {
+  /** Wait this long for the first upstream byte before aborting the stream. */
+  readonly streamingHeaderMs: number
+  /** Maximum silence between upstream bytes before aborting the stream. */
+  readonly streamingIdleMs: number
+}
 
 export interface InferenceRoutesOptions {
   readonly gatewayKeys: GatewayKeyRegistry
   readonly providers: ProviderConnectionRegistry
   readonly inference: InferenceAdapter
   readonly modelCatalog: ModelCatalogService
+  /** Streaming deadlines; tests inject a fake timer to drive them. */
+  readonly timer?: Timer
+  readonly timeouts?: StreamingTimeouts
 }
+
+const DEFAULT_STREAMING_HEADER_MS = 20_000
+const DEFAULT_STREAMING_IDLE_MS = 30_000
 
 /**
  * The provider-scoped OpenAI surface an application reaches with its Gateway
@@ -20,6 +35,11 @@ export interface InferenceRoutesOptions {
  */
 export function createInferenceRoutes(options: InferenceRoutesOptions) {
   const { gatewayKeys, providers, inference, modelCatalog } = options
+  const timer = options.timer ?? systemTimer
+  const timeouts: StreamingTimeouts = {
+    streamingHeaderMs: options.timeouts?.streamingHeaderMs ?? DEFAULT_STREAMING_HEADER_MS,
+    streamingIdleMs: options.timeouts?.streamingIdleMs ?? DEFAULT_STREAMING_IDLE_MS,
+  }
 
   return new Elysia({ name: 'iroha/inference', prefix: '/providers' })
     .get(
@@ -97,18 +117,31 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           return error(refusal.status, baseHeaders, refusal, correlationId)
         }
 
+        const forwardRequest: InferenceForwardRequest = {
+          baseUrl: target.value.baseUrl,
+          allowInsecureHttp: target.value.allowInsecureHttp,
+          path: '/chat/completions',
+          method: 'POST',
+          body: envelope.raw,
+          headers: headersOf(request),
+          upstreamKey: target.value.upstreamKey,
+          signal: request.signal,
+        }
+
+        if (envelope.stream) {
+          return await streamChatCompletion(
+            inference,
+            timer,
+            timeouts,
+            forwardRequest,
+            baseHeaders,
+            correlationId,
+          )
+        }
+
         let upstream
         try {
-          upstream = await inference.forward({
-            baseUrl: target.value.baseUrl,
-            allowInsecureHttp: target.value.allowInsecureHttp,
-            path: '/chat/completions',
-            method: 'POST',
-            body: envelope.raw,
-            headers: headersOf(request),
-            upstreamKey: target.value.upstreamKey,
-            signal: request.signal,
-          })
+          upstream = await inference.forward(forwardRequest)
         } catch (cause) {
           // The caller went away: propagating the abort is the honest answer,
           // and any response would reach nobody anyway.
@@ -122,7 +155,9 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         }
 
         if (upstream.status >= 200 && upstream.status < 300) {
-          return new Response(upstream.body, {
+          // A buffered request never asks for a stream, but if an adapter
+          // streamed anyway the bytes flow through exactly as they arrive.
+          return new Response(upstream.kind === 'stream' ? upstream.stream : upstream.body, {
             status: upstream.status,
             headers: {
               'content-type': upstream.headers['content-type'] ?? 'application/json',
@@ -145,7 +180,7 @@ export type InferenceRoutes = ReturnType<typeof createInferenceRoutes>
  * and newer fields need no Iroha release.
  */
 type Envelope =
-  | { readonly ok: true; readonly model: string; readonly raw: string }
+  | { readonly ok: true; readonly model: string; readonly raw: string; readonly stream: boolean }
   | { readonly ok: false; readonly status: 400; readonly code: string; readonly message: string }
 
 function readEnvelope(raw: string): Envelope {
@@ -169,7 +204,7 @@ function readEnvelope(raw: string): Envelope {
     return { ok: false, status: 400, code: 'model_required', message: 'The request must name a model.' }
   }
 
-  return { ok: true, model: model.trim(), raw }
+  return { ok: true, model: model.trim(), raw, stream: (parsed as Record<string, unknown>).stream === true }
 }
 
 type Refusal = { readonly status: number; readonly code: string; readonly message: string; readonly retryAfter?: string }
@@ -321,6 +356,159 @@ function headersOf(request: Request): Readonly<Record<string, string>> {
 
 function newRequestId(): string {
   return `req_${randomBytes(16).toString('base64url')}`
+}
+
+/**
+ * The streaming answer. The upstream SSE body flows straight to the caller,
+ * guarded by first-byte and idle deadlines, and aborts the instant the caller
+ * goes away. Failures before the upstream answer arrives keep the normal
+ * OpenAI-shaped error contract; after the first byte reaches the caller the
+ * only honest outcome is the stream ending, never an error JSON swapped in
+ * mid-stream.
+ */
+async function streamChatCompletion(
+  inference: InferenceAdapter,
+  timer: Timer,
+  timeouts: StreamingTimeouts,
+  request: InferenceForwardRequest,
+  baseHeaders: Record<string, string>,
+  correlationId: string,
+): Promise<Response> {
+  const upstream = new AbortController()
+  const abortUpstream = () => upstream.abort()
+  const callerAbort = () => abortUpstream()
+  request.signal?.addEventListener('abort', callerAbort, { once: true })
+  if (request.signal?.aborted === true) abortUpstream()
+
+  let answer
+  try {
+    answer = await inference.forward({ ...request, stream: true, signal: upstream.signal })
+  } catch (cause) {
+    // The caller went away, or the upstream was unreachable before any byte
+    // could be emitted; both keep the buffered error contract.
+    if (isAbort(cause)) throw cause
+    return error(
+      502,
+      baseHeaders,
+      { code: 'upstream_unreachable', message: 'The Provider could not be reached.' },
+      correlationId,
+    )
+  }
+
+  if (answer.status < 200 || answer.status >= 300) {
+    const refusal = upstreamRefusal(answer.status, answer.headers)
+    return error(
+      refusal.status,
+      { ...baseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) },
+      refusal,
+      correlationId,
+    )
+  }
+
+  if (answer.kind !== 'stream') {
+    // A buffered answer to a streaming request (e.g. a provider that ignored
+    // `stream: true`) is delivered as the finished body it already is.
+    return new Response(answer.body, {
+      status: answer.status,
+      headers: {
+        'content-type': answer.headers['content-type'] ?? 'text/event-stream',
+        'x-request-id': correlationId,
+      },
+    })
+  }
+
+  const guarded = deadlineGuard(answer.stream, {
+    timer,
+    timeouts,
+    signal: upstream.signal,
+    abort: abortUpstream,
+  })
+
+  return new Response(guarded.stream, {
+    status: answer.status,
+    headers: {
+      'content-type': answer.headers['content-type'] ?? 'text/event-stream',
+      'x-request-id': correlationId,
+    },
+  })
+}
+
+/**
+ * Guards a live upstream body with the streaming deadlines and the caller's
+ * cancellation, passing its bytes through unchanged. `started` is the "has
+ * started emitting" signal a retry loop must consult: once it reports true,
+ * no retry or key switch may happen. A deadline violation or a mid-stream
+ * upstream failure ends the stream rather than replacing it with error JSON,
+ * because bytes may already have reached the caller.
+ */
+function deadlineGuard(
+  upstream: ReadableStream<Uint8Array>,
+  options: {
+    timer: Timer
+    timeouts: StreamingTimeouts
+    signal: AbortSignal
+    abort: () => void
+  },
+): { readonly stream: ReadableStream<Uint8Array>; readonly started: () => boolean } {
+  const { timer, timeouts, signal, abort } = options
+  const reader = upstream.getReader()
+  let emitted = false
+  let ending = false
+  let armed: (() => void) | null = null
+
+  const disarm = () => {
+    if (armed !== null) armed()
+    armed = null
+  }
+
+  const stop = () => {
+    if (ending) return
+    ending = true
+    disarm()
+    if (!signal.aborted) abort()
+    void reader.cancel().catch(() => undefined)
+  }
+
+  return {
+    started: () => emitted,
+    stream: new ReadableStream<Uint8Array>({
+      start() {
+        armed = timer.set(stop, timeouts.streamingHeaderMs)
+      },
+      async pull(downstream) {
+        if (ending) {
+          downstream.close()
+          return
+        }
+
+        let chunk
+        try {
+          chunk = await reader.read()
+        } catch {
+          stop()
+          downstream.close()
+          return
+        }
+        if (ending) {
+          downstream.close()
+          return
+        }
+        if (chunk.done) {
+          stop()
+          downstream.close()
+          return
+        }
+
+        disarm()
+        emitted = true
+        downstream.enqueue(chunk.value)
+        armed = timer.set(stop, timeouts.streamingIdleMs)
+      },
+      cancel() {
+        stop()
+      },
+    }),
+  }
 }
 
 function isAbort(cause: unknown): boolean {

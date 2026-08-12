@@ -8,12 +8,13 @@ import type { GatewayKeyRegistry } from '../keys/index.ts'
 import { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
 import type { ProviderConnectionRegistry } from '../providers/index.ts'
+import type { Timer } from '../runtime/timer.ts'
 import { createAdminRoutes } from './admin.ts'
 import { createAuthRoutes } from './auth.ts'
 import { createCatalogRoutes } from './catalog.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
-import { createInferenceRoutes } from './inference.ts'
+import { createInferenceRoutes, type StreamingTimeouts } from './inference.ts'
 import { ReadinessState } from './readiness.ts'
 
 export interface AppOptions {
@@ -30,6 +31,9 @@ export interface AppOptions {
   readonly inference?: InferenceAdapter | undefined
   /** Replaces the catalog service built from the other options. */
   readonly modelCatalog?: ModelCatalogService | undefined
+  /** Streaming deadlines; tests inject a fake timer to drive them. */
+  readonly timer?: Timer
+  readonly streamingTimeouts?: StreamingTimeouts
 }
 
 const liveResponse = t.Object({ status: t.Literal('alive') })
@@ -77,7 +81,16 @@ export function createApp(options: AppOptions) {
     .use(createAdminRoutes({ identity, providers, gatewayKeys }))
     .use(createDirectoryRoutes({ gatewayKeys }))
     .use(createCatalogRoutes({ identity, modelCatalog }))
-    .use(createInferenceRoutes({ gatewayKeys, providers, inference, modelCatalog }))
+    .use(createInferenceRoutes({
+      gatewayKeys,
+      providers,
+      inference,
+      modelCatalog,
+      ...(options.timer === undefined ? {} : { timer: options.timer }),
+      ...(options.streamingTimeouts === undefined
+        ? {}
+        : { timeouts: options.streamingTimeouts }),
+    }))
     .get('/health/live', () => ({ status: 'alive' as const }), {
       detail: {
         summary: 'Process liveness',

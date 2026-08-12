@@ -165,6 +165,17 @@ export class ModelCatalogService {
       )
     }
 
+    // Discovery never asks for a stream, so a live body here means an adapter
+    // misbehaved; it cannot be parsed as a model list either way.
+    if (upstream.kind !== 'buffered') {
+      return await this.#recordedFailure(
+        connectionId,
+        prior,
+        at,
+        'the provider answered model discovery without a usable model list',
+      )
+    }
+
     const discovered = readDiscoveredModels(upstream.body)
     if (discovered === null) {
       return await this.#recordedFailure(

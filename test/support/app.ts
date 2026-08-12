@@ -1,5 +1,6 @@
 import { createSecretCipher, type SecretCipher } from '../../src/crypto/index.ts'
 import { createApp } from '../../src/http/app.ts'
+import type { StreamingTimeouts } from '../../src/http/inference.ts'
 import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
 import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
@@ -11,6 +12,7 @@ import {
   type KeyProbeResult,
   type UpstreamKeyProbe,
 } from '../../src/providers/index.ts'
+import type { Timer } from '../../src/runtime/timer.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
 import { testClock, testPasswordHasher, type TestClock } from './identity.ts'
 import { stubUpstreamTransport } from './inference.ts'
@@ -45,6 +47,9 @@ export interface TestAppOptions {
   /** Replaces the inference upstream transport; defaults to a closed stub. */
   readonly upstreamTransport?: typeof fetch | undefined
   readonly secretCipher?: SecretCipher
+  /** Streaming deadlines; tests inject a fake timer to drive them. */
+  readonly timer?: Timer
+  readonly streamingTimeouts?: StreamingTimeouts
 }
 
 export const SETUP_TOKEN = 'setup-token-for-tests-0123456789abcdef'
@@ -150,6 +155,10 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     secretCipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
     inference,
     modelCatalog,
+    ...(options.timer === undefined ? {} : { timer: options.timer }),
+    ...(options.streamingTimeouts === undefined
+      ? {}
+      : { streamingTimeouts: options.streamingTimeouts }),
   })
 
   const cookies = new Map<string, string>()

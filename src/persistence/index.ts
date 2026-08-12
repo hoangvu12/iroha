@@ -4,7 +4,11 @@ import type { Database } from './repository.ts'
 import { openSqliteDatabase } from './sqlite/database.ts'
 
 export type {
+  AttemptOutcome,
   AuditEventRecord,
+  AuditFilter,
+  AuditListOptions,
+  AuditListResult,
   AuditOutcome,
   AuditRepository,
   ConnectionCapabilities,
@@ -24,6 +28,13 @@ export type {
   ProviderRepository,
   ProviderStaticHeader,
   Repositories,
+  RequestAttemptRecord,
+  RequestEventRecord,
+  RequestHistoryFilter,
+  RequestHistoryListOptions,
+  RequestHistoryListResult,
+  RequestHistoryRepository,
+  RequestOutcome,
   SessionRecord,
   SessionRepository,
   SettingRecord,

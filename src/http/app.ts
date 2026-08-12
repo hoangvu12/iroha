@@ -1,6 +1,7 @@
 import { openapi } from '@elysiajs/openapi'
 import { Elysia, t } from 'elysia'
 import type { SecretCipher } from '../crypto/index.ts'
+import { RequestHistoryService } from '../history/index.ts'
 import type { InferenceAdapter } from '../inference/index.ts'
 import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
 import type { OwnerIdentity } from '../identity/index.ts'
@@ -12,12 +13,15 @@ import type { Timer } from '../runtime/timer.ts'
 import { UsageService, type UsageAdapter } from '../usage/index.ts'
 import { createGenericUsageAdapter } from '../usage/generic-adapter.ts'
 import { createAdminRoutes } from './admin.ts'
+import { createAuditRoutes } from './audit.ts'
 import { createAuthRoutes } from './auth.ts'
 import { createCatalogRoutes } from './catalog.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
 import { createInferenceRoutes, DEFAULT_TRANSPORT, type StreamingTimeouts, type TransportDefaults } from './inference.ts'
+import { createRequestHistoryRoutes } from './request-history.ts'
 import { ReadinessState } from './readiness.ts'
+import { createSettingsRoutes } from './settings.ts'
 import { createUsageRoutes } from './usage.ts'
 
 export interface AppOptions {
@@ -38,6 +42,8 @@ export interface AppOptions {
   readonly usageAdapter?: UsageAdapter | undefined
   /** Replaces the usage service built from the other options. */
   readonly usageService?: UsageService | undefined
+  /** Replaces the request-history service built from the other options. */
+  readonly requestHistory?: RequestHistoryService | undefined
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly streamingTimeouts?: StreamingTimeouts
@@ -97,6 +103,8 @@ export function createApp(options: AppOptions) {
       })
     })()
 
+  const requestHistory = options.requestHistory ?? new RequestHistoryService({ database })
+
   const transportDefaults: TransportDefaults = options.transportDefaults ?? DEFAULT_TRANSPORT
 
   return new Elysia()
@@ -112,12 +120,32 @@ export function createApp(options: AppOptions) {
       }),
     )
     .use(
+      createAuditRoutes({
+        identity,
+        database,
+      }),
+    )
+    .use(
+      createRequestHistoryRoutes({
+        identity,
+        requestHistory,
+      }),
+    )
+    .use(
+      createSettingsRoutes({
+        identity,
+        requestHistory,
+        database,
+      }),
+    )
+    .use(
       createInferenceRoutes({
         gatewayKeys,
         providers,
         inference,
         modelCatalog,
         database,
+        requestHistory,
         transportDefaults,
         ...(options.timer === undefined ? {} : { timer: options.timer }),
         ...(options.streamingTimeouts === undefined

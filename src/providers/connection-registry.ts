@@ -657,7 +657,15 @@ export class ProviderConnectionRegistry {
     // A disabled key stays disabled: a test informs, only activation revives.
     // An unverified key that proves itself usable is activated on the spot.
     const activates = probe.verdict === 'usable' && key.health !== 'disabled'
-    await this.#database.providers.updateKey(keyId, probedPatch(probe, at, activates), at)
+    await this.#database.transaction(async (repositories) => {
+      await repositories.providers.updateKey(keyId, probedPatch(probe, at, activates), at)
+      await repositories.audit.record({
+        action: 'key.tested',
+        outcome: probe.verdict === 'usable' ? 'success' : 'failure',
+        detail: { connectionId, keyId, verdict: probe.verdict, reason: probe.reason },
+        at,
+      })
+    })
     this.#controlledTrials.delete(healthClaim(key))
     return { ok: true, value: await this.#viewOf(connectionId) }
   }

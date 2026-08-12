@@ -979,6 +979,267 @@ for (const engine of availableEngines) {
         expect(two?.visibility).toBe('reactive_only')
       })
     })
+
+    describe('request history', () => {
+      const at = new Date('2026-01-01T00:00:00.000Z')
+      const later = new Date('2026-01-02T00:00:00.000Z')
+
+      const connection = (
+        id: string,
+        overrides: Partial<ProviderConnectionRecord> = {},
+      ): ProviderConnectionRecord => ({
+        id,
+        displayName: 'Example',
+        baseUrl: 'https://api.example.com/v1',
+        allowInsecureHttp: false,
+        enabled: true,
+        retryMaxAttempts: 3,
+        retryAmbiguousNetwork: false,
+        archivedAt: null,
+        templateId: null,
+        capabilities: {
+          chat: false,
+          streaming: false,
+          tools: false,
+          structuredOutput: false,
+          responses: false,
+        },
+        authHeader: 'authorization',
+        authPrefix: 'Bearer ',
+        staticHeadersEncrypted: '[]',
+        redirectAllowSameOrigin: false,
+        connectionTimeoutMs: 10_000,
+        firstByteTimeoutMs: 20_000,
+        nonStreamingTotalTimeoutMs: 120_000,
+        streamingIdleTimeoutMs: 30_000,
+        totalRetryTimeoutMs: 30_000,
+        idempotencyHeader: 'Idempotency-Key',
+        createdAt: at,
+        updatedAt: at,
+        ...overrides,
+      })
+
+      const event = (
+        id: string,
+        connectionId: string,
+        overrides: Partial<{
+          occurredAt: Date
+          model: string
+          gatewayKeyId: string | null
+          keyId: string | null
+          status: number
+          outcome: 'success' | 'failure'
+          latencyMs: number
+          isStreaming: boolean
+          promptTokens: number | null
+          completionTokens: number | null
+          totalTokens: number | null
+          errorCode: string | null
+        }> = {},
+      ) => ({
+        id,
+        occurredAt: at,
+        connectionId,
+        model: 'gpt-4o-mini',
+        gatewayKeyId: 'gw_one',
+        keyId: 'uk_one',
+        status: 200,
+        outcome: 'success' as const,
+        latencyMs: 250,
+        isStreaming: false,
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+        errorCode: null,
+        ...overrides,
+      })
+
+      test('round-trips an event with every column preserved', async () => {
+        await database.providers.insertConnection(connection('pc_rh'))
+        await database.requestHistory.recordEvent(
+          event('req_one', 'pc_rh', {
+            gatewayKeyId: null,
+            keyId: null,
+            status: 503,
+            outcome: 'failure',
+            latencyMs: 1234,
+            promptTokens: null,
+            completionTokens: null,
+            totalTokens: null,
+            errorCode: 'upstream_credentials_unavailable',
+          }),
+        )
+
+        const stored = await database.requestHistory.getEvent('req_one')
+        expect(stored).toEqual(
+          event('req_one', 'pc_rh', {
+            gatewayKeyId: null,
+            keyId: null,
+            status: 503,
+            outcome: 'failure',
+            latencyMs: 1234,
+            promptTokens: null,
+            completionTokens: null,
+            totalTokens: null,
+            errorCode: 'upstream_credentials_unavailable',
+          }),
+        )
+      })
+
+      test('overwrites an event with the same id so streaming can update usage', async () => {
+        await database.providers.insertConnection(connection('pc_rh'))
+        await database.requestHistory.recordEvent(
+          event('req_one', 'pc_rh', { totalTokens: 0, isStreaming: true }),
+        )
+        await database.requestHistory.recordEvent(
+          event('req_one', 'pc_rh', { totalTokens: 17, isStreaming: true }),
+        )
+
+        const stored = await database.requestHistory.getEvent('req_one')
+        expect(stored?.totalTokens).toBe(17)
+      })
+
+      test('records attempts and patches the outcome', async () => {
+        await database.providers.insertConnection(connection('pc_rh'))
+        await database.requestHistory.recordEvent(event('req_one', 'pc_rh'))
+
+        const started = await database.requestHistory.recordAttempt({
+          requestId: 'req_one',
+          attemptNumber: 1,
+          keyId: 'uk_one',
+          startedAt: at,
+          completedAt: null,
+          status: null,
+          outcome: 'failure',
+          errorCode: null,
+          retryAfterSeconds: null,
+        })
+
+        await database.requestHistory.recordAttempt({
+          requestId: 'req_one',
+          attemptNumber: 2,
+          keyId: 'uk_two',
+          startedAt: later,
+          completedAt: later,
+          status: 200,
+          outcome: 'success',
+          errorCode: null,
+          retryAfterSeconds: null,
+        })
+
+        await database.requestHistory.updateAttempt(started.id, {
+          completedAt: at,
+          status: 401,
+          outcome: 'failure',
+          errorCode: 'upstream_invalid_credentials',
+          retryAfterSeconds: 30,
+        })
+
+        const attempts = await database.requestHistory.getAttempts('req_one')
+        expect(attempts.map((a) => ({ number: a.attemptNumber, key: a.keyId, outcome: a.outcome, status: a.status, error: a.errorCode }))).toEqual([
+          { number: 1, key: 'uk_one', outcome: 'failure', status: 401, error: 'upstream_invalid_credentials' },
+          { number: 2, key: 'uk_two', outcome: 'success', status: 200, error: null },
+        ])
+      })
+
+      test('orders events most-recent first and supports filters', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertConnection(connection('pc_two'))
+
+        await database.requestHistory.recordEvent(event('req_a', 'pc_one', { outcome: 'success' }))
+        await database.requestHistory.recordEvent(event('req_b', 'pc_two', { outcome: 'failure', status: 502 }))
+        await database.requestHistory.recordEvent(event('req_c', 'pc_one', { keyId: 'uk_two', latencyMs: 100, status: 200 }))
+
+        const all = await database.requestHistory.listEvents()
+        expect(all.total).toBe(3)
+        expect(all.events.map((row) => row.id)).toEqual(['req_c', 'req_b', 'req_a'])
+
+        const onlyPcOne = await database.requestHistory.listEvents({
+          filter: { connectionId: 'pc_one' },
+        })
+        expect(onlyPcOne.events.map((row) => row.id)).toEqual(['req_c', 'req_a'])
+
+        const onlyFailures = await database.requestHistory.listEvents({ filter: { outcome: 'failure' } })
+        expect(onlyFailures.events.map((row) => row.id)).toEqual(['req_b'])
+
+        const byKey = await database.requestHistory.listEvents({ filter: { keyId: 'uk_two' } })
+        expect(byKey.events.map((row) => row.id)).toEqual(['req_c'])
+      })
+
+      test('paginates events with a stable order under a limit', async () => {
+        await database.providers.insertConnection(connection('pc_rh'))
+        for (let i = 0; i < 5; i++) {
+          await database.requestHistory.recordEvent(
+            event(`req_${i}`, 'pc_rh', {
+              occurredAt: new Date(at.getTime() + i * 1000),
+            }),
+          )
+        }
+
+        const page1 = await database.requestHistory.listEvents({ limit: 2, offset: 0 })
+        const page2 = await database.requestHistory.listEvents({ limit: 2, offset: 2 })
+        const page3 = await database.requestHistory.listEvents({ limit: 2, offset: 4 })
+
+        expect(page1.events.map((row) => row.id)).toEqual(['req_4', 'req_3'])
+        expect(page2.events.map((row) => row.id)).toEqual(['req_2', 'req_1'])
+        expect(page3.events.map((row) => row.id)).toEqual(['req_0'])
+        expect(page1.total).toBe(5)
+      })
+
+      test('prunes events older than a cutoff', async () => {
+        await database.providers.insertConnection(connection('pc_rh'))
+        await database.requestHistory.recordEvent(event('req_old', 'pc_rh', { occurredAt: new Date('2026-01-01T00:00:00.000Z') }))
+        await database.requestHistory.recordEvent(event('req_new', 'pc_rh', { occurredAt: new Date('2026-02-01T00:00:00.000Z') }))
+
+        const removed = await database.requestHistory.pruneEvents(new Date('2026-01-15T00:00:00.000Z'))
+        expect(removed).toBe(1)
+        expect((await database.requestHistory.listEvents()).events.map((row) => row.id)).toEqual(['req_new'])
+      })
+
+      test('cascades attempts when their event is pruned through a connection purge', async () => {
+        await database.providers.insertConnection(connection('pc_rh'))
+        await database.requestHistory.recordEvent(event('req_one', 'pc_rh'))
+        await database.requestHistory.recordAttempt({
+          requestId: 'req_one',
+          attemptNumber: 1,
+          keyId: 'uk_one',
+          startedAt: at,
+          completedAt: at,
+          status: 200,
+          outcome: 'success',
+          errorCode: null,
+          retryAfterSeconds: null,
+        })
+
+        await database.transaction(async (repositories) => {
+          await repositories.providers.deleteKeysForConnection('pc_rh')
+          await repositories.providers.deleteConnection('pc_rh')
+        })
+
+        expect(await database.requestHistory.getEvent('req_one')).toBeNull()
+        expect(await database.requestHistory.getAttempts('req_one')).toEqual([])
+      })
+
+      test('lists and clears audit events', async () => {
+        await database.audit.record({ action: 'owner.login', outcome: 'success', at })
+        await database.audit.record({ action: 'owner.logout', outcome: 'success', at: later })
+        await database.audit.record({ action: 'key.test.failure', outcome: 'failure', at: later })
+
+        const all = await database.requestHistory.listAudit()
+        expect(all.events.map((row) => row.action)).toEqual(['key.test.failure', 'owner.logout', 'owner.login'])
+
+        const loginOnly = await database.requestHistory.listAudit({
+          filter: { actionPrefix: 'owner.login' },
+        })
+        expect(loginOnly.events.map((row) => row.action)).toEqual(['owner.login'])
+
+        const failures = await database.requestHistory.listAudit({ filter: { outcome: 'failure' } })
+        expect(failures.events.map((row) => row.action)).toEqual(['key.test.failure'])
+
+        expect(await database.requestHistory.clearAudit()).toBe(3)
+        expect((await database.requestHistory.listAudit()).total).toBe(0)
+      })
+    })
   })
 }
 

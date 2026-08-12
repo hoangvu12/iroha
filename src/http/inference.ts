@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { Elysia } from 'elysia'
-import type { Database } from '../persistence/index.ts'
+import type { RequestHistoryService } from '../history/index.ts'
+import type { AttemptOutcome } from '../persistence/index.ts'
 import {
   callerSuppliedIdempotency,
   generateIdempotencyValue,
@@ -10,8 +11,54 @@ import {
 } from '../inference/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
+import type { Database } from '../persistence/index.ts'
 import type { InferenceTarget, ProviderConnectionRegistry } from '../providers/index.ts'
 import { systemTimer, type Timer } from '../runtime/timer.ts'
+
+/** The terminal shape of one attempt's outcome, what the recorder writes. */
+interface AttemptTerminal {
+  readonly status: number | null
+  readonly outcome: AttemptOutcome
+  readonly errorCode: string | null
+  readonly retryAfterSeconds: number | null
+  readonly at: Date
+}
+
+/**
+ * Pulls the Provider's `usage` block out of a buffered response body without
+ * keeping any prompt or response text. Returns nulls when the body is not
+ * JSON, is missing `usage`, or any field is not a non-negative integer; the
+ * history row records only what the Provider claimed, never what Iroha
+ * inferred.
+ */
+function parseUsage(body: string): {
+  readonly promptTokens: number | null
+  readonly completionTokens: number | null
+  readonly totalTokens: number | null
+} {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return { promptTokens: null, completionTokens: null, totalTokens: null }
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return { promptTokens: null, completionTokens: null, totalTokens: null }
+  }
+  const usage = (parsed as { usage?: unknown }).usage
+  if (typeof usage !== 'object' || usage === null) {
+    return { promptTokens: null, completionTokens: null, totalTokens: null }
+  }
+  const record = usage as Record<string, unknown>
+  const prompt = readTokenCount(record.prompt_tokens)
+  const completion = readTokenCount(record.completion_tokens)
+  const total = readTokenCount(record.total_tokens)
+  return { promptTokens: prompt, completionTokens: completion, totalTokens: total }
+}
+
+function readTokenCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null
+}
 
 /** The streaming deadlines, deliberately separate knobs from any buffered total timeout. */
 export interface StreamingTimeouts {
@@ -46,6 +93,8 @@ export interface InferenceRoutesOptions {
   /** Per-connection transport overrides and the global fallback defaults. */
   readonly transportDefaults?: TransportDefaults
   readonly database?: Database
+  /** Writes request-history rows; tests can inject a no-op. */
+  readonly requestHistory?: RequestHistoryService
   readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
@@ -73,6 +122,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
   const retrySleep = options.retrySleep ?? sleepWithTimer(timer)
   const transport = options.transportDefaults ?? DEFAULT_TRANSPORT
   const adapterCapabilities: InferenceAdapterCapabilities = inference.capabilities
+  const requestHistory = options.requestHistory
 
   return new Elysia({ name: 'iroha/inference', prefix: '/providers' })
     .options(
@@ -149,6 +199,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           transport,
           adapterCapabilities,
           database: options.database ?? null,
+          requestHistory,
         }),
     )
     .post(
@@ -168,6 +219,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           transport,
           adapterCapabilities,
           database: options.database ?? null,
+          requestHistory,
         }),
     )
 }
@@ -189,6 +241,7 @@ async function forwardGeneration(options: {
   retrySleep: (ms: number, signal: AbortSignal) => Promise<void>
   transport: TransportDefaults
   adapterCapabilities: InferenceAdapterCapabilities
+  requestHistory?: RequestHistoryService | undefined
 }): Promise<Response> {
   const {
     request,
@@ -203,6 +256,7 @@ async function forwardGeneration(options: {
     transport,
     adapterCapabilities,
     timeouts,
+    requestHistory,
   } = options
   const correlationId = newRequestId()
   const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
@@ -263,12 +317,21 @@ async function forwardGeneration(options: {
   let sameKeyRetries = 0
   let lastUpstream: Awaited<ReturnType<InferenceAdapter['forward']>> | null = null
   let retainedTarget: InferenceTarget | null = null
+  let lastAttemptRecorder: { readonly finalize: (outcome: AttemptTerminal) => Promise<void> } | null = null
+  let lastAttemptKeyId: string | null = null
 
   const callerHeaders = headersOf(request)
   const inboundIdempotency = callerSuppliedIdempotency(callerHeaders, adapterCapabilities.idempotencyHeader)
   const generatedIdempotency = inboundIdempotency === null && adapterCapabilities.idempotencyGenerationSafe
     ? generateIdempotencyValue()
     : null
+
+  const history = requestHistory?.beginRequest({
+    id: correlationId,
+    connectionId,
+    model: envelope.model,
+    gatewayKeyId: authorization.keyId,
+  }) ?? null
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (request.signal.aborted) throw abortError()
@@ -286,6 +349,7 @@ async function forwardGeneration(options: {
       if (!resolution.ok) {
         const refusal = resolutionRefusal(resolution.failure)
         const retryAfter = await providers.earliestRetryAfterSeconds(connectionId)
+        await history?.recordSkip(refusal.code, new Date())
         return error(
           refusal.status,
           { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
@@ -295,6 +359,13 @@ async function forwardGeneration(options: {
       }
       target = resolution.value
     }
+
+    lastAttemptKeyId = target.keyId
+    lastAttemptRecorder = (await history?.startAttempt({
+      attemptNumber: attempt,
+      keyId: target.keyId,
+      at: new Date(),
+    })) ?? null
 
     const upstreamHeaders = buildUpstreamHeaders({
       callerHeaders,
@@ -337,6 +408,24 @@ async function forwardGeneration(options: {
       )
       if (streamed.status >= 200 && streamed.status < 300) {
         await providers.recordInferenceSuccess(target.keyId)
+        await lastAttemptRecorder?.finalize({
+          status: streamed.status,
+          outcome: 'success',
+          errorCode: null,
+          retryAfterSeconds: null,
+          at: new Date(),
+        })
+        await history?.finalize({
+          status: streamed.status,
+          outcome: 'success',
+          isStreaming: true,
+          latencyMs: timer.now() - startedAt,
+          keyId: target.keyId,
+          promptTokens: null,
+          completionTokens: null,
+          totalTokens: null,
+          errorCode: null,
+        })
         return streamed
       }
       await providers.recordInferenceFailure({
@@ -345,6 +434,15 @@ async function forwardGeneration(options: {
         status: streamed.status,
         retryAfterSeconds: numericRetryAfter(streamed.headers),
         reason: `upstream HTTP ${streamed.status}`,
+      })
+      const headerMap = Object.fromEntries(streamed.headers.entries())
+      const refusal = upstreamRefusal(streamed.status, headerMap)
+      await lastAttemptRecorder?.finalize({
+        status: streamed.status,
+        outcome: 'failure',
+        errorCode: refusal.code,
+        retryAfterSeconds: numericRetryAfter(streamed.headers),
+        at: new Date(),
       })
       const status = streamed.status
       if ((status === 401 || status === 403) && attempt < maxAttempts) {
@@ -362,6 +460,17 @@ async function forwardGeneration(options: {
         await retrySleep(100, request.signal)
         continue
       }
+      await history?.finalize({
+        status: streamed.status,
+        outcome: 'failure',
+        isStreaming: true,
+        latencyMs: timer.now() - startedAt,
+        keyId: target.keyId,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+        errorCode: refusal.code,
+      })
       return streamed
     }
 
@@ -369,6 +478,13 @@ async function forwardGeneration(options: {
       lastUpstream = await inference.forward(forwardRequest)
     } catch (cause) {
       if (isAbort(cause)) throw cause
+      await lastAttemptRecorder?.finalize({
+        status: null,
+        outcome: 'failure',
+        errorCode: 'upstream_unreachable',
+        retryAfterSeconds: null,
+        at: new Date(),
+      })
       if (
         retryAmbiguousNetwork &&
         attempt < maxAttempts &&
@@ -378,6 +494,17 @@ async function forwardGeneration(options: {
         await retrySleep(100, request.signal)
         continue
       }
+      await history?.finalize({
+        status: 502,
+        outcome: 'failure',
+        isStreaming: false,
+        latencyMs: timer.now() - startedAt,
+        keyId: target.keyId,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+        errorCode: 'upstream_unreachable',
+      })
       return error(
         502,
         responseHeaders,
@@ -388,6 +515,25 @@ async function forwardGeneration(options: {
 
     if (lastUpstream.status >= 200 && lastUpstream.status < 300) {
       await providers.recordInferenceSuccess(target.keyId)
+      const usage = lastUpstream.kind === 'buffered' ? parseUsage(lastUpstream.body) : { promptTokens: null, completionTokens: null, totalTokens: null }
+      await lastAttemptRecorder?.finalize({
+        status: lastUpstream.status,
+        outcome: 'success',
+        errorCode: null,
+        retryAfterSeconds: null,
+        at: new Date(),
+      })
+      await history?.finalize({
+        status: lastUpstream.status,
+        outcome: 'success',
+        isStreaming: false,
+        latencyMs: timer.now() - startedAt,
+        keyId: target.keyId,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        totalTokens: usage.totalTokens,
+        errorCode: null,
+      })
       return new Response(lastUpstream.kind === 'stream' ? lastUpstream.stream : lastUpstream.body, {
         status: lastUpstream.status,
         headers: {
@@ -404,6 +550,15 @@ async function forwardGeneration(options: {
       status,
       retryAfterSeconds: numericRetryAfter(lastUpstream.headers),
       reason: `upstream HTTP ${status}`,
+    })
+
+    const refusal = upstreamRefusal(status, lastUpstream.headers)
+    await lastAttemptRecorder?.finalize({
+      status,
+      outcome: 'failure',
+      errorCode: refusal.code,
+      retryAfterSeconds: numericRetryAfter(lastUpstream.headers),
+      at: new Date(),
     })
 
     const insideBudget = timer.now() - startedAt < totalRetryBudgetMs
@@ -428,15 +583,37 @@ async function forwardGeneration(options: {
   }
 
   if (lastUpstream === null) {
-    return error(
-      503,
-      responseHeaders,
-      { code: 'upstream_credentials_unavailable', message: 'No eligible Upstream Key is available for this connection.' },
-      correlationId,
-    )
-  }
+await history?.finalize({
+    status: 503,
+    outcome: 'failure',
+    isStreaming: false,
+    latencyMs: timer.now() - startedAt,
+    keyId: lastAttemptKeyId,
+    promptTokens: null,
+    completionTokens: null,
+    totalTokens: null,
+    errorCode: 'upstream_credentials_unavailable',
+  })
+  return error(
+    503,
+    responseHeaders,
+    { code: 'upstream_credentials_unavailable', message: 'No eligible Upstream Key is available for this connection.' },
+    correlationId,
+  )
+}
   if (lastUpstream.status === 429) {
     const retryAfter = await providers.earliestRetryAfterSeconds(connectionId)
+    await history?.finalize({
+      status: 503,
+      outcome: 'failure',
+      isStreaming: false,
+      latencyMs: timer.now() - startedAt,
+      keyId: lastAttemptKeyId,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      errorCode: 'upstream_credentials_unavailable',
+    })
     return error(
       503,
       { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
@@ -448,6 +625,17 @@ async function forwardGeneration(options: {
     )
   }
   const refusal = upstreamRefusal(lastUpstream.status, lastUpstream.headers)
+  await history?.finalize({
+    status: refusal.status,
+    outcome: 'failure',
+    isStreaming: false,
+    latencyMs: timer.now() - startedAt,
+    keyId: lastAttemptKeyId,
+    promptTokens: null,
+    completionTokens: null,
+    totalTokens: null,
+    errorCode: refusal.code,
+  })
   return error(
     refusal.status,
     { ...responseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) },

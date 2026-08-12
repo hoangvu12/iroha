@@ -1,14 +1,18 @@
 import { Database as BunSqlite } from 'bun:sqlite'
 import { dirname, join } from 'node:path'
 import { mkdirSync } from 'node:fs'
-import { and, desc, eq, lt, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, like, lt, lte, sql } from 'drizzle-orm'
 import { drizzle, type BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import type { SqliteConfiguration } from '../../config/environment.ts'
 import {
   DatabaseUnavailableError,
   OWNER_ROW_ID,
+  type AttemptOutcome,
   type AuditEventRecord,
+  type AuditFilter,
+  type AuditListOptions,
+  type AuditListResult,
   type AuditOutcome,
   type AuditRepository,
   type ConnectionCapabilities,
@@ -27,6 +31,13 @@ import {
   type ProviderConnectionRecord,
   type ProviderRepository,
   type Repositories,
+  type RequestAttemptRecord,
+  type RequestEventRecord,
+  type RequestHistoryFilter,
+  type RequestHistoryListOptions,
+  type RequestHistoryListResult,
+  type RequestHistoryRepository,
+  type RequestOutcome,
   type SessionRecord,
   type SessionRepository,
   type SettingRecord,
@@ -47,6 +58,8 @@ import {
   owner,
   ownerSessions,
   providerConnections,
+  requestAttempts,
+  requestEvents,
   settings,
   upstreamAccounts,
   upstreamKeys,
@@ -93,6 +106,7 @@ class SqliteDatabase implements Database {
   readonly gatewayKeys: GatewayKeyRepository
   readonly modelCatalog: ModelCatalogRepository
   readonly usage: UsageRepository
+  readonly requestHistory: RequestHistoryRepository
 
   /**
    * `bun:sqlite` is one synchronous connection, so two overlapping
@@ -115,6 +129,7 @@ class SqliteDatabase implements Database {
     this.gatewayKeys = new SqliteGatewayKeyRepository(handle)
     this.modelCatalog = new SqliteModelCatalogRepository(handle)
     this.usage = new SqliteUsageRepository(handle)
+    this.requestHistory = new SqliteRequestHistoryRepository(handle)
   }
 
   /**
@@ -131,6 +146,7 @@ class SqliteDatabase implements Database {
       gatewayKeys: this.gatewayKeys,
       modelCatalog: this.modelCatalog,
       usage: this.usage,
+      requestHistory: this.requestHistory,
     }
   }
 
@@ -1183,4 +1199,243 @@ function parseCapabilities(raw: string): ConnectionCapabilities {
   }
 }
 
-/** JSON text -> capabilities. A corrupted row must not silently become defaults. */
+class SqliteRequestHistoryRepository implements RequestHistoryRepository {
+  constructor(private readonly handle: Handle) {}
+
+  async recordEvent(event: RequestEventRecord): Promise<void> {
+    await this.handle
+      .insert(requestEvents)
+      .values({
+        id: event.id,
+        occurredAt: event.occurredAt,
+        connectionId: event.connectionId,
+        model: event.model,
+        gatewayKeyId: event.gatewayKeyId,
+        keyId: event.keyId,
+        status: event.status,
+        outcome: event.outcome,
+        latencyMs: event.latencyMs,
+        isStreaming: event.isStreaming,
+        promptTokens: event.promptTokens,
+        completionTokens: event.completionTokens,
+        totalTokens: event.totalTokens,
+        errorCode: event.errorCode,
+      })
+      .onConflictDoUpdate({
+        target: requestEvents.id,
+        set: {
+          occurredAt: event.occurredAt,
+          connectionId: event.connectionId,
+          model: event.model,
+          gatewayKeyId: event.gatewayKeyId,
+          keyId: event.keyId,
+          status: event.status,
+          outcome: event.outcome,
+          latencyMs: event.latencyMs,
+          isStreaming: event.isStreaming,
+          promptTokens: event.promptTokens,
+          completionTokens: event.completionTokens,
+          totalTokens: event.totalTokens,
+          errorCode: event.errorCode,
+        },
+      })
+  }
+
+  async recordAttempt(attempt: Omit<RequestAttemptRecord, 'id'>): Promise<RequestAttemptRecord> {
+    const [row] = await this.handle
+      .insert(requestAttempts)
+      .values({
+        requestId: attempt.requestId,
+        attemptNumber: attempt.attemptNumber,
+        keyId: attempt.keyId,
+        startedAt: attempt.startedAt,
+        completedAt: attempt.completedAt,
+        status: attempt.status,
+        outcome: attempt.outcome,
+        errorCode: attempt.errorCode,
+        retryAfterSeconds: attempt.retryAfterSeconds,
+      })
+      .returning()
+
+    if (!row) throw new DatabaseUnavailableError('Recording a request attempt returned no row')
+    return toAttempt(row)
+  }
+
+  async updateAttempt(
+    id: number,
+    patch: {
+      readonly completedAt: Date
+      readonly status: number | null
+      readonly outcome: AttemptOutcome
+      readonly errorCode: string | null
+      readonly retryAfterSeconds: number | null
+    },
+  ): Promise<void> {
+    await this.handle
+      .update(requestAttempts)
+      .set({
+        completedAt: patch.completedAt,
+        status: patch.status,
+        outcome: patch.outcome,
+        errorCode: patch.errorCode,
+        retryAfterSeconds: patch.retryAfterSeconds,
+      })
+      .where(eq(requestAttempts.id, id))
+  }
+
+  async getEvent(id: string): Promise<RequestEventRecord | null> {
+    const [row] = await this.handle
+      .select()
+      .from(requestEvents)
+      .where(eq(requestEvents.id, id))
+      .limit(1)
+    return row ? toEvent(row) : null
+  }
+
+  async getAttempts(requestId: string): Promise<readonly RequestAttemptRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(requestAttempts)
+      .where(eq(requestAttempts.requestId, requestId))
+      .orderBy(asc(requestAttempts.attemptNumber), asc(requestAttempts.id))
+    return rows.map(toAttempt)
+  }
+
+  async listEvents(
+    options: RequestHistoryListOptions = {},
+  ): Promise<RequestHistoryListResult> {
+    const filter = options.filter ?? {}
+    const where = eventFilter(filter)
+
+    const totalRow = await this.handle.select({ value: count() }).from(requestEvents).where(where)
+    const total = totalRow[0]?.value ?? 0
+
+    const query = this.handle
+      .select()
+      .from(requestEvents)
+      .where(where)
+      .orderBy(desc(requestEvents.occurredAt), desc(requestEvents.id))
+
+    const limited =
+      options.limit === undefined
+        ? await query
+        : options.offset === undefined
+          ? await query.limit(options.limit)
+          : await query.limit(options.limit).offset(options.offset)
+
+    return { events: limited.map(toEvent), total }
+  }
+
+  async pruneEvents(before: Date): Promise<number> {
+    const removed = await this.handle
+      .delete(requestEvents)
+      .where(lt(requestEvents.occurredAt, before))
+      .returning({ id: requestEvents.id })
+    return removed.length
+  }
+
+  async listAudit(options: AuditListOptions = {}): Promise<AuditListResult> {
+    const filter = options.filter ?? {}
+    const where = auditFilter(filter)
+
+    const totalRow = await this.handle.select({ value: count() }).from(auditEvents).where(where)
+    const total = totalRow[0]?.value ?? 0
+
+    const query = this.handle
+      .select()
+      .from(auditEvents)
+      .where(where)
+      .orderBy(desc(auditEvents.occurredAt), desc(auditEvents.id))
+
+    const limited =
+      options.limit === undefined
+        ? await query
+        : options.offset === undefined
+          ? await query.limit(options.limit)
+          : await query.limit(options.limit).offset(options.offset)
+
+    return { events: limited.map(toAuditEvent), total }
+  }
+
+  async clearAudit(): Promise<number> {
+    const removed = await this.handle.delete(auditEvents).returning({ id: auditEvents.id })
+    return removed.length
+  }
+}
+
+type RequestEventRow = typeof requestEvents.$inferSelect
+type RequestAttemptRow = typeof requestAttempts.$inferSelect
+
+function toEvent(row: RequestEventRow): RequestEventRecord {
+  return {
+    id: row.id,
+    occurredAt: row.occurredAt,
+    connectionId: row.connectionId,
+    model: row.model,
+    gatewayKeyId: row.gatewayKeyId,
+    keyId: row.keyId,
+    status: row.status,
+    outcome: row.outcome as RequestOutcome,
+    latencyMs: row.latencyMs,
+    isStreaming: row.isStreaming,
+    promptTokens: row.promptTokens,
+    completionTokens: row.completionTokens,
+    totalTokens: row.totalTokens,
+    errorCode: row.errorCode,
+  }
+}
+
+function toAttempt(row: RequestAttemptRow): RequestAttemptRecord {
+  return {
+    id: row.id,
+    requestId: row.requestId,
+    attemptNumber: row.attemptNumber,
+    keyId: row.keyId,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    status: row.status,
+    outcome: row.outcome as AttemptOutcome,
+    errorCode: row.errorCode,
+    retryAfterSeconds: row.retryAfterSeconds,
+  }
+}
+
+function eventFilter(filter: RequestHistoryFilter) {
+  const conditions = []
+  if (filter.connectionId !== undefined) {
+    conditions.push(eq(requestEvents.connectionId, filter.connectionId))
+  }
+  if (filter.outcome !== undefined) {
+    conditions.push(eq(requestEvents.outcome, filter.outcome))
+  }
+  if (filter.model !== undefined) {
+    conditions.push(eq(requestEvents.model, filter.model))
+  }
+  if (filter.keyId !== undefined) {
+    conditions.push(eq(requestEvents.keyId, filter.keyId))
+  }
+  if (filter.after !== undefined) {
+    conditions.push(gte(requestEvents.occurredAt, filter.after))
+  }
+  if (filter.before !== undefined) {
+    conditions.push(lt(requestEvents.occurredAt, filter.before))
+  }
+  return conditions.length === 0 ? undefined : and(...conditions)
+}
+
+function auditFilter(filter: AuditFilter) {
+  const conditions = []
+  if (filter.actionPrefix !== undefined) {
+    conditions.push(like(auditEvents.action, `${filter.actionPrefix}%`))
+  }
+  if (filter.outcome !== undefined) {
+    conditions.push(eq(auditEvents.outcome, filter.outcome))
+  }
+  if (filter.after !== undefined) {
+    conditions.push(gte(auditEvents.occurredAt, filter.after))
+  }
+  if (filter.before !== undefined) {
+    conditions.push(lte(auditEvents.occurredAt, filter.before))
+  }
+  return conditions.length === 0 ? undefined : and(...conditions)
+}

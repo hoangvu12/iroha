@@ -224,7 +224,16 @@ export class ModelCatalogService {
     const connection = await this.#editableConnection(connectionId)
     if (!connection.ok) return connection
 
-    await this.#database.modelCatalog.addOwnerModel(connectionId, name.value, this.#clock.now())
+    const at = this.#clock.now()
+    await this.#database.transaction(async (repositories) => {
+      await repositories.modelCatalog.addOwnerModel(connectionId, name.value, at)
+      await repositories.audit.record({
+        action: 'model_catalog.owner_added',
+        outcome: 'success',
+        detail: { connectionId, modelId: name.value },
+        at,
+      })
+    })
     return await this.#viewOf(connectionId)
   }
 
@@ -233,7 +242,16 @@ export class ModelCatalogService {
     const connection = await this.#editableConnection(connectionId)
     if (!connection.ok) return connection
 
-    await this.#database.modelCatalog.removeOwnerModel(connectionId, modelId)
+    const at = this.#clock.now()
+    await this.#database.transaction(async (repositories) => {
+      const removed = await repositories.modelCatalog.removeOwnerModel(connectionId, modelId)
+      await repositories.audit.record({
+        action: 'model_catalog.owner_removed',
+        outcome: removed ? 'success' : 'failure',
+        detail: { connectionId, modelId, removed },
+        at,
+      })
+    })
     return await this.#viewOf(connectionId)
   }
 
@@ -242,7 +260,16 @@ export class ModelCatalogService {
     const connection = await this.#editableConnection(connectionId)
     if (!connection.ok) return connection
 
-    await this.#database.modelCatalog.setExcluded(connectionId, modelId, excluded, this.#clock.now())
+    const at = this.#clock.now()
+    await this.#database.transaction(async (repositories) => {
+      await repositories.modelCatalog.setExcluded(connectionId, modelId, excluded, at)
+      await repositories.audit.record({
+        action: excluded ? 'model_catalog.excluded' : 'model_catalog.unexcluded',
+        outcome: 'success',
+        detail: { connectionId, modelId },
+        at,
+      })
+    })
     return await this.#viewOf(connectionId)
   }
 
@@ -258,12 +285,16 @@ export class ModelCatalogService {
     const connection = await this.#editableConnection(connectionId)
     if (!connection.ok) return connection
 
-    await this.#database.modelCatalog.updateOverrides(
-      connectionId,
-      modelId,
-      read.overrides,
-      this.#clock.now(),
-    )
+    const at = this.#clock.now()
+    await this.#database.transaction(async (repositories) => {
+      await repositories.modelCatalog.updateOverrides(connectionId, modelId, read.overrides, at)
+      await repositories.audit.record({
+        action: 'model_catalog.overrides_updated',
+        outcome: 'success',
+        detail: { connectionId, modelId, fields: Object.keys(read.overrides) },
+        at,
+      })
+    })
     return await this.#viewOf(connectionId)
   }
 

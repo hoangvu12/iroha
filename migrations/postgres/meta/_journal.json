@@ -71,6 +71,13 @@
       "when": 1786534600000,
       "tag": "0009_advanced_provider_transport",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786548125214,
+      "tag": "0010_ancient_warstar",
+      "breakpoints": true
     }
   ]
 }

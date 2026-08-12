@@ -504,6 +504,152 @@ export interface UsageRepository {
   put(record: UsageSnapshotRecord): Promise<void>
 }
 
+export type RequestOutcome = 'success' | 'failure'
+
+/**
+ * The persistent shape of one inference call. No prompts, no responses, no
+ * upstream headers, no secrets. The ID is the same correlation ID the caller
+ * received; `keyId` and `gatewayKeyId` are public identities, not material.
+ */
+export interface RequestEventRecord {
+  readonly id: string
+  readonly occurredAt: Date
+  readonly connectionId: string
+  readonly model: string
+  readonly gatewayKeyId: string | null
+  readonly keyId: string | null
+  readonly status: number
+  readonly outcome: RequestOutcome
+  readonly latencyMs: number
+  readonly isStreaming: boolean
+  readonly promptTokens: number | null
+  readonly completionTokens: number | null
+  readonly totalTokens: number | null
+  readonly errorCode: string | null
+}
+
+export type AttemptOutcome = 'success' | 'failure' | 'skipped'
+
+/**
+ * One upstream call inside an inference request. `keyId` is null when the
+ * attempt had no eligible key to try; `outcome` is then `skipped`.
+ */
+export interface RequestAttemptRecord {
+  readonly id: number
+  readonly requestId: string
+  readonly attemptNumber: number
+  readonly keyId: string | null
+  readonly startedAt: Date
+  readonly completedAt: Date | null
+  readonly status: number | null
+  readonly outcome: AttemptOutcome
+  readonly errorCode: string | null
+  readonly retryAfterSeconds: number | null
+}
+
+/**
+ * The filters the Owner may apply to the request-history list. Empty values
+ * mean "do not filter on this field".
+ */
+export interface RequestHistoryFilter {
+  readonly connectionId?: string
+  readonly outcome?: RequestOutcome
+  readonly model?: string
+  readonly keyId?: string
+  /** Only events strictly after this moment (inclusive). */
+  readonly after?: Date
+  /** Only events strictly before this moment (exclusive). */
+  readonly before?: Date
+}
+
+export interface RequestHistoryListOptions {
+  readonly filter?: RequestHistoryFilter
+  /** Maximum number of events to return; defaults to a reasonable page size. */
+  readonly limit?: number
+  /** Number of events to skip; used together with a stable order to paginate. */
+  readonly offset?: number
+}
+
+export interface RequestHistoryListResult {
+  readonly events: readonly RequestEventRecord[]
+  /** Total rows that match the filter, ignoring `limit` and `offset`. */
+  readonly total: number
+}
+
+/**
+ * Read-only filter and pagination query for the audit feed. Empty values
+ * mean "do not filter on this field". `actionPrefix` matches the start of
+ * the action name, so the Owner can ask for everything under `key.*`.
+ */
+export interface AuditFilter {
+  readonly actionPrefix?: string
+  readonly outcome?: AuditOutcome
+  readonly after?: Date
+  readonly before?: Date
+}
+
+export interface AuditListOptions {
+  readonly filter?: AuditFilter
+  readonly limit?: number
+  readonly offset?: number
+}
+
+export interface AuditListResult {
+  readonly events: readonly AuditEventRecord[]
+  readonly total: number
+}
+
+export interface RequestHistoryRepository {
+  /**
+   * Records the final outcome of one inference call. The caller passes the
+   * completed event; the repository never guesses at missing fields.
+   * Records with the same `id` overwrite earlier ones so a streaming request
+   * whose final tokens arrive later can update its usage numbers without
+   * creating a duplicate event.
+   */
+  recordEvent(event: RequestEventRecord): Promise<void>
+
+  /**
+   * Records one attempt within an inference call. The repository returns
+   * the assigned row id so the caller can update the same row when the
+   * attempt finishes. The caller writes a `null` `completedAt` at start and
+   * the final attempt outcome by `updateAttempt`.
+   */
+  recordAttempt(attempt: Omit<RequestAttemptRecord, 'id'>): Promise<RequestAttemptRecord>
+
+  /** Patches the outcome of a previously recorded attempt. */
+  updateAttempt(
+    id: number,
+    patch: {
+      readonly completedAt: Date
+      readonly status: number | null
+      readonly outcome: AttemptOutcome
+      readonly errorCode: string | null
+      readonly retryAfterSeconds: number | null
+    },
+  ): Promise<void>
+
+  /** Returns one event with its attempts in attempt-number order. */
+  getEvent(id: string): Promise<RequestEventRecord | null>
+  getAttempts(requestId: string): Promise<readonly RequestAttemptRecord[]>
+
+  /**
+   * Filters and paginates events. The order is most-recent-first; ties on
+   * `occurredAt` are broken by `id` so pagination is stable even when two
+   * requests happened in the same millisecond.
+   */
+  listEvents(options?: RequestHistoryListOptions): Promise<RequestHistoryListResult>
+
+  /** Removes events that occurred strictly before `before`. */
+  pruneEvents(before: Date): Promise<number>
+
+  /** Audit listing with the same kind of pagination as request history. */
+  listAudit(options?: AuditListOptions): Promise<AuditListResult>
+
+  /** Removes every audit event; used by the Owner's clear-audit action. */
+  clearAudit(): Promise<number>
+}
+
 /** The repositories reachable inside and outside a transaction alike. */
 export interface Repositories {
   readonly settings: SettingsRepository
@@ -514,6 +660,7 @@ export interface Repositories {
   readonly gatewayKeys: GatewayKeyRepository
   readonly modelCatalog: ModelCatalogRepository
   readonly usage: UsageRepository
+  readonly requestHistory: RequestHistoryRepository
 }
 
 export interface Database extends Repositories {

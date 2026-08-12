@@ -205,3 +205,68 @@ export const usageSnapshots = sqliteTable('usage_snapshots', {
   /** JSON text of the last successful normalized reading, or null. */
   result: text('result'),
 })
+
+/**
+ * One inference call's metadata, kept for the Owner's history view.
+ *
+ * The ID is the same correlation ID returned to the caller and stored on
+ * every error response, so the Owner can correlate a failure with what they
+ * see on the wire. `keyId` is the public identity of the Upstream Key the
+ * request actually used (the value is the database row ID; the secret
+ * material is never reachable from this column). `gatewayKeyId` is the
+ * public identity of the Gateway Key the application used.
+ *
+ * Token usage is what the Provider returned in the upstream response body.
+ * It is the Provider's own number, never Iroha's count, and is recorded only
+ * when the Provider supplied it. No prompts, no responses, no upstream
+ * message bodies.
+ */
+export const requestEvents = sqliteTable('request_events', {
+  id: text('id').primaryKey(),
+  occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(),
+  connectionId: text('connection_id')
+    .notNull()
+    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+  model: text('model').notNull(),
+  /** Public identity of the Gateway Key the application presented. */
+  gatewayKeyId: text('gateway_key_id'),
+  /** Public identity of the Upstream Key the request actually used. */
+  keyId: text('key_id'),
+  /** Final HTTP status Iroha returned to the caller. */
+  status: integer('status').notNull(),
+  outcome: text('outcome').notNull(),
+  latencyMs: integer('latency_ms').notNull(),
+  isStreaming: integer('is_streaming', { mode: 'boolean' }).notNull(),
+  promptTokens: integer('prompt_tokens'),
+  completionTokens: integer('completion_tokens'),
+  totalTokens: integer('total_tokens'),
+  /** Stable Iroha error code on failure; null on success. */
+  errorCode: text('error_code'),
+})
+
+/**
+ * One attempt within an inference call's retry trail. Each row describes one
+ * upstream call: which key, when it started and ended, what status it
+ * produced, and what Iroha decided to do with it next (retry, skip, succeed).
+ * No upstream bodies, no headers, no secrets.
+ */
+export const requestAttempts = sqliteTable(
+  'request_attempts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    requestId: text('request_id')
+      .notNull()
+      .references(() => requestEvents.id, { onDelete: 'cascade' }),
+    attemptNumber: integer('attempt_number').notNull(),
+    /** Public identity of the Upstream Key tried on this attempt. */
+    keyId: text('key_id'),
+    startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+    completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
+    status: integer('status'),
+    /** 'success' | 'failure' | 'skipped' (skipped when no key was eligible) */
+    outcome: text('outcome').notNull(),
+    errorCode: text('error_code'),
+    retryAfterSeconds: integer('retry_after_seconds'),
+  },
+  (table) => ({ pkRequestAttempt: primaryKey({ columns: [table.id] }) }),
+)

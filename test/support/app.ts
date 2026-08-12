@@ -1,6 +1,6 @@
 import { createSecretCipher, type SecretCipher } from '../../src/crypto/index.ts'
 import { createApp } from '../../src/http/app.ts'
-import type { StreamingTimeouts } from '../../src/http/inference.ts'
+import type { StreamingTimeouts, TransportDefaults } from '../../src/http/inference.ts'
 import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
 import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
@@ -13,6 +13,8 @@ import {
   type UpstreamKeyProbe,
 } from '../../src/providers/index.ts'
 import type { Timer } from '../../src/runtime/timer.ts'
+import { UsageService, type UsageAdapter } from '../../src/usage/index.ts'
+import { createGenericUsageAdapter } from '../../src/usage/generic-adapter.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
 import { testClock, testPasswordHasher, type TestClock } from './identity.ts'
 import { stubUpstreamTransport } from './inference.ts'
@@ -31,6 +33,10 @@ export interface TestApp {
   readonly upstreamKeyProbe: UpstreamKeyProbe
   readonly gatewayKeys: GatewayKeyRegistry
   readonly modelCatalog: ModelCatalogService
+  /** The Usage Adapter the assembled app is using; tests usually inject one. */
+  readonly usageAdapter: UsageAdapter
+  /** The Usage Service the assembled app is using. */
+  readonly usageService: UsageService
   /** Sends a request the way a same-origin browser would. */
   fetch(path: string, init?: RequestInit & { csrf?: string }): Promise<Response>
   dispose(): Promise<void>
@@ -47,9 +53,13 @@ export interface TestAppOptions {
   /** Replaces the inference upstream transport; defaults to a closed stub. */
   readonly upstreamTransport?: typeof fetch | undefined
   readonly secretCipher?: SecretCipher
+  /** Replaces the Usage Adapter; defaults to the reactive-only generic one. */
+  readonly usageAdapter?: UsageAdapter
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly streamingTimeouts?: StreamingTimeouts
+  /** Transport defaults; tests can override CORS allow-list, etc. */
+  readonly transportDefaults?: TransportDefaults
   readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
@@ -104,6 +114,15 @@ export function modelCatalogFor(database: Database): ModelCatalogService {
   })
 }
 
+/** The standard Usage Service for tests that assemble an app by hand. */
+export function usageServiceFor(database: Database, adapter?: UsageAdapter): UsageService {
+  return new UsageService({
+    database,
+    cipher: createSecretCipher(TEST_MASTER_KEY),
+    adapter: adapter ?? createGenericUsageAdapter(),
+  })
+}
+
 /**
  * The seam the spec names: the assembled application driven through its Web
  * `fetch` interface, over a real database, with only time, password cost, the
@@ -147,6 +166,13 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     cipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
     inference,
   })
+  const usageAdapter = options.usageAdapter ?? createGenericUsageAdapter()
+  const usageService = new UsageService({
+    database,
+    cipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
+    adapter: usageAdapter,
+    clock,
+  })
   const app = createApp({
     database,
     readiness,
@@ -156,10 +182,15 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     secretCipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
     inference,
     modelCatalog,
+    usageAdapter,
+    usageService,
     ...(options.timer === undefined ? {} : { timer: options.timer }),
     ...(options.streamingTimeouts === undefined
       ? {}
       : { streamingTimeouts: options.streamingTimeouts }),
+    ...(options.transportDefaults === undefined
+      ? {}
+      : { transportDefaults: options.transportDefaults }),
     retrySleep:
       options.retrySleep ??
       (async (_ms, signal) => {
@@ -178,6 +209,8 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     upstreamKeyProbe,
     gatewayKeys,
     modelCatalog,
+    usageAdapter,
+    usageService,
 
     async fetch(path, init = {}) {
       const { csrf, headers, ...rest } = init

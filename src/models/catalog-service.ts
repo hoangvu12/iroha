@@ -146,6 +146,17 @@ export class ModelCatalogService {
         headers: {},
         upstreamKey: target.value.upstreamKey,
         signal: null,
+        authHeader: target.value.authHeader,
+        authPrefix: target.value.authPrefix,
+        staticHeaders: target.value.staticHeaders,
+        redirectAllowSameOrigin: target.value.redirectAllowSameOrigin,
+        idempotencyHeader: target.value.idempotencyHeader,
+        idempotencyGenerationSafe: false,
+        connectionTimeoutMs: target.value.connectionTimeoutMs,
+        firstByteTimeoutMs: target.value.firstByteTimeoutMs,
+        nonStreamingTotalTimeoutMs: target.value.nonStreamingTotalTimeoutMs,
+        streamingIdleTimeoutMs: target.value.streamingIdleTimeoutMs,
+        totalRetryTimeoutMs: target.value.totalRetryTimeoutMs,
       })
     } catch {
       return await this.#recordedFailure(
@@ -310,7 +321,23 @@ export class ModelCatalogService {
   /** The base URL and one usable Upstream Key for a read-only discovery GET. */
   async #discoveryTarget(
     connectionId: string,
-  ): Promise<ModelCatalogResult<{ readonly baseUrl: string; readonly allowInsecureHttp: boolean; readonly upstreamKey: string }>> {
+  ): Promise<
+    ModelCatalogResult<{
+      readonly baseUrl: string
+      readonly allowInsecureHttp: boolean
+      readonly upstreamKey: string
+      readonly authHeader: string
+      readonly authPrefix: string
+      readonly staticHeaders: Readonly<Record<string, string>>
+      readonly redirectAllowSameOrigin: boolean
+      readonly idempotencyHeader: string
+      readonly connectionTimeoutMs: number
+      readonly firstByteTimeoutMs: number
+      readonly nonStreamingTotalTimeoutMs: number
+      readonly streamingIdleTimeoutMs: number
+      readonly totalRetryTimeoutMs: number
+    }>
+  > {
     const connection = await this.#database.providers.getConnection(connectionId)
     if (connection === null) return failed({ code: 'connection_not_found' })
 
@@ -320,18 +347,51 @@ export class ModelCatalogService {
       ) ?? null
     if (key === null) return failed({ code: 'no_eligible_key' })
 
+    let upstreamKey: string
     try {
-      return {
-        ok: true,
-        value: {
-          baseUrl: connection.baseUrl,
-          allowInsecureHttp: connection.allowInsecureHttp,
-          upstreamKey: await this.#cipher.decrypt(key.encryptedKey),
-        },
+      upstreamKey = await this.#cipher.decrypt(key.encryptedKey)
+    } catch (cause) {
+      if (cause instanceof SecretCipherError) return failed({ code: 'stored_key_unreadable' })
+      throw cause
+    }
+
+    let staticHeaders: Readonly<Record<string, string>> = {}
+    try {
+      const decoded = connection.staticHeadersEncrypted === '[]'
+        ? []
+        : JSON.parse(await this.#cipher.decrypt(connection.staticHeadersEncrypted)) as unknown
+      if (Array.isArray(decoded)) {
+        const map: Record<string, string> = {}
+        for (const entry of decoded) {
+          if (typeof entry !== 'object' || entry === null) continue
+          const name = (entry as Record<string, unknown>).name
+          const value = (entry as Record<string, unknown>).value
+          if (typeof name === 'string' && typeof value === 'string') map[name] = value
+        }
+        staticHeaders = map
       }
     } catch (cause) {
       if (cause instanceof SecretCipherError) return failed({ code: 'stored_key_unreadable' })
       throw cause
+    }
+
+    return {
+      ok: true,
+      value: {
+        baseUrl: connection.baseUrl,
+        allowInsecureHttp: connection.allowInsecureHttp,
+        upstreamKey,
+        authHeader: connection.authHeader,
+        authPrefix: connection.authPrefix,
+        staticHeaders,
+        redirectAllowSameOrigin: connection.redirectAllowSameOrigin,
+        idempotencyHeader: connection.idempotencyHeader,
+        connectionTimeoutMs: connection.connectionTimeoutMs,
+        firstByteTimeoutMs: connection.firstByteTimeoutMs,
+        nonStreamingTotalTimeoutMs: connection.nonStreamingTotalTimeoutMs,
+        streamingIdleTimeoutMs: connection.streamingIdleTimeoutMs,
+        totalRetryTimeoutMs: connection.totalRetryTimeoutMs,
+      },
     }
   }
 

@@ -3,9 +3,16 @@
  * inference API. The generic form forwards OpenAI-compatible requests and
  * responses unchanged and owns safe authentication injection.
  */
-export type { InferenceAdapter, InferenceForwardRequest, InferenceForwardResult } from './adapter.ts'
+export type {
+  InferenceAdapter,
+  InferenceAdapterCapabilities,
+  InferenceForwardRequest,
+  InferenceForwardResult,
+} from './adapter.ts'
 export {
+  callerSuppliedIdempotency,
   createGenericInferenceAdapter,
+  generateIdempotencyValue,
   upstreamUrl,
   type GenericInferenceAdapterOptions,
 } from './generic-adapter.ts'

@@ -8,6 +8,7 @@ import {
   gatewayKeyRegistryFor,
   modelCatalogFor,
   providerRegistryFor,
+  usageServiceFor,
 } from '../support/app.ts'
 
 describe('health endpoints', () => {
@@ -26,6 +27,7 @@ describe('health endpoints', () => {
       providers: providerRegistryFor(database),
       gatewayKeys: gatewayKeyRegistryFor(database),
       modelCatalog: modelCatalogFor(database),
+      usageService: usageServiceFor(database),
     })
   })
 
@@ -101,6 +103,7 @@ describe('generated API documentation', () => {
       providers: providerRegistryFor(database),
       gatewayKeys: gatewayKeyRegistryFor(database),
       modelCatalog: modelCatalogFor(database),
+      usageService: usageServiceFor(database),
     })
 
     try {

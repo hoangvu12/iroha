@@ -22,6 +22,7 @@ export type {
   ProviderConnectionPatch,
   ProviderConnectionRecord,
   ProviderRepository,
+  ProviderStaticHeader,
   Repositories,
   SessionRecord,
   SessionRepository,
@@ -32,6 +33,8 @@ export type {
   UpstreamKeyPatch,
   UpstreamKeyRecord,
   UpstreamKeyHealth,
+  UsageRepository,
+  UsageSnapshotRecord,
 } from './repository.ts'
 export { DatabaseUnavailableError } from './repository.ts'
 

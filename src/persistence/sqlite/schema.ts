@@ -48,6 +48,12 @@ export const auditEvents = sqliteTable('audit_events', {
 /**
  * One Owner-configured account or server. The ID is immutable and client URLs
  * are built on it; the display name, base URL, and lifecycle state are not.
+ *
+ * The advanced transport columns encode what the connection's Inference Adapter
+ * may add and how the transport must behave. Auth header values and prefixes are
+ * stored as plain text because they are not secrets: the secret lives on the
+ * Upstream Key. Static headers, by contrast, are stored encrypted via the
+ * SecretCipher and surfaced as a JSON-encoded array of {name, value} objects.
  */
 export const providerConnections = sqliteTable('provider_connections', {
   id: text('id').primaryKey(),
@@ -63,6 +69,23 @@ export const providerConnections = sqliteTable('provider_connections', {
   templateId: text('template_id'),
   /** JSON text owned by the repository, like the gateway key scope. */
   capabilities: text('capabilities').notNull(),
+  /** Canonical authentication header name. Defaults to "Authorization". */
+  authHeader: text('auth_header').notNull().default('authorization'),
+  /** Plain-text prefix (e.g. "Bearer "); empty string means none. */
+  authPrefix: text('auth_prefix').notNull().default('Bearer '),
+  /** Encrypted JSON text of static [{name, value}] headers. Default is []. */
+  staticHeadersEncrypted: text('static_headers_encrypted').notNull().default('[]'),
+  /** Whether same-origin redirects are allowed. Default false: redirects rejected. */
+  redirectAllowSameOrigin: integer('redirect_allow_same_origin', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  connectionTimeoutMs: integer('connection_timeout_ms').notNull().default(10000),
+  firstByteTimeoutMs: integer('first_byte_timeout_ms').notNull().default(20000),
+  nonStreamingTotalTimeoutMs: integer('non_streaming_total_timeout_ms').notNull().default(120000),
+  streamingIdleTimeoutMs: integer('streaming_idle_timeout_ms').notNull().default(30000),
+  totalRetryTimeoutMs: integer('total_retry_timeout_ms').notNull().default(30000),
+  /** The idempotency header the adapter accepts. Default: Idempotency-Key. */
+  idempotencyHeader: text('idempotency_header').notNull().default('Idempotency-Key'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 })
@@ -116,12 +139,16 @@ export const upstreamKeys = sqliteTable('upstream_keys', {
  * An application credential the Owner issues. The secret itself never lands
  * here: only its hash is stored, and the public id is what applications and
  * lists refer to. Scope is JSON text, owned by the repository like settings.
+ * `cors_origins` is a JSON array of exact origins allowed to call from a
+ * browser; an empty array disables CORS for the key entirely.
  */
 export const gatewayKeys = sqliteTable('gateway_keys', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   secretHash: text('secret_hash').notNull(),
   scope: text('scope').notNull(),
+  /** JSON array of exact origin strings; empty means no CORS for this key. */
+  corsOrigins: text('cors_origins').notNull().default('[]'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
   revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
@@ -156,4 +183,25 @@ export const modelCatalogSync = sqliteTable('model_catalog_sync', {
   lastSuccessAt: integer('last_success_at', { mode: 'timestamp_ms' }),
   lastFailureAt: integer('last_failure_at', { mode: 'timestamp_ms' }),
   lastFailureMessage: text('last_failure_message'),
+})
+
+/**
+ * The last usage polling outcome of one connection. `result` holds the last
+ * successful normalized reading; `lastFailureAt` and `lastFailureMessage` are
+ * kept independently so the Owner sees the latest error without losing the
+ * previous successful result.
+ */
+export const usageSnapshots = sqliteTable('usage_snapshots', {
+  connectionId: text('connection_id')
+    .primaryKey()
+    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+  /** The visibility the configured Usage Adapter declares. */
+  visibility: text('visibility').notNull(),
+  syncedAt: integer('synced_at', { mode: 'timestamp_ms' }),
+  lastSuccessAt: integer('last_success_at', { mode: 'timestamp_ms' }),
+  lastFailureAt: integer('last_failure_at', { mode: 'timestamp_ms' }),
+  lastFailureCode: text('last_failure_code'),
+  lastFailureMessage: text('last_failure_message'),
+  /** JSON text of the last successful normalized reading, or null. */
+  result: text('result'),
 })

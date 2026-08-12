@@ -224,7 +224,6 @@ describe('provider-scoped Chat Completions', () => {
         'x-real-ip': '198.51.100.2',
         'x-request-id': 'caller-chosen-id',
         host: 'evil.example',
-        origin: 'https://attacker.example',
         'x-custom-header': 'forward-me',
       })
 

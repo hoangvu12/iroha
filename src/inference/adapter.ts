@@ -24,6 +24,28 @@ export interface InferenceForwardRequest {
   readonly signal?: AbortSignal | null
   /** Asks for the live upstream body instead of a fully buffered one. */
   readonly stream?: boolean
+  /** Canonical authentication header name (e.g. "Authorization", "X-Api-Key"). */
+  readonly authHeader: string
+  /** Plain-text prefix for the authentication header; "" means none. */
+  readonly authPrefix: string
+  /** Decrypted static headers merged into every upstream request. */
+  readonly staticHeaders: Readonly<Record<string, string>>
+  /** Whether same-origin redirects are explicitly allowed. */
+  readonly redirectAllowSameOrigin: boolean
+  /** The idempotency header name the adapter accepts. */
+  readonly idempotencyHeader: string
+  /** Whether Iroha may generate a fresh idempotency value when the caller did not supply one. */
+  readonly idempotencyGenerationSafe: boolean
+  /** Per-connection override for the connection timeout (ms). */
+  readonly connectionTimeoutMs: number
+  /** Per-connection override for the first-byte timeout (ms). */
+  readonly firstByteTimeoutMs: number
+  /** Per-connection override for the non-streaming total timeout (ms). */
+  readonly nonStreamingTotalTimeoutMs: number
+  /** Per-connection override for the streaming idle timeout (ms). */
+  readonly streamingIdleTimeoutMs: number
+  /** Per-connection override for the total-retry timeout (ms). */
+  readonly totalRetryTimeoutMs: number
 }
 
 /** One upstream answer, as raw material the routing layer may interpret. */
@@ -50,6 +72,20 @@ export interface InferenceStreamResult {
   readonly stream: ReadableStream<Uint8Array>
 }
 
+/**
+ * The capabilities an Inference Adapter declares about how it uses the
+ * connection. Today only idempotency behaviour is declared; provider-specific
+ * adapters will add theirs here, never as configuration.
+ */
+export interface InferenceAdapterCapabilities {
+  /** The canonical header name this adapter sends as an idempotency key. */
+  readonly idempotencyHeader: string
+  /** Whether Iroha may mint a fresh value when the caller did not supply one. */
+  readonly idempotencyGenerationSafe: boolean
+}
+
 export interface InferenceAdapter {
+  /** What this adapter declares about itself; the routing layer reads it once. */
+  readonly capabilities: InferenceAdapterCapabilities
   forward(request: InferenceForwardRequest): Promise<InferenceForwardResult>
 }

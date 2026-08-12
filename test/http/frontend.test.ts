@@ -10,6 +10,7 @@ import {
   gatewayKeyRegistryFor,
   modelCatalogFor,
   providerRegistryFor,
+  usageServiceFor,
 } from '../support/app.ts'
 
 const cleanups: Array<() => void | Promise<void>> = []
@@ -47,6 +48,7 @@ async function appWith(frontendDirectory: string | undefined) {
     providers: providerRegistryFor(database),
     gatewayKeys: gatewayKeyRegistryFor(database),
     modelCatalog: modelCatalogFor(database),
+    usageService: usageServiceFor(database),
     frontendDirectory,
   })
   return (path: string) => app.handle(new Request(`http://iroha.test${path}`))

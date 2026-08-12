@@ -25,6 +25,8 @@ export interface GatewayKeyView {
   readonly id: string
   readonly name: string
   readonly scope: readonly GatewayKeyScopeEntry[]
+  /** Exact browser origins allowed to use this key; empty disables browser CORS. */
+  readonly corsOrigins: readonly string[]
   readonly createdAt: Date
   readonly lastUsedAt: Date | null
   readonly revokedAt: Date | null
@@ -119,9 +121,14 @@ export class GatewayKeyRegistry {
    * everything stored is its hash, so a database copy cannot be used to call
    * the Gateway.
    */
-  async create(input: { name: unknown; scope: unknown }): Promise<GatewayKeyResult<CreatedGatewayKey>> {
+  async create(input: {
+    name: unknown
+    scope: unknown
+    corsOrigins?: unknown
+  }): Promise<GatewayKeyResult<CreatedGatewayKey>> {
     const problems = [...nameProblems(input.name)]
     const scope = await readScope(input.scope, this.#database, problems)
+    const corsOrigins = readCorsOrigins(input.corsOrigins, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
     const id = newId()
@@ -134,6 +141,7 @@ export class GatewayKeyRegistry {
         name: (input.name as string).trim(),
         secretHash: hashSecret(secret),
         scope,
+        corsOrigins,
         createdAt: at,
         lastUsedAt: null,
         revokedAt: null,
@@ -149,6 +157,44 @@ export class GatewayKeyRegistry {
 
     const key = await this.#getOrThrow(id)
     return { ok: true, value: { key, secret: `${id}.${secret}` } }
+  }
+
+  /**
+   * Replaces the per-key CORS origin list. The Owner can later broaden a key's
+   * browser surface; the audit history records the field name only, never the
+   * origin strings themselves (which can be hostnames the Owner considers
+   * configuration rather than a secret).
+   */
+  async updateCorsOrigins(
+    id: string,
+    input: { corsOrigins: unknown },
+  ): Promise<GatewayKeyResult<GatewayKeyView>> {
+    const key = await this.#database.gatewayKeys.get(id)
+    if (key === null) return failed({ code: 'gateway_key_not_found' })
+
+    const problems: FieldProblem[] = []
+    const corsOrigins = readCorsOrigins(input.corsOrigins, problems)
+    if (problems.length > 0) return failed({ code: 'validation_failed', problems })
+
+    if (
+      corsOrigins.length === key.corsOrigins.length &&
+      corsOrigins.every((origin, index) => origin === key.corsOrigins[index])
+    ) {
+      return { ok: true, value: await this.#getOrThrow(id) }
+    }
+
+    const at = this.#clock.now()
+    await this.#database.transaction(async (repositories) => {
+      await repositories.gatewayKeys.updateCorsOrigins(id, corsOrigins, at)
+      await repositories.audit.record({
+        action: 'gateway_key.configured',
+        outcome: 'success',
+        detail: { gatewayKeyId: id, fields: ['corsOrigins'] },
+        at,
+      })
+    })
+
+    return { ok: true, value: await this.#getOrThrow(id) }
   }
 
   /**
@@ -377,10 +423,65 @@ function toView(key: GatewayKeyRecord): GatewayKeyView {
     id: key.id,
     name: key.name,
     scope: key.scope,
+    corsOrigins: [...key.corsOrigins],
     createdAt: key.createdAt,
     lastUsedAt: key.lastUsedAt,
     revokedAt: key.revokedAt,
   }
+}
+
+const CORS_ORIGIN_MAXIMUM_ENTRIES = 64
+
+/**
+ * Reads and validates the CORS origins list. Each entry must be a parseable
+ * exact origin: scheme + host (+ optional port). No wildcards, no paths, no
+ * fragment. The list is deduplicated case-sensitively as-is so an explicit
+ * `https://Example` and `https://example` are preserved separately; a browser
+ * will reject the wrong case.
+ */
+function readCorsOrigins(input: unknown, problems: FieldProblem[]): readonly string[] {
+  if (input === undefined) return []
+  if (!Array.isArray(input)) {
+    problems.push({ field: 'corsOrigins', message: 'must be a list of exact origin strings' })
+    return []
+  }
+
+  if (input.length > CORS_ORIGIN_MAXIMUM_ENTRIES) {
+    problems.push({
+      field: 'corsOrigins',
+      message: `holds at most ${CORS_ORIGIN_MAXIMUM_ENTRIES} entries`,
+    })
+  }
+
+  const origins: string[] = []
+  const seen = new Set<string>()
+  for (const raw of input) {
+    if (typeof raw !== 'string' || raw.length === 0) {
+      problems.push({ field: 'corsOrigins', message: 'each origin must be a non-empty string' })
+      continue
+    }
+    if (raw.includes('*')) {
+      problems.push({ field: 'corsOrigins', message: 'wildcard origins are not accepted' })
+      continue
+    }
+    let parsed: URL
+    try {
+      parsed = new URL(raw)
+    } catch {
+      problems.push({ field: 'corsOrigins', message: 'each entry must be an exact origin like https://host' })
+      continue
+    }
+    if (parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '') {
+      problems.push({ field: 'corsOrigins', message: 'each entry must be an origin without a path' })
+      continue
+    }
+    const canonical = parsed.origin
+    if (seen.has(canonical)) continue
+    seen.add(canonical)
+    origins.push(canonical)
+  }
+
+  return origins
 }
 
 function newId(): string {

@@ -16,6 +16,8 @@ import {
   ProviderConnectionRegistry,
   type UpstreamKeyProbe,
 } from '../providers/index.ts'
+import { UsageService, type UsageAdapter } from '../usage/index.ts'
+import { createGenericUsageAdapter } from '../usage/generic-adapter.ts'
 import type { Clock } from './clock.ts'
 
 const DEFAULT_FRONTEND_DIRECTORY = join(import.meta.dir, '../../ui/dist')
@@ -29,6 +31,7 @@ export interface StartOptions {
   readonly clock?: Clock
   readonly passwordHasher?: PasswordHasher
   readonly keyProbe?: UpstreamKeyProbe
+  readonly usageAdapter?: UsageAdapter
 }
 
 export interface RunningIroha {
@@ -108,14 +111,24 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     ...(options.clock ? { clock: options.clock } : {}),
   })
 
+  const secretCipher = createSecretCipher(configuration.masterKey)
+  const usageService = new UsageService({
+    database,
+    cipher: secretCipher,
+    adapter: options.usageAdapter ?? createGenericUsageAdapter(),
+    ...(options.clock ? { clock: options.clock } : {}),
+  })
+
   const app = createApp({
     database,
     readiness,
     identity,
     providers,
     gatewayKeys,
-    secretCipher: createSecretCipher(configuration.masterKey),
+    secretCipher,
     frontendDirectory: options.frontendDirectory ?? DEFAULT_FRONTEND_DIRECTORY,
+    usageAdapter: options.usageAdapter ?? createGenericUsageAdapter(),
+    usageService,
   })
 
   const server = app.listen({ hostname: configuration.host, port: configuration.port })

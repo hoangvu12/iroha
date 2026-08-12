@@ -57,6 +57,20 @@
       "when": 1786531690957,
       "tag": "0007_purple_lyja",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786532997922,
+      "tag": "0008_complete_madame_web",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786534500000,
+      "tag": "0009_advanced_provider_transport",
+      "breakpoints": true
     }
   ]
 }

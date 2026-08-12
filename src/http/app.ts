@@ -9,13 +9,16 @@ import { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
 import type { ProviderConnectionRegistry } from '../providers/index.ts'
 import type { Timer } from '../runtime/timer.ts'
+import { UsageService, type UsageAdapter } from '../usage/index.ts'
+import { createGenericUsageAdapter } from '../usage/generic-adapter.ts'
 import { createAdminRoutes } from './admin.ts'
 import { createAuthRoutes } from './auth.ts'
 import { createCatalogRoutes } from './catalog.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
-import { createInferenceRoutes, type StreamingTimeouts } from './inference.ts'
+import { createInferenceRoutes, DEFAULT_TRANSPORT, type StreamingTimeouts, type TransportDefaults } from './inference.ts'
 import { ReadinessState } from './readiness.ts'
+import { createUsageRoutes } from './usage.ts'
 
 export interface AppOptions {
   readonly database: Database
@@ -31,9 +34,15 @@ export interface AppOptions {
   readonly inference?: InferenceAdapter | undefined
   /** Replaces the catalog service built from the other options. */
   readonly modelCatalog?: ModelCatalogService | undefined
+  /** Replaces the Usage Adapter the Usage Service polls. */
+  readonly usageAdapter?: UsageAdapter | undefined
+  /** Replaces the usage service built from the other options. */
+  readonly usageService?: UsageService | undefined
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly streamingTimeouts?: StreamingTimeouts
+  /** Overrides the transport defaults read from the global settings store. */
+  readonly transportDefaults?: TransportDefaults | undefined
   readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
@@ -75,6 +84,20 @@ export function createApp(options: AppOptions) {
       }
       return new ModelCatalogService({ database, cipher: options.secretCipher, inference })
     })()
+  const usageService =
+    options.usageService ??
+    (() => {
+      if (options.secretCipher === undefined) {
+        throw new Error('createApp requires a usageService or a secretCipher')
+      }
+      return new UsageService({
+        database,
+        cipher: options.secretCipher,
+        adapter: options.usageAdapter ?? createGenericUsageAdapter(),
+      })
+    })()
+
+  const transportDefaults: TransportDefaults = options.transportDefaults ?? DEFAULT_TRANSPORT
 
   return new Elysia()
     .use(openapi({ path: '/docs', documentation: { info: { title: 'Iroha', version: '0.1.0' } } }))
@@ -82,17 +105,27 @@ export function createApp(options: AppOptions) {
     .use(createAdminRoutes({ identity, providers, gatewayKeys }))
     .use(createDirectoryRoutes({ gatewayKeys }))
     .use(createCatalogRoutes({ identity, modelCatalog }))
-    .use(createInferenceRoutes({
-      gatewayKeys,
-      providers,
-      inference,
-      modelCatalog,
-      ...(options.timer === undefined ? {} : { timer: options.timer }),
-      ...(options.streamingTimeouts === undefined
-        ? {}
-        : { timeouts: options.streamingTimeouts }),
-      ...(options.retrySleep === undefined ? {} : { retrySleep: options.retrySleep }),
-    }))
+    .use(
+      createUsageRoutes({
+        identity,
+        usage: usageService,
+      }),
+    )
+    .use(
+      createInferenceRoutes({
+        gatewayKeys,
+        providers,
+        inference,
+        modelCatalog,
+        database,
+        transportDefaults,
+        ...(options.timer === undefined ? {} : { timer: options.timer }),
+        ...(options.streamingTimeouts === undefined
+          ? {}
+          : { timeouts: options.streamingTimeouts }),
+        ...(options.retrySleep === undefined ? {} : { retrySleep: options.retrySleep }),
+      }),
+    )
     .get('/health/live', () => ({ status: 'alive' as const }), {
       detail: {
         summary: 'Process liveness',

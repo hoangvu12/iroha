@@ -5,12 +5,14 @@ import type {
   Database,
   KeyProbeVerdict,
   ProviderConnectionRecord,
+  ProviderStaticHeader,
   UpstreamAccountRecord,
   UpstreamKeyHealth,
   UpstreamKeyPatch,
   UpstreamKeyRecord,
 } from '../persistence/index.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
+import type { UsageRecoveryEvidence } from '../usage/adapter.ts'
 import type { UpstreamKeyProbe } from './key-probe.ts'
 import { RoundRobinSelector } from './round-robin.ts'
 
@@ -82,6 +84,26 @@ export interface InferenceTarget {
   readonly retryAmbiguousNetwork: boolean
   /** The decrypted Upstream Key; it exists only for the duration of the call. */
   readonly upstreamKey: string
+  /** Canonical authentication header name. */
+  readonly authHeader: string
+  /** Plain-text authentication header prefix; "" means none. */
+  readonly authPrefix: string
+  /** Decrypted static headers merged into every upstream request. */
+  readonly staticHeaders: Readonly<Record<string, string>>
+  /** Whether same-origin redirects are explicitly allowed. */
+  readonly redirectAllowSameOrigin: boolean
+  /** Idempotency header name the adapter accepts. */
+  readonly idempotencyHeader: string
+  /** Per-connection override for the connection timeout (ms). */
+  readonly connectionTimeoutMs: number
+  /** Per-connection override for the first-byte timeout (ms). */
+  readonly firstByteTimeoutMs: number
+  /** Per-connection override for the non-streaming total timeout (ms). */
+  readonly nonStreamingTotalTimeoutMs: number
+  /** Per-connection override for the streaming idle timeout (ms). */
+  readonly streamingIdleTimeoutMs: number
+  /** Per-connection override for the total-retry timeout (ms). */
+  readonly totalRetryTimeoutMs: number
 }
 
 export interface ConnectionView {
@@ -93,6 +115,19 @@ export interface ConnectionView {
   readonly retryMaxAttempts: number
   readonly retryAmbiguousNetwork: boolean
   readonly archived: boolean
+  readonly authHeader: string
+  readonly authPrefix: string
+  /** Static header names only; the values stay encrypted at rest. */
+  readonly staticHeaders: readonly { readonly name: string }[]
+  readonly redirectAllowSameOrigin: boolean
+  readonly connectionTimeoutMs: number
+  readonly firstByteTimeoutMs: number
+  readonly nonStreamingTotalTimeoutMs: number
+  readonly streamingIdleTimeoutMs: number
+  readonly totalRetryTimeoutMs: number
+  readonly idempotencyHeader: string
+  /** Persistent warnings the Owner UI renders (e.g. "insecure_http"). */
+  readonly warnings: readonly string[]
   readonly createdAt: Date
   readonly updatedAt: Date
   readonly keys: readonly KeyView[]
@@ -109,6 +144,25 @@ export interface ProviderConnectionRegistryOptions {
 const DISPLAY_NAME_MAXIMUM = 128
 const BASE_URL_MAXIMUM = 2048
 const UPSTREAM_KEY_MAXIMUM = 2048
+const AUTH_HEADER_MAXIMUM = 128
+const AUTH_PREFIX_MAXIMUM = 64
+const STATIC_HEADER_VALUE_MAXIMUM = 4096
+const STATIC_HEADER_MAXIMUM_ENTRIES = 50
+const TIMEOUT_MINIMUM_MS = 1_000
+const TIMEOUT_MAXIMUM_MS = 600_000
+const STATIC_HEADERS_BLANK = '[]'
+
+/**
+ * Header names Iroha treats as safe without further validation: the canonical
+ * OpenAI-compatible header shapes, plus the OpenRouter / Anthropic-style
+ * aliases. Anything outside this list passes only when it matches the
+ * `custom-name` regex applied in `authHeaderProblems`.
+ */
+const APPROVED_AUTH_HEADERS = new Set([
+  'authorization',
+  'x-api-key',
+  'api-key',
+])
 
 /**
  * What Iroha knows about configuring Provider Connections.
@@ -146,9 +200,7 @@ export class ProviderConnectionRegistry {
 
     return await Promise.all(
       connections.map(async (connection) => ({
-        ...summaryOf(connection),
-        keys: await this.#keysOf(connection.id),
-        accounts: await this.#accountsOf(connection.id),
+        ...(await this.#viewOf(connection.id)),
       })),
     )
   }
@@ -156,12 +208,7 @@ export class ProviderConnectionRegistry {
   async get(id: string): Promise<ConnectionView | null> {
     const connection = await this.#database.providers.getConnection(id)
     if (connection === null) return null
-
-    return {
-      ...summaryOf(connection),
-      keys: await this.#keysOf(connection.id),
-      accounts: await this.#accountsOf(connection.id),
-    }
+    return await this.#viewOf(id)
   }
 
   /**
@@ -174,21 +221,56 @@ export class ProviderConnectionRegistry {
     baseUrl: unknown
     upstreamKey: unknown
     allowInsecureHttp?: unknown
+    authHeader?: unknown
+    authPrefix?: unknown
+    staticHeaders?: unknown
+    redirectAllowSameOrigin?: unknown
+    connectionTimeoutMs?: unknown
+    firstByteTimeoutMs?: unknown
+    nonStreamingTotalTimeoutMs?: unknown
+    streamingIdleTimeoutMs?: unknown
+    totalRetryTimeoutMs?: unknown
+    idempotencyHeader?: unknown
   }): Promise<ProviderResult<ConnectionView>> {
     const allowInsecureHttp = input.allowInsecureHttp === true
 
-    const problems = [
-      ...displayNameProblems(input.displayName),
-      ...baseUrlProblems(input.baseUrl, allowInsecureHttp),
-      ...upstreamKeyProblems(input.upstreamKey),
-    ]
+    const authHeader = input.authHeader === undefined ? 'authorization' : input.authHeader
+    const authPrefix = input.authPrefix === undefined ? 'Bearer ' : input.authPrefix
+    const idempotencyHeader = input.idempotencyHeader === undefined
+      ? 'Idempotency-Key'
+      : input.idempotencyHeader
+    const redirectAllowSameOrigin = input.redirectAllowSameOrigin === true
+
+    const problems: FieldProblem[] = []
+    problems.push(...displayNameProblems(input.displayName))
+    problems.push(...baseUrlProblems(input.baseUrl, allowInsecureHttp))
+    problems.push(...upstreamKeyProblems(input.upstreamKey))
+    problems.push(...authHeaderProblems(authHeader))
+    problems.push(...authPrefixProblems(authPrefix))
+    problems.push(...idempotencyHeaderProblems(idempotencyHeader))
+    problems.push(...timeoutProblems('connectionTimeoutMs', input.connectionTimeoutMs))
+    problems.push(...timeoutProblems('firstByteTimeoutMs', input.firstByteTimeoutMs))
+    problems.push(...timeoutProblems('nonStreamingTotalTimeoutMs', input.nonStreamingTotalTimeoutMs))
+    problems.push(...timeoutProblems('streamingIdleTimeoutMs', input.streamingIdleTimeoutMs))
+    problems.push(...timeoutProblems('totalRetryTimeoutMs', input.totalRetryTimeoutMs))
+
+    const staticHeadersResult = readStaticHeaders(input.staticHeaders, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
     const displayName = (input.displayName as string).trim()
     const baseUrl = (input.baseUrl as string).trim()
     const upstreamKey = (input.upstreamKey as string).trim()
+    const authHeaderName = (authHeader as string).trim()
+    const authPrefixValue = (authPrefix as string)
+    const idempotencyHeaderName = (idempotencyHeader as string).trim()
+    const connectionTimeoutMs = numericDefault(input.connectionTimeoutMs, 10_000)
+    const firstByteTimeoutMs = numericDefault(input.firstByteTimeoutMs, 20_000)
+    const nonStreamingTotalTimeoutMs = numericDefault(input.nonStreamingTotalTimeoutMs, 120_000)
+    const streamingIdleTimeoutMs = numericDefault(input.streamingIdleTimeoutMs, 30_000)
+    const totalRetryTimeoutMs = numericDefault(input.totalRetryTimeoutMs, 30_000)
 
     const encryptedKey = await this.#cipher.encrypt(upstreamKey)
+    const staticHeadersEncrypted = await this.#encryptStaticHeaders(staticHeadersResult)
     const at = this.#clock.now()
     const connectionId = newId('pc')
 
@@ -204,6 +286,16 @@ export class ProviderConnectionRegistry {
         archivedAt: null,
         templateId: null,
         capabilities: defaultCapabilities(),
+        authHeader: authHeaderName,
+        authPrefix: authPrefixValue,
+        staticHeadersEncrypted,
+        redirectAllowSameOrigin,
+        connectionTimeoutMs,
+        firstByteTimeoutMs,
+        nonStreamingTotalTimeoutMs,
+        streamingIdleTimeoutMs,
+        totalRetryTimeoutMs,
+        idempotencyHeader: idempotencyHeaderName,
         createdAt: at,
         updatedAt: at,
       })
@@ -251,6 +343,16 @@ export class ProviderConnectionRegistry {
       enabled?: unknown
       retryMaxAttempts?: unknown
       retryAmbiguousNetwork?: unknown
+      authHeader?: unknown
+      authPrefix?: unknown
+      staticHeaders?: unknown
+      redirectAllowSameOrigin?: unknown
+      connectionTimeoutMs?: unknown
+      firstByteTimeoutMs?: unknown
+      nonStreamingTotalTimeoutMs?: unknown
+      streamingIdleTimeoutMs?: unknown
+      totalRetryTimeoutMs?: unknown
+      idempotencyHeader?: unknown
     },
   ): Promise<ProviderResult<ConnectionView>> {
     const connection = await this.#database.providers.getConnection(id)
@@ -264,6 +366,16 @@ export class ProviderConnectionRegistry {
       enabled?: boolean
       retryMaxAttempts?: number
       retryAmbiguousNetwork?: boolean
+      authHeader?: string
+      authPrefix?: string
+      staticHeadersEncrypted?: string
+      redirectAllowSameOrigin?: boolean
+      connectionTimeoutMs?: number
+      firstByteTimeoutMs?: number
+      nonStreamingTotalTimeoutMs?: number
+      streamingIdleTimeoutMs?: number
+      totalRetryTimeoutMs?: number
+      idempotencyHeader?: string
     } = {}
 
     if (patch.displayName !== undefined) {
@@ -308,6 +420,60 @@ export class ProviderConnectionRegistry {
       changes.retryAmbiguousNetwork = patch.retryAmbiguousNetwork === true
     }
 
+    const advancedProblems: FieldProblem[] = []
+    if (patch.authHeader !== undefined) {
+      advancedProblems.push(...authHeaderProblems(patch.authHeader))
+      changes.authHeader = (patch.authHeader as string).trim()
+    }
+    if (patch.authPrefix !== undefined) {
+      advancedProblems.push(...authPrefixProblems(patch.authPrefix))
+      changes.authPrefix = patch.authPrefix as string
+    }
+    if (patch.idempotencyHeader !== undefined) {
+      advancedProblems.push(...idempotencyHeaderProblems(patch.idempotencyHeader))
+      changes.idempotencyHeader = (patch.idempotencyHeader as string).trim()
+    }
+    if (patch.redirectAllowSameOrigin !== undefined) {
+      changes.redirectAllowSameOrigin = patch.redirectAllowSameOrigin === true
+    }
+    if (patch.connectionTimeoutMs !== undefined) {
+      advancedProblems.push(...timeoutProblems('connectionTimeoutMs', patch.connectionTimeoutMs))
+      changes.connectionTimeoutMs = numericDefault(patch.connectionTimeoutMs, connection.connectionTimeoutMs)
+    }
+    if (patch.firstByteTimeoutMs !== undefined) {
+      advancedProblems.push(...timeoutProblems('firstByteTimeoutMs', patch.firstByteTimeoutMs))
+      changes.firstByteTimeoutMs = numericDefault(patch.firstByteTimeoutMs, connection.firstByteTimeoutMs)
+    }
+    if (patch.nonStreamingTotalTimeoutMs !== undefined) {
+      advancedProblems.push(
+        ...timeoutProblems('nonStreamingTotalTimeoutMs', patch.nonStreamingTotalTimeoutMs),
+      )
+      changes.nonStreamingTotalTimeoutMs = numericDefault(
+        patch.nonStreamingTotalTimeoutMs,
+        connection.nonStreamingTotalTimeoutMs,
+      )
+    }
+    if (patch.streamingIdleTimeoutMs !== undefined) {
+      advancedProblems.push(...timeoutProblems('streamingIdleTimeoutMs', patch.streamingIdleTimeoutMs))
+      changes.streamingIdleTimeoutMs = numericDefault(
+        patch.streamingIdleTimeoutMs,
+        connection.streamingIdleTimeoutMs,
+      )
+    }
+    if (patch.totalRetryTimeoutMs !== undefined) {
+      advancedProblems.push(...timeoutProblems('totalRetryTimeoutMs', patch.totalRetryTimeoutMs))
+      changes.totalRetryTimeoutMs = numericDefault(
+        patch.totalRetryTimeoutMs,
+        connection.totalRetryTimeoutMs,
+      )
+    }
+    let newStaticHeaders: readonly ProviderStaticHeader[] | null = null
+    if (patch.staticHeaders !== undefined) {
+      const read = readStaticHeaders(patch.staticHeaders, advancedProblems)
+      newStaticHeaders = read
+    }
+    if (advancedProblems.length > 0) return failed({ code: 'validation_failed', problems: advancedProblems })
+
     if (changes.baseUrl === undefined && changes.allowInsecureHttp !== undefined) {
       // The flag changed under an unchanged URL: an https URL ignores the
       // flag, but an http URL must not lose its exception.
@@ -322,6 +488,10 @@ export class ProviderConnectionRegistry {
           ],
         })
       }
+    }
+
+    if (newStaticHeaders !== null) {
+      changes.staticHeadersEncrypted = await this.#encryptStaticHeaders(newStaticHeaders)
     }
 
     if (Object.keys(changes).length === 0) {
@@ -399,6 +569,16 @@ export class ProviderConnectionRegistry {
         archivedAt: null,
         templateId: source.templateId,
         capabilities: source.capabilities,
+        authHeader: source.authHeader,
+        authPrefix: source.authPrefix,
+        staticHeadersEncrypted: source.staticHeadersEncrypted,
+        redirectAllowSameOrigin: source.redirectAllowSameOrigin,
+        connectionTimeoutMs: source.connectionTimeoutMs,
+        firstByteTimeoutMs: source.firstByteTimeoutMs,
+        nonStreamingTotalTimeoutMs: source.nonStreamingTotalTimeoutMs,
+        streamingIdleTimeoutMs: source.streamingIdleTimeoutMs,
+        totalRetryTimeoutMs: source.totalRetryTimeoutMs,
+        idempotencyHeader: source.idempotencyHeader,
         createdAt: at,
         updatedAt: at,
       })
@@ -825,6 +1005,10 @@ export class ProviderConnectionRegistry {
       throw cause
     }
 
+    const staticHeaders = await this.#decryptStaticHeaders(connection.staticHeadersEncrypted)
+    const staticHeaderMap: Record<string, string> = {}
+    for (const header of staticHeaders) staticHeaderMap[header.name] = header.value
+
     return {
       ok: true,
       value: {
@@ -835,6 +1019,16 @@ export class ProviderConnectionRegistry {
         retryMaxAttempts: connection.retryMaxAttempts,
         retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
         upstreamKey,
+        authHeader: connection.authHeader,
+        authPrefix: connection.authPrefix,
+        staticHeaders: staticHeaderMap,
+        redirectAllowSameOrigin: connection.redirectAllowSameOrigin,
+        idempotencyHeader: connection.idempotencyHeader,
+        connectionTimeoutMs: connection.connectionTimeoutMs,
+        firstByteTimeoutMs: connection.firstByteTimeoutMs,
+        nonStreamingTotalTimeoutMs: connection.nonStreamingTotalTimeoutMs,
+        streamingIdleTimeoutMs: connection.streamingIdleTimeoutMs,
+        totalRetryTimeoutMs: connection.totalRetryTimeoutMs,
       },
     }
   }
@@ -871,6 +1065,65 @@ export class ProviderConnectionRegistry {
       },
       at,
     )
+  }
+
+  /**
+   * Reactivates one or more keys from authoritative Usage Adapter evidence,
+   * without paying for a real inference probe. Reactive-only evidence is
+   * ignored: the rule is that only confirmed authority changes health.
+   *
+   * The scope the evidence names determines which keys reactivate:
+   * `key` reactivates that single key; `account` reactivates every key in
+   * the named account; `connection_model` reactivates the whole connection
+   * for that one model (the scope the cooldown engine already uses);
+   * `provider` reactivates the entire connection; `unknown` does not touch
+   * any cooldown.
+   */
+  async reactivateFromUsage(
+    connectionId: string,
+    evidence: UsageRecoveryEvidence,
+  ): Promise<{ readonly reactivated: readonly string[] }> {
+    if (!evidence.authoritative || !evidence.hasCapacity) {
+      return { reactivated: [] }
+    }
+
+    const keys = await this.#database.providers.listKeys(connectionId)
+    const affected = eligibleForUsageRecovery(keys, evidence)
+
+    const at = this.#clock.now()
+    const reactivated: string[] = []
+    for (const key of affected) {
+      this.#controlledTrials.delete(healthClaim(key))
+      await this.#database.providers.updateKey(
+        key.id,
+        {
+          health: 'active',
+          healthReason: 'authoritative usage adapter evidence',
+          healthChangedAt: at,
+          retryAfterAt: null,
+          healthScope: 'key',
+          healthScopeId: null,
+          healthModel: null,
+        },
+        at,
+      )
+      reactivated.push(key.id)
+    }
+
+    if (reactivated.length > 0) {
+      await this.#database.audit.record({
+        action: 'key.reactivated_by_usage',
+        outcome: 'success',
+        detail: {
+          connectionId,
+          reactivated: [...reactivated],
+          scope: evidence.scope.kind,
+        },
+        at,
+      })
+    }
+
+    return { reactivated }
   }
 
   async recordInferenceFailure(input: {
@@ -1046,9 +1299,59 @@ export class ProviderConnectionRegistry {
   }
 
   async #viewOf(id: string): Promise<ConnectionView> {
-    const view = await this.get(id)
-    if (view === null) throw new Error(`Provider connection ${id} vanished mid-operation`)
-    return view
+    const connection = await this.#database.providers.getConnection(id)
+    if (connection === null) throw new Error(`Provider connection ${id} vanished mid-operation`)
+
+    let staticHeaders: readonly ProviderStaticHeader[] = []
+    try {
+      staticHeaders = await this.#decryptStaticHeaders(connection.staticHeadersEncrypted)
+    } catch (cause) {
+      if (cause instanceof SecretCipherError) {
+        throw new Error('stored static headers are unreadable; the installation master key may have changed')
+      }
+      throw cause
+    }
+
+    return {
+      ...summaryOf(connection),
+      staticHeaders: staticHeaders.map((header) => ({ name: header.name })),
+      warnings: connection.allowInsecureHttp ? ['insecure_http'] : [],
+      keys: await this.#keysOf(connection.id),
+      accounts: await this.#accountsOf(connection.id),
+    }
+  }
+
+  /**
+   * Encrypts the connection's static headers as a JSON-encoded array of
+   * {name, value} pairs. The cipher output for each value travels together
+   * inside one outer ciphertext so a database copy does not yield any value
+   * plaintext without the master key.
+   */
+  async #encryptStaticHeaders(headers: readonly ProviderStaticHeader[]): Promise<string> {
+    if (headers.length === 0) return STATIC_HEADERS_BLANK
+    const plainJson = JSON.stringify(headers.map((header) => ({ name: header.name, value: header.value })))
+    return await this.#cipher.encrypt(plainJson)
+  }
+
+  /**
+   * Decrypts the stored static headers back to a list of {name, value}
+   * pairs. A stored value of `[]` (the column default) returns an empty
+   * list without a cipher call, so an empty default never errors.
+   */
+  async #decryptStaticHeaders(stored: string): Promise<readonly ProviderStaticHeader[]> {
+    if (stored === STATIC_HEADERS_BLANK) return []
+    const plainJson = await this.#cipher.decrypt(stored)
+    const parsed = JSON.parse(plainJson) as unknown
+    if (!Array.isArray(parsed)) return []
+    const headers: ProviderStaticHeader[] = []
+    for (const entry of parsed) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const name = (entry as Record<string, unknown>).name
+      const value = (entry as Record<string, unknown>).value
+      if (typeof name !== 'string' || typeof value !== 'string') continue
+      headers.push({ name, value })
+    }
+    return headers
   }
 }
 
@@ -1088,9 +1391,19 @@ function summaryOf(connection: {
   retryMaxAttempts: number
   retryAmbiguousNetwork: boolean
   archivedAt: Date | null
+  authHeader: string
+  authPrefix: string
+  staticHeadersEncrypted: string
+  redirectAllowSameOrigin: boolean
+  connectionTimeoutMs: number
+  firstByteTimeoutMs: number
+  nonStreamingTotalTimeoutMs: number
+  streamingIdleTimeoutMs: number
+  totalRetryTimeoutMs: number
+  idempotencyHeader: string
   createdAt: Date
   updatedAt: Date
-}): Omit<ConnectionView, 'keys' | 'accounts'> {
+}): Omit<ConnectionView, 'keys' | 'accounts' | 'staticHeaders' | 'warnings'> {
   return {
     id: connection.id,
     displayName: connection.displayName,
@@ -1100,6 +1413,15 @@ function summaryOf(connection: {
     retryMaxAttempts: connection.retryMaxAttempts,
     retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
     archived: connection.archivedAt !== null,
+    authHeader: connection.authHeader,
+    authPrefix: connection.authPrefix,
+    redirectAllowSameOrigin: connection.redirectAllowSameOrigin,
+    connectionTimeoutMs: connection.connectionTimeoutMs,
+    firstByteTimeoutMs: connection.firstByteTimeoutMs,
+    nonStreamingTotalTimeoutMs: connection.nonStreamingTotalTimeoutMs,
+    streamingIdleTimeoutMs: connection.streamingIdleTimeoutMs,
+    totalRetryTimeoutMs: connection.totalRetryTimeoutMs,
+    idempotencyHeader: connection.idempotencyHeader,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
   }
@@ -1164,6 +1486,151 @@ function upstreamKeyProblems(input: unknown): readonly FieldProblem[] {
   }
 
   return []
+}
+
+/**
+ * An authentication header name must either be one of the adapter-approved
+ * names (Authorization, X-Api-Key, Api-Key) or a printable ASCII custom name
+ * matching `[A-Za-z0-9-]{1,128}`. The regex forbids whitespace, colons,
+ * semicolons, and any byte that could be used to inject header folds.
+ */
+function authHeaderProblems(input: unknown): readonly FieldProblem[] {
+  if (typeof input !== 'string' || input.length === 0) {
+    return [{ field: 'authHeader', message: 'is required' }]
+  }
+
+  if (input.length > AUTH_HEADER_MAXIMUM) {
+    return [{ field: 'authHeader', message: `must be at most ${AUTH_HEADER_MAXIMUM} characters` }]
+  }
+
+  if (APPROVED_AUTH_HEADERS.has(input.toLowerCase())) return []
+  if (/^[A-Za-z0-9-]{1,128}$/.test(input)) return []
+  return [
+    {
+      field: 'authHeader',
+      message: 'must be a printable header name; only Authorization, X-Api-Key, Api-Key, or a [A-Za-z0-9-]{1,128} custom name are accepted',
+    },
+  ]
+}
+
+/**
+ * An authentication prefix must be printable ASCII with no control characters
+ * or newlines, and within a generous length bound. An empty prefix is allowed
+ * and means "no prefix"; only the key follows the header name.
+ */
+function authPrefixProblems(input: unknown): readonly FieldProblem[] {
+  if (typeof input !== 'string') {
+    return [{ field: 'authPrefix', message: 'must be a string' }]
+  }
+
+  if (input.length > AUTH_PREFIX_MAXIMUM) {
+    return [{ field: 'authPrefix', message: `must be at most ${AUTH_PREFIX_MAXIMUM} characters` }]
+  }
+
+  // Printable ASCII without CR/LF/NUL or other control characters.
+  if (/^[\x20-\x7E]*$/.test(input)) return []
+  return [{ field: 'authPrefix', message: 'must be printable ASCII without control characters' }]
+}
+
+/**
+ * Idempotency headers reuse the same validation shape as auth headers: they
+ * must be a printable HTTP token. The default `Idempotency-Key` is what the
+ * OpenAI-compatible family uses.
+ */
+function idempotencyHeaderProblems(input: unknown): readonly FieldProblem[] {
+  if (typeof input !== 'string' || input.length === 0) {
+    return [{ field: 'idempotencyHeader', message: 'is required' }]
+  }
+  if (input.length > AUTH_HEADER_MAXIMUM) {
+    return [{ field: 'idempotencyHeader', message: `must be at most ${AUTH_HEADER_MAXIMUM} characters` }]
+  }
+  if (/^[A-Za-z0-9-]{1,128}$/.test(input)) return []
+  return [{ field: 'idempotencyHeader', message: 'must be a printable header name' }]
+}
+
+/**
+ * Timeouts are positive integers within a generous bound. The lower bound
+ * keeps a malformed zero from being silently accepted; the upper bound stops
+ * a typo from making the connection effectively hang forever.
+ */
+function timeoutProblems(field: string, input: unknown): readonly FieldProblem[] {
+  if (input === undefined) return []
+  if (typeof input !== 'number' || !Number.isInteger(input)) {
+    return [{ field, message: 'must be an integer number of milliseconds' }]
+  }
+  if (input < TIMEOUT_MINIMUM_MS || input > TIMEOUT_MAXIMUM_MS) {
+    return [
+      {
+        field,
+        message: `must be between ${TIMEOUT_MINIMUM_MS} and ${TIMEOUT_MAXIMUM_MS} milliseconds`,
+      },
+    ]
+  }
+  return []
+}
+
+/** A default fallback used by the update path so a supplied value never silently vanishes. */
+function numericDefault(input: unknown, fallback: number): number {
+  if (typeof input !== 'number' || !Number.isInteger(input)) return fallback
+  return input
+}
+
+/**
+ * Reads and validates a list of static headers. Names share the auth-header
+ * shape so they cannot smuggle header folds or colons; values are plain
+ * strings within a generous bound. The whole list is encrypted together when
+ * it is persisted.
+ */
+function readStaticHeaders(input: unknown, problems: FieldProblem[]): readonly ProviderStaticHeader[] {
+  if (input === undefined) return []
+  if (!Array.isArray(input)) {
+    problems.push({ field: 'staticHeaders', message: 'must be a list of {name, value} entries' })
+    return []
+  }
+
+  if (input.length > STATIC_HEADER_MAXIMUM_ENTRIES) {
+    problems.push({
+      field: 'staticHeaders',
+      message: `holds at most ${STATIC_HEADER_MAXIMUM_ENTRIES} entries`,
+    })
+  }
+
+  const headers: ProviderStaticHeader[] = []
+  const seen = new Set<string>()
+  for (const raw of input) {
+    if (typeof raw !== 'object' || raw === null) {
+      problems.push({ field: 'staticHeaders', message: 'each entry must be a {name, value} object' })
+      continue
+    }
+    const entry = raw as Record<string, unknown>
+    const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+    const value = typeof entry.value === 'string' ? entry.value : null
+    if (name === '') {
+      problems.push({ field: 'staticHeaders.name', message: 'is required' })
+      continue
+    }
+    if (name.length > AUTH_HEADER_MAXIMUM || !/^[A-Za-z0-9-]{1,128}$/.test(name)) {
+      problems.push({ field: `staticHeaders.name`, message: 'must be a printable header name' })
+      continue
+    }
+    if (value === null) {
+      problems.push({ field: `staticHeaders.${name}.value`, message: 'must be a string' })
+      continue
+    }
+    if (value.length > STATIC_HEADER_VALUE_MAXIMUM) {
+      problems.push({
+        field: `staticHeaders.${name}.value`,
+        message: `must be at most ${STATIC_HEADER_VALUE_MAXIMUM} characters`,
+      })
+      continue
+    }
+    const lower = name.toLowerCase()
+    if (seen.has(lower)) continue
+    seen.add(lower)
+    headers.push({ name, value })
+  }
+
+  return headers
 }
 
 const MODEL_ID_MAXIMUM = 128
@@ -1284,6 +1751,34 @@ function copiedName(displayName: string): string {
   const suffix = ' (copy)'
   const stem = displayName.slice(0, DISPLAY_NAME_MAXIMUM - suffix.length)
   return `${stem}${suffix}`
+}
+
+/**
+ * The keys whose cooldown the evidence can resolve. Disabled and Active keys
+ * are never touched; the evidence must name a scope the existing cooldown
+ * engine would have used, otherwise the recovery would be too aggressive.
+ */
+function eligibleForUsageRecovery(
+  keys: readonly UpstreamKeyRecord[],
+  evidence: UsageRecoveryEvidence,
+): readonly UpstreamKeyRecord[] {
+  const cooling = keys.filter(
+    (key) => key.health === 'cooling_down' || key.health === 'exhausted',
+  )
+  const scope = evidence.scope
+
+  switch (scope.kind) {
+    case 'key':
+      return cooling.filter((key) => key.id === scope.keyId)
+    case 'account':
+      return cooling.filter((key) => key.accountId === scope.accountId)
+    case 'connection_model':
+      return cooling.filter((key) => key.healthModel === scope.model)
+    case 'provider':
+      return cooling
+    case 'unknown':
+      return []
+  }
 }
 
 /**

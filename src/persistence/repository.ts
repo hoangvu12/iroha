@@ -134,6 +134,30 @@ export interface ProviderConnectionRecord {
   readonly templateId: string | null
   /** Connection-wide capability defaults; per-model overrides may replace them. */
   readonly capabilities: ConnectionCapabilities
+  /** Canonical authentication header name (e.g. "Authorization", "X-Api-Key"). */
+  readonly authHeader: string
+  /** Plain-text prefix for the authentication header; empty string means none. */
+  readonly authPrefix: string
+  /**
+   * The stored encrypted blob of the connection's static headers. Decryption
+   * is the registry's responsibility: this column carries cipher output, and
+   * the registry surfaces a decrypted `staticHeaders` view to callers.
+   */
+  readonly staticHeadersEncrypted: string
+  /** Whether same-origin redirects are explicitly allowed. */
+  readonly redirectAllowSameOrigin: boolean
+  /** Per-connection override for the global connection timeout (ms). */
+  readonly connectionTimeoutMs: number
+  /** Per-connection override for the global first-byte timeout (ms). */
+  readonly firstByteTimeoutMs: number
+  /** Per-connection override for the global non-streaming total timeout (ms). */
+  readonly nonStreamingTotalTimeoutMs: number
+  /** Per-connection override for the global streaming idle timeout (ms). */
+  readonly streamingIdleTimeoutMs: number
+  /** Per-connection override for the global total-retry timeout (ms). */
+  readonly totalRetryTimeoutMs: number
+  /** The idempotency header the adapter accepts (e.g. "Idempotency-Key"). */
+  readonly idempotencyHeader: string
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -234,6 +258,26 @@ export interface ProviderConnectionPatch {
   readonly archivedAt?: Date | null
   /** Replaces the connection-wide capability defaults. */
   readonly capabilities?: ConnectionCapabilities
+  /** Replaces the canonical authentication header name. */
+  readonly authHeader?: string
+  /** Replaces the authentication header prefix. */
+  readonly authPrefix?: string
+  /** Replaces the encrypted static headers blob (already encrypted by the caller). */
+  readonly staticHeadersEncrypted?: string
+  /** Replaces the same-origin redirect flag. */
+  readonly redirectAllowSameOrigin?: boolean
+  /** Per-connection override for the global connection timeout (ms). */
+  readonly connectionTimeoutMs?: number
+  /** Per-connection override for the global first-byte timeout (ms). */
+  readonly firstByteTimeoutMs?: number
+  /** Per-connection override for the global non-streaming total timeout (ms). */
+  readonly nonStreamingTotalTimeoutMs?: number
+  /** Per-connection override for the global streaming idle timeout (ms). */
+  readonly streamingIdleTimeoutMs?: number
+  /** Per-connection override for the global total-retry timeout (ms). */
+  readonly totalRetryTimeoutMs?: number
+  /** Replaces the idempotency header the adapter accepts. */
+  readonly idempotencyHeader?: string
 }
 
 export interface UpstreamKeyPatch {
@@ -309,6 +353,17 @@ export interface GatewayKeyScopeEntry {
 }
 
 /**
+ * One decrypted static header the adapter will merge into every upstream
+ * request. `name` is canonicalised; `value` is the Owner's cleartext. The pair
+ * travels decrypted through `InferenceTarget` and is encrypted before the
+ * registry writes it; the database stores only cipher output.
+ */
+export interface ProviderStaticHeader {
+  readonly name: string
+  readonly value: string
+}
+
+/**
  * One application credential. The usable secret never reaches storage: only the
  * hash of the high-entropy secret part is kept, and the full credential the
  * application presents is `<id>.<secret>`, revealed once on creation.
@@ -321,6 +376,8 @@ export interface GatewayKeyRecord {
   readonly secretHash: string
   /** Which Provider Connections the key may use and discover, and how. */
   readonly scope: readonly GatewayKeyScopeEntry[]
+  /** Exact browser origins allowed to use this key; empty disables browser CORS. */
+  readonly corsOrigins: readonly string[]
   readonly createdAt: Date
   /** The last time the key successfully authenticated a caller. */
   readonly lastUsedAt: Date | null
@@ -337,6 +394,8 @@ export interface GatewayKeyRepository {
   markUsed(id: string, at: Date): Promise<boolean>
   /** Revokes the key. Returns `null` when no such key exists. */
   revoke(id: string, at: Date): Promise<GatewayKeyRecord | null>
+  /** Replaces the per-key CORS origins. Returns `null` when no such key exists. */
+  updateCorsOrigins(id: string, origins: readonly string[], at: Date): Promise<GatewayKeyRecord | null>
 }
 
 /**
@@ -412,6 +471,39 @@ export interface ModelCatalogRepository {
   putSync(record: ModelCatalogSyncRecord): Promise<void>
 }
 
+/**
+ * The durable state of one connection's Usage Adapter polling. `result` is the
+ * last successful normalized reading kept across failures; the failure fields
+ * describe the latest poll attempt separately so the UI can render both.
+ */
+export interface UsageSnapshotRecord {
+  readonly connectionId: string
+  /** The visibility declared by the configured Usage Adapter. */
+  readonly visibility: 'reactive_only' | 'authoritative'
+  readonly syncedAt: Date | null
+  readonly lastSuccessAt: Date | null
+  readonly lastFailureAt: Date | null
+  /** A structural code from the latest failure, when one happened. */
+  readonly lastFailureCode: string | null
+  /** A safe structural message from the latest failure, never upstream text. */
+  readonly lastFailureMessage: string | null
+  /**
+   * The JSON-encoded last successful reading, or null when no poll has ever
+   * succeeded or the last successful reading has been forgotten.
+   */
+  readonly result: unknown
+}
+
+export interface UsageRepository {
+  get(connectionId: string): Promise<UsageSnapshotRecord | null>
+  /**
+   * Replaces the snapshot. The service passes the full record so the
+   * repository never has to guess whether an absent field means "stale" or
+   * "never polled".
+   */
+  put(record: UsageSnapshotRecord): Promise<void>
+}
+
 /** The repositories reachable inside and outside a transaction alike. */
 export interface Repositories {
   readonly settings: SettingsRepository
@@ -421,6 +513,7 @@ export interface Repositories {
   readonly providers: ProviderRepository
   readonly gatewayKeys: GatewayKeyRepository
   readonly modelCatalog: ModelCatalogRepository
+  readonly usage: UsageRepository
 }
 
 export interface Database extends Repositories {

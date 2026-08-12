@@ -374,6 +374,16 @@ for (const engine of availableEngines) {
           structuredOutput: false,
           responses: false,
         },
+        authHeader: 'authorization',
+        authPrefix: 'Bearer ',
+        staticHeadersEncrypted: '[]',
+        redirectAllowSameOrigin: false,
+        connectionTimeoutMs: 10_000,
+        firstByteTimeoutMs: 20_000,
+        nonStreamingTotalTimeoutMs: 120_000,
+        streamingIdleTimeoutMs: 30_000,
+        totalRetryTimeoutMs: 30_000,
+        idempotencyHeader: 'Idempotency-Key',
         createdAt: at,
         updatedAt: at,
         ...overrides,
@@ -709,6 +719,16 @@ for (const engine of availableEngines) {
           structuredOutput: false,
           responses: false,
         },
+        authHeader: 'authorization',
+        authPrefix: 'Bearer ',
+        staticHeadersEncrypted: '[]',
+        redirectAllowSameOrigin: false,
+        connectionTimeoutMs: 10_000,
+        firstByteTimeoutMs: 20_000,
+        nonStreamingTotalTimeoutMs: 120_000,
+        streamingIdleTimeoutMs: 30_000,
+        totalRetryTimeoutMs: 30_000,
+        idempotencyHeader: 'Idempotency-Key',
         createdAt: at,
         updatedAt: at,
         ...overrides,
@@ -785,6 +805,178 @@ for (const engine of availableEngines) {
         expect(two.find((entry) => entry.modelId === 'gpt-4o-mini')?.overrides).toEqual({
           streaming: false,
         })
+      })
+    })
+
+    describe('usage snapshots', () => {
+      const at = new Date('2026-01-01T00:00:00.000Z')
+      const later = new Date('2026-01-02T00:00:00.000Z')
+
+      const connection = (
+        id: string,
+        overrides: Partial<ProviderConnectionRecord> = {},
+      ): ProviderConnectionRecord => ({
+        id,
+        displayName: 'Example',
+        baseUrl: 'https://api.example.com/v1',
+        allowInsecureHttp: false,
+        enabled: true,
+        retryMaxAttempts: 3,
+        retryAmbiguousNetwork: false,
+        archivedAt: null,
+        templateId: null,
+        capabilities: {
+          chat: false,
+          streaming: false,
+          tools: false,
+          structuredOutput: false,
+          responses: false,
+        },
+        authHeader: 'authorization',
+        authPrefix: 'Bearer ',
+        staticHeadersEncrypted: '[]',
+        redirectAllowSameOrigin: false,
+        connectionTimeoutMs: 10_000,
+        firstByteTimeoutMs: 20_000,
+        nonStreamingTotalTimeoutMs: 120_000,
+        streamingIdleTimeoutMs: 30_000,
+        totalRetryTimeoutMs: 30_000,
+        idempotencyHeader: 'Idempotency-Key',
+        createdAt: at,
+        updatedAt: at,
+        ...overrides,
+      })
+
+      const snapshot = (
+        connectionId: string,
+        overrides: {
+          visibility?: 'reactive_only' | 'authoritative'
+          syncedAt?: Date | null
+          lastSuccessAt?: Date | null
+          lastFailureAt?: Date | null
+          lastFailureCode?: string | null
+          lastFailureMessage?: string | null
+          result?: unknown
+        } = {},
+      ) => ({
+        connectionId,
+        visibility: 'reactive_only' as const,
+        syncedAt: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        lastFailureCode: null,
+        lastFailureMessage: null,
+        result: null,
+        ...overrides,
+      })
+
+      test('round-trips a snapshot for one connection', async () => {
+        await database.providers.insertConnection(connection('pc_usage'))
+        const stored = snapshot('pc_usage', {
+          visibility: 'authoritative',
+          syncedAt: at,
+          lastSuccessAt: at,
+          result: {
+            unit: 'usd',
+            balance: 42,
+            used: 8,
+            limit: 50,
+            resetAt: null,
+            scope: { kind: 'provider' },
+            confidence: 'confirmed',
+            diagnostics: { provider: 'mock' },
+          },
+        })
+        await database.usage.put(stored)
+
+        const read = await database.usage.get('pc_usage')
+        expect(read).toEqual(stored)
+      })
+
+      test('returns null for an unknown connection', async () => {
+        expect(await database.usage.get('pc_absent')).toBeNull()
+      })
+
+      test('replaces the snapshot of an existing connection', async () => {
+        await database.providers.insertConnection(connection('pc_usage'))
+        await database.usage.put(snapshot('pc_usage', { visibility: 'reactive_only' }))
+        await database.usage.put(
+          snapshot('pc_usage', {
+            visibility: 'authoritative',
+            syncedAt: later,
+            lastSuccessAt: later,
+            lastFailureCode: 'upstream_refused',
+            lastFailureMessage: 'HTTP 503',
+            result: { unit: 'usd', balance: 5 },
+          }),
+        )
+
+        const read = await database.usage.get('pc_usage')
+        expect(read).toMatchObject({
+          visibility: 'authoritative',
+          syncedAt: later,
+          lastSuccessAt: later,
+          lastFailureCode: 'upstream_refused',
+          lastFailureMessage: 'HTTP 503',
+        })
+      })
+
+      test('retains the prior success when a later record carries only failure data', async () => {
+        await database.providers.insertConnection(connection('pc_usage'))
+        await database.usage.put(
+          snapshot('pc_usage', {
+            visibility: 'authoritative',
+            syncedAt: at,
+            lastSuccessAt: at,
+            result: { balance: 12, unit: 'usd' },
+          }),
+        )
+        // The Usage Service writes a fresh record that carries the previous
+        // success fields forward alongside the new failure fields; the
+        // repository faithfully stores whatever it receives.
+        await database.usage.put({
+          connectionId: 'pc_usage',
+          visibility: 'authoritative',
+          syncedAt: later,
+          lastSuccessAt: at,
+          lastFailureAt: later,
+          lastFailureCode: 'upstream_unreachable',
+          lastFailureMessage: 'the provider timed out',
+          result: { balance: 12, unit: 'usd' },
+        })
+
+        const read = await database.usage.get('pc_usage')
+        expect(read?.lastSuccessAt).toEqual(at)
+        expect(read?.lastFailureAt).toEqual(later)
+        expect(read?.lastFailureCode).toBe('upstream_unreachable')
+        expect(read?.result).toEqual({ balance: 12, unit: 'usd' })
+      })
+
+      test('takes the snapshot with its connection when the connection is purged', async () => {
+        await database.providers.insertConnection(connection('pc_usage'))
+        await database.usage.put(
+          snapshot('pc_usage', { visibility: 'authoritative', lastSuccessAt: at }),
+        )
+
+        await database.transaction(async (repositories) => {
+          await repositories.providers.deleteKeysForConnection('pc_usage')
+          await repositories.providers.deleteConnection('pc_usage')
+        })
+
+        expect(await database.usage.get('pc_usage')).toBeNull()
+      })
+
+      test('scopes each snapshot to its own connection', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertConnection(connection('pc_two'))
+
+        await database.usage.put(snapshot('pc_one', { visibility: 'authoritative' }))
+        await database.usage.put(snapshot('pc_two', { visibility: 'reactive_only' }))
+
+        const one = await database.usage.get('pc_one')
+        const two = await database.usage.get('pc_two')
+        expect(one?.visibility).toBe('authoritative')
+        expect(two?.visibility).toBe('reactive_only')
       })
     })
   })

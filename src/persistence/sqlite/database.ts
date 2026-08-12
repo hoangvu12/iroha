@@ -36,6 +36,8 @@ import {
   type UpstreamKeyHealth,
   type UpstreamKeyPatch,
   type UpstreamKeyRecord,
+  type UsageRepository,
+  type UsageSnapshotRecord,
 } from '../repository.ts'
 import {
   auditEvents,
@@ -48,6 +50,7 @@ import {
   settings,
   upstreamAccounts,
   upstreamKeys,
+  usageSnapshots,
 } from './schema.ts'
 
 const MIGRATIONS_FOLDER = join(import.meta.dir, '../../../migrations/sqlite')
@@ -89,6 +92,7 @@ class SqliteDatabase implements Database {
   readonly providers: ProviderRepository
   readonly gatewayKeys: GatewayKeyRepository
   readonly modelCatalog: ModelCatalogRepository
+  readonly usage: UsageRepository
 
   /**
    * `bun:sqlite` is one synchronous connection, so two overlapping
@@ -110,6 +114,7 @@ class SqliteDatabase implements Database {
     this.providers = new SqliteProviderRepository(handle)
     this.gatewayKeys = new SqliteGatewayKeyRepository(handle)
     this.modelCatalog = new SqliteModelCatalogRepository(handle)
+    this.usage = new SqliteUsageRepository(handle)
   }
 
   /**
@@ -125,6 +130,7 @@ class SqliteDatabase implements Database {
       providers: this.providers,
       gatewayKeys: this.gatewayKeys,
       modelCatalog: this.modelCatalog,
+      usage: this.usage,
     }
   }
 
@@ -412,11 +418,9 @@ class SqliteProviderRepository implements ProviderRepository {
   async insertConnection(
     connection: ProviderConnectionRecord,
   ): Promise<ProviderConnectionRecord> {
-    const [row] = await this.handle
-      .insert(providerConnections)
-      .values({ ...connection, capabilities: JSON.stringify(connection.capabilities) })
-      .returning()
-    return toConnection(row ?? { ...connection, capabilities: JSON.stringify(connection.capabilities) })
+    const encoded = encodeConnectionRow(connection)
+    const [row] = await this.handle.insert(providerConnections).values(encoded).returning()
+    return toConnection(row ?? encoded)
   }
 
   async updateConnection(
@@ -424,12 +428,7 @@ class SqliteProviderRepository implements ProviderRepository {
     patch: ProviderConnectionPatch,
     at: Date,
   ): Promise<ProviderConnectionRecord | null> {
-    const { capabilities, ...rest } = patch
-    const changed = {
-      ...rest,
-      ...(capabilities === undefined ? {} : { capabilities: JSON.stringify(capabilities) }),
-      updatedAt: at,
-    }
+    const changed = { ...encodeConnectionPatch(patch), updatedAt: at }
     const [row] = await this.handle
       .update(providerConnections)
       .set(changed)
@@ -595,19 +594,9 @@ class SqliteGatewayKeyRepository implements GatewayKeyRepository {
   }
 
   async insert(key: GatewayKeyRecord): Promise<GatewayKeyRecord> {
-    const [row] = await this.handle
-      .insert(gatewayKeys)
-      .values({
-        id: key.id,
-        name: key.name,
-        secretHash: key.secretHash,
-        scope: JSON.stringify(key.scope),
-        createdAt: key.createdAt,
-        lastUsedAt: key.lastUsedAt,
-        revokedAt: key.revokedAt,
-      })
-      .returning()
-    return row === undefined ? toGatewayKey({ ...key, scope: JSON.stringify(key.scope) }) : toGatewayKey(row)
+    const encoded = encodeGatewayKeyRow(key)
+    const [row] = await this.handle.insert(gatewayKeys).values(encoded).returning()
+    return row === undefined ? toGatewayKey(encoded) : toGatewayKey(row)
   }
 
   async markUsed(id: string, at: Date): Promise<boolean> {
@@ -627,6 +616,19 @@ class SqliteGatewayKeyRepository implements GatewayKeyRepository {
       .returning()
     return row ? toGatewayKey(row) : null
   }
+
+  async updateCorsOrigins(
+    id: string,
+    origins: readonly string[],
+    _at: Date,
+  ): Promise<GatewayKeyRecord | null> {
+    const [row] = await this.handle
+      .update(gatewayKeys)
+      .set({ corsOrigins: JSON.stringify([...origins]) })
+      .where(eq(gatewayKeys.id, id))
+      .returning()
+    return row ? toGatewayKey(row) : null
+  }
 }
 
 type GatewayKeyRow = typeof gatewayKeys.$inferSelect
@@ -637,10 +639,39 @@ function toGatewayKey(row: GatewayKeyRow): GatewayKeyRecord {
     name: row.name,
     secretHash: row.secretHash,
     scope: JSON.parse(row.scope) as readonly GatewayKeyScopeEntry[],
+    corsOrigins: decodeOrigins(row.corsOrigins),
     createdAt: row.createdAt,
     lastUsedAt: row.lastUsedAt,
     revokedAt: row.revokedAt,
   }
+}
+
+/** Encodes one record for storage. `scope` and `corsOrigins` are JSON strings. */
+function encodeGatewayKeyRow(key: GatewayKeyRecord): {
+  id: string
+  name: string
+  secretHash: string
+  scope: string
+  corsOrigins: string
+  createdAt: Date
+  lastUsedAt: Date | null
+  revokedAt: Date | null
+} {
+  return {
+    id: key.id,
+    name: key.name,
+    secretHash: key.secretHash,
+    scope: JSON.stringify(key.scope),
+    corsOrigins: JSON.stringify([...key.corsOrigins]),
+    createdAt: key.createdAt,
+    lastUsedAt: key.lastUsedAt,
+    revokedAt: key.revokedAt,
+  }
+}
+
+function decodeOrigins(raw: string): readonly string[] {
+  const parsed = JSON.parse(raw) as unknown
+  return Array.isArray(parsed) ? (parsed as string[]) : []
 }
 
 type ConnectionRow = typeof providerConnections.$inferSelect
@@ -658,9 +689,85 @@ function toConnection(row: ConnectionRow): ProviderConnectionRecord {
     archivedAt: row.archivedAt,
     templateId: row.templateId,
     capabilities: parseCapabilities(row.capabilities),
+    authHeader: row.authHeader,
+    authPrefix: row.authPrefix,
+    staticHeadersEncrypted: row.staticHeadersEncrypted,
+    redirectAllowSameOrigin: row.redirectAllowSameOrigin,
+    connectionTimeoutMs: row.connectionTimeoutMs,
+    firstByteTimeoutMs: row.firstByteTimeoutMs,
+    nonStreamingTotalTimeoutMs: row.nonStreamingTotalTimeoutMs,
+    streamingIdleTimeoutMs: row.streamingIdleTimeoutMs,
+    totalRetryTimeoutMs: row.totalRetryTimeoutMs,
+    idempotencyHeader: row.idempotencyHeader,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
+}
+
+/**
+ * The row a caller hands the SQLite repository carries the cipher output of
+ * `staticHeadersEncrypted` and a JSON-encoded `capabilities` blob. The caller
+ * (the registry) is responsible for encrypting the static headers before
+ * `insertConnection` and for supplying `staticHeadersEncrypted` on the patch
+ * passed to `updateConnection`.
+ */
+function encodeConnectionRow(connection: ProviderConnectionRecord): {
+  id: string
+  displayName: string
+  baseUrl: string
+  allowInsecureHttp: boolean
+  enabled: boolean
+  retryMaxAttempts: number
+  retryAmbiguousNetwork: boolean
+  archivedAt: Date | null
+  templateId: string | null
+  capabilities: string
+  authHeader: string
+  authPrefix: string
+  staticHeadersEncrypted: string
+  redirectAllowSameOrigin: boolean
+  connectionTimeoutMs: number
+  firstByteTimeoutMs: number
+  nonStreamingTotalTimeoutMs: number
+  streamingIdleTimeoutMs: number
+  totalRetryTimeoutMs: number
+  idempotencyHeader: string
+  createdAt: Date
+  updatedAt: Date
+} {
+  return {
+    id: connection.id,
+    displayName: connection.displayName,
+    baseUrl: connection.baseUrl,
+    allowInsecureHttp: connection.allowInsecureHttp,
+    enabled: connection.enabled,
+    retryMaxAttempts: connection.retryMaxAttempts,
+    retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
+    archivedAt: connection.archivedAt,
+    templateId: connection.templateId,
+    capabilities: JSON.stringify(connection.capabilities),
+    authHeader: connection.authHeader,
+    authPrefix: connection.authPrefix,
+    staticHeadersEncrypted: connection.staticHeadersEncrypted,
+    redirectAllowSameOrigin: connection.redirectAllowSameOrigin,
+    connectionTimeoutMs: connection.connectionTimeoutMs,
+    firstByteTimeoutMs: connection.firstByteTimeoutMs,
+    nonStreamingTotalTimeoutMs: connection.nonStreamingTotalTimeoutMs,
+    streamingIdleTimeoutMs: connection.streamingIdleTimeoutMs,
+    totalRetryTimeoutMs: connection.totalRetryTimeoutMs,
+    idempotencyHeader: connection.idempotencyHeader,
+    createdAt: connection.createdAt,
+    updatedAt: connection.updatedAt,
+  }
+}
+
+/** Same encoding shape as {@link encodeConnectionRow} but only the supplied fields. */
+function encodeConnectionPatch(patch: ProviderConnectionPatch): Partial<ReturnType<typeof encodeConnectionRow>> {
+  const encoded = { ...(patch as Record<string, unknown>) }
+  if (patch.capabilities !== undefined) {
+    encoded.capabilities = JSON.stringify(patch.capabilities)
+  }
+  return encoded as Partial<ReturnType<typeof encodeConnectionRow>>
 }
 
 function toKey(row: KeyRow): UpstreamKeyRecord {
@@ -1002,6 +1109,65 @@ function toSyncRecord(row: SyncRow): ModelCatalogSyncRecord {
     lastSuccessAt: row.lastSuccessAt,
     lastFailureAt: row.lastFailureAt,
     lastFailureMessage: row.lastFailureMessage,
+  }
+}
+
+class SqliteUsageRepository implements UsageRepository {
+  constructor(private readonly handle: Handle) {}
+
+  async get(connectionId: string): Promise<UsageSnapshotRecord | null> {
+    const [row] = await this.handle
+      .select()
+      .from(usageSnapshots)
+      .where(eq(usageSnapshots.connectionId, connectionId))
+      .limit(1)
+    return row ? toUsageSnapshot(row) : null
+  }
+
+  async put(record: UsageSnapshotRecord): Promise<void> {
+    await this.handle
+      .insert(usageSnapshots)
+      .values(encodeUsageSnapshot(record))
+      .onConflictDoUpdate({
+        target: usageSnapshots.connectionId,
+        set: {
+          visibility: record.visibility,
+          syncedAt: record.syncedAt,
+          lastSuccessAt: record.lastSuccessAt,
+          lastFailureAt: record.lastFailureAt,
+          lastFailureCode: record.lastFailureCode,
+          lastFailureMessage: record.lastFailureMessage,
+          result: record.result === null ? null : JSON.stringify(record.result),
+        },
+      })
+  }
+}
+
+type UsageSnapshotRow = typeof usageSnapshots.$inferSelect
+
+function encodeUsageSnapshot(record: UsageSnapshotRecord): UsageSnapshotRow {
+  return {
+    connectionId: record.connectionId,
+    visibility: record.visibility,
+    syncedAt: record.syncedAt,
+    lastSuccessAt: record.lastSuccessAt,
+    lastFailureAt: record.lastFailureAt,
+    lastFailureCode: record.lastFailureCode,
+    lastFailureMessage: record.lastFailureMessage,
+    result: record.result === null ? null : JSON.stringify(record.result),
+  }
+}
+
+function toUsageSnapshot(row: UsageSnapshotRow): UsageSnapshotRecord {
+  return {
+    connectionId: row.connectionId,
+    visibility: row.visibility === 'authoritative' ? 'authoritative' : 'reactive_only',
+    syncedAt: row.syncedAt,
+    lastSuccessAt: row.lastSuccessAt,
+    lastFailureAt: row.lastFailureAt,
+    lastFailureCode: row.lastFailureCode,
+    lastFailureMessage: row.lastFailureMessage,
+    result: row.result === null ? null : (JSON.parse(row.result) as unknown),
   }
 }
 

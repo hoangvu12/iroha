@@ -1,6 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import { Elysia } from 'elysia'
-import type { InferenceAdapter, InferenceForwardRequest } from '../inference/index.ts'
+import type { Database } from '../persistence/index.ts'
+import {
+  callerSuppliedIdempotency,
+  generateIdempotencyValue,
+  type InferenceAdapter,
+  type InferenceAdapterCapabilities,
+  type InferenceForwardRequest,
+} from '../inference/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
 import type { InferenceTarget, ProviderConnectionRegistry } from '../providers/index.ts'
@@ -14,6 +21,20 @@ export interface StreamingTimeouts {
   readonly streamingIdleMs: number
 }
 
+/**
+ * The default inference transport timeouts. Each may be overridden by a
+ * matching global setting; per-connection overrides win over both.
+ */
+export interface TransportDefaults {
+  readonly connectionTimeoutMs: number
+  readonly firstByteTimeoutMs: number
+  readonly nonStreamingTotalTimeoutMs: number
+  readonly streamingIdleTimeoutMs: number
+  readonly totalRetryTimeoutMs: number
+  /** Browser origins allowed to call inference cross-origin. */
+  readonly corsAllowedOrigins: readonly string[]
+}
+
 export interface InferenceRoutesOptions {
   readonly gatewayKeys: GatewayKeyRegistry
   readonly providers: ProviderConnectionRegistry
@@ -22,13 +43,23 @@ export interface InferenceRoutesOptions {
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly timeouts?: StreamingTimeouts
+  /** Per-connection transport overrides and the global fallback defaults. */
+  readonly transportDefaults?: TransportDefaults
+  readonly database?: Database
   readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
-const DEFAULT_STREAMING_HEADER_MS = 20_000
-const DEFAULT_STREAMING_IDLE_MS = 30_000
 const MAX_INFERENCE_ATTEMPTS = 3
-const MAX_RETRY_BUDGET_MS = 30_000
+
+/** Reasonable defaults applied when no global setting has been written yet. */
+export const DEFAULT_TRANSPORT: TransportDefaults = {
+  connectionTimeoutMs: 10_000,
+  firstByteTimeoutMs: 20_000,
+  nonStreamingTotalTimeoutMs: 120_000,
+  streamingIdleTimeoutMs: 30_000,
+  totalRetryTimeoutMs: 30_000,
+  corsAllowedOrigins: [],
+}
 
 /**
  * The provider-scoped OpenAI surface an application reaches with its Gateway
@@ -40,29 +71,56 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
   const { gatewayKeys, providers, inference, modelCatalog } = options
   const timer = options.timer ?? systemTimer
   const retrySleep = options.retrySleep ?? sleepWithTimer(timer)
-  const timeouts: StreamingTimeouts = {
-    streamingHeaderMs: options.timeouts?.streamingHeaderMs ?? DEFAULT_STREAMING_HEADER_MS,
-    streamingIdleMs: options.timeouts?.streamingIdleMs ?? DEFAULT_STREAMING_IDLE_MS,
-  }
+  const transport = options.transportDefaults ?? DEFAULT_TRANSPORT
+  const adapterCapabilities: InferenceAdapterCapabilities = inference.capabilities
 
   return new Elysia({ name: 'iroha/inference', prefix: '/providers' })
+    .options(
+      '/:connectionId/*',
+      async ({ params, request }) => {
+        return handleCors({
+          connectionId: params.connectionId,
+          gatewayKeys,
+          database: options.database ?? null,
+          transport,
+          adapterCapabilities,
+          request,
+        })
+      },
+      {
+        detail: {
+          summary: 'CORS preflight',
+          description:
+            'Replies to a browser OPTIONS preflight with the allow-listed origin (if any) and the methods/headers inference is allowed to use. Same-origin requests get no CORS machinery.',
+        },
+      },
+    )
     .get(
       '/:connectionId/v1/models',
       async ({ request, params }) => {
         const correlationId = newRequestId()
         const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
 
+        const cors = await buildCorsHeaders({
+          connectionId: params.connectionId,
+          gatewayKeys,
+          database: options.database ?? null,
+          transport,
+          request,
+        })
+        const responseHeaders = { ...baseHeaders, ...cors }
+
         const token = bearerToken(request.headers)
         const authorization = await gatewayKeys.authorizeConnection(params.connectionId, token)
         if (!authorization.ok) {
           const refusal = authorizationRefusal(authorization)
-          return error(refusal.status, baseHeaders, refusal, correlationId)
+          return error(refusal.status, responseHeaders, refusal, correlationId)
         }
 
         const result = await modelCatalog.listForScope(params.connectionId, authorization.models)
         if (!result.ok) {
           const refusal = resolutionRefusal(result.failure)
-          return error(refusal.status, baseHeaders, refusal, correlationId)
+          return error(refusal.status, responseHeaders, refusal, correlationId)
         }
 
         return new Response(
@@ -70,7 +128,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
             object: 'list',
             data: result.value.map((model) => ({ id: model.id, object: 'model', created: model.created })),
           }),
-          { status: 200, headers: baseHeaders },
+          { status: 200, headers: responseHeaders },
         )
       },
     )
@@ -86,8 +144,11 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           inference,
           modelCatalog,
           timer,
-          timeouts,
+          timeouts: options.timeouts,
           retrySleep,
+          transport,
+          adapterCapabilities,
+          database: options.database ?? null,
         }),
     )
     .post(
@@ -102,8 +163,11 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           inference,
           modelCatalog,
           timer,
-          timeouts,
+          timeouts: options.timeouts,
           retrySleep,
+          transport,
+          adapterCapabilities,
+          database: options.database ?? null,
         }),
     )
 }
@@ -114,23 +178,60 @@ async function forwardGeneration(options: {
   request: Request
   connectionId: string
   upstreamPath: '/chat/completions' | '/responses'
+  database?: Database | null
   gatewayKeys: GatewayKeyRegistry
   providers: ProviderConnectionRegistry
   inference: InferenceAdapter
   modelCatalog: ModelCatalogService
   timer: Timer
-  timeouts: StreamingTimeouts
+  /** Test override applied when no per-connection streaming timeout is set. */
+  timeouts?: StreamingTimeouts | undefined
   retrySleep: (ms: number, signal: AbortSignal) => Promise<void>
+  transport: TransportDefaults
+  adapterCapabilities: InferenceAdapterCapabilities
 }): Promise<Response> {
-  const { request, connectionId, upstreamPath, gatewayKeys, providers, inference, modelCatalog, timer, timeouts, retrySleep } = options
+  const {
+    request,
+    connectionId,
+    upstreamPath,
+    gatewayKeys,
+    providers,
+    inference,
+    modelCatalog,
+    timer,
+    retrySleep,
+    transport,
+    adapterCapabilities,
+    timeouts,
+  } = options
   const correlationId = newRequestId()
   const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
+  const cors = await buildCorsHeaders({
+    connectionId,
+    gatewayKeys,
+    database: options.database ?? null,
+    transport,
+    request,
+  })
+  const responseHeaders = { ...baseHeaders, ...cors }
+
+  const corsPreflight = await maybeCorsDeny({
+    request,
+    connectionId,
+    gatewayKeys,
+    database: options.database ?? null,
+    transport,
+    correlationId,
+    headers: responseHeaders,
+  })
+  if (corsPreflight !== null) return corsPreflight
+
   const envelope = readEnvelope(await request.text())
 
   if (!envelope.ok) {
     return error(
       envelope.status,
-      baseHeaders,
+      responseHeaders,
       { code: envelope.code, message: envelope.message },
       correlationId,
     )
@@ -140,13 +241,13 @@ async function forwardGeneration(options: {
   const authorization = await gatewayKeys.authorizeInference(connectionId, envelope.model, token)
   if (!authorization.ok) {
     const refusal = authorizationRefusal(authorization)
-    return error(refusal.status, baseHeaders, refusal, correlationId)
+    return error(refusal.status, responseHeaders, refusal, correlationId)
   }
 
   if (await modelCatalog.isExcluded(connectionId, envelope.model)) {
     return error(
       403,
-      baseHeaders,
+      responseHeaders,
       { code: 'model_excluded', message: 'This model is excluded on this Provider Connection.' },
       correlationId,
     )
@@ -157,10 +258,17 @@ async function forwardGeneration(options: {
   const retryPolicy = await providers.get(connectionId)
   const maxAttempts = retryPolicy?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
   const retryAmbiguousNetwork = retryPolicy?.retryAmbiguousNetwork ?? false
+  const totalRetryBudgetMs = retryPolicy?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
   let alternateUsed = false
   let sameKeyRetries = 0
   let lastUpstream: Awaited<ReturnType<InferenceAdapter['forward']>> | null = null
   let retainedTarget: InferenceTarget | null = null
+
+  const callerHeaders = headersOf(request)
+  const inboundIdempotency = callerSuppliedIdempotency(callerHeaders, adapterCapabilities.idempotencyHeader)
+  const generatedIdempotency = inboundIdempotency === null && adapterCapabilities.idempotencyGenerationSafe
+    ? generateIdempotencyValue()
+    : null
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (request.signal.aborted) throw abortError()
@@ -180,7 +288,7 @@ async function forwardGeneration(options: {
         const retryAfter = await providers.earliestRetryAfterSeconds(connectionId)
         return error(
           refusal.status,
-          { ...baseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
+          { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
           refusal,
           correlationId,
         )
@@ -188,24 +296,43 @@ async function forwardGeneration(options: {
       target = resolution.value
     }
 
+    const upstreamHeaders = buildUpstreamHeaders({
+      callerHeaders,
+      target,
+      adapterCapabilities,
+      inboundIdempotency,
+      generatedIdempotency,
+    })
+
     const forwardRequest: InferenceForwardRequest = {
       baseUrl: target.baseUrl,
       allowInsecureHttp: target.allowInsecureHttp,
       path: upstreamPath,
       method: 'POST',
       body: envelope.raw,
-      headers: headersOf(request),
+      headers: upstreamHeaders,
       upstreamKey: target.upstreamKey,
       signal: request.signal,
+      authHeader: target.authHeader,
+      authPrefix: target.authPrefix,
+      staticHeaders: target.staticHeaders,
+      redirectAllowSameOrigin: target.redirectAllowSameOrigin,
+      idempotencyHeader: target.idempotencyHeader,
+      idempotencyGenerationSafe: adapterCapabilities.idempotencyGenerationSafe,
+      connectionTimeoutMs: target.connectionTimeoutMs,
+      firstByteTimeoutMs: target.firstByteTimeoutMs,
+      nonStreamingTotalTimeoutMs: target.nonStreamingTotalTimeoutMs,
+      streamingIdleTimeoutMs: target.streamingIdleTimeoutMs,
+      totalRetryTimeoutMs: target.totalRetryTimeoutMs,
     }
 
     if (envelope.stream) {
       const streamed = await streamChatCompletion(
         inference,
         timer,
-        timeouts,
+        streamingTimeoutsFor(timeouts, target, transport),
         forwardRequest,
-        baseHeaders,
+        responseHeaders,
         correlationId,
       )
       if (streamed.status >= 200 && streamed.status < 300) {
@@ -245,7 +372,7 @@ async function forwardGeneration(options: {
       if (
         retryAmbiguousNetwork &&
         attempt < maxAttempts &&
-        timer.now() - startedAt < MAX_RETRY_BUDGET_MS
+        timer.now() - startedAt < totalRetryBudgetMs
       ) {
         retainedTarget = target
         await retrySleep(100, request.signal)
@@ -253,7 +380,7 @@ async function forwardGeneration(options: {
       }
       return error(
         502,
-        baseHeaders,
+        responseHeaders,
         { code: 'upstream_unreachable', message: 'The Provider could not be reached.' },
         correlationId,
       )
@@ -264,8 +391,8 @@ async function forwardGeneration(options: {
       return new Response(lastUpstream.kind === 'stream' ? lastUpstream.stream : lastUpstream.body, {
         status: lastUpstream.status,
         headers: {
+          ...responseHeaders,
           'content-type': lastUpstream.headers['content-type'] ?? 'application/json',
-          'x-request-id': correlationId,
         },
       })
     }
@@ -279,7 +406,7 @@ async function forwardGeneration(options: {
       reason: `upstream HTTP ${status}`,
     })
 
-    const insideBudget = timer.now() - startedAt < MAX_RETRY_BUDGET_MS
+    const insideBudget = timer.now() - startedAt < totalRetryBudgetMs
     if (!insideBudget || request.signal.aborted) break
 
     if (status === 401 || status === 403) {
@@ -303,7 +430,7 @@ async function forwardGeneration(options: {
   if (lastUpstream === null) {
     return error(
       503,
-      baseHeaders,
+      responseHeaders,
       { code: 'upstream_credentials_unavailable', message: 'No eligible Upstream Key is available for this connection.' },
       correlationId,
     )
@@ -312,7 +439,7 @@ async function forwardGeneration(options: {
     const retryAfter = await providers.earliestRetryAfterSeconds(connectionId)
     return error(
       503,
-      { ...baseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
+      { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
       {
         code: 'upstream_credentials_unavailable',
         message: 'No eligible Upstream Key is available for this connection.',
@@ -323,10 +450,71 @@ async function forwardGeneration(options: {
   const refusal = upstreamRefusal(lastUpstream.status, lastUpstream.headers)
   return error(
     refusal.status,
-    { ...baseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) },
+    { ...responseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) },
     refusal,
     correlationId,
   )
+}
+
+/** Adds the Iroha-managed authentication, static, and idempotency headers to a forwarded request. */
+function buildUpstreamHeaders(options: {
+  callerHeaders: Readonly<Record<string, string>>
+  target: InferenceTarget
+  adapterCapabilities: InferenceAdapterCapabilities
+  inboundIdempotency: string | null
+  generatedIdempotency: string | null
+}): Readonly<Record<string, string>> {
+  const result: Record<string, string> = {}
+  for (const [name, value] of Object.entries(options.callerHeaders)) {
+    if (!shouldForwardHeader(name)) continue
+    result[name] = value
+  }
+  const authValue = options.target.authPrefix + options.target.upstreamKey
+  result[options.target.authHeader.toLowerCase()] = authValue
+  for (const [name, value] of Object.entries(options.target.staticHeaders)) {
+    if (name.toLowerCase() === options.target.authHeader.toLowerCase()) continue
+    result[name.toLowerCase()] = value
+  }
+  if (options.inboundIdempotency !== null) {
+    result[options.adapterCapabilities.idempotencyHeader.toLowerCase()] = options.inboundIdempotency
+  } else if (options.generatedIdempotency !== null) {
+    result[options.adapterCapabilities.idempotencyHeader.toLowerCase()] = options.generatedIdempotency
+  }
+  return result
+}
+
+const FORWARD_BLOCKED_HEADERS = new Set([
+  'authorization',
+  'connection',
+  'content-length',
+  'cookie',
+  'expect',
+  'host',
+  'keep-alive',
+  'origin',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'referer',
+  'set-cookie',
+  'te',
+  'traceparent',
+  'tracestate',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'via',
+  'x-correlation-id',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+  'x-request-id',
+])
+
+function shouldForwardHeader(name: string): boolean {
+  if (FORWARD_BLOCKED_HEADERS.has(name.toLowerCase())) return false
+  if (name.toLowerCase().startsWith('iroha-')) return false
+  return true
 }
 
 function numericRetryAfter(headers: Readonly<Record<string, string>> | Headers): number | null {
@@ -695,4 +883,205 @@ function deadlineGuard(
 function isAbort(cause: unknown): boolean {
   if (typeof cause !== 'object' || cause === null) return false
   return (cause as { name?: unknown }).name === 'AbortError'
+}
+
+/**
+ * Resolves the streaming deadlines for one inference call. Priority is the
+ * route-level override (tests use it to compress time), then the connection's
+ * per-connection overrides, then the global transport defaults. The fallbacks
+ * exist so a target without those fields still has safe upper bounds.
+ */
+function streamingTimeoutsFor(
+  routeOverride: StreamingTimeouts | undefined,
+  target: InferenceTarget,
+  transport: TransportDefaults,
+): StreamingTimeouts {
+  return {
+    streamingHeaderMs:
+      routeOverride?.streamingHeaderMs ?? target.firstByteTimeoutMs ?? transport.firstByteTimeoutMs,
+    streamingIdleMs:
+      routeOverride?.streamingIdleMs ?? target.streamingIdleTimeoutMs ?? transport.streamingIdleTimeoutMs,
+  }
+}
+
+const CORS_ALLOW_METHODS = 'POST, OPTIONS'
+const CORS_ALLOW_HEADERS = 'authorization, content-type, idempotency-key, x-api-key, api-key'
+const CORS_MAX_AGE = '600'
+
+/**
+ * Resolves the CORS allow-list for a request. A missing `Origin` header means
+ * a server-to-server call, which never goes through CORS machinery. An origin
+ * that matches the request's host is treated as same-origin and gets no CORS
+ * headers; any other origin must match the global allow-list, the per-key
+ * allow-list, or the request is denied.
+ *
+ * The function returns the headers a successful response should carry. A
+ * null return means "no CORS machinery", not "denied"; the caller decides.
+ */
+async function buildCorsHeaders(options: {
+  connectionId: string
+  gatewayKeys: GatewayKeyRegistry
+  database: Database | null
+  transport: TransportDefaults
+  request: Request
+}): Promise<Record<string, string>> {
+  const origin = options.request.headers.get('origin')
+  if (origin === null) return {}
+
+  const sameOrigin = isSameOrigin(options.request, origin)
+  if (sameOrigin) return {}
+
+  const allow = await resolveAllowList(options)
+  if (allow !== origin) return {}
+
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': CORS_ALLOW_METHODS,
+    'access-control-allow-headers': CORS_ALLOW_HEADERS,
+    'access-control-max-age': CORS_MAX_AGE,
+    vary: 'Origin',
+  }
+}
+
+/**
+ * If the request is a cross-origin browser call from a denied Origin, returns
+ * a 403 response; otherwise returns null and the caller proceeds. The check
+ * runs before bearer authentication so an Origin probe cannot learn whether
+ * a Gateway Key exists.
+ */
+async function maybeCorsDeny(options: {
+  request: Request
+  connectionId: string
+  gatewayKeys: GatewayKeyRegistry
+  database: Database | null
+  transport: TransportDefaults
+  correlationId: string
+  headers: Record<string, string>
+}): Promise<Response | null> {
+  const origin = options.request.headers.get('origin')
+  if (origin === null) return null
+  if (isSameOrigin(options.request, origin)) return null
+
+  const allow = await resolveAllowList({
+    connectionId: options.connectionId,
+    gatewayKeys: options.gatewayKeys,
+    database: options.database,
+    transport: options.transport,
+    request: options.request,
+  })
+  if (allow === origin) return null
+
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: 'cors_origin_denied',
+        message: 'This Origin is not allowed to call Iroha.',
+      },
+    }),
+    {
+      status: 403,
+      headers: {
+        ...options.headers,
+        'content-type': 'application/json',
+        'x-request-id': options.correlationId,
+      },
+    },
+  )
+}
+
+async function resolveAllowList(options: {
+  connectionId: string
+  gatewayKeys: GatewayKeyRegistry
+  database: Database | null
+  transport: TransportDefaults
+  request: Request
+}): Promise<string | null> {
+  const origin = options.request.headers.get('origin')
+  if (origin === null) return null
+
+  const token = bearerToken(options.request.headers)
+  if (token !== null && options.database !== null) {
+    const key = await locateGatewayKey(options.database, token)
+    if (key !== null && key.corsOrigins.includes(origin)) return origin
+  }
+
+  if (options.transport.corsAllowedOrigins.includes(origin)) return origin
+  return null
+}
+
+async function locateGatewayKey(database: Database, token: string): Promise<{
+  readonly corsOrigins: readonly string[]
+} | null> {
+  const separator = token.indexOf('.')
+  if (separator <= 0) return null
+  const id = token.slice(0, separator)
+  const record = await database.gatewayKeys.get(id)
+  if (record === null || record.revokedAt !== null) return null
+  return { corsOrigins: record.corsOrigins }
+}
+
+function isSameOrigin(request: Request, origin: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(origin)
+  } catch {
+    return false
+  }
+  // The `Host` header is caller-controlled and must not be trusted to decide
+  // the same-origin question: a browser never sets Host. The real authority
+  // is the URL the request reached Iroha on, which the runtime fills in.
+  const requestHost = new URL(request.url).host
+  return parsed.host === requestHost
+}
+
+async function handleCors(options: {
+  connectionId: string
+  gatewayKeys: GatewayKeyRegistry
+  database: Database | null
+  transport: TransportDefaults
+  adapterCapabilities: InferenceAdapterCapabilities
+  request: Request
+}): Promise<Response> {
+  const origin = options.request.headers.get('origin')
+  const correlationId = newRequestId()
+  const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
+
+  if (origin === null || isSameOrigin(options.request, origin)) {
+    return new Response(null, { status: 204, headers: baseHeaders })
+  }
+
+  const allow = await resolveAllowList({
+    connectionId: options.connectionId,
+    gatewayKeys: options.gatewayKeys,
+    database: options.database,
+    transport: options.transport,
+    request: options.request,
+  })
+  if (allow === origin) {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...baseHeaders,
+        'access-control-allow-origin': origin,
+        'access-control-allow-methods': CORS_ALLOW_METHODS,
+        'access-control-allow-headers': CORS_ALLOW_HEADERS,
+        'access-control-max-age': CORS_MAX_AGE,
+        vary: 'Origin',
+      },
+    })
+  }
+
+  return new Response(
+    JSON.stringify({
+      error: { code: 'cors_origin_denied', message: 'This Origin is not allowed to call Iroha.' },
+    }),
+    {
+      status: 403,
+      headers: {
+        ...baseHeaders,
+        'content-type': 'application/json',
+        'x-request-id': correlationId,
+      },
+    },
+  )
 }

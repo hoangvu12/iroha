@@ -57,6 +57,20 @@
       "when": 1786531693067,
       "tag": "0007_robust_baron_zemo",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786533091409,
+      "tag": "0008_lowly_spirit",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786534600000,
+      "tag": "0009_advanced_provider_transport",
+      "breakpoints": true
     }
   ]
 }

@@ -82,6 +82,24 @@ export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRou
           baseUrl: input.baseUrl,
           upstreamKey: input.upstreamKey,
           allowInsecureHttp: input.allowInsecureHttp,
+          ...('authHeader' in input ? { authHeader: input.authHeader } : {}),
+          ...('authPrefix' in input ? { authPrefix: input.authPrefix } : {}),
+          ...('staticHeaders' in input ? { staticHeaders: input.staticHeaders } : {}),
+          ...('redirectAllowSameOrigin' in input
+            ? { redirectAllowSameOrigin: input.redirectAllowSameOrigin }
+            : {}),
+          ...('connectionTimeoutMs' in input
+            ? { connectionTimeoutMs: input.connectionTimeoutMs }
+            : {}),
+          ...('firstByteTimeoutMs' in input ? { firstByteTimeoutMs: input.firstByteTimeoutMs } : {}),
+          ...('nonStreamingTotalTimeoutMs' in input
+            ? { nonStreamingTotalTimeoutMs: input.nonStreamingTotalTimeoutMs }
+            : {}),
+          ...('streamingIdleTimeoutMs' in input
+            ? { streamingIdleTimeoutMs: input.streamingIdleTimeoutMs }
+            : {}),
+          ...('totalRetryTimeoutMs' in input ? { totalRetryTimeoutMs: input.totalRetryTimeoutMs } : {}),
+          ...('idempotencyHeader' in input ? { idempotencyHeader: input.idempotencyHeader } : {}),
         })
 
         if (!result.ok) {
@@ -154,6 +172,24 @@ export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRou
           ...('retryAmbiguousNetwork' in input
             ? { retryAmbiguousNetwork: input.retryAmbiguousNetwork }
             : {}),
+          ...('authHeader' in input ? { authHeader: input.authHeader } : {}),
+          ...('authPrefix' in input ? { authPrefix: input.authPrefix } : {}),
+          ...('staticHeaders' in input ? { staticHeaders: input.staticHeaders } : {}),
+          ...('redirectAllowSameOrigin' in input
+            ? { redirectAllowSameOrigin: input.redirectAllowSameOrigin }
+            : {}),
+          ...('connectionTimeoutMs' in input
+            ? { connectionTimeoutMs: input.connectionTimeoutMs }
+            : {}),
+          ...('firstByteTimeoutMs' in input ? { firstByteTimeoutMs: input.firstByteTimeoutMs } : {}),
+          ...('nonStreamingTotalTimeoutMs' in input
+            ? { nonStreamingTotalTimeoutMs: input.nonStreamingTotalTimeoutMs }
+            : {}),
+          ...('streamingIdleTimeoutMs' in input
+            ? { streamingIdleTimeoutMs: input.streamingIdleTimeoutMs }
+            : {}),
+          ...('totalRetryTimeoutMs' in input ? { totalRetryTimeoutMs: input.totalRetryTimeoutMs } : {}),
+          ...('idempotencyHeader' in input ? { idempotencyHeader: input.idempotencyHeader } : {}),
         })
 
         if (!result.ok) {
@@ -585,6 +621,7 @@ export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRou
         const result = await gatewayKeys.create({
           name: input.name,
           scope: input.scope,
+          ...('corsOrigins' in input ? { corsOrigins: input.corsOrigins } : {}),
         })
 
         if (!result.ok) {
@@ -718,6 +755,10 @@ const accountResponse = t.Object({
   updatedAt: t.String(),
 })
 
+const staticHeaderNameResponse = t.Object({
+  name: t.String(),
+})
+
 const connectionResponse = t.Object({
   id: t.String(),
   displayName: t.String(),
@@ -727,6 +768,17 @@ const connectionResponse = t.Object({
   retryMaxAttempts: t.Number(),
   retryAmbiguousNetwork: t.Boolean(),
   archived: t.Boolean(),
+  authHeader: t.String(),
+  authPrefix: t.String(),
+  staticHeaders: t.Array(staticHeaderNameResponse),
+  redirectAllowSameOrigin: t.Boolean(),
+  connectionTimeoutMs: t.Number(),
+  firstByteTimeoutMs: t.Number(),
+  nonStreamingTotalTimeoutMs: t.Number(),
+  streamingIdleTimeoutMs: t.Number(),
+  totalRetryTimeoutMs: t.Number(),
+  idempotencyHeader: t.String(),
+  warnings: t.Array(t.String()),
   createdAt: t.String(),
   updatedAt: t.String(),
   keys: t.Array(keyResponse),
@@ -744,6 +796,7 @@ const gatewayKeyResponse = t.Object({
   id: t.String(),
   name: t.String(),
   scope: t.Array(gatewayKeyScopeResponse),
+  corsOrigins: t.Array(t.String()),
   createdAt: t.String(),
   lastUsedAt: t.Union([t.Null(), t.String()]),
   revoked: t.Boolean(),
@@ -795,6 +848,17 @@ function toConnectionDto(view: ConnectionView): ConnectionDto {
     retryMaxAttempts: view.retryMaxAttempts,
     retryAmbiguousNetwork: view.retryAmbiguousNetwork,
     archived: view.archived,
+    authHeader: view.authHeader,
+    authPrefix: view.authPrefix,
+    staticHeaders: view.staticHeaders.map((header) => ({ name: header.name })),
+    redirectAllowSameOrigin: view.redirectAllowSameOrigin,
+    connectionTimeoutMs: view.connectionTimeoutMs,
+    firstByteTimeoutMs: view.firstByteTimeoutMs,
+    nonStreamingTotalTimeoutMs: view.nonStreamingTotalTimeoutMs,
+    streamingIdleTimeoutMs: view.streamingIdleTimeoutMs,
+    totalRetryTimeoutMs: view.totalRetryTimeoutMs,
+    idempotencyHeader: view.idempotencyHeader,
+    warnings: [...view.warnings],
     createdAt: view.createdAt.toISOString(),
     updatedAt: view.updatedAt.toISOString(),
     keys: view.keys.map(toKeyDto),
@@ -845,6 +909,7 @@ function toGatewayKeyDto(key: GatewayKeyView): GatewayKeyDto {
       connectionId: entry.connectionId,
       models: entry.models === null ? null : [...entry.models],
     })),
+    corsOrigins: [...key.corsOrigins],
     createdAt: key.createdAt.toISOString(),
     lastUsedAt: key.lastUsedAt === null ? null : key.lastUsedAt.toISOString(),
     revoked: key.revokedAt !== null,

@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -11,6 +13,7 @@ import {
   type AuthState,
   type SessionSummary,
 } from '@/lib/auth'
+import { fetchRetention, updateRetention, SettingsError, type RetentionView } from '@/lib/settings'
 
 interface AccountSettingsProps {
   readonly state: AuthState
@@ -19,41 +22,65 @@ interface AccountSettingsProps {
 }
 
 /**
- * The Owner's account area: who is signed in, and which browsers hold a live
- * session. Revocation is the useful action here, so it sits next to each row
+ * The Owner's account area: who is signed in, which browsers hold a live
+ * session, the request-history retention window, and (later) other global
+ * settings. Revocation is the useful action here, so it sits next to each row
  * rather than behind a menu.
  */
 export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
   const csrfToken = state.session?.csrfToken ?? ''
   const [sessions, setSessions] = useState<readonly SessionSummary[] | null>(null)
-  const [error, setError] = useState<AuthError | null>(null)
+  const [sessionsError, setSessionsError] = useState<AuthError | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [retention, setRetention] = useState<RetentionView | null>(null)
+  const [retentionDraft, setRetentionDraft] = useState<string>('30')
+  const [retentionError, setRetentionError] = useState<string | null>(null)
+  const [retentionBusy, setRetentionBusy] = useState(false)
 
-  const reload = useCallback(async () => {
+  const reloadSessions = useCallback(async () => {
     try {
       setSessions(await fetchSessions())
-      setError(null)
+      setSessionsError(null)
     } catch (cause) {
       if (cause instanceof AuthError && cause.code === 'authentication_required') {
         onSignedOut()
         return
       }
-      setError(cause instanceof AuthError ? cause : new AuthError('request_failed', 'Load failed.'))
+      setSessionsError(cause instanceof AuthError ? cause : new AuthError('request_failed', 'Load failed.'))
     }
   }, [onSignedOut])
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    void reloadSessions()
+  }, [reloadSessions])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchRetention()
+      .then((value) => {
+        if (cancelled) return
+        setRetention(value)
+        setRetentionDraft(String(value.days))
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return
+        setRetentionError(
+          cause instanceof SettingsError ? cause.message : 'Retention could not be loaded.',
+        )
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const revokeOne = async (session: SessionSummary) => {
     setBusyId(session.id)
     try {
       await revokeSession(session.id, csrfToken)
       if (session.current) onSignedOut()
-      else await reload()
+      else await reloadSessions()
     } catch (cause) {
-      setError(cause instanceof AuthError ? cause : new AuthError('request_failed', 'Revoke failed.'))
+      setSessionsError(cause instanceof AuthError ? cause : new AuthError('request_failed', 'Revoke failed.'))
     } finally {
       setBusyId(null)
     }
@@ -65,10 +92,32 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
       await revokeAllSessions(csrfToken)
       onSignedOut()
     } catch (cause) {
-      setError(cause instanceof AuthError ? cause : new AuthError('request_failed', 'Revoke failed.'))
+      setSessionsError(cause instanceof AuthError ? cause : new AuthError('request_failed', 'Revoke failed.'))
     } finally {
       setBusyId(null)
     }
+  }
+
+  const saveRetention = (event: FormEvent) => {
+    event.preventDefault()
+    const parsed = Number(retentionDraft)
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 3650) {
+      setRetentionError('Retention must be an integer between 0 and 3650 days.')
+      return
+    }
+    setRetentionBusy(true)
+    setRetentionError(null)
+    updateRetention(parsed, csrfToken)
+      .then((value) => {
+        setRetention(value)
+        setRetentionDraft(String(value.days))
+      })
+      .catch((cause: unknown) => {
+        setRetentionError(
+          cause instanceof SettingsError ? cause.message : 'Retention could not be saved.',
+        )
+      })
+      .finally(() => setRetentionBusy(false))
   }
 
   return (
@@ -110,10 +159,10 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
 
         <Separator className="my-4" />
 
-        {error && (
+        {sessionsError && (
           <Alert variant="destructive" role="alert" className="mb-4">
             <AlertTitle>Sessions unavailable</AlertTitle>
-            <AlertDescription>{error.message}</AlertDescription>
+            <AlertDescription>{sessionsError.message}</AlertDescription>
           </Alert>
         )}
 
@@ -148,6 +197,49 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section>
+        <h2 className="text-base font-semibold tracking-tight">Request history</h2>
+        <p className="text-muted-foreground mt-1 text-sm">
+          How long Iroha keeps inference metadata. Zero disables storage entirely — useful when
+          storage is unwanted and a fresh install needs to drop history before any inference has
+          happened.
+        </p>
+
+        <Separator className="my-4" />
+
+        {retentionError && (
+          <Alert variant="destructive" role="alert" className="mb-4">
+            <AlertTitle>Retention could not be saved</AlertTitle>
+            <AlertDescription>{retentionError}</AlertDescription>
+          </Alert>
+        )}
+
+        {retention === null ? (
+          <Skeleton className="h-12 w-full" />
+        ) : (
+          <form className="bg-card flex flex-col gap-2 rounded-lg border p-3" onSubmit={saveRetention}>
+            <Label htmlFor="retention-days">Retention (days)</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="retention-days"
+                type="number"
+                min={0}
+                max={3650}
+                value={retentionDraft}
+                onChange={(event) => setRetentionDraft(event.target.value)}
+                aria-describedby="retention-hint"
+              />
+              <Button type="submit" size="sm" disabled={retentionBusy}>
+                {retentionBusy ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+            <p id="retention-hint" className="text-muted-foreground text-xs">
+              Currently {retention.enabled ? `${retention.days} day${retention.days === 1 ? '' : 's'}` : 'disabled'}.
+            </p>
+          </form>
         )}
       </section>
     </div>

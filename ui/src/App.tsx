@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AccountSettings } from '@/components/account-settings'
 import { AppShell } from '@/components/app-shell'
+import { AuditArea } from '@/components/audit-area'
 import { AuthScreen } from '@/components/auth-screen'
+import { GatewayKeysArea } from '@/components/gateway-keys-area'
+import { Overview } from '@/components/overview'
 import { ProvidersArea } from '@/components/providers-area'
 import { ReadinessPill } from '@/components/readiness-pill'
+import { RequestsArea } from '@/components/requests-area'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { Skeleton } from '@/components/ui/skeleton'
 import { fetchAuthState, signOut, type AuthState } from '@/lib/auth'
 import { fetchReadiness, type Readiness } from '@/lib/health'
 
@@ -55,7 +57,7 @@ export default function App() {
   if (auth === null) {
     return (
       <div className="bg-canvas flex min-h-full items-center justify-center p-10">
-        <Skeleton className="h-24 w-full max-w-sm" aria-label="Loading" />
+        <div className="bg-muted h-6 w-40 animate-pulse rounded-md" aria-label="Loading" />
       </div>
     )
   }
@@ -74,6 +76,7 @@ export default function App() {
   }
 
   const area = AREAS[activeId] ?? AREAS.overview!
+  const csrf = auth.session?.csrfToken ?? ''
 
   return (
     <AppShell
@@ -93,82 +96,43 @@ export default function App() {
       {activeId === 'settings' ? (
         <AccountSettings state={auth} onSignedOut={() => void reloadAuth()} />
       ) : activeId === 'providers' ? (
-        <ProvidersArea
-          csrfToken={auth.session?.csrfToken ?? ''}
-          onSignedOut={() => void reloadAuth()}
-        />
+        <ProvidersArea csrfToken={csrf} onSignedOut={() => void reloadAuth()} />
+      ) : activeId === 'gateway-keys' ? (
+        <GatewayKeysArea csrfToken={csrf} onSignedOut={() => void reloadAuth()} />
+      ) : activeId === 'requests' ? (
+        <RequestsArea onSignedOut={() => void reloadAuth()} />
+      ) : activeId === 'audit' ? (
+        <AuditArea csrfToken={csrf} onSignedOut={() => void reloadAuth()} />
       ) : (
-        <Overview readiness={readiness} auth={auth} />
+        <Overview auth={auth} readiness={readiness} csrfToken={csrf} />
       )}
     </AppShell>
   )
 }
 
 const AREAS: Record<string, { title: string; description: string }> = {
-  overview: { title: 'Overview', description: 'Gateway runtime and configuration state' },
-  providers: { title: 'Providers', description: 'Provider Connections and their Upstream Keys' },
-  settings: { title: 'Settings', description: 'Owner account and signed-in sessions' },
-}
-
-function Overview({ readiness, auth }: { readiness: Readiness | null; auth: AuthState }) {
-  return (
-    <div className="flex flex-col gap-6">
-      <section>
-        <h2 className="text-base font-semibold tracking-tight">Runtime</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Iroha validated its configuration, applied every pending migration, and bound its port
-          before accepting this request.
-        </p>
-
-        <Separator className="my-4" />
-
-        <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
-          <Fact label="Readiness">
-            {readiness === null ? <Skeleton className="h-4 w-24" /> : readinessText(readiness)}
-          </Fact>
-          <Fact label="Database engine">
-            {readiness === null ? (
-              <Skeleton className="h-4 w-20" />
-            ) : readiness.state === 'ready' ? (
-              readiness.dialect === 'sqlite' ? 'SQLite' : 'PostgreSQL'
-            ) : (
-              'Unknown'
-            )}
-          </Fact>
-          <Fact label="Owner">{auth.owner?.username ?? '—'}</Fact>
-          <Fact label="Recovery">
-            {auth.recoveryEnabled ? 'Token configured' : 'Not configured'}
-          </Fact>
-        </dl>
-      </section>
-
-      <section>
-        <h2 className="text-base font-semibold tracking-tight">Not configured yet</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Provider Connections live in the Providers area. Gateway Keys, request history, and audit
-          arrive with the tickets that build them; nothing here is inferred or simulated.
-        </p>
-      </section>
-    </div>
-  )
-}
-
-function readinessText(readiness: Readiness): string {
-  switch (readiness.state) {
-    case 'ready':
-      return 'Accepting traffic'
-    case 'not_ready':
-      return `Not accepting traffic (${readiness.reason.replace(/_/g, ' ')})`
-    case 'unreachable':
-      return 'Gateway did not answer'
-  }
-}
-
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <dt className="text-muted-foreground text-xs tracking-wide uppercase">{label}</dt>
-      <dd className="text-sm">{children}</dd>
-    </div>
-  )
+  overview: {
+    title: 'Overview',
+    description: 'Gateway runtime and the things that need attention',
+  },
+  providers: {
+    title: 'Providers',
+    description: 'Provider Connections and their Upstream Keys',
+  },
+  'gateway-keys': {
+    title: 'Gateway Keys',
+    description: 'Application credentials and their Provider Connection scope',
+  },
+  requests: {
+    title: 'Requests',
+    description: 'Inference metadata — connection, model, key, status, and latency',
+  },
+  audit: {
+    title: 'Audit',
+    description: 'Every administrative change retained by Iroha',
+  },
+  settings: {
+    title: 'Settings',
+    description: 'Owner account, sessions, and retention',
+  },
 }

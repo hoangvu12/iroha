@@ -129,13 +129,11 @@ function NavigationButton({
     <button
       type="button"
       onClick={onSelect}
-      disabled={!item.available}
       aria-current={active ? 'page' : undefined}
       className={cn(
         'group relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors',
         'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
         active && 'bg-active-subtle text-active font-medium hover:bg-active-subtle hover:text-active',
-        !item.available && 'cursor-not-allowed opacity-45 hover:bg-transparent',
       )}
     >
       {/* The blue active accent, drawn as a rail rather than a filled block. */}
@@ -148,11 +146,6 @@ function NavigationButton({
       />
       <Icon className="size-4 shrink-0" aria-hidden />
       <span className="truncate">{item.label}</span>
-      {!item.available && (
-        <span className="text-muted-foreground ml-auto text-[10px] tracking-wide uppercase">
-          Soon
-        </span>
-      )}
     </button>
   )
 }

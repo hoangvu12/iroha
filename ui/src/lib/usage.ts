@@ -1,0 +1,114 @@
+export interface UsageScope {
+  readonly kind: 'key' | 'account' | 'connection_model' | 'provider' | 'unknown'
+  readonly keyId?: string
+  readonly accountId?: string
+  readonly model?: string
+}
+
+export interface UsageReadingView {
+  readonly unit: string
+  readonly balance: number | null
+  readonly used: number | null
+  readonly limit: number | null
+  readonly resetAt: string | null
+  readonly scope: UsageScope
+  readonly confidence: 'confirmed' | 'unknown'
+  readonly diagnostics: Readonly<Record<string, unknown>>
+}
+
+export interface UsageView {
+  readonly visibility: 'reactive_only' | 'authoritative'
+  readonly reading: UsageReadingView | null
+  readonly syncedAt: string | null
+  readonly lastSuccessAt: string | null
+  readonly lastFailureAt: string | null
+  readonly lastFailureCode: string | null
+  readonly lastFailureMessage: string | null
+  readonly stale: boolean
+  readonly nextPollAllowedAt: string | null
+  readonly recovery: {
+    readonly authoritative: boolean
+    readonly hasCapacity: boolean
+    readonly scope: UsageScope
+    readonly takenAt: string
+  } | null
+}
+
+export class UsageError extends Error {
+  readonly code: string
+  readonly retryAfterSeconds: number | null
+
+  constructor(code: string, message: string, retryAfterSeconds: number | null = null) {
+    super(message)
+    this.name = 'UsageError'
+    this.code = code
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
+export async function fetchUsage(
+  connectionId: string,
+  signal?: AbortSignal,
+): Promise<UsageView> {
+  return await request<UsageView>(
+    'GET',
+    `/provider-connections/${encodeURIComponent(connectionId)}/usage`,
+    { signal },
+  )
+}
+
+export async function refreshUsage(
+  connectionId: string,
+  csrfToken: string,
+): Promise<UsageView> {
+  return await request<UsageView>(
+    'POST',
+    `/provider-connections/${encodeURIComponent(connectionId)}/usage/refresh`,
+    { csrfToken },
+  )
+}
+
+async function request<T = unknown>(
+  method: string,
+  path: string,
+  options: { body?: unknown; csrfToken?: string; signal?: AbortSignal } = {},
+): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`/api/v1/admin${path}`, {
+      method,
+      credentials: 'same-origin',
+      ...(options.signal ? { signal: options.signal } : {}),
+      headers: {
+        accept: 'application/json',
+        ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(options.csrfToken === undefined ? {} : { 'x-iroha-csrf': options.csrfToken }),
+      },
+      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+    })
+  } catch {
+    throw new UsageError('unreachable', 'Iroha did not answer. Check that the gateway is running.')
+  }
+
+  if (response.status === 204) return undefined as T
+
+  let payload: unknown = null
+  try {
+    payload = await response.json()
+  } catch {
+    payload = null
+  }
+
+  if (!response.ok) throw toError(response, payload)
+  return payload as T
+}
+
+function toError(response: Response, payload: unknown): UsageError {
+  const error = (payload as { error?: { code?: unknown; message?: unknown } })?.error
+  const retryAfter = Number(response.headers.get('retry-after'))
+  return new UsageError(
+    typeof error?.code === 'string' ? error.code : 'request_failed',
+    typeof error?.message === 'string' ? error.message : 'That request could not be completed.',
+    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null,
+  )
+}

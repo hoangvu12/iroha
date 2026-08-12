@@ -1,0 +1,2 @@
+ALTER TABLE "provider_connections" ADD COLUMN "retry_max_attempts" integer DEFAULT 3 NOT NULL;--> statement-breakpoint
+ALTER TABLE "provider_connections" ADD COLUMN "retry_ambiguous_network" boolean DEFAULT false NOT NULL;

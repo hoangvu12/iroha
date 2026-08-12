@@ -342,7 +342,7 @@ describe('provider-scoped streaming Chat Completions', () => {
       const failure = (await response.json()) as { error: { code: string; type: string } }
       expect(failure.error.code).toBe('upstream_unavailable')
       expect(failure.error.type).toBe('api_error')
-      expect(upstream.calls.length - baseline).toBe(1)
+      expect(upstream.calls.length - baseline).toBe(2)
     })
 
     test('a 400 before streaming maps to the stable upstream code', async () => {

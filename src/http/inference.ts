@@ -3,7 +3,7 @@ import { Elysia } from 'elysia'
 import type { InferenceAdapter, InferenceForwardRequest } from '../inference/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
-import type { ProviderConnectionRegistry } from '../providers/index.ts'
+import type { InferenceTarget, ProviderConnectionRegistry } from '../providers/index.ts'
 import { systemTimer, type Timer } from '../runtime/timer.ts'
 
 /** The streaming deadlines, deliberately separate knobs from any buffered total timeout. */
@@ -22,10 +22,13 @@ export interface InferenceRoutesOptions {
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly timeouts?: StreamingTimeouts
+  readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
 const DEFAULT_STREAMING_HEADER_MS = 20_000
 const DEFAULT_STREAMING_IDLE_MS = 30_000
+const MAX_INFERENCE_ATTEMPTS = 3
+const MAX_RETRY_BUDGET_MS = 30_000
 
 /**
  * The provider-scoped OpenAI surface an application reaches with its Gateway
@@ -36,6 +39,7 @@ const DEFAULT_STREAMING_IDLE_MS = 30_000
 export function createInferenceRoutes(options: InferenceRoutesOptions) {
   const { gatewayKeys, providers, inference, modelCatalog } = options
   const timer = options.timer ?? systemTimer
+  const retrySleep = options.retrySleep ?? sleepWithTimer(timer)
   const timeouts: StreamingTimeouts = {
     streamingHeaderMs: options.timeouts?.streamingHeaderMs ?? DEFAULT_STREAMING_HEADER_MS,
     streamingIdleMs: options.timeouts?.streamingIdleMs ?? DEFAULT_STREAMING_IDLE_MS,
@@ -83,6 +87,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           modelCatalog,
           timer,
           timeouts,
+          retrySleep,
         }),
     )
     .post(
@@ -98,6 +103,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           modelCatalog,
           timer,
           timeouts,
+          retrySleep,
         }),
     )
 }
@@ -114,8 +120,9 @@ async function forwardGeneration(options: {
   modelCatalog: ModelCatalogService
   timer: Timer
   timeouts: StreamingTimeouts
+  retrySleep: (ms: number, signal: AbortSignal) => Promise<void>
 }): Promise<Response> {
-  const { request, connectionId, upstreamPath, gatewayKeys, providers, inference, modelCatalog, timer, timeouts } = options
+  const { request, connectionId, upstreamPath, gatewayKeys, providers, inference, modelCatalog, timer, timeouts, retrySleep } = options
   const correlationId = newRequestId()
   const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
   const envelope = readEnvelope(await request.text())
@@ -145,64 +152,207 @@ async function forwardGeneration(options: {
     )
   }
 
-  const target = await providers.resolveInference(connectionId, envelope.model)
-  if (!target.ok) {
-    const refusal = resolutionRefusal(target.failure)
-    return error(refusal.status, baseHeaders, refusal, correlationId)
-  }
+  const attemptedKeys: string[] = []
+  const startedAt = timer.now()
+  const retryPolicy = await providers.get(connectionId)
+  const maxAttempts = retryPolicy?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
+  const retryAmbiguousNetwork = retryPolicy?.retryAmbiguousNetwork ?? false
+  let alternateUsed = false
+  let sameKeyRetries = 0
+  let lastUpstream: Awaited<ReturnType<InferenceAdapter['forward']>> | null = null
+  let retainedTarget: InferenceTarget | null = null
 
-  const forwardRequest: InferenceForwardRequest = {
-    baseUrl: target.value.baseUrl,
-    allowInsecureHttp: target.value.allowInsecureHttp,
-    path: upstreamPath,
-    method: 'POST',
-    body: envelope.raw,
-    headers: headersOf(request),
-    upstreamKey: target.value.upstreamKey,
-    signal: request.signal,
-  }
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (request.signal.aborted) throw abortError()
+    let target: InferenceTarget
+    if (retainedTarget !== null) {
+      target = retainedTarget
+      retainedTarget = null
+    } else {
+      const resolution = await providers.resolveInference(
+        connectionId,
+        envelope.model,
+        attemptedKeys,
+        alternateUsed,
+      )
+      if (!resolution.ok) {
+        const refusal = resolutionRefusal(resolution.failure)
+        const retryAfter = await providers.earliestRetryAfterSeconds(connectionId)
+        return error(
+          refusal.status,
+          { ...baseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
+          refusal,
+          correlationId,
+        )
+      }
+      target = resolution.value
+    }
 
-  if (envelope.stream) {
-    return await streamChatCompletion(
-      inference,
-      timer,
-      timeouts,
-      forwardRequest,
-      baseHeaders,
-      correlationId,
-    )
-  }
+    const forwardRequest: InferenceForwardRequest = {
+      baseUrl: target.baseUrl,
+      allowInsecureHttp: target.allowInsecureHttp,
+      path: upstreamPath,
+      method: 'POST',
+      body: envelope.raw,
+      headers: headersOf(request),
+      upstreamKey: target.upstreamKey,
+      signal: request.signal,
+    }
 
-  let upstream
-  try {
-    upstream = await inference.forward(forwardRequest)
-  } catch (cause) {
-    if (isAbort(cause)) throw cause
-    return error(
-      502,
-      baseHeaders,
-      { code: 'upstream_unreachable', message: 'The Provider could not be reached.' },
-      correlationId,
-    )
-  }
+    if (envelope.stream) {
+      const streamed = await streamChatCompletion(
+        inference,
+        timer,
+        timeouts,
+        forwardRequest,
+        baseHeaders,
+        correlationId,
+      )
+      if (streamed.status >= 200 && streamed.status < 300) {
+        await providers.recordInferenceSuccess(target.keyId)
+        return streamed
+      }
+      await providers.recordInferenceFailure({
+        keyId: target.keyId,
+        model: envelope.model,
+        status: streamed.status,
+        retryAfterSeconds: numericRetryAfter(streamed.headers),
+        reason: `upstream HTTP ${streamed.status}`,
+      })
+      const status = streamed.status
+      if ((status === 401 || status === 403) && attempt < maxAttempts) {
+        attemptedKeys.push(target.keyId)
+        continue
+      }
+      if (status === 429 && !alternateUsed && attempt < maxAttempts) {
+        alternateUsed = true
+        attemptedKeys.push(target.keyId)
+        continue
+      }
+      if (status >= 500 && sameKeyRetries < 1 && attempt < maxAttempts) {
+        sameKeyRetries++
+        retainedTarget = target
+        await retrySleep(100, request.signal)
+        continue
+      }
+      return streamed
+    }
 
-  if (upstream.status >= 200 && upstream.status < 300) {
-    return new Response(upstream.kind === 'stream' ? upstream.stream : upstream.body, {
-      status: upstream.status,
-      headers: {
-        'content-type': upstream.headers['content-type'] ?? 'application/json',
-        'x-request-id': correlationId,
-      },
+    try {
+      lastUpstream = await inference.forward(forwardRequest)
+    } catch (cause) {
+      if (isAbort(cause)) throw cause
+      if (
+        retryAmbiguousNetwork &&
+        attempt < maxAttempts &&
+        timer.now() - startedAt < MAX_RETRY_BUDGET_MS
+      ) {
+        retainedTarget = target
+        await retrySleep(100, request.signal)
+        continue
+      }
+      return error(
+        502,
+        baseHeaders,
+        { code: 'upstream_unreachable', message: 'The Provider could not be reached.' },
+        correlationId,
+      )
+    }
+
+    if (lastUpstream.status >= 200 && lastUpstream.status < 300) {
+      await providers.recordInferenceSuccess(target.keyId)
+      return new Response(lastUpstream.kind === 'stream' ? lastUpstream.stream : lastUpstream.body, {
+        status: lastUpstream.status,
+        headers: {
+          'content-type': lastUpstream.headers['content-type'] ?? 'application/json',
+          'x-request-id': correlationId,
+        },
+      })
+    }
+
+    const status = lastUpstream.status
+    await providers.recordInferenceFailure({
+      keyId: target.keyId,
+      model: envelope.model,
+      status,
+      retryAfterSeconds: numericRetryAfter(lastUpstream.headers),
+      reason: `upstream HTTP ${status}`,
     })
+
+    const insideBudget = timer.now() - startedAt < MAX_RETRY_BUDGET_MS
+    if (!insideBudget || request.signal.aborted) break
+
+    if (status === 401 || status === 403) {
+      attemptedKeys.push(target.keyId)
+      continue
+    }
+    if (status === 429 && !alternateUsed) {
+      alternateUsed = true
+      attemptedKeys.push(target.keyId)
+      continue
+    }
+    if (status >= 500 && sameKeyRetries < 1) {
+      sameKeyRetries++
+      retainedTarget = target
+      await retrySleep(100, request.signal)
+      continue
+    }
+    break
   }
 
-  const refusal = upstreamRefusal(upstream.status, upstream.headers)
+  if (lastUpstream === null) {
+    return error(
+      503,
+      baseHeaders,
+      { code: 'upstream_credentials_unavailable', message: 'No eligible Upstream Key is available for this connection.' },
+      correlationId,
+    )
+  }
+  if (lastUpstream.status === 429) {
+    const retryAfter = await providers.earliestRetryAfterSeconds(connectionId)
+    return error(
+      503,
+      { ...baseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
+      {
+        code: 'upstream_credentials_unavailable',
+        message: 'No eligible Upstream Key is available for this connection.',
+      },
+      correlationId,
+    )
+  }
+  const refusal = upstreamRefusal(lastUpstream.status, lastUpstream.headers)
   return error(
     refusal.status,
     { ...baseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) },
     refusal,
     correlationId,
   )
+}
+
+function numericRetryAfter(headers: Readonly<Record<string, string>> | Headers): number | null {
+  const value = headers instanceof Headers ? headers.get('retry-after') : headers['retry-after']
+  if (value === null || value === undefined || !/^\d+$/.test(value.trim())) return null
+  return Number(value.trim())
+}
+
+function sleepWithTimer(timer: Timer): (ms: number, signal: AbortSignal) => Promise<void> {
+  return async (ms, signal) => {
+    await new Promise<void>((resolve, reject) => {
+      const cancel = timer.set(resolve, ms)
+      signal.addEventListener(
+        'abort',
+        () => {
+          cancel()
+          reject(abortError())
+        },
+        { once: true },
+      )
+    })
+  }
+}
+
+function abortError(): Error {
+  return Object.assign(new Error('aborted'), { name: 'AbortError' })
 }
 
 /**

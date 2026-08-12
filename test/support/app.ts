@@ -50,6 +50,7 @@ export interface TestAppOptions {
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly streamingTimeouts?: StreamingTimeouts
+  readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
 export const SETUP_TOKEN = 'setup-token-for-tests-0123456789abcdef'
@@ -159,6 +160,12 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     ...(options.streamingTimeouts === undefined
       ? {}
       : { streamingTimeouts: options.streamingTimeouts }),
+    retrySleep:
+      options.retrySleep ??
+      (async (_ms, signal) => {
+        await Promise.resolve()
+        if (signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+      }),
   })
 
   const cookies = new Map<string, string>()

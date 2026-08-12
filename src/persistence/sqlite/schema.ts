@@ -55,6 +55,10 @@ export const providerConnections = sqliteTable('provider_connections', {
   baseUrl: text('base_url').notNull(),
   allowInsecureHttp: integer('allow_insecure_http', { mode: 'boolean' }).notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  retryMaxAttempts: integer('retry_max_attempts').notNull().default(3),
+  retryAmbiguousNetwork: integer('retry_ambiguous_network', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
   templateId: text('template_id'),
   /** JSON text owned by the repository, like the gateway key scope. */
@@ -96,6 +100,12 @@ export const upstreamKeys = sqliteTable('upstream_keys', {
   lastProbeAt: integer('last_probe_at', { mode: 'timestamp_ms' }),
   lastProbeVerdict: text('last_probe_verdict'),
   lastProbeReason: text('last_probe_reason'),
+  healthReason: text('health_reason'),
+  healthChangedAt: integer('health_changed_at', { mode: 'timestamp_ms' }),
+  retryAfterAt: integer('retry_after_at', { mode: 'timestamp_ms' }),
+  healthScope: text('health_scope').notNull().default('key'),
+  healthScopeId: text('health_scope_id'),
+  healthModel: text('health_model'),
   allowedModels: text('allowed_models'),
   deniedModels: text('denied_models'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),

@@ -422,6 +422,15 @@ function KeyLine({
             </span>
             <span>{describeModelPolicy(keyView)}</span>
           </p>
+          {keyView.healthReason !== null && (
+            <p className="text-muted-foreground mt-1 text-xs">
+              {keyView.healthReason}
+              {keyView.healthModel === null ? '' : ` · model ${keyView.healthModel}`}
+              {keyView.retryAfterAt === null
+                ? ''
+                : ` · retry eligible ${formatTime(keyView.retryAfterAt)}`}
+            </p>
+          )}
         </div>
 
         {!archived && (
@@ -714,10 +723,21 @@ function EditConnectionForm({
   const [baseUrl, setBaseUrl] = useState(connection.baseUrl)
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(connection.allowInsecureHttp)
   const [enabled, setEnabled] = useState(connection.enabled)
+  const [retryMaxAttempts, setRetryMaxAttempts] = useState(String(connection.retryMaxAttempts))
+  const [retryAmbiguousNetwork, setRetryAmbiguousNetwork] = useState(
+    connection.retryAmbiguousNetwork,
+  )
   const form = useSubmission(async () => {
     await updateConnection(
       connection.id,
-      { displayName, baseUrl, allowInsecureHttp, enabled },
+      {
+        displayName,
+        baseUrl,
+        allowInsecureHttp,
+        enabled,
+        retryMaxAttempts: Number(retryMaxAttempts),
+        retryAmbiguousNetwork,
+      },
       csrfToken,
     )
     onDone()
@@ -763,7 +783,25 @@ function EditConnectionForm({
           />
           Allow plain HTTP
         </label>
+        <label className="text-muted-foreground flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={retryAmbiguousNetwork}
+            onChange={(event) => setRetryAmbiguousNetwork(event.target.checked)}
+            className="size-3.5"
+          />
+          Retry ambiguous network failures. Off by default because a generation may have completed.
+        </label>
       </div>
+      <Field
+        id={`edit-${connection.id}-retry-attempts`}
+        label="Maximum attempts"
+        type="number"
+        hint="One to five attempts across retries and alternate credentials."
+        value={retryMaxAttempts}
+        onChange={setRetryMaxAttempts}
+        problem={form.problemFor('retryMaxAttempts')}
+      />
 
       <Failure error={form.error} />
 
@@ -852,6 +890,9 @@ const TITLES: Record<string, string> = {
 const HEALTH_LABELS: Record<KeyView['health'], string> = {
   unverified: 'Unverified',
   active: 'Active',
+  cooling_down: 'Cooling Down',
+  invalid_authentication: 'Invalid Authentication',
+  exhausted: 'Exhausted',
   disabled: 'Disabled',
 }
 

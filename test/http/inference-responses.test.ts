@@ -108,7 +108,7 @@ describe('provider-scoped Responses API', () => {
     expect(text).not.toContain('unsafe upstream detail')
     expect(text).not.toContain('sk-provider-secret')
     expect(JSON.parse(text).error.code).toBe('upstream_unavailable')
-    expect(upstream.calls).toHaveLength(1)
+    expect(upstream.calls).toHaveLength(2)
   })
 
   test('caller cancellation aborts a buffered upstream response', async () => {

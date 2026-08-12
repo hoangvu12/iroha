@@ -283,10 +283,18 @@ describe('provider-scoped Chat Completions', () => {
         const key = await connect()
 
         const response = await chat(key.secret, completionBody())
-        expect(response.status).toBe(scenario.status)
+        const expectedStatus =
+          scenario.status === 401 || scenario.status === 403 || scenario.status === 429
+            ? 503
+            : scenario.status
+        expect(response.status).toBe(expectedStatus)
 
         const failure = await openError(response)
-        expect(failure.error.code).toBe(scenario.code)
+        expect(failure.error.code).toBe(
+          expectedStatus === 503 && scenario.status < 500
+            ? 'upstream_credentials_unavailable'
+            : scenario.code,
+        )
         expect(typeof failure.error.message).toBe('string')
         expect(failure.error.type).toBeDefined()
         expect(response.headers.get('x-request-id')).toMatch(/^req_/)
@@ -299,19 +307,19 @@ describe('provider-scoped Chat Completions', () => {
 
       const response = await chat(key.secret, completionBody())
 
-      expect(response.status).toBe(429)
+      expect(response.status).toBe(503)
       expect(response.headers.get('retry-after')).toBe('17')
-      expect((await openError(response)).error.code).toBe('upstream_rate_limited')
+      expect((await openError(response)).error.code).toBe('upstream_credentials_unavailable')
     })
 
-    test('drops unusable Retry-After values instead of forwarding upstream text', async () => {
+    test('drops unusable upstream Retry-After text and returns the bounded fallback', async () => {
       upstream.respondWith(() => new Response('slow down', { status: 429, headers: { 'retry-after': 'soon maybe' } }))
       const key = await connect()
 
       const response = await chat(key.secret, completionBody())
 
-      expect(response.status).toBe(429)
-      expect(response.headers.get('retry-after')).toBeNull()
+      expect(response.status).toBe(503)
+      expect(response.headers.get('retry-after')).toBe('30')
     })
 
     test('sanitizes upstream detail and never echoes it', async () => {

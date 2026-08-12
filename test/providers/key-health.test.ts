@@ -1,0 +1,150 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { createSecretCipher } from '../../src/crypto/index.ts'
+import { ProviderConnectionRegistry } from '../../src/providers/index.ts'
+import { sqliteEngine } from '../persistence/engines.ts'
+import { fakeKeyProbe, TEST_MASTER_KEY } from '../support/app.ts'
+import { testClock, type TestClock } from '../support/identity.ts'
+
+describe('durable scoped Key Health', () => {
+  let opened: Awaited<ReturnType<typeof sqliteEngine.open>>
+  let clock: TestClock
+  let registry: ProviderConnectionRegistry
+  let connectionId: string
+  let keyIds: string[]
+
+  beforeEach(async () => {
+    opened = await sqliteEngine.open()
+    clock = testClock()
+    registry = new ProviderConnectionRegistry({
+      database: opened.database,
+      cipher: createSecretCipher(TEST_MASTER_KEY),
+      keyProbe: fakeKeyProbe(),
+      clock,
+    })
+    const created = await registry.create({
+      displayName: 'Health test',
+      baseUrl: 'https://api.example.com/v1',
+      upstreamKey: 'sk-first-health-key',
+    })
+    if (!created.ok) throw new Error(created.failure.code)
+    connectionId = created.value.id
+    const withSecond = await registry.addKey(connectionId, { upstreamKey: 'sk-second-health-key' })
+    if (!withSecond.ok) throw new Error(withSecond.failure.code)
+    keyIds = withSecond.value.keys.map((key) => key.id)
+  })
+
+  afterEach(async () => {
+    await opened.dispose()
+  })
+
+  test('authentication failure persists and removes only the failed credential', async () => {
+    await registry.recordInferenceFailure({
+      keyId: keyIds[0]!,
+      model: 'gpt-4o',
+      status: 401,
+      reason: 'upstream HTTP 401',
+    })
+
+    const stored = await opened.database.providers.getKey(keyIds[0]!)
+    expect(stored).toMatchObject({
+      health: 'invalid_authentication',
+      healthScope: 'key',
+      healthScopeId: keyIds[0],
+      retryAfterAt: null,
+    })
+    expect((await registry.resolveInference(connectionId, 'gpt-4o')).ok).toBe(true)
+  })
+
+  test('a shared-account exhaustion applies to every key in that account', async () => {
+    const account = await registry.createAccount(connectionId, { displayName: 'Shared plan' })
+    if (!account.ok) throw new Error(account.failure.code)
+    const accountId = account.value.accounts[0]!.id
+    for (const keyId of keyIds) {
+      await registry.updateKeySettings(connectionId, keyId, { accountId })
+    }
+
+    await registry.recordInferenceFailure({
+      keyId: keyIds[0]!,
+      model: 'gpt-4o',
+      status: 429,
+      retryAfterSeconds: 60,
+      reason: 'account quota exhausted',
+    })
+
+    const keys = await opened.database.providers.listKeys(connectionId)
+    expect(keys.map((key) => key.health)).toEqual(['exhausted', 'exhausted'])
+    expect(keys.every((key) => key.healthScope === 'account' && key.healthScopeId === accountId)).toBe(
+      true,
+    )
+  })
+
+  test('a connection-and-model cooldown blocks only that exact model', async () => {
+    await registry.recordInferenceFailure({
+      keyId: keyIds[0]!,
+      model: 'gpt-4o',
+      status: 503,
+      retryAfterSeconds: 30,
+      reason: 'model unavailable',
+    })
+
+    expect((await registry.resolveInference(connectionId, 'gpt-4o')).ok).toBe(false)
+    expect((await registry.resolveInference(connectionId, 'gpt-4o-mini')).ok).toBe(true)
+  })
+
+  test('durable health survives registry restart', async () => {
+    await registry.recordInferenceFailure({
+      keyId: keyIds[0]!,
+      model: 'gpt-4o',
+      status: 401,
+      reason: 'upstream HTTP 401',
+    })
+    const restarted = new ProviderConnectionRegistry({
+      database: opened.database,
+      cipher: createSecretCipher(TEST_MASTER_KEY),
+      keyProbe: fakeKeyProbe(),
+      clock,
+    })
+
+    expect((await restarted.get(connectionId))?.keys[0]?.health).toBe('invalid_authentication')
+    const target = await restarted.resolveInference(connectionId, 'gpt-4o')
+    if (!target.ok) throw new Error(target.failure.code)
+    expect(target.value.keyId).toBe(keyIds[1]!)
+  })
+
+  test('cooldown expiry allows one concurrent controlled trial', async () => {
+    await registry.disableKey(connectionId, keyIds[1]!)
+    await registry.recordInferenceFailure({
+      keyId: keyIds[0]!,
+      model: 'gpt-4o',
+      status: 429,
+      retryAfterSeconds: 30,
+      reason: 'unknown rate limit',
+    })
+    clock.advance(31)
+
+    const [first, second] = await Promise.all([
+      registry.resolveInference(connectionId, 'gpt-4o'),
+      registry.resolveInference(connectionId, 'gpt-4o'),
+    ])
+
+    expect([first.ok, second.ok].filter(Boolean)).toHaveLength(1)
+    const trial = first.ok ? first : second
+    if (!trial.ok) throw new Error('controlled trial was not claimed')
+    await registry.recordInferenceSuccess(trial.value.keyId)
+    expect((await opened.database.providers.getKey(trial.value.keyId))?.health).toBe('active')
+  })
+
+  test('manual test restores an exhausted key when the probe is authoritative', async () => {
+    await registry.recordInferenceFailure({
+      keyId: keyIds[0]!,
+      model: 'gpt-4o',
+      status: 429,
+      retryAfterSeconds: 60,
+      reason: 'quota exhausted',
+    })
+
+    await registry.testKey(connectionId, keyIds[0]!)
+
+    expect((await opened.database.providers.getKey(keyIds[0]!))?.health).toBe('active')
+  })
+})

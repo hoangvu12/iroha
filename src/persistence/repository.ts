@@ -123,6 +123,8 @@ export interface ProviderConnectionRecord {
   /** The explicit per-connection exception that permits plain HTTP. */
   readonly allowInsecureHttp: boolean
   readonly enabled: boolean
+  readonly retryMaxAttempts: number
+  readonly retryAmbiguousNetwork: boolean
   /** Set when the connection is archived; null while it is in active use. */
   readonly archivedAt: Date | null
   /**
@@ -161,7 +163,15 @@ export type KeyProbeVerdict = 'usable' | 'rejected' | 'inconclusive'
  * Disabled when the Owner turns it off. Later tickets widen this without
  * renaming it.
  */
-export type UpstreamKeyHealth = 'unverified' | 'active' | 'disabled'
+export type UpstreamKeyHealth =
+  | 'unverified'
+  | 'active'
+  | 'cooling_down'
+  | 'invalid_authentication'
+  | 'exhausted'
+  | 'disabled'
+
+export type CapacityScopeKind = 'key' | 'account' | 'connection_model' | 'provider' | 'unknown'
 
 /**
  * One Owner-configured group of Upstream Keys that share Provider billing or
@@ -194,6 +204,12 @@ export interface UpstreamKeyRecord {
   readonly lastProbeAt: Date | null
   readonly lastProbeVerdict: KeyProbeVerdict | null
   readonly lastProbeReason: string | null
+  readonly healthReason: string | null
+  readonly healthChangedAt: Date
+  readonly retryAfterAt: Date | null
+  readonly healthScope: CapacityScopeKind
+  readonly healthScopeId: string | null
+  readonly healthModel: string | null
   /**
    * The Upstream Account the key shares billing or capacity with, or null when
    * the key is independent.
@@ -213,6 +229,8 @@ export interface ProviderConnectionPatch {
   readonly baseUrl?: string
   readonly allowInsecureHttp?: boolean
   readonly enabled?: boolean
+  readonly retryMaxAttempts?: number
+  readonly retryAmbiguousNetwork?: boolean
   readonly archivedAt?: Date | null
   /** Replaces the connection-wide capability defaults. */
   readonly capabilities?: ConnectionCapabilities
@@ -223,6 +241,12 @@ export interface UpstreamKeyPatch {
   readonly lastProbeAt?: Date | null
   readonly lastProbeVerdict?: KeyProbeVerdict | null
   readonly lastProbeReason?: string | null
+  readonly healthReason?: string | null
+  readonly healthChangedAt?: Date
+  readonly retryAfterAt?: Date | null
+  readonly healthScope?: CapacityScopeKind
+  readonly healthScopeId?: string | null
+  readonly healthModel?: string | null
   /** Moves the key into an Upstream Account, or back to independence. */
   readonly accountId?: string | null
   /** Replaces the exact-model allow list; null means every model is allowed. */

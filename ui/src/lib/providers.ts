@@ -1,11 +1,23 @@
 export interface KeyView {
   readonly id: string
-  readonly health: 'unverified' | 'active' | 'disabled'
+  readonly health:
+    | 'unverified'
+    | 'active'
+    | 'cooling_down'
+    | 'invalid_authentication'
+    | 'exhausted'
+    | 'disabled'
   readonly lastProbe: {
     readonly at: string
     readonly verdict: 'usable' | 'rejected' | 'inconclusive'
     readonly reason: string | null
   } | null
+  readonly healthReason: string | null
+  readonly healthChangedAt: string
+  readonly retryAfterAt: string | null
+  readonly healthScope: 'key' | 'account' | 'connection_model' | 'provider' | 'unknown'
+  readonly healthScopeId: string | null
+  readonly healthModel: string | null
   readonly accountId: string | null
   readonly allowedModels: readonly string[] | null
   readonly deniedModels: readonly string[] | null
@@ -26,6 +38,8 @@ export interface ConnectionView {
   readonly baseUrl: string
   readonly allowInsecureHttp: boolean
   readonly enabled: boolean
+  readonly retryMaxAttempts: number
+  readonly retryAmbiguousNetwork: boolean
   readonly archived: boolean
   readonly createdAt: string
   readonly updatedAt: string
@@ -84,6 +98,8 @@ export async function updateConnection(
     baseUrl?: string
     allowInsecureHttp?: boolean
     enabled?: boolean
+    retryMaxAttempts?: number
+    retryAmbiguousNetwork?: boolean
   },
   csrfToken: string,
 ): Promise<ConnectionView> {

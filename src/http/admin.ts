@@ -150,6 +150,10 @@ export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRou
           ...('baseUrl' in input ? { baseUrl: input.baseUrl } : {}),
           ...('allowInsecureHttp' in input ? { allowInsecureHttp: input.allowInsecureHttp } : {}),
           ...('enabled' in input ? { enabled: input.enabled } : {}),
+          ...('retryMaxAttempts' in input ? { retryMaxAttempts: input.retryMaxAttempts } : {}),
+          ...('retryAmbiguousNetwork' in input
+            ? { retryAmbiguousNetwork: input.retryAmbiguousNetwork }
+            : {}),
         })
 
         if (!result.ok) {
@@ -667,7 +671,14 @@ export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRou
 export type AdminRoutes = ReturnType<typeof createAdminRoutes>
 
 const probeVerdict = t.Union([t.Literal('usable'), t.Literal('rejected'), t.Literal('inconclusive')])
-const keyHealth = t.Union([t.Literal('unverified'), t.Literal('active'), t.Literal('disabled')])
+const keyHealth = t.Union([
+  t.Literal('unverified'),
+  t.Literal('active'),
+  t.Literal('cooling_down'),
+  t.Literal('invalid_authentication'),
+  t.Literal('exhausted'),
+  t.Literal('disabled'),
+])
 const modelList = t.Union([t.Null(), t.Array(t.String())])
 
 const keyResponse = t.Object({
@@ -681,6 +692,18 @@ const keyResponse = t.Object({
       reason: t.Union([t.Null(), t.String()]),
     }),
   ]),
+  healthReason: t.Union([t.Null(), t.String()]),
+  healthChangedAt: t.String(),
+  retryAfterAt: t.Union([t.Null(), t.String()]),
+  healthScope: t.Union([
+    t.Literal('key'),
+    t.Literal('account'),
+    t.Literal('connection_model'),
+    t.Literal('provider'),
+    t.Literal('unknown'),
+  ]),
+  healthScopeId: t.Union([t.Null(), t.String()]),
+  healthModel: t.Union([t.Null(), t.String()]),
   accountId: t.Union([t.Null(), t.String()]),
   allowedModels: modelList,
   deniedModels: modelList,
@@ -701,6 +724,8 @@ const connectionResponse = t.Object({
   baseUrl: t.String(),
   allowInsecureHttp: t.Boolean(),
   enabled: t.Boolean(),
+  retryMaxAttempts: t.Number(),
+  retryAmbiguousNetwork: t.Boolean(),
   archived: t.Boolean(),
   createdAt: t.String(),
   updatedAt: t.String(),
@@ -767,6 +792,8 @@ function toConnectionDto(view: ConnectionView): ConnectionDto {
     baseUrl: view.baseUrl,
     allowInsecureHttp: view.allowInsecureHttp,
     enabled: view.enabled,
+    retryMaxAttempts: view.retryMaxAttempts,
+    retryAmbiguousNetwork: view.retryAmbiguousNetwork,
     archived: view.archived,
     createdAt: view.createdAt.toISOString(),
     updatedAt: view.updatedAt.toISOString(),
@@ -787,6 +814,12 @@ function toKeyDto(key: KeyView): KeyDto {
             verdict: key.lastProbe.verdict,
             reason: key.lastProbe.reason,
           },
+    healthReason: key.healthReason,
+    healthChangedAt: key.healthChangedAt.toISOString(),
+    retryAfterAt: key.retryAfterAt?.toISOString() ?? null,
+    healthScope: key.healthScope,
+    healthScopeId: key.healthScopeId,
+    healthModel: key.healthModel,
     accountId: key.accountId,
     allowedModels: key.allowedModels === null ? null : [...key.allowedModels],
     deniedModels: key.deniedModels === null ? null : [...key.deniedModels],

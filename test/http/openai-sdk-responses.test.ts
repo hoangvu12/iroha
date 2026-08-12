@@ -23,6 +23,7 @@ describe('the official OpenAI SDK through the Responses surface', () => {
       apiKey: secret,
       baseURL: `http://iroha.test/providers/${connectionId}/v1`,
       fetch: appFetch(iroha.app),
+      maxRetries: 0,
       dangerouslyAllowBrowser: true,
     })
   })

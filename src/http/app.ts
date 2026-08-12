@@ -34,6 +34,7 @@ export interface AppOptions {
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly streamingTimeouts?: StreamingTimeouts
+  readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
 const liveResponse = t.Object({ status: t.Literal('alive') })
@@ -90,6 +91,7 @@ export function createApp(options: AppOptions) {
       ...(options.streamingTimeouts === undefined
         ? {}
         : { timeouts: options.streamingTimeouts }),
+      ...(options.retrySleep === undefined ? {} : { retrySleep: options.retrySleep }),
     }))
     .get('/health/live', () => ({ status: 'alive' as const }), {
       detail: {

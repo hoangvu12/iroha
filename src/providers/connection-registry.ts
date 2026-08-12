@@ -48,6 +48,12 @@ export interface KeyView {
     readonly verdict: KeyProbeVerdict
     readonly reason: string | null
   } | null
+  readonly healthReason: string | null
+  readonly healthChangedAt: Date
+  readonly retryAfterAt: Date | null
+  readonly healthScope: UpstreamKeyRecord['healthScope']
+  readonly healthScopeId: string | null
+  readonly healthModel: string | null
   /** The account the key shares billing or capacity with, or null when independent. */
   readonly accountId: string | null
   /** Exact models the key may serve; null means every connection model. */
@@ -69,8 +75,11 @@ export interface UpstreamAccountView {
 /** What one provider-scoped inference call needs, ready for an Inference Adapter. */
 export interface InferenceTarget {
   readonly keyId: string
+  readonly accountId: string | null
   readonly baseUrl: string
   readonly allowInsecureHttp: boolean
+  readonly retryMaxAttempts: number
+  readonly retryAmbiguousNetwork: boolean
   /** The decrypted Upstream Key; it exists only for the duration of the call. */
   readonly upstreamKey: string
 }
@@ -81,6 +90,8 @@ export interface ConnectionView {
   readonly baseUrl: string
   readonly allowInsecureHttp: boolean
   readonly enabled: boolean
+  readonly retryMaxAttempts: number
+  readonly retryAmbiguousNetwork: boolean
   readonly archived: boolean
   readonly createdAt: Date
   readonly updatedAt: Date
@@ -119,6 +130,7 @@ export class ProviderConnectionRegistry {
    * nothing durable.
    */
   readonly #selector: RoundRobinSelector
+  readonly #controlledTrials = new Set<string>()
 
   constructor(options: ProviderConnectionRegistryOptions) {
     this.#database = options.database
@@ -187,6 +199,8 @@ export class ProviderConnectionRegistry {
         baseUrl,
         allowInsecureHttp,
         enabled: true,
+        retryMaxAttempts: 3,
+        retryAmbiguousNetwork: false,
         archivedAt: null,
         templateId: null,
         capabilities: defaultCapabilities(),
@@ -202,6 +216,12 @@ export class ProviderConnectionRegistry {
         lastProbeAt: null,
         lastProbeVerdict: null,
         lastProbeReason: null,
+        healthReason: null,
+        healthChangedAt: at,
+        retryAfterAt: null,
+        healthScope: 'key',
+        healthScopeId: null,
+        healthModel: null,
         allowedModels: null,
         deniedModels: null,
         createdAt: at,
@@ -229,6 +249,8 @@ export class ProviderConnectionRegistry {
       baseUrl?: unknown
       allowInsecureHttp?: unknown
       enabled?: unknown
+      retryMaxAttempts?: unknown
+      retryAmbiguousNetwork?: unknown
     },
   ): Promise<ProviderResult<ConnectionView>> {
     const connection = await this.#database.providers.getConnection(id)
@@ -240,6 +262,8 @@ export class ProviderConnectionRegistry {
       baseUrl?: string
       allowInsecureHttp?: boolean
       enabled?: boolean
+      retryMaxAttempts?: number
+      retryAmbiguousNetwork?: boolean
     } = {}
 
     if (patch.displayName !== undefined) {
@@ -263,6 +287,25 @@ export class ProviderConnectionRegistry {
 
     if (patch.enabled !== undefined) {
       changes.enabled = patch.enabled === true
+    }
+
+    if (patch.retryMaxAttempts !== undefined) {
+      if (
+        typeof patch.retryMaxAttempts !== 'number' ||
+        !Number.isInteger(patch.retryMaxAttempts) ||
+        patch.retryMaxAttempts < 1 ||
+        patch.retryMaxAttempts > 5
+      ) {
+        return failed({
+          code: 'validation_failed',
+          problems: [{ field: 'retryMaxAttempts', message: 'must be an integer from 1 to 5' }],
+        })
+      }
+      changes.retryMaxAttempts = patch.retryMaxAttempts
+    }
+
+    if (patch.retryAmbiguousNetwork !== undefined) {
+      changes.retryAmbiguousNetwork = patch.retryAmbiguousNetwork === true
     }
 
     if (changes.baseUrl === undefined && changes.allowInsecureHttp !== undefined) {
@@ -351,6 +394,8 @@ export class ProviderConnectionRegistry {
         baseUrl: source.baseUrl,
         allowInsecureHttp: source.allowInsecureHttp,
         enabled: true,
+        retryMaxAttempts: source.retryMaxAttempts,
+        retryAmbiguousNetwork: source.retryAmbiguousNetwork,
         archivedAt: null,
         templateId: source.templateId,
         capabilities: source.capabilities,
@@ -368,6 +413,12 @@ export class ProviderConnectionRegistry {
           lastProbeAt: null,
           lastProbeVerdict: null,
           lastProbeReason: null,
+          healthReason: null,
+          healthChangedAt: at,
+          retryAfterAt: null,
+          healthScope: 'key',
+          healthScopeId: null,
+          healthModel: null,
           allowedModels: null,
           deniedModels: null,
           createdAt: at,
@@ -425,8 +476,9 @@ export class ProviderConnectionRegistry {
     const at = this.#clock.now()
     // A disabled key stays disabled: a test informs, only activation revives.
     // An unverified key that proves itself usable is activated on the spot.
-    const activates = probe.verdict === 'usable' && key.health === 'unverified'
+    const activates = probe.verdict === 'usable' && key.health !== 'disabled'
     await this.#database.providers.updateKey(keyId, probedPatch(probe, at, activates), at)
+    this.#controlledTrials.delete(healthClaim(key))
     return { ok: true, value: await this.#viewOf(connectionId) }
   }
 
@@ -438,7 +490,19 @@ export class ProviderConnectionRegistry {
     if (located.value.key.health !== 'active') {
       const at = this.#clock.now()
       await this.#database.transaction(async (repositories) => {
-        await repositories.providers.updateKey(keyId, { health: 'active' }, at)
+        await repositories.providers.updateKey(
+          keyId,
+          {
+            health: 'active',
+            healthReason: 'activated by Owner',
+            healthChangedAt: at,
+            retryAfterAt: null,
+            healthScope: 'key',
+            healthScopeId: null,
+            healthModel: null,
+          },
+          at,
+        )
         await repositories.audit.record({
           action: 'key.activated',
           outcome: 'success',
@@ -458,7 +522,19 @@ export class ProviderConnectionRegistry {
     if (located.value.key.health !== 'disabled') {
       const at = this.#clock.now()
       await this.#database.transaction(async (repositories) => {
-        await repositories.providers.updateKey(keyId, { health: 'disabled' }, at)
+        await repositories.providers.updateKey(
+          keyId,
+          {
+            health: 'disabled',
+            healthReason: 'disabled by Owner',
+            healthChangedAt: at,
+            retryAfterAt: null,
+            healthScope: 'key',
+            healthScopeId: keyId,
+            healthModel: null,
+          },
+          at,
+        )
         await repositories.audit.record({
           action: 'key.disabled',
           outcome: 'success',
@@ -499,6 +575,12 @@ export class ProviderConnectionRegistry {
         lastProbeAt: null,
         lastProbeVerdict: null,
         lastProbeReason: null,
+        healthReason: null,
+        healthChangedAt: at,
+        retryAfterAt: null,
+        healthScope: 'key',
+        healthScopeId: null,
+        healthModel: null,
         allowedModels: null,
         deniedModels: null,
         createdAt: at,
@@ -702,19 +784,38 @@ export class ProviderConnectionRegistry {
    * and an enabled connection with no eligible key is reported rather than
    * guessed at. Selection never writes to the database.
    */
-  async resolveInference(connectionId: string, model: string): Promise<ProviderResult<InferenceTarget>> {
+  async resolveInference(
+    connectionId: string,
+    model: string,
+    excludedKeyIds: readonly string[] = [],
+    ignoreUnknownScope = false,
+  ): Promise<ProviderResult<InferenceTarget>> {
     const connection = await this.#database.providers.getConnection(connectionId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
     if (!connection.enabled) return failed({ code: 'connection_disabled' })
 
-    const eligible = (await this.#database.providers.listKeys(connectionId)).filter((candidate) =>
-      keyServesModel(candidate, model),
-    )
+    const excluded = new Set(excludedKeyIds)
+    const keys = await this.#database.providers.listKeys(connectionId)
+    const at = this.#clock.now()
+    const eligible = keys.filter((candidate) => {
+      if (excluded.has(candidate.id) || !keyServesModel(candidate, model)) return false
+      if (candidate.health === 'active') {
+        return !scopeUnavailable(candidate, keys, model, at, ignoreUnknownScope)
+      }
+      if (candidate.health !== 'cooling_down' && candidate.health !== 'exhausted') return false
+      if (candidate.retryAfterAt === null || candidate.retryAfterAt > at) return false
+      return !this.#controlledTrials.has(healthClaim(candidate))
+    })
     if (eligible.length === 0) return failed({ code: 'no_eligible_key' })
 
     const key = this.#selector.select(connectionId, eligible)
     if (key === null) return failed({ code: 'no_eligible_key' })
+    if (key.health !== 'active') {
+      const claim = healthClaim(key)
+      if (this.#controlledTrials.has(claim)) return failed({ code: 'no_eligible_key' })
+      this.#controlledTrials.add(claim)
+    }
 
     let upstreamKey: string
     try {
@@ -728,10 +829,112 @@ export class ProviderConnectionRegistry {
       ok: true,
       value: {
         keyId: key.id,
+        accountId: key.accountId,
         baseUrl: connection.baseUrl,
         allowInsecureHttp: connection.allowInsecureHttp,
+        retryMaxAttempts: connection.retryMaxAttempts,
+        retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
         upstreamKey,
       },
+    }
+  }
+
+  async earliestRetryAfterSeconds(connectionId: string): Promise<number | null> {
+    const at = this.#clock.now()
+    const seconds = (await this.#database.providers.listKeys(connectionId))
+      .flatMap((key) =>
+        key.retryAfterAt === null
+          ? []
+          : [Math.ceil((key.retryAfterAt.getTime() - at.getTime()) / 1000)],
+      )
+      .filter((value) => value > 0)
+      .sort((left, right) => left - right)[0]
+    return seconds ?? null
+  }
+
+  async recordInferenceSuccess(keyId: string): Promise<void> {
+    const key = await this.#database.providers.getKey(keyId)
+    if (key === null) return
+    this.#controlledTrials.delete(healthClaim(key))
+    if (key.health === 'active') return
+    const at = this.#clock.now()
+    await this.#database.providers.updateKey(
+      keyId,
+      {
+        health: 'active',
+        healthReason: 'authoritative inference success',
+        healthChangedAt: at,
+        retryAfterAt: null,
+        healthScope: 'key',
+        healthScopeId: null,
+        healthModel: null,
+      },
+      at,
+    )
+  }
+
+  async recordInferenceFailure(input: {
+    keyId: string
+    model: string
+    status?: number
+    retryAfterSeconds?: number | null
+    reason: string
+  }): Promise<void> {
+    const key = await this.#database.providers.getKey(input.keyId)
+    if (key === null) return
+    this.#controlledTrials.delete(healthClaim(key))
+    const at = this.#clock.now()
+    const retryAfterAt = new Date(at.getTime() + Math.max(1, input.retryAfterSeconds ?? 30) * 1000)
+    if (input.status === 401) {
+      await this.#database.providers.updateKey(
+        key.id,
+        healthPatch('invalid_authentication', input.reason, at, null, 'key', key.id, null),
+        at,
+      )
+      return
+    }
+    if (input.status === 403) {
+      await this.#database.providers.updateKey(
+        key.id,
+        healthPatch('cooling_down', input.reason, at, retryAfterAt, 'key', key.id, null),
+        at,
+      )
+      return
+    }
+    if (input.status === 429) {
+      const scope = key.accountId === null ? 'unknown' : 'account'
+      const scopeId = key.accountId
+      const affected =
+        scope === 'account'
+          ? (await this.#database.providers.listKeys(key.connectionId)).filter(
+              (candidate) => candidate.accountId === key.accountId,
+            )
+          : [key]
+      await Promise.all(
+        affected.map((candidate) =>
+          this.#database.providers.updateKey(
+            candidate.id,
+            healthPatch('exhausted', input.reason, at, retryAfterAt, scope, scopeId, null),
+            at,
+          ),
+        ),
+      )
+      return
+    }
+    if (input.status !== undefined && input.status >= 500) {
+      await this.#database.providers.updateKey(
+        key.id,
+        healthPatch(
+          'cooling_down',
+          input.reason,
+          at,
+          retryAfterAt,
+          'connection_model',
+          key.connectionId,
+          input.model,
+        ),
+        at,
+      )
     }
   }
 
@@ -801,6 +1004,12 @@ export class ProviderConnectionRegistry {
         key.lastProbeAt === null || key.lastProbeVerdict === null
           ? null
           : { at: key.lastProbeAt, verdict: key.lastProbeVerdict, reason: key.lastProbeReason },
+      healthReason: key.healthReason,
+      healthChangedAt: key.healthChangedAt,
+      retryAfterAt: key.retryAfterAt,
+      healthScope: key.healthScope,
+      healthScopeId: key.healthScopeId,
+      healthModel: key.healthModel,
       accountId: key.accountId,
       allowedModels: key.allowedModels,
       deniedModels: key.deniedModels,
@@ -853,6 +1062,12 @@ function probedPatch(probe: { readonly verdict: KeyProbeVerdict; readonly reason
   return activates
     ? {
         health: 'active',
+        healthReason: 'manual test confirmed usable',
+        healthChangedAt: at,
+        retryAfterAt: null,
+        healthScope: 'key',
+        healthScopeId: null,
+        healthModel: null,
         lastProbeAt: at,
         lastProbeVerdict: probe.verdict,
         lastProbeReason: probe.reason,
@@ -870,6 +1085,8 @@ function summaryOf(connection: {
   baseUrl: string
   allowInsecureHttp: boolean
   enabled: boolean
+  retryMaxAttempts: number
+  retryAmbiguousNetwork: boolean
   archivedAt: Date | null
   createdAt: Date
   updatedAt: Date
@@ -880,6 +1097,8 @@ function summaryOf(connection: {
     baseUrl: connection.baseUrl,
     allowInsecureHttp: connection.allowInsecureHttp,
     enabled: connection.enabled,
+    retryMaxAttempts: connection.retryMaxAttempts,
+    retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
     archived: connection.archivedAt !== null,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
@@ -956,10 +1175,64 @@ const MODEL_LIST_MAXIMUM = 500
  * grouped or independent. An unverified or disabled key is never eligible.
  */
 function keyServesModel(key: UpstreamKeyRecord, model: string): boolean {
-  if (key.health !== 'active') return false
   if (key.allowedModels !== null && !key.allowedModels.includes(model)) return false
   if (key.deniedModels !== null && key.deniedModels.includes(model)) return false
   return true
+}
+
+function healthClaim(key: UpstreamKeyRecord): string {
+  return `${key.healthScope}:${key.healthScopeId ?? key.id}:${key.healthModel ?? ''}`
+}
+
+function scopeUnavailable(
+  key: UpstreamKeyRecord,
+  keys: readonly UpstreamKeyRecord[],
+  model: string,
+  at: Date,
+  ignoreUnknownScope: boolean,
+): boolean {
+  return keys.some((candidate) => {
+    if (
+      candidate.health !== 'cooling_down' &&
+      candidate.health !== 'exhausted' &&
+      candidate.health !== 'invalid_authentication'
+    ) {
+      return false
+    }
+    if (candidate.retryAfterAt !== null && candidate.retryAfterAt <= at) return false
+    switch (candidate.healthScope) {
+      case 'key':
+        return candidate.id === key.id
+      case 'account':
+        return candidate.healthScopeId !== null && candidate.healthScopeId === key.accountId
+      case 'connection_model':
+        return candidate.connectionId === key.connectionId && candidate.healthModel === model
+      case 'provider':
+        return candidate.connectionId === key.connectionId
+      case 'unknown':
+        return !ignoreUnknownScope && candidate.connectionId === key.connectionId
+    }
+  })
+}
+
+function healthPatch(
+  health: UpstreamKeyHealth,
+  reason: string,
+  at: Date,
+  retryAfterAt: Date | null,
+  scope: UpstreamKeyRecord['healthScope'],
+  scopeId: string | null,
+  model: string | null,
+): UpstreamKeyPatch {
+  return {
+    health,
+    healthReason: reason,
+    healthChangedAt: at,
+    retryAfterAt,
+    healthScope: scope,
+    healthScopeId: scopeId,
+    healthModel: model,
+  }
 }
 
 /**

@@ -6,6 +6,10 @@ import type { InferenceAdapter } from '../inference/index.ts'
 import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
 import type { OwnerIdentity } from '../identity/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
+import {
+  BackgroundScheduleSettingsService,
+  type BackgroundScheduler,
+} from '../jobs/index.ts'
 import { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
 import type { ProviderConnectionRegistry } from '../providers/index.ts'
@@ -15,6 +19,8 @@ import { createGenericUsageAdapter } from '../usage/generic-adapter.ts'
 import { createAdminRoutes } from './admin.ts'
 import { createAuditRoutes } from './audit.ts'
 import { createAuthRoutes } from './auth.ts'
+import { createBackgroundRoutes } from './background-jobs.ts'
+import { type SchedulerSurface, StaticScheduler } from './background-scheduler-surface.ts'
 import { createCatalogRoutes } from './catalog.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
@@ -44,6 +50,10 @@ export interface AppOptions {
   readonly usageService?: UsageService | undefined
   /** Replaces the request-history service built from the other options. */
   readonly requestHistory?: RequestHistoryService | undefined
+  /** Replaces the background schedule settings built from the database. */
+  readonly backgroundSchedule?: BackgroundScheduleSettingsService | undefined
+  /** Replaces the background scheduler surface built from the other options. */
+  readonly backgroundScheduler?: SchedulerSurface | undefined
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly streamingTimeouts?: StreamingTimeouts
@@ -105,6 +115,10 @@ export function createApp(options: AppOptions) {
 
   const requestHistory = options.requestHistory ?? new RequestHistoryService({ database })
 
+  const backgroundSchedule = options.backgroundSchedule ?? new BackgroundScheduleSettingsService({ database })
+
+  const backgroundScheduler: SchedulerSurface = options.backgroundScheduler ?? new StaticScheduler(database)
+
   const transportDefaults: TransportDefaults = options.transportDefaults ?? DEFAULT_TRANSPORT
 
   return new Elysia()
@@ -136,6 +150,14 @@ export function createApp(options: AppOptions) {
         identity,
         requestHistory,
         database,
+      }),
+    )
+    .use(
+      createBackgroundRoutes({
+        identity,
+        database,
+        scheduler: backgroundScheduler,
+        settings: backgroundSchedule,
       }),
     )
     .use(
@@ -210,3 +232,4 @@ export function createApp(options: AppOptions) {
 
 export type App = ReturnType<typeof createApp>
 export { ReadinessState }
+export { StaticScheduler, type SchedulerSurface }

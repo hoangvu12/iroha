@@ -1240,6 +1240,124 @@ for (const engine of availableEngines) {
         expect((await database.requestHistory.listAudit()).total).toBe(0)
       })
     })
+
+    describe('background jobs', () => {
+      test('returns null for an unknown job', async () => {
+        expect(await database.backgroundJobs.get('absent')).toBeNull()
+      })
+
+      test('creates an idle row that has not run yet', async () => {
+        const at = new Date('2026-01-01T00:00:00.000Z')
+        const seeded = await database.backgroundJobs.ensureIdle('model_sync', at)
+        expect(seeded.jobId).toBe('model_sync')
+        expect(seeded.status).toBe('idle')
+        expect(seeded.lastStartedAt).toBeNull()
+        expect(seeded.lastCompletedAt).toBeNull()
+        expect(seeded.lastOutcome).toBeNull()
+        expect(seeded.updatedAt).toEqual(at)
+      })
+
+      test('ensureIdle is idempotent on a pre-existing row', async () => {
+        const first = new Date('2026-01-01T00:00:00.000Z')
+        const second = new Date('2026-02-01T00:00:00.000Z')
+        await database.backgroundJobs.ensureIdle('retention_cleanup', first)
+        const reloaded = await database.backgroundJobs.ensureIdle('retention_cleanup', second)
+        expect(reloaded.updatedAt).toEqual(second)
+        const stored = await database.backgroundJobs.get('retention_cleanup')
+        expect(stored?.status).toBe('idle')
+      })
+
+      test('tryClaim transitions an idle row to running', async () => {
+        const at = new Date('2026-01-01T00:00:00.000Z')
+        await database.backgroundJobs.ensureIdle('model_sync', at)
+        const started = await database.backgroundJobs.tryClaim('model_sync', new Date('2026-01-02T00:00:00.000Z'))
+        expect(started).toEqual(new Date('2026-01-02T00:00:00.000Z'))
+        const record = await database.backgroundJobs.get('model_sync')
+        expect(record?.status).toBe('running')
+      })
+
+      test('tryClaim rejects a second concurrent claim of the same job', async () => {
+        const at = new Date('2026-01-01T00:00:00.000Z')
+        await database.backgroundJobs.ensureIdle('model_sync', at)
+        const first = await database.backgroundJobs.tryClaim('model_sync', new Date('2026-01-02T00:00:00.000Z'))
+        expect(first).not.toBeNull()
+        const second = await database.backgroundJobs.tryClaim('model_sync', new Date('2026-01-03T00:00:00.000Z'))
+        expect(second).toBeNull()
+      })
+
+      test('tryClaim returns null for a job that has no row', async () => {
+        const started = await database.backgroundJobs.tryClaim('unknown', new Date())
+        expect(started).toBeNull()
+      })
+
+      test('recordCompletion writes the terminal status, timing, and error context', async () => {
+        const at = new Date('2026-01-01T00:00:00.000Z')
+        await database.backgroundJobs.ensureIdle('model_sync', at)
+        await database.backgroundJobs.tryClaim('model_sync', new Date('2026-01-02T00:00:00.000Z'))
+
+        const completedAt = new Date('2026-01-02T00:00:01.000Z')
+        const record = await database.backgroundJobs.recordCompletion('model_sync', {
+          completedAt,
+          status: 'failed',
+          outcome: 'failure',
+          errorCode: 'temporary',
+          errorMessage: 'try again later',
+          durationMs: 1000,
+          affectedCount: 3,
+        })
+
+        expect(record.status).toBe('failed')
+        expect(record.lastOutcome).toBe('failure')
+        expect(record.lastErrorCode).toBe('temporary')
+        expect(record.lastErrorMessage).toBe('try again later')
+        expect(record.lastDurationMs).toBe(1000)
+        expect(record.lastAffectedCount).toBe(3)
+        expect(record.lastCompletedAt).toEqual(completedAt)
+      })
+
+      test('recordCompletion lets a fresh claim run again after the previous one finished', async () => {
+        const at = new Date('2026-01-01T00:00:00.000Z')
+        await database.backgroundJobs.ensureIdle('model_sync', at)
+        await database.backgroundJobs.tryClaim('model_sync', new Date('2026-01-02T00:00:00.000Z'))
+        await database.backgroundJobs.recordCompletion('model_sync', {
+          completedAt: new Date('2026-01-02T00:00:01.000Z'),
+          status: 'succeeded',
+          outcome: 'success',
+          durationMs: 1000,
+        })
+
+        const next = await database.backgroundJobs.tryClaim('model_sync', new Date('2026-01-02T00:00:05.000Z'))
+        expect(next).not.toBeNull()
+      })
+
+      test('resetRunning moves every running row back to idle and keeps the timestamps', async () => {
+        const at = new Date('2026-01-01T00:00:00.000Z')
+        await database.backgroundJobs.ensureIdle('model_sync', at)
+        const startedAt = new Date('2026-01-02T00:00:00.000Z')
+        await database.backgroundJobs.tryClaim('model_sync', startedAt)
+
+        const removed = await database.backgroundJobs.resetRunning()
+        expect(removed).toBe(1)
+
+        const record = await database.backgroundJobs.get('model_sync')
+        expect(record?.status).toBe('idle')
+        expect(record?.lastStartedAt).toEqual(startedAt)
+      })
+
+      test('list returns every row in job-id order', async () => {
+        const at = new Date('2026-01-01T00:00:00.000Z')
+        await database.backgroundJobs.ensureIdle('session_cleanup', at)
+        await database.backgroundJobs.ensureIdle('model_sync', at)
+        await database.backgroundJobs.ensureIdle('usage_poll', at)
+
+        const all = await database.backgroundJobs.list()
+        expect(all.map((record) => record.jobId)).toEqual([
+          'model_sync',
+          'session_cleanup',
+          'usage_poll',
+        ])
+      })
+    })
   })
 }
 

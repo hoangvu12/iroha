@@ -6,16 +6,25 @@ import {
   type IrohaConfiguration,
 } from '../config/environment.ts'
 import { createSecretCipher } from '../crypto/index.ts'
+import { RequestHistoryService } from '../history/index.ts'
 import { createApp } from '../http/app.ts'
 import { ReadinessState } from '../http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../identity/index.ts'
+import {
+  BackgroundScheduleSettingsService,
+  BackgroundScheduler,
+  buildDefaultJobs,
+} from '../jobs/index.ts'
 import { GatewayKeyRegistry } from '../keys/index.ts'
+import { ModelCatalogService } from '../models/index.ts'
 import { openDatabase, type Database } from '../persistence/index.ts'
 import {
   createGenericKeyProbe,
   ProviderConnectionRegistry,
   type UpstreamKeyProbe,
 } from '../providers/index.ts'
+import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
+import type { Timer } from './timer.ts'
 import { UsageService, type UsageAdapter } from '../usage/index.ts'
 import { createGenericUsageAdapter } from '../usage/generic-adapter.ts'
 import type { Clock } from './clock.ts'
@@ -29,9 +38,16 @@ export interface StartOptions {
   readonly log?: (message: string) => void
   /** Injected at the composition boundary; production uses the real ones. */
   readonly clock?: Clock
+  readonly timer?: Timer
   readonly passwordHasher?: PasswordHasher
   readonly keyProbe?: UpstreamKeyProbe
   readonly usageAdapter?: UsageAdapter
+  /** Replaces the fully assembled app the runtime listens on. */
+  readonly appFactory?: typeof createApp
+  /** Replaces the request-history service the scheduler reaches for. */
+  readonly requestHistory?: RequestHistoryService
+  /** Replaces the model catalog service the scheduler reaches for. */
+  readonly modelCatalog?: ModelCatalogService
 }
 
 export interface RunningIroha {
@@ -119,7 +135,48 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     ...(options.clock ? { clock: options.clock } : {}),
   })
 
-  const app = createApp({
+  const requestHistory = options.requestHistory ?? new RequestHistoryService({ database })
+  const modelCatalog = options.modelCatalog ?? new ModelCatalogService({
+    database,
+    cipher: secretCipher,
+    inference: createGenericInferenceAdapter({ fetch: globalThis.fetch }),
+  })
+  const backgroundSchedule = new BackgroundScheduleSettingsService({
+    database,
+    ...(options.clock ? { clock: options.clock } : {}),
+  })
+
+  // A few scheduled jobs may have been left `running` by a previous process;
+  // resetting them to `idle` is what the Owner sees when the service comes
+  // back up: every row is fresh, no card is stuck on a job that cannot
+  // possibly finish.
+  await database.backgroundJobs.resetRunning()
+
+  const removeExpiredSessions = async (now: Date) => await database.sessions.removeExpired(now)
+  const backgroundScheduler = new BackgroundScheduler({
+    database,
+    jobs: buildDefaultJobs({
+      modelCatalog,
+      providers,
+      usage: usageService,
+      requestHistory,
+      removeExpiredSessions,
+    }),
+    settings: backgroundSchedule,
+    collaborators: {
+      modelCatalog,
+      providers,
+      usage: usageService,
+      requestHistory,
+      removeExpiredSessions,
+    },
+    ...(options.clock ? { clock: options.clock } : {}),
+    ...(options.timer ? { timer: options.timer } : {}),
+  })
+  backgroundScheduler.start()
+
+  const createAppFn = options.appFactory ?? createApp
+  const app = createAppFn({
     database,
     readiness,
     identity,
@@ -129,6 +186,9 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     frontendDirectory: options.frontendDirectory ?? DEFAULT_FRONTEND_DIRECTORY,
     usageAdapter: options.usageAdapter ?? createGenericUsageAdapter(),
     usageService,
+    requestHistory,
+    backgroundSchedule,
+    backgroundScheduler,
   })
 
   const server = app.listen({ hostname: configuration.host, port: configuration.port })
@@ -146,6 +206,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     stop() {
       stopped ??= (async () => {
         readiness.beginShutdown()
+        await backgroundScheduler.stop()
         await server.stop()
         await database.close()
       })()

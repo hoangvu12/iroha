@@ -78,6 +78,13 @@
       "when": 1786548125214,
       "tag": "0010_ancient_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786551896263,
+      "tag": "0011_spicy_spot",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { Database as BunSqlite } from 'bun:sqlite'
 import { dirname, join } from 'node:path'
 import { mkdirSync } from 'node:fs'
-import { and, asc, count, desc, eq, gte, like, lt, lte, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, inArray, like, lt, lte, ne, sql } from 'drizzle-orm'
 import { drizzle, type BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import type { SqliteConfiguration } from '../../config/environment.ts'
@@ -15,6 +15,10 @@ import {
   type AuditListResult,
   type AuditOutcome,
   type AuditRepository,
+  type BackgroundJobCompletion,
+  type BackgroundJobRecord,
+  type BackgroundJobRepository,
+  type BackgroundJobStatus,
   type ConnectionCapabilities,
   type Database,
   type GatewayKeyRecord,
@@ -52,6 +56,7 @@ import {
 } from '../repository.ts'
 import {
   auditEvents,
+  backgroundJobs,
   gatewayKeys,
   modelCatalogEntries,
   modelCatalogSync,
@@ -107,6 +112,7 @@ class SqliteDatabase implements Database {
   readonly modelCatalog: ModelCatalogRepository
   readonly usage: UsageRepository
   readonly requestHistory: RequestHistoryRepository
+  readonly backgroundJobs: BackgroundJobRepository
 
   /**
    * `bun:sqlite` is one synchronous connection, so two overlapping
@@ -130,6 +136,7 @@ class SqliteDatabase implements Database {
     this.modelCatalog = new SqliteModelCatalogRepository(handle)
     this.usage = new SqliteUsageRepository(handle)
     this.requestHistory = new SqliteRequestHistoryRepository(handle)
+    this.backgroundJobs = new SqliteBackgroundJobRepository(handle)
   }
 
   /**
@@ -147,6 +154,7 @@ class SqliteDatabase implements Database {
       modelCatalog: this.modelCatalog,
       usage: this.usage,
       requestHistory: this.requestHistory,
+      backgroundJobs: this.backgroundJobs,
     }
   }
 
@@ -1334,6 +1342,28 @@ class SqliteRequestHistoryRepository implements RequestHistoryRepository {
     return removed.length
   }
 
+  async pruneEventsBounded(before: Date, limit: number): Promise<number> {
+    if (limit <= 0) return 0
+    // SQLite supports `DELETE ... ORDER BY ... LIMIT`, so we can pick the
+    // oldest events and stop after `limit` rows. The subquery also keeps the
+    // cascade on request_attempts to a single batch.
+    const removed = await this.handle
+      .delete(requestEvents)
+      .where(
+        inArray(
+          requestEvents.id,
+          this.handle
+            .select({ id: requestEvents.id })
+            .from(requestEvents)
+            .where(lt(requestEvents.occurredAt, before))
+            .orderBy(asc(requestEvents.occurredAt), asc(requestEvents.id))
+            .limit(limit),
+        ),
+      )
+      .returning({ id: requestEvents.id })
+    return removed.length
+  }
+
   async listAudit(options: AuditListOptions = {}): Promise<AuditListResult> {
     const filter = options.filter ?? {}
     const where = auditFilter(filter)
@@ -1438,4 +1468,122 @@ function auditFilter(filter: AuditFilter) {
     conditions.push(lte(auditEvents.occurredAt, filter.before))
   }
   return conditions.length === 0 ? undefined : and(...conditions)
+}
+
+class SqliteBackgroundJobRepository implements BackgroundJobRepository {
+  constructor(private readonly handle: Handle) {}
+
+  async resetRunning(): Promise<number> {
+    // A running row from a previous process is stale: the process no longer
+    // owns the claim, so the row is moved back to idle. `WHERE status = 'running'`
+    // is the only way to tell an old "running" from a new one; the row keeps
+    // its lastStartedAt/lastCompletedAt so the Owner can still see the run.
+    const updated = await this.handle
+      .update(backgroundJobs)
+      .set({ status: 'idle', updatedAt: new Date() })
+      .where(eq(backgroundJobs.status, 'running'))
+      .returning({ jobId: backgroundJobs.jobId })
+    return updated.length
+  }
+
+  async ensureIdle(jobId: string, at: Date): Promise<BackgroundJobRecord> {
+    const [row] = await this.handle
+      .insert(backgroundJobs)
+      .values({
+        jobId,
+        status: 'idle',
+        updatedAt: at,
+      })
+      .onConflictDoUpdate({
+        target: backgroundJobs.jobId,
+        set: { updatedAt: at },
+      })
+      .returning()
+    if (row === undefined) throw new DatabaseUnavailableError('ensureIdle did not return a row')
+    return toBackgroundJob(row)
+  }
+
+  async get(jobId: string): Promise<BackgroundJobRecord | null> {
+    const [row] = await this.handle
+      .select()
+      .from(backgroundJobs)
+      .where(eq(backgroundJobs.jobId, jobId))
+      .limit(1)
+    return row ? toBackgroundJob(row) : null
+  }
+
+  async list(): Promise<readonly BackgroundJobRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(backgroundJobs)
+      .orderBy(backgroundJobs.jobId)
+    return rows.map(toBackgroundJob)
+  }
+
+  async tryClaim(jobId: string, startedAt: Date): Promise<Date | null> {
+    // The UPDATE only matches when the existing row is not already running, so
+    // two concurrent callers compete atomically and exactly one wins.
+    const updated = await this.handle
+      .update(backgroundJobs)
+      .set({
+        status: 'running',
+        lastStartedAt: startedAt,
+        lastCompletedAt: null,
+        lastOutcome: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastDurationMs: null,
+        lastAffectedCount: null,
+        updatedAt: startedAt,
+      })
+      .where(and(eq(backgroundJobs.jobId, jobId), ne(backgroundJobs.status, 'running')))
+      .returning({ startedAt: backgroundJobs.lastStartedAt })
+
+    if (updated.length === 0) return null
+    return updated[0]?.startedAt ?? null
+  }
+
+  async recordCompletion(
+    jobId: string,
+    completion: BackgroundJobCompletion,
+  ): Promise<BackgroundJobRecord> {
+    const [row] = await this.handle
+      .update(backgroundJobs)
+      .set({
+        status: completion.status,
+        lastCompletedAt: completion.completedAt,
+        lastOutcome: completion.outcome,
+        lastErrorCode: completion.errorCode ?? null,
+        lastErrorMessage: completion.errorMessage ?? null,
+        lastDurationMs: completion.durationMs,
+        lastAffectedCount: completion.affectedCount ?? null,
+        updatedAt: completion.completedAt,
+      })
+      .where(eq(backgroundJobs.jobId, jobId))
+      .returning()
+
+    if (row === undefined) {
+      throw new DatabaseUnavailableError(
+        `Background job ${jobId} has no row to update; tryClaim must have been called first`,
+      )
+    }
+    return toBackgroundJob(row)
+  }
+}
+
+type BackgroundJobRow = typeof backgroundJobs.$inferSelect
+
+function toBackgroundJob(row: BackgroundJobRow): BackgroundJobRecord {
+  return {
+    jobId: row.jobId,
+    lastStartedAt: row.lastStartedAt,
+    lastCompletedAt: row.lastCompletedAt,
+    status: row.status as BackgroundJobStatus,
+    lastOutcome: row.lastOutcome as 'success' | 'failure' | null,
+    lastErrorCode: row.lastErrorCode,
+    lastErrorMessage: row.lastErrorMessage,
+    lastDurationMs: row.lastDurationMs,
+    lastAffectedCount: row.lastAffectedCount,
+    updatedAt: row.updatedAt,
+  }
 }

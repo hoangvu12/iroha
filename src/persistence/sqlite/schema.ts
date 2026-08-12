@@ -270,3 +270,24 @@ export const requestAttempts = sqliteTable(
   },
   (table) => ({ pkRequestAttempt: primaryKey({ columns: [table.id] }) }),
 )
+
+/**
+ * One background job's durable status. The scheduler writes one row per job and
+ * updates it inside a database-level claim so two overlapping invocations of
+ * the same job cannot both succeed. `status` is the current state (`idle`,
+ * `running`, `succeeded`, `failed`); the `last_*` fields describe the most
+ * recent completed run. `last_error_message` is structural text only, never
+ * upstream body content that could echo a secret.
+ */
+export const backgroundJobs = sqliteTable('background_jobs', {
+  jobId: text('job_id').primaryKey(),
+  lastStartedAt: integer('last_started_at', { mode: 'timestamp_ms' }),
+  lastCompletedAt: integer('last_completed_at', { mode: 'timestamp_ms' }),
+  status: text('status').notNull(),
+  lastOutcome: text('last_outcome'),
+  lastErrorCode: text('last_error_code'),
+  lastErrorMessage: text('last_error_message'),
+  lastDurationMs: integer('last_duration_ms'),
+  lastAffectedCount: integer('last_affected_count'),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})

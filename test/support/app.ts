@@ -5,6 +5,7 @@ import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
 import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
+import { BackgroundScheduleSettingsService } from '../../src/jobs/index.ts'
 import { ModelCatalogService } from '../../src/models/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import {
@@ -18,6 +19,8 @@ import { createGenericUsageAdapter } from '../../src/usage/generic-adapter.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
 import { testClock, testPasswordHasher, type TestClock } from './identity.ts'
 import { stubUpstreamTransport } from './inference.ts'
+import { RequestHistoryService } from '../../src/history/index.ts'
+import { StaticScheduler } from '../../src/http/background-scheduler-surface.ts'
 
 export const ORIGIN = 'http://iroha.test'
 
@@ -55,6 +58,10 @@ export interface TestAppOptions {
   readonly secretCipher?: SecretCipher
   /** Replaces the Usage Adapter; defaults to the reactive-only generic one. */
   readonly usageAdapter?: UsageAdapter
+  /** Replaces the background schedule settings service. */
+  readonly backgroundSchedule?: BackgroundScheduleSettingsService
+  /** Replaces the background scheduler surface the management route reaches for. */
+  readonly backgroundScheduler?: import('../../src/http/background-scheduler-surface.ts').SchedulerSurface
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly streamingTimeouts?: StreamingTimeouts
@@ -173,6 +180,13 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     adapter: usageAdapter,
     clock,
   })
+  const backgroundSchedule = options.backgroundSchedule ?? new BackgroundScheduleSettingsService({ database, clock })
+  const backgroundScheduler = options.backgroundScheduler ?? new StaticScheduler(database)
+  const requestHistory = new RequestHistoryService({ database, clock })
+
+  // Test apps default to a real scheduler so the management route can list
+  // jobs and trigger them; tests that want to silence the scheduler pass
+  // their own StaticScheduler explicitly through options.backgroundScheduler.
   const app = createApp({
     database,
     readiness,
@@ -184,6 +198,9 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     modelCatalog,
     usageAdapter,
     usageService,
+    requestHistory,
+    backgroundSchedule,
+    backgroundScheduler,
     ...(options.timer === undefined ? {} : { timer: options.timer }),
     ...(options.streamingTimeouts === undefined
       ? {}

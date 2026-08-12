@@ -299,6 +299,20 @@ export class RequestHistoryService {
     return await this.#database.requestHistory.pruneEvents(cutoff)
   }
 
+  /**
+   * Drops at most `limit` events older than the retention window, returning
+   * the number actually removed. The bounded form is what the background
+   * retention job calls: it cooperates with the database so a single tick
+   * cannot monopolize the connection with one giant DELETE.
+   */
+  async pruneBounded(limit: number): Promise<number> {
+    if (!this.#retentionEnabled()) return 0
+    const days = await this.#effectiveDays()
+    if (days <= 0) return 0
+    const cutoff = new Date(this.#clock.now().getTime() - days * MS_PER_DAY)
+    return await this.#database.requestHistory.pruneEventsBounded(cutoff, limit)
+  }
+
   /** Reads the configured retention window, applying the default when unset. */
   async readRetention(): Promise<RequestHistoryRetention> {
     return await this.#readRetentionSetting()

@@ -643,6 +643,14 @@ export interface RequestHistoryRepository {
   /** Removes events that occurred strictly before `before`. */
   pruneEvents(before: Date): Promise<number>
 
+  /**
+   * Removes at most `limit` events that occurred strictly before `before`,
+   * returning the number actually removed. The bounded form lets the
+   * background retention job cooperate with the database instead of taking
+   * the lock for one giant DELETE.
+   */
+  pruneEventsBounded(before: Date, limit: number): Promise<number>
+
   /** Audit listing with the same kind of pagination as request history. */
   listAudit(options?: AuditListOptions): Promise<AuditListResult>
 
@@ -661,6 +669,88 @@ export interface Repositories {
   readonly modelCatalog: ModelCatalogRepository
   readonly usage: UsageRepository
   readonly requestHistory: RequestHistoryRepository
+  readonly backgroundJobs: BackgroundJobRepository
+}
+
+/**
+ * Lifecycle states of one background job. `running` is the in-flight state;
+ * `succeeded` and `failed` are terminal states the scheduler writes once a
+ * run finishes. `idle` is the initial state before any run has happened.
+ */
+export type BackgroundJobStatus = 'idle' | 'running' | 'succeeded' | 'failed'
+
+/**
+ * The durable status of one background job. `lastStartedAt` and
+ * `lastCompletedAt` are kept independently so the Owner can see when a job
+ * last began and when it finished — they are not the same timestamp when a
+ * job is still running. `lastErrorMessage` is a structural description, never
+ * upstream body content that could echo a secret.
+ */
+export interface BackgroundJobRecord {
+  readonly jobId: string
+  readonly lastStartedAt: Date | null
+  readonly lastCompletedAt: Date | null
+  readonly status: BackgroundJobStatus
+  readonly lastOutcome: 'success' | 'failure' | null
+  readonly lastErrorCode: string | null
+  readonly lastErrorMessage: string | null
+  readonly lastDurationMs: number | null
+  readonly lastAffectedCount: number | null
+  readonly updatedAt: Date
+}
+
+/**
+ * The patch applied to a job's status row when a run finishes. The scheduler
+ * supplies the outcome and any error context; only the supplied fields are
+ * written, so a stale `lastDurationMs` is not overwritten by a missing one.
+ */
+export interface BackgroundJobCompletion {
+  readonly completedAt: Date
+  readonly status: Exclude<BackgroundJobStatus, 'running' | 'idle'>
+  readonly outcome: 'success' | 'failure'
+  readonly errorCode?: string | null
+  readonly errorMessage?: string | null
+  readonly durationMs: number
+  readonly affectedCount?: number | null
+}
+
+/**
+ * The durable status of the bounded background jobs the scheduler runs.
+ *
+ * The contract covers the lifecycle that keeps the Owner's visibility honest
+ * without ever letting two concurrent invocations of the same job silently
+ * double-write. `tryClaim` is the only way to move a job from `idle` or
+ * `succeeded` or `failed` into `running`, and it is atomic: two callers that
+ * race against the same job see exactly one winner.
+ */
+export interface BackgroundJobRepository {
+  /**
+   * Initial idles every known job, used during startup so the Owner never
+   * sees a stale `running`. Returns the number of rows that were moved from
+   * `running` back to `idle` so tests can prove the call did anything.
+   */
+  resetRunning(): Promise<number>
+  /**
+   * Creates a row for `jobId` if one does not already exist. The default
+   * status is `idle` and the `updatedAt` is `at`. The scheduler calls this on
+   * every startup so the Owner's job list never collapses to empty rows
+   * just because a job has never run.
+   */
+  ensureIdle(jobId: string, at: Date): Promise<BackgroundJobRecord>
+  get(jobId: string): Promise<BackgroundJobRecord | null>
+  list(): Promise<readonly BackgroundJobRecord[]>
+  /**
+   * Atomically marks the job as `running` from a non-running state. Returns
+   * the started-at timestamp on success, or `null` when another caller
+   * already holds the claim (or when the job is unknown).
+   */
+  tryClaim(jobId: string, startedAt: Date): Promise<Date | null>
+  /**
+   * Writes the terminal status of a run, including any failure context. The
+   * caller is the one that just won `tryClaim`, so the row is updated
+   * unconditionally.
+   */
+  recordCompletion(jobId: string, completion: BackgroundJobCompletion): Promise<BackgroundJobRecord>
 }
 
 export interface Database extends Repositories {

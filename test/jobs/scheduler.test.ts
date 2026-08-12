@@ -10,6 +10,7 @@ import {
   type BackgroundScheduleSettings,
 } from '../../src/jobs/index.ts'
 import { testClock } from '../support/identity.ts'
+import { fakeTimer } from '../support/timer.ts'
 
 /**
  * Deterministic clock tests for the bounded background scheduler.
@@ -269,6 +270,52 @@ describe('background scheduler', () => {
     const record = await scheduler.status('tick_no_double')
     // The job was not picked up because the claim was already taken.
     expect(record?.status).toBe('running')
+  })
+
+  test('stop waits for the active tick and rejects subsequent claims', async () => {
+    const timer = fakeTimer()
+    let starts = 0
+    let release!: () => void
+    const job: BackgroundJob = {
+      id: 'drainable_job',
+      label: 'Drainable job',
+      intervalSeconds: () => 60,
+      async run() {
+        starts += 1
+        await new Promise<void>((resolve) => { release = resolve })
+        return { outcome: 'success' }
+      },
+    }
+    const scheduler = new BackgroundScheduler({
+      database,
+      jobs: [job],
+      settings,
+      collaborators: {
+        modelCatalog: null as never,
+        providers: null as never,
+        usage: null as never,
+        requestHistory: null as never,
+        removeExpiredSessions: async () => 0,
+      },
+      clock,
+      timer,
+    })
+
+    await scheduler.seed()
+    scheduler.start()
+    timer.advance(250)
+    timer.flush()
+    while ((await scheduler.status('drainable_job'))?.status !== 'running') await Bun.sleep(0)
+    const stopping = scheduler.stop()
+    expect(starts).toBe(1)
+
+    release()
+    await stopping
+    expect((await scheduler.status('drainable_job'))?.status).toBe('succeeded')
+
+    scheduler.start()
+    timer.flush()
+    expect(starts).toBe(1)
   })
 
   test('listStatus returns every known job in the schedule order', async () => {

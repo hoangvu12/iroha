@@ -19,6 +19,7 @@ import {
   type RequestEventView,
   type RequestFilter,
 } from '@/lib/requests'
+import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 const PAGE_SIZE = 25
 
@@ -434,9 +435,6 @@ function hasFilter(filter: RequestFilter): boolean {
   )
 }
 
-/** Stored in UTC, shown in the reader's own timezone. */
 function formatTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return 'unknown'
-  return at.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' })
+  return formatTimeWithUtc(iso, { dateStyle: 'short', timeStyle: 'medium' })
 }

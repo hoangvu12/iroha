@@ -40,6 +40,7 @@ export function createDirectoryRoutes({ gatewayKeys }: DirectoryRoutesOptions) {
       },
       {
         detail: {
+          security: [{ GatewayKey: [] }],
           summary: 'Discover permitted Provider Connections',
           description:
             'Lists only the Provider Connections and exact model IDs this Gateway Key is scoped to. Base URLs, balances, secrets, and health are never returned.',

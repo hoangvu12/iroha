@@ -21,6 +21,7 @@ import {
   updateKeySettings,
   type ConnectionView,
 } from '@/lib/providers'
+import { formatTime as formatTimeWithUtc } from '@/lib/time'
 import { refreshCatalog } from '@/lib/catalog'
 import type { ConnectionSection } from '@/components/navigation'
 import { SectionTabs } from '@/components/section-tabs'
@@ -908,9 +909,6 @@ function parseModelList(value: string): readonly string[] | null {
   return models.length === 0 ? null : models
 }
 
-/** Stored in UTC, shown in the reader's own timezone. */
 function formatTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return 'unknown'
-  return at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return formatTimeWithUtc(iso, { dateStyle: 'medium', timeStyle: 'short' })
 }

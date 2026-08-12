@@ -28,6 +28,7 @@ describe('required configuration', () => {
     expect(config.recoveryToken).toBeUndefined()
     expect(config.host).toBe('0.0.0.0')
     expect(config.port).toBe(3000)
+    expect(config.shutdownGraceMs).toBe(10_000)
   })
 
   test('reports every missing required value together', () => {
@@ -171,7 +172,20 @@ describe('optional configuration', () => {
     expect(config.port).toBe(8080)
   })
 
+  test('shutdown grace is bounded and accepts zero', () => {
+    expect(loadConfiguration(valid({ IROHA_SHUTDOWN_GRACE_MS: '0' })).shutdownGraceMs).toBe(0)
+    expect(loadConfiguration(valid({ IROHA_SHUTDOWN_GRACE_MS: '60000' })).shutdownGraceMs).toBe(60_000)
+  })
+
   test.each(['0', '65536', '-1', '3000.5', 'eighty'])('PORT=%s is rejected', (port) => {
     expect(problemsFrom(valid({ PORT: port })).problems[0]?.variable).toBe('PORT')
   })
+
+  test.each(['-1', '60001', 'thirty', '2.5', ''])(
+    'IROHA_SHUTDOWN_GRACE_MS=%s is rejected',
+    (value) => {
+      const error = problemsFrom(valid({ IROHA_SHUTDOWN_GRACE_MS: value }))
+      expect(error.problems[0]?.variable).toBe('IROHA_SHUTDOWN_GRACE_MS')
+    },
+  )
 })

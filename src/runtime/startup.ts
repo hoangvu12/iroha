@@ -26,9 +26,11 @@ import {
   type UpstreamKeyProbe,
 } from '../providers/index.ts'
 import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
-import type { Timer } from './timer.ts'
+import { ShutdownController } from './shutdown.ts'
+import { systemTimer, type Timer } from './timer.ts'
 import { UsageService, type UsageAdapter } from '../usage/index.ts'
 import { createGenericUsageAdapter } from '../usage/generic-adapter.ts'
+import { MetricsCollector, MetricsSettingsService } from '../metrics/metrics.ts'
 import type { Clock } from './clock.ts'
 
 const DEFAULT_FRONTEND_DIRECTORY = join(import.meta.dir, '../../ui/dist')
@@ -56,6 +58,7 @@ export interface StartOptions {
   readonly requestHistory?: RequestHistoryService
   /** Replaces the model catalog service the scheduler reaches for. */
   readonly modelCatalog?: ModelCatalogService
+  readonly shutdownGraceMs?: number
 }
 
 export interface RunningIroha {
@@ -63,6 +66,7 @@ export interface RunningIroha {
   readonly database: Database
   readonly url: string
   readonly port: number
+  readonly shutdown: ShutdownController
   stop(): Promise<void>
 }
 
@@ -82,6 +86,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
 
   const database = openDatabase(configuration.database)
   const readiness = new ReadinessState()
+  readiness.markConfigured()
 
   try {
     await database.migrate()
@@ -167,13 +172,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
   const removeExpiredSessions = async (now: Date) => await database.sessions.removeExpired(now)
   const backgroundScheduler = new BackgroundScheduler({
     database,
-    jobs: buildDefaultJobs({
-      modelCatalog,
-      providers,
-      usage: usageService,
-      requestHistory,
-      removeExpiredSessions,
-    }),
+    jobs: buildDefaultJobs(),
     settings: backgroundSchedule,
     collaborators: {
       modelCatalog,
@@ -185,8 +184,16 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     ...(options.clock ? { clock: options.clock } : {}),
     ...(options.timer ? { timer: options.timer } : {}),
   })
+  await backgroundScheduler.seed()
   backgroundScheduler.start()
 
+  const shutdown = new ShutdownController({
+    graceMs: options.shutdownGraceMs ?? configuration.shutdownGraceMs,
+    timer: options.timer ?? systemTimer,
+  })
+
+  const metrics = new MetricsCollector()
+  const metricsSettings = new MetricsSettingsService(database)
   const createAppFn = options.appFactory ?? createApp
   const app = createAppFn({
     database,
@@ -201,6 +208,9 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     requestHistory,
     backgroundSchedule,
     backgroundScheduler,
+    shutdown,
+    metrics,
+    metricsSettings,
   })
 
   const server = app.listen({ hostname: configuration.host, port: configuration.port })
@@ -215,12 +225,20 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     database,
     url,
     port,
+    shutdown,
     stop() {
       stopped ??= (async () => {
         readiness.beginShutdown()
-        await backgroundScheduler.stop()
-        await server.stop()
-        await database.close()
+        const inferenceStop = shutdown.drain({
+          onDeadline: async () => { await server.stop(true) },
+        })
+        const backgroundStop = backgroundScheduler.stop()
+        try {
+          await Promise.all([inferenceStop, backgroundStop])
+        } finally {
+          await server.stop(true)
+          await database.close()
+        }
       })()
       return stopped
     },

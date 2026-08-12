@@ -14,6 +14,7 @@ import {
   type SessionSummary,
 } from '@/lib/auth'
 import { fetchRetention, updateRetention, SettingsError, type RetentionView } from '@/lib/settings'
+import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 interface AccountSettingsProps {
   readonly state: AuthState
@@ -246,10 +247,6 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
   )
 }
 
-/** Stored in UTC, shown in the reader's own timezone. */
 function formatTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return 'unknown'
-
-  return at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return formatTimeWithUtc(iso, { dateStyle: 'medium', timeStyle: 'short' })
 }

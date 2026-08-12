@@ -41,7 +41,7 @@ export class StaticScheduler implements SchedulerSurface {
     return await this.#database.backgroundJobs.list()
   }
 
-  async trigger(jobId: string): Promise<BackgroundJobRecord | null> {
+  async trigger(): Promise<BackgroundJobRecord | null> {
     // The real scheduler exposes its job list; the static placeholder has
     // none, so a trigger always returns null and the route answers 404.
     return null

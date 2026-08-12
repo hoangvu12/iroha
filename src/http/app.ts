@@ -6,15 +6,13 @@ import type { InferenceAdapter } from '../inference/index.ts'
 import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
 import type { OwnerIdentity } from '../identity/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
-import {
-  BackgroundScheduleSettingsService,
-  type BackgroundScheduler,
-} from '../jobs/index.ts'
+import { BackgroundScheduleSettingsService } from '../jobs/index.ts'
 import { ModelCatalogService, templateKnowledgeFromRegistry } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import { createBuiltInAdapterRegistry } from '../providers/adapter-registry.ts'
 import type { ProviderConnectionRegistry } from '../providers/index.ts'
+import type { ShutdownController } from '../runtime/shutdown.ts'
 import type { Timer } from '../runtime/timer.ts'
 import { UsageService, type UsageAdapter } from '../usage/index.ts'
 import { createGenericUsageAdapter } from '../usage/generic-adapter.ts'
@@ -31,6 +29,8 @@ import { createRequestHistoryRoutes } from './request-history.ts'
 import { ReadinessState } from './readiness.ts'
 import { createSettingsRoutes } from './settings.ts'
 import { createUsageRoutes } from './usage.ts'
+import { createMetricsRoutes } from './metrics.ts'
+import { MetricsCollector, MetricsSettingsService } from '../metrics/metrics.ts'
 
 export interface AppOptions {
   readonly database: Database
@@ -63,8 +63,11 @@ export interface AppOptions {
   readonly backgroundSchedule?: BackgroundScheduleSettingsService | undefined
   /** Replaces the background scheduler surface built from the other options. */
   readonly backgroundScheduler?: SchedulerSurface | undefined
+  readonly metrics?: MetricsCollector | undefined
+  readonly metricsSettings?: MetricsSettingsService | undefined
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
+  readonly shutdown?: ShutdownController
   readonly streamingTimeouts?: StreamingTimeouts
   /** Overrides the transport defaults read from the global settings store. */
   readonly transportDefaults?: TransportDefaults | undefined
@@ -80,7 +83,8 @@ const readyResponse = t.Object({
 
 const notReadyResponse = t.Object({
   status: t.Literal('not_ready'),
-  reason: t.Union([
+  reason:     t.Union([
+    t.Literal('configuration_invalid'),
     t.Literal('migrations_pending'),
     t.Literal('shutting_down'),
     t.Literal('database_unavailable'),
@@ -134,10 +138,44 @@ export function createApp(options: AppOptions) {
 
   const backgroundScheduler: SchedulerSurface = options.backgroundScheduler ?? new StaticScheduler(database)
 
+  readiness.markConfigured()
+
+  const metrics = options.metrics ?? new MetricsCollector(
+    options.timer === undefined ? {} : { now: () => options.timer!.now() },
+  )
+  const metricsSettings = options.metricsSettings ?? new MetricsSettingsService(database)
+
   const transportDefaults: TransportDefaults = options.transportDefaults ?? DEFAULT_TRANSPORT
 
   return new Elysia()
-    .use(openapi({ path: '/docs', documentation: { info: { title: 'Iroha', version: '0.1.0' } } }))
+    .get('/docs/capability-matrix', () => new Response(capabilityMatrixPage, {
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    }))
+    .onRequest(({ request }) => {
+      if (isTrackedInferenceRequest(request)) metrics.begin(request)
+    })
+    .mapResponse(({ request, responseValue }) => {
+      if (isTrackedInferenceRequest(request)) {
+        metrics.finish(request, responseValue instanceof Response ? responseValue.status : null)
+      }
+    })
+    .use(openapi({
+      path: '/docs',
+      documentation: {
+        info: {
+          title: 'Iroha',
+          version: '0.1.0',
+          description: 'Iroha discovery and Owner administration APIs. The OpenAI-compatible provider-scoped surface is linked to the capability matrix rather than duplicated here.',
+        },
+        externalDocs: { description: 'Iroha OpenAI capability matrix', url: '/docs/capability-matrix' },
+        components: {
+          securitySchemes: {
+            GatewayKey: { type: 'http', scheme: 'bearer', bearerFormat: 'Gateway Key' },
+            OwnerSession: { type: 'apiKey', in: 'cookie', name: 'iroha_session' },
+          },
+        },
+      },
+    }))
     .use(createAuthRoutes({ identity }))
     .use(createAdminRoutes({ identity, providers, gatewayKeys, adapterRegistry }))
     .use(createDirectoryRoutes({ gatewayKeys }))
@@ -176,6 +214,15 @@ export function createApp(options: AppOptions) {
       }),
     )
     .use(
+      createMetricsRoutes({
+        identity,
+        database,
+        providers,
+        metrics,
+        metricsSettings,
+      }),
+    )
+    .use(
       createInferenceRoutes({
         gatewayKeys,
         providers,
@@ -185,6 +232,8 @@ export function createApp(options: AppOptions) {
         requestHistory,
         transportDefaults,
         ...(options.timer === undefined ? {} : { timer: options.timer }),
+        ...(options.shutdown === undefined ? {} : { shutdown: options.shutdown }),
+        ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
         ...(options.streamingTimeouts === undefined
           ? {}
           : { timeouts: options.streamingTimeouts }),
@@ -247,4 +296,18 @@ export function createApp(options: AppOptions) {
 
 export type App = ReturnType<typeof createApp>
 export { ReadinessState }
+const capabilityMatrixPage = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Iroha OpenAI capability matrix</title></head>
+<body><h1>Iroha OpenAI capability matrix</h1>
+<table><thead><tr><th>Surface</th><th>Capability</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Models</td><td>Provider-scoped list</td><td>Exact model IDs filtered by Gateway Key scope.</td></tr>
+<tr><td>Chat Completions</td><td>Buffered and streaming</td><td>Tools, structured output, cancellation, unknown request fields, and OpenAI-shaped errors.</td></tr>
+<tr><td>Responses</td><td>Buffered and streaming</td><td>Tools, structured output, cancellation, unknown request fields, and OpenAI-shaped errors.</td></tr>
+<tr><td>All inference</td><td>Provider-aware routing</td><td>Connection capabilities and Key Health can constrain what is forwarded.</td></tr>
+</tbody></table></body></html>`
+
+function isTrackedInferenceRequest(request: Request): boolean {
+  return request.method !== 'OPTIONS' && /^\/providers\/[^/]+\/v1\//.test(new URL(request.url).pathname)
+}
+
 export { StaticScheduler, type SchedulerSurface }

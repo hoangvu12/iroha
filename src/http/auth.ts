@@ -147,6 +147,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          security: [{ OwnerSession: [] }],
           summary: 'Sign out',
           description: 'Revokes the session this browser is using and clears its cookie.',
         },
@@ -162,6 +163,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          security: [{ OwnerSession: [] }],
           summary: 'List sessions',
           description:
             'Lists every live Owner session with the browser description it was created from. Session secrets are never listed.',
@@ -180,6 +182,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          security: [{ OwnerSession: [] }],
           summary: 'Sign out everywhere',
           description: 'Revokes every Owner session, including the one making the request.',
         },
@@ -201,6 +204,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          security: [{ OwnerSession: [] }],
           summary: 'Revoke a session',
           description:
             'Revokes one session by ID. Revoking the current session also clears this browser’s cookie.',

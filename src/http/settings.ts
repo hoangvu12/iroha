@@ -18,8 +18,10 @@ export interface SettingsRoutesOptions {
 export function createSettingsRoutes({ identity, requestHistory, database }: SettingsRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
-  return new Elysia({ name: 'iroha/admin-settings', prefix: '/api/v1/admin/settings' })
-    .get(
+  return new Elysia({ name: 'iroha/admin-settings', prefix: '/api/v1/admin/settings' }).guard(
+    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    (app) => app
+      .get(
       '/request-history',
       async ({ request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
@@ -79,6 +81,7 @@ export function createSettingsRoutes({ identity, requestHistory, database }: Set
           403: errorResponse,
         },
       },
+    )
     )
 }
 

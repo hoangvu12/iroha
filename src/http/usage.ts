@@ -23,8 +23,10 @@ export interface UsageRoutesOptions {
 export function createUsageRoutes({ identity, usage }: UsageRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
-  return new Elysia({ name: 'iroha/usage', prefix: '/api/v1/admin/provider-connections/:id' })
-    .onError({ as: 'scoped' }, ({ code, status }) => {
+  return new Elysia({ name: 'iroha/usage', prefix: '/api/v1/admin/provider-connections/:id' }).guard(
+    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    (app) => app
+      .onError({ as: 'scoped' }, ({ code, status }) => {
       if (code === 'VALIDATION' || code === 'PARSE') {
         return status(400, managementError('invalid_request', 'The request body could not be read.'))
       }
@@ -84,6 +86,7 @@ export function createUsageRoutes({ identity, usage }: UsageRoutesOptions) {
         },
         response: { 200: usageResponse, ...errorResponses },
       },
+    )
     )
 }
 

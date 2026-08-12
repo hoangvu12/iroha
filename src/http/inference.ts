@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { Elysia } from 'elysia'
+import { Elysia, t } from 'elysia'
 import type { RequestHistoryService } from '../history/index.ts'
 import type { AttemptOutcome } from '../persistence/index.ts'
 import {
@@ -13,6 +13,8 @@ import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
 import type { InferenceTarget, ProviderConnectionRegistry } from '../providers/index.ts'
+import type { MetricsCollector } from '../metrics/metrics.ts'
+import type { InferenceActivity, ShutdownController } from '../runtime/shutdown.ts'
 import { systemTimer, type Timer } from '../runtime/timer.ts'
 
 /** The terminal shape of one attempt's outcome, what the recorder writes. */
@@ -89,6 +91,8 @@ export interface InferenceRoutesOptions {
   readonly modelCatalog: ModelCatalogService
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
+  readonly shutdown?: ShutdownController
+  readonly metrics?: MetricsCollector
   readonly timeouts?: StreamingTimeouts
   /** Per-connection transport overrides and the global fallback defaults. */
   readonly transportDefaults?: TransportDefaults
@@ -117,7 +121,7 @@ export const DEFAULT_TRANSPORT: TransportDefaults = {
  * authorization never travels beyond this boundary.
  */
 export function createInferenceRoutes(options: InferenceRoutesOptions) {
-  const { gatewayKeys, providers, inference, modelCatalog } = options
+  const { gatewayKeys, providers, inference, modelCatalog, shutdown, metrics } = options
   const timer = options.timer ?? systemTimer
   const retrySleep = options.retrySleep ?? sleepWithTimer(timer)
   const transport = options.transportDefaults ?? DEFAULT_TRANSPORT
@@ -139,6 +143,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       },
       {
         detail: {
+          hide: true,
           summary: 'CORS preflight',
           description:
             'Replies to a browser OPTIONS preflight with the allow-listed origin (if any) and the methods/headers inference is allowed to use. Same-origin requests get no CORS machinery.',
@@ -148,6 +153,9 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
     .get(
       '/:connectionId/v1/models',
       async ({ request, params }) => {
+        const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
+        if (activity === null) return shuttingDownError()
+        try {
         const correlationId = newRequestId()
         const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
 
@@ -180,12 +188,25 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           }),
           { status: 200, headers: responseHeaders },
         )
+        } finally {
+          activity?.finish()
+        }
+      },
+      {
+        detail: {
+          hide: true,
+          summary: 'List Provider Models',
+          description: 'The OpenAI-compatible provider-scoped Models surface is covered by the capability matrix and intentionally omitted from the custom API document.',
+        },
+        response: { 200: t.Object({ object: t.Literal('list'), data: t.Array(t.Object({ id: t.String(), object: t.Literal('model'), created: t.Number() })) }) },
       },
     )
     .post(
       '/:connectionId/v1/chat/completions',
-      async ({ request, params }) =>
-        await forwardGeneration({
+      async ({ request, params }) => {
+        const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
+        if (activity === null) return shuttingDownError()
+        return await forwardGeneration({
           request,
           connectionId: params.connectionId,
           upstreamPath: '/chat/completions',
@@ -194,18 +215,31 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           inference,
           modelCatalog,
           timer,
+          ...(metrics === undefined ? {} : { metrics }),
           timeouts: options.timeouts,
           retrySleep,
           transport,
           adapterCapabilities,
           database: options.database ?? null,
           requestHistory,
-        }),
+          ...(activity === undefined ? {} : { requestActivity: activity }),
+        })
+      },
+      {
+        detail: {
+          hide: true,
+          summary: 'Create Chat Completions',
+          description: 'The OpenAI-compatible provider-scoped Chat Completions surface is covered by the capability matrix and intentionally omitted from the custom API document.',
+        },
+        response: { 200: t.Unknown() },
+      },
     )
     .post(
       '/:connectionId/v1/responses',
-      async ({ request, params }) =>
-        await forwardGeneration({
+      async ({ request, params }) => {
+        const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
+        if (activity === null) return shuttingDownError()
+        return await forwardGeneration({
           request,
           connectionId: params.connectionId,
           upstreamPath: '/responses',
@@ -214,13 +248,24 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           inference,
           modelCatalog,
           timer,
+          ...(metrics === undefined ? {} : { metrics }),
           timeouts: options.timeouts,
           retrySleep,
           transport,
           adapterCapabilities,
           database: options.database ?? null,
           requestHistory,
-        }),
+          ...(activity === undefined ? {} : { requestActivity: activity }),
+        })
+      },
+      {
+        detail: {
+          hide: true,
+          summary: 'Create Responses',
+          description: 'The OpenAI-compatible provider-scoped Responses surface is covered by the capability matrix and intentionally omitted from the custom API document.',
+        },
+        response: { 200: t.Unknown() },
+      },
     )
 }
 
@@ -242,6 +287,8 @@ async function forwardGeneration(options: {
   transport: TransportDefaults
   adapterCapabilities: InferenceAdapterCapabilities
   requestHistory?: RequestHistoryService | undefined
+  requestActivity?: InferenceActivity
+  metrics?: MetricsCollector
 }): Promise<Response> {
   const {
     request,
@@ -257,8 +304,13 @@ async function forwardGeneration(options: {
     adapterCapabilities,
     timeouts,
     requestHistory,
+    requestActivity,
+    metrics,
   } = options
   const correlationId = newRequestId()
+  const requestSignal = requestActivity?.signal ?? request.signal
+  let streamingResponse = false
+  try {
   const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
   const cors = await buildCorsHeaders({
     connectionId,
@@ -334,7 +386,7 @@ async function forwardGeneration(options: {
   }) ?? null
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (request.signal.aborted) throw abortError()
+    if (requestSignal.aborted) throw abortError()
     let target: InferenceTarget
     if (retainedTarget !== null) {
       target = retainedTarget
@@ -383,7 +435,7 @@ async function forwardGeneration(options: {
       body: envelope.raw,
       headers: upstreamHeaders,
       upstreamKey: target.upstreamKey,
-      signal: request.signal,
+      signal: requestSignal,
       authHeader: target.authHeader,
       authPrefix: target.authPrefix,
       staticHeaders: target.staticHeaders,
@@ -426,7 +478,8 @@ async function forwardGeneration(options: {
           totalTokens: null,
           errorCode: null,
         })
-        return streamed
+        streamingResponse = true
+        return monitorResponse(streamed, requestActivity)
       }
       await providers.recordInferenceFailure({
         keyId: target.keyId,
@@ -447,17 +500,20 @@ async function forwardGeneration(options: {
       const status = streamed.status
       if ((status === 401 || status === 403) && attempt < maxAttempts) {
         attemptedKeys.push(target.keyId)
+        metrics?.recordRetry()
         continue
       }
       if (status === 429 && !alternateUsed && attempt < maxAttempts) {
         alternateUsed = true
         attemptedKeys.push(target.keyId)
+        metrics?.recordRetry()
         continue
       }
       if (status >= 500 && sameKeyRetries < 1 && attempt < maxAttempts) {
         sameKeyRetries++
         retainedTarget = target
-        await retrySleep(100, request.signal)
+        await retrySleep(100, requestSignal)
+        metrics?.recordRetry()
         continue
       }
       await history?.finalize({
@@ -491,7 +547,8 @@ async function forwardGeneration(options: {
         timer.now() - startedAt < totalRetryBudgetMs
       ) {
         retainedTarget = target
-        await retrySleep(100, request.signal)
+        await retrySleep(100, requestSignal)
+        metrics?.recordRetry()
         continue
       }
       await history?.finalize({
@@ -562,21 +619,24 @@ async function forwardGeneration(options: {
     })
 
     const insideBudget = timer.now() - startedAt < totalRetryBudgetMs
-    if (!insideBudget || request.signal.aborted) break
+    if (!insideBudget || requestSignal.aborted) break
 
     if (status === 401 || status === 403) {
       attemptedKeys.push(target.keyId)
+      metrics?.recordRetry()
       continue
     }
     if (status === 429 && !alternateUsed) {
       alternateUsed = true
       attemptedKeys.push(target.keyId)
+      metrics?.recordRetry()
       continue
     }
     if (status >= 500 && sameKeyRetries < 1) {
       sameKeyRetries++
       retainedTarget = target
-      await retrySleep(100, request.signal)
+      await retrySleep(100, requestSignal)
+      metrics?.recordRetry()
       continue
     }
     break
@@ -642,6 +702,9 @@ await history?.finalize({
     refusal,
     correlationId,
   )
+  } finally {
+    if (!streamingResponse) requestActivity?.finish()
+  }
 }
 
 /** Adds the Iroha-managed authentication, static, and idempotency headers to a forwarded request. */
@@ -887,6 +950,59 @@ function error(
     }),
     { status, headers },
   )
+}
+
+function shuttingDownError(): Response {
+  const correlationId = newRequestId()
+  return error(
+    503,
+    { 'content-type': 'application/json', 'x-request-id': correlationId },
+    { code: 'upstream_credentials_unavailable', message: 'Iroha is shutting down and cannot accept inference.' },
+    correlationId,
+  )
+}
+
+function monitorResponse(response: Response, activity: InferenceActivity | undefined): Response {
+  if (activity === undefined) return response
+  if (response.body === null) {
+    activity.finish()
+    return response
+  }
+
+  let completed = false
+  const finish = () => {
+    if (completed) return
+    completed = true
+    activity.finish()
+  }
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = response.body!.getReader()
+      try {
+        while (true) {
+          const chunk = await reader.read()
+          if (chunk.done) {
+            finish()
+            controller.close()
+            return
+          }
+          controller.enqueue(chunk.value)
+        }
+      } catch (cause) {
+        finish()
+        controller.error(cause)
+      }
+    },
+    async cancel(reason) {
+      await response.body!.cancel(reason)
+      finish()
+    },
+  })
+  return new Response(stream, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  })
 }
 
 function errorType(status: number): string {

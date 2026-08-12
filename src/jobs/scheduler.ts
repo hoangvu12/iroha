@@ -116,8 +116,7 @@ export class BackgroundScheduler {
   readonly #consecutiveFailures = new Map<string, number>()
   /** The active `setTimeout` handle, so `stop()` can cancel in-flight work. */
   #tickHandle: (() => void) | null = null
-  /** True while a tick is in progress; `stop()` waits for it to finish. */
-  #tickInFlight = false
+  #currentTick: Promise<void> | null = null
   #stopped = false
   /** Outstanding manual jobs that have been claimed but not yet finished. */
   readonly #manualJobs = new Map<string, Promise<void>>()
@@ -218,7 +217,9 @@ export class BackgroundScheduler {
     this.#stopped = true
     this.#tickHandle?.()
     this.#tickHandle = null
-    await Promise.all([...this.#manualJobs.values()])
+    const tick = this.#currentTick
+    this.#currentTick = null
+    await Promise.all([tick, ...this.#manualJobs.values()].filter((value): value is Promise<void> => value !== null))
   }
 
   /**
@@ -229,6 +230,7 @@ export class BackgroundScheduler {
    * the click was not queued behind the in-flight run.
    */
   async trigger(jobId: string): Promise<BackgroundJobRecord | null> {
+    if (this.#stopped) return null
     const job = this.#jobs.find((candidate) => candidate.id === jobId)
     if (job === undefined) return null
 
@@ -282,17 +284,17 @@ export class BackgroundScheduler {
   #scheduleNextTick(): void {
     if (this.#stopped) return
     this.#tickHandle = this.#timer.set(() => {
-      void this.#runTick()
+      const tick = this.#runTick()
+      this.#currentTick = tick
+      void tick
     }, this.#tickIntervalMs)
   }
 
   async #runTick(): Promise<void> {
-    this.#tickInFlight = true
     this.#tickHandle = null
     try {
       await this.tick()
     } finally {
-      this.#tickInFlight = false
       if (!this.#stopped) this.#scheduleNextTick()
     }
   }

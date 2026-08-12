@@ -16,6 +16,7 @@ import {
   type GatewayKeyView,
 } from '@/lib/gateway-keys'
 import { fetchConnections, type ConnectionView } from '@/lib/providers'
+import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 /**
  * The Gateway Keys area. Lists every key with its name, scope, and revocation
@@ -403,9 +404,6 @@ function IssuedSecret({ keyView }: { readonly keyView: CreatedGatewayKey }) {
   )
 }
 
-/** Stored in UTC, shown in the reader's own timezone. */
 function formatTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return 'unknown'
-  return at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return formatTimeWithUtc(iso, { dateStyle: 'medium', timeStyle: 'short' })
 }

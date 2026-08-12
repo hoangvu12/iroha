@@ -4,6 +4,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { fetchUsage, refreshUsage, UsageError, type UsageView } from '@/lib/usage'
+import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 interface ConnectionUsageViewProps {
   readonly connectionId: string
@@ -188,9 +189,6 @@ function Row({ label, children }: { readonly label: string; readonly children: R
   )
 }
 
-/** Stored in UTC, shown in the reader's own timezone. */
 function formatTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return 'unknown'
-  return at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return formatTimeWithUtc(iso, { dateStyle: 'medium', timeStyle: 'short' })
 }

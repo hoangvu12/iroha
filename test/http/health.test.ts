@@ -4,6 +4,8 @@ import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity } from '../../src/identity/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
+import { createTestApp, completeSetup, type TestApp } from '../support/app.ts'
+import { mockUpstreamTransport } from '../support/inference.ts'
 import {
   gatewayKeyRegistryFor,
   modelCatalogFor,
@@ -28,7 +30,7 @@ describe('health endpoints', () => {
       gatewayKeys: gatewayKeyRegistryFor(database),
       modelCatalog: modelCatalogFor(database),
       usageService: usageServiceFor(database),
-    })
+      })
   })
 
   afterEach(async () => {
@@ -36,6 +38,15 @@ describe('health endpoints', () => {
   })
 
   const get = (path: string) => app.handle(new Request(`http://iroha.test${path}`))
+
+  test('readiness distinguishes configuration from migrations', () => {
+    const state = new ReadinessState()
+    state.markMigrated()
+
+    expect(state.staticReason()).toBe('configuration_invalid')
+    state.markConfigured()
+    expect(state.staticReason()).toBeNull()
+  })
 
   test('liveness reports a running process before migrations complete', async () => {
     const response = await get('/health/live')
@@ -122,6 +133,43 @@ describe('generated API documentation', () => {
       )
     } finally {
       await dispose()
+    }
+  })
+})
+
+describe('readiness and Provider outages', () => {
+  test('a Provider outage does not make the process unready', async () => {
+    const upstream = mockUpstreamTransport(() => new Response('unavailable', { status: 503 }))
+    const test: TestApp = await createTestApp({ upstreamTransport: upstream.fetch })
+    const signedIn = await completeSetup(test)
+    try {
+      const connectionResponse = await test.fetch('/api/v1/admin/provider-connections', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Outage example', baseUrl: 'https://api.example.com/v1', upstreamKey: 'upstream-secret' }),
+        csrf: signedIn.csrf,
+      })
+      const connection = (await connectionResponse.json()) as { id: string }
+      const keyResponse = await test.fetch('/api/v1/admin/gateway-keys', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Outage app', scope: [{ connectionId: connection.id }] }),
+        csrf: signedIn.csrf,
+      })
+      const key = (await keyResponse.json()) as { secret: string }
+
+      const inference = await test.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key.secret}` },
+        body: JSON.stringify({ model: 'model-a', messages: [{ role: 'user', content: 'hello' }] }),
+      })
+      expect(inference.status).toBe(503)
+
+      const ready = await test.fetch('/health/ready')
+      expect(ready.status).toBe(200)
+      expect(await ready.json()).toEqual({ status: 'ready', database: { dialect: 'sqlite' } })
+    } finally {
+      await test.dispose()
     }
   })
 })

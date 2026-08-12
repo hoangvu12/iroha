@@ -100,6 +100,21 @@ describe('startup ordering', () => {
     expect((await second.database.settings.get('retention'))?.value).toEqual({ days: 30 })
   })
 
+  test('shutdown closes the runtime after the configured grace period', async () => {
+    const iroha = await start({
+      DATABASE_URL: 'file::memory:',
+      IROHA_MASTER_KEY: MASTER_KEY,
+      IROHA_SHUTDOWN_GRACE_MS: '0',
+      HOST: '127.0.0.1',
+      PORT: String(await freePort()),
+    })
+
+    const stopping = iroha.stop()
+    await stopping
+
+    await expect(fetch(`${iroha.url}/health/live`)).rejects.toThrow()
+  })
+
   test('stop() is safe to call more than once', async () => {
     const iroha = await start({
       DATABASE_URL: 'file::memory:',

@@ -22,8 +22,10 @@ export interface CatalogRoutesOptions {
 export function createCatalogRoutes({ identity, modelCatalog }: CatalogRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
-  return new Elysia({ name: 'iroha/catalog', prefix: '/api/v1/admin/provider-connections/:id' })
-    .onError({ as: 'scoped' }, ({ code, status }) => {
+  return new Elysia({ name: 'iroha/catalog', prefix: '/api/v1/admin/provider-connections/:id' }).guard(
+    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    (app) => app
+      .onError({ as: 'scoped' }, ({ code, status }) => {
       if (code === 'VALIDATION' || code === 'PARSE') {
         return status(400, managementError('invalid_request', 'The request body could not be read.'))
       }
@@ -164,6 +166,7 @@ export function createCatalogRoutes({ identity, modelCatalog }: CatalogRoutesOpt
         },
         response: { 200: catalogResponse, ...errorResponses },
       },
+    )
     )
 }
 

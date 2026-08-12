@@ -33,8 +33,10 @@ export function createBackgroundRoutes({
 }: BackgroundRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
-  return new Elysia({ name: 'iroha/admin-background', prefix: '/api/v1/admin/background-jobs' })
-    .onError({ as: 'scoped' }, ({ code, status }) => {
+  return new Elysia({ name: 'iroha/admin-background', prefix: '/api/v1/admin/background-jobs' }).guard(
+    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    (app) => app
+      .onError({ as: 'scoped' }, ({ code, status }) => {
       if (code === 'VALIDATION' || code === 'PARSE') {
         return status(400, managementError('invalid_request', 'The request body could not be read.'))
       }
@@ -191,6 +193,7 @@ export function createBackgroundRoutes({
           403: errorResponse,
         },
       },
+    )
     )
 }
 

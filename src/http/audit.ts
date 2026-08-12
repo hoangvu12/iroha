@@ -17,8 +17,10 @@ export interface AuditRoutesOptions {
 export function createAuditRoutes({ identity, database }: AuditRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
-  return new Elysia({ name: 'iroha/admin-audit', prefix: '/api/v1/admin/audit' })
-    .get(
+  return new Elysia({ name: 'iroha/admin-audit', prefix: '/api/v1/admin/audit' }).guard(
+    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    (app) => app
+      .get(
       '/',
       async ({ request, query, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
@@ -81,6 +83,7 @@ export function createAuditRoutes({ identity, database }: AuditRoutesOptions) {
         },
         response: { 200: clearResponse, 401: errorResponse, 403: errorResponse },
       },
+    )
     )
 }
 

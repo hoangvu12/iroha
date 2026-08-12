@@ -1,5 +1,4 @@
 import type { Clock } from '../runtime/clock.ts'
-import { systemClock } from '../runtime/clock.ts'
 import type { Database } from '../persistence/index.ts'
 
 /**
@@ -62,13 +61,11 @@ const MAX_BATCH_SIZE = 100_000
  */
 export class BackgroundScheduleSettingsService {
   readonly #database: Database
-  readonly #clock: Clock
   /** The last-fetched settings; `null` means the cache has not been primed yet. */
   #cached: BackgroundScheduleSettings | null = null
 
   constructor(options: { readonly database: Database; readonly clock?: Clock }) {
     this.#database = options.database
-    this.#clock = options.clock ?? systemClock
   }
 
   /** Reads the schedule settings, returning defaults for a fresh installation. */

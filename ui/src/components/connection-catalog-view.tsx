@@ -17,6 +17,7 @@ import {
   type CatalogOverrides,
   type CatalogView,
 } from '@/lib/catalog'
+import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 interface ConnectionCatalogViewProps {
   readonly connectionId: string
@@ -367,9 +368,6 @@ function Row({ label, children }: { readonly label: string; readonly children: R
   )
 }
 
-/** Stored in UTC, shown in the reader's own timezone. */
 function formatTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return 'unknown'
-  return at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return formatTimeWithUtc(iso, { dateStyle: 'medium', timeStyle: 'short' })
 }

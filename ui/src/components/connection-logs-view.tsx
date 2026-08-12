@@ -10,6 +10,7 @@ import {
 import { fetchUsage, type UsageView } from '@/lib/usage'
 import { fetchCatalog, type CatalogView } from '@/lib/catalog'
 import { fetchBackgroundJobs, type BackgroundJobView } from '@/lib/background'
+import { formatTime as formatTimeWithUtc } from '@/lib/time'
 import { BarChart } from '@/components/bar-chart'
 
 interface ConnectionLogsViewProps {
@@ -199,9 +200,6 @@ function bucketByHour(events: readonly RequestEventView[]): number[] {
   return buckets
 }
 
-/** Stored in UTC, shown in the reader's own timezone. */
 function formatTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return 'unknown'
-  return at.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+  return formatTimeWithUtc(iso, { dateStyle: 'short', timeStyle: 'short' })
 }

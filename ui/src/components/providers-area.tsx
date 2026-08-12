@@ -28,6 +28,7 @@ import {
 } from '@/lib/providers'
 import { ConnectionDetail } from '@/components/connection-detail'
 import { KeyHealthBadge } from '@/components/key-health'
+import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 interface ProvidersAreaProps {
   readonly csrfToken: string
@@ -993,10 +994,6 @@ function describeProbe(key: KeyView): string | null {
   }
 }
 
-/** Stored in UTC, shown in the reader's own timezone. */
 function formatTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return 'unknown'
-
-  return at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return formatTimeWithUtc(iso, { dateStyle: 'medium', timeStyle: 'short' })
 }

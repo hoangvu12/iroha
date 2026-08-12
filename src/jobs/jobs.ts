@@ -1,12 +1,7 @@
-import type { ModelCatalogService } from '../models/index.ts'
-import type { ProviderConnectionRegistry } from '../providers/index.ts'
-import type { RequestHistoryService } from '../history/index.ts'
-import type { UsageService } from '../usage/index.ts'
 import {
   BackgroundJobError,
   type BackgroundJob,
   type BackgroundJobContext,
-  type BackgroundJobCollaborators,
   type BackgroundJobRunResult,
 } from './scheduler.ts'
 
@@ -37,7 +32,7 @@ export type { BackgroundJobCollaborators } from './scheduler.ts'
  * The repo boundary already enforces per-event FKs; the bounded batch is the
  * second wall against a single DELETE taking the lock for too long.
  */
-export function buildDefaultJobs(factories: BackgroundJobCollaborators): BackgroundJob[] {
+export function buildDefaultJobs(): BackgroundJob[] {
   return [
     {
       id: JOB_IDS.modelSync,

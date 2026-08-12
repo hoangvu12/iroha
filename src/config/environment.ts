@@ -31,6 +31,7 @@ export interface IrohaConfiguration {
   readonly setupToken: string | undefined
   /** Enables browser-based Owner password recovery when present. */
   readonly recoveryToken: string | undefined
+  readonly shutdownGraceMs: number
   readonly host: string
   readonly port: number
 }
@@ -67,6 +68,8 @@ const MINIMUM_SECRET_LENGTH = 32
 const PLACEHOLDER_PREFIX = 'replace-with-'
 
 const SUPPORTED_SCHEMES = 'file:, postgres://, or postgresql://'
+const DEFAULT_SHUTDOWN_GRACE_MS = 10_000
+const MAX_SHUTDOWN_GRACE_MS = 60_000
 
 /**
  * Reads deployment configuration, reporting every current problem together.
@@ -81,6 +84,7 @@ export function loadConfiguration(source: EnvironmentSource = Bun.env): IrohaCon
   const masterKey = readRequiredSecret(source, 'IROHA_MASTER_KEY', problems)
   const setupToken = readOptionalSecret(source, 'IROHA_SETUP_TOKEN', problems)
   const recoveryToken = readOptionalSecret(source, 'IROHA_RECOVERY_TOKEN', problems)
+  const shutdownGraceMs = readShutdownGraceMs(source, problems)
   const host = readHost(source, problems)
   const port = readPort(source, problems)
 
@@ -88,7 +92,7 @@ export function loadConfiguration(source: EnvironmentSource = Bun.env): IrohaCon
     throw new ConfigurationError(problems)
   }
 
-  return { database, masterKey, setupToken, recoveryToken, host, port }
+  return { database, masterKey, setupToken, recoveryToken, shutdownGraceMs, host, port }
 }
 
 function readDatabase(
@@ -225,6 +229,29 @@ function validateSecret(
       message: `must be at least ${MINIMUM_SECRET_LENGTH} characters`,
     })
     return null
+  }
+
+  return value
+}
+
+function readShutdownGraceMs(source: EnvironmentSource, problems: ConfigurationProblem[]): number {
+  const raw = source.IROHA_SHUTDOWN_GRACE_MS?.trim()
+  if (raw === undefined) return DEFAULT_SHUTDOWN_GRACE_MS
+  if (!/^\d+$/.test(raw)) {
+    problems.push({
+      variable: 'IROHA_SHUTDOWN_GRACE_MS',
+      message: 'must be a whole number of milliseconds between 0 and 60000',
+    })
+    return DEFAULT_SHUTDOWN_GRACE_MS
+  }
+
+  const value = Number(raw)
+  if (value > MAX_SHUTDOWN_GRACE_MS) {
+    problems.push({
+      variable: 'IROHA_SHUTDOWN_GRACE_MS',
+      message: `must be between 0 and ${MAX_SHUTDOWN_GRACE_MS} milliseconds`,
+    })
+    return DEFAULT_SHUTDOWN_GRACE_MS
   }
 
   return value

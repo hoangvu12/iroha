@@ -17,8 +17,10 @@ export interface RequestHistoryRoutesOptions {
 export function createRequestHistoryRoutes({ identity, requestHistory }: RequestHistoryRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
-  return new Elysia({ name: 'iroha/admin-request-history', prefix: '/api/v1/admin/requests' })
-    .get(
+  return new Elysia({ name: 'iroha/admin-request-history', prefix: '/api/v1/admin/requests' }).guard(
+    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    (app) => app
+      .get(
       '/',
       async ({ request, query, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
@@ -87,6 +89,7 @@ export function createRequestHistoryRoutes({ identity, requestHistory }: Request
           404: errorResponse,
         },
       },
+    )
     )
 }
 

@@ -47,8 +47,10 @@ export function createAdminRoutes({
 }: AdminRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
-  return new Elysia({ name: 'iroha/admin', prefix: '/api/v1/admin' })
-    .onError({ as: 'scoped' }, ({ code, status }) => {
+  return new Elysia({ name: 'iroha/admin', prefix: '/api/v1/admin' }).guard(
+    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    (app) => app
+      .onError({ as: 'scoped' }, ({ code, status }) => {
       if (code === 'VALIDATION' || code === 'PARSE') {
         return status(400, managementError('invalid_request', 'The request body could not be read.'))
       }
@@ -738,6 +740,7 @@ export function createAdminRoutes({
           ...errorResponses,
         },
       },
+    )
     )
 }
 

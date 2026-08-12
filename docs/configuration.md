@@ -40,11 +40,14 @@ Generate this independently from the master key. Iroha refuses to start while no
 
 ```env
 IROHA_RECOVERY_TOKEN=
+IROHA_SHUTDOWN_GRACE_MS=10000
 HOST=0.0.0.0
 PORT=3000
 ```
 
 `IROHA_RECOVERY_TOKEN` enables browser-based Owner-password recovery. A permanently configured value is a reusable alternate root credential: protect, rotate, or remove it accordingly. Recovery is throttled and audited, and all Owner sessions are revoked after reset. Without it, the recovery form is not offered and a recovery attempt is refused exactly as a wrong token is.
+
+`IROHA_SHUTDOWN_GRACE_MS` controls how long active inference may finish after a SIGINT or SIGTERM before its upstream request is aborted. It defaults to `10000`, accepts `0`, and is bounded between `0` and `60000` milliseconds. The process stops accepting new inference and background claims, waits for the grace period, aborts remaining upstream work, and closes storage before it exits.
 
 Every secret variable follows the same rule as `IROHA_MASTER_KEY`: at least 32 characters, and never the shipped placeholder. `HOST` must be non-empty and `PORT` a whole number between 1 and 65535.
 
@@ -52,7 +55,7 @@ Every secret variable follows the same rule as `IROHA_MASTER_KEY`: at least 32 c
 
 Iroha validates configuration, opens the selected database, and applies every pending migration *before* it binds its port. A configuration or migration failure prints every current problem together and exits non-zero; nothing listens. Problem reports name the variable and what is wrong with it, never the value, and an unsupported `DATABASE_URL` is reported by scheme alone so that a URL carrying a password is not echoed into logs.
 
-`/health/live` answers as soon as the process is up. `/health/ready` answers `200` only once migrations have completed and the database responds; otherwise it returns `503` with `migrations_pending`, `database_unavailable`, or `shutting_down`. Neither endpoint discloses the connection target.
+`/health/live` answers as soon as the process is up. `/health/ready` answers `200` only once configuration is valid, migrations have completed, and the database responds; otherwise it returns `503` with `configuration_invalid`, `migrations_pending`, `database_unavailable`, or `shutting_down`. Neither endpoint discloses the connection target.
 
 `HOST` defaults to `0.0.0.0`; `PORT` defaults to `3000`.
 

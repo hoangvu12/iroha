@@ -12,6 +12,7 @@ import { fetchRequests, type RequestEventView } from '@/lib/requests'
 import { fetchRetention, type RetentionView } from '@/lib/settings'
 import type { Readiness } from '@/lib/health'
 import type { AuthState } from '@/lib/auth'
+import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 interface OverviewProps {
   readonly auth: AuthState
@@ -362,9 +363,6 @@ function Fact({ label, children }: { readonly label: string; readonly children: 
   )
 }
 
-/** Stored in UTC, shown in the reader's own timezone. */
 function formatTime(iso: string): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return 'unknown'
-  return at.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+  return formatTimeWithUtc(iso, { dateStyle: 'short', timeStyle: 'short' })
 }

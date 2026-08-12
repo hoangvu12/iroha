@@ -4,7 +4,11 @@ import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity } from '../../src/identity/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
-import { gatewayKeyRegistryFor, providerRegistryFor } from '../support/app.ts'
+import {
+  gatewayKeyRegistryFor,
+  modelCatalogFor,
+  providerRegistryFor,
+} from '../support/app.ts'
 
 describe('health endpoints', () => {
   let database: Database
@@ -21,6 +25,7 @@ describe('health endpoints', () => {
       identity: new OwnerIdentity({ database }),
       providers: providerRegistryFor(database),
       gatewayKeys: gatewayKeyRegistryFor(database),
+      modelCatalog: modelCatalogFor(database),
     })
   })
 
@@ -95,6 +100,7 @@ describe('generated API documentation', () => {
       identity: new OwnerIdentity({ database }),
       providers: providerRegistryFor(database),
       gatewayKeys: gatewayKeyRegistryFor(database),
+      modelCatalog: modelCatalogFor(database),
     })
 
     try {

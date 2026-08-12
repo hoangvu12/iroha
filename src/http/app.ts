@@ -1,17 +1,20 @@
 import { openapi } from '@elysiajs/openapi'
 import { Elysia, t } from 'elysia'
+import type { SecretCipher } from '../crypto/index.ts'
 import type { InferenceAdapter } from '../inference/index.ts'
+import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
 import type { OwnerIdentity } from '../identity/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
+import { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
 import type { ProviderConnectionRegistry } from '../providers/index.ts'
 import { createAdminRoutes } from './admin.ts'
 import { createAuthRoutes } from './auth.ts'
+import { createCatalogRoutes } from './catalog.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
 import { createInferenceRoutes } from './inference.ts'
 import { ReadinessState } from './readiness.ts'
-import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
 
 export interface AppOptions {
   readonly database: Database
@@ -19,10 +22,14 @@ export interface AppOptions {
   readonly identity: OwnerIdentity
   readonly providers: ProviderConnectionRegistry
   readonly gatewayKeys: GatewayKeyRegistry
+  /** Decrypts stored Upstream Keys for the catalog's read-only discovery GET. */
+  readonly secretCipher?: SecretCipher | undefined
   /** Directory holding the built management UI. Omit to serve the API alone. */
   readonly frontendDirectory?: string | undefined
   /** The inference surface's transport. Omit for the runtime's real fetch. */
   readonly inference?: InferenceAdapter | undefined
+  /** Replaces the catalog service built from the other options. */
+  readonly modelCatalog?: ModelCatalogService | undefined
 }
 
 const liveResponse = t.Object({ status: t.Literal('alive') })
@@ -53,13 +60,24 @@ export function createApp(options: AppOptions) {
     ? createFrontendHandler(options.frontendDirectory)
     : null
   const inference = options.inference ?? createGenericInferenceAdapter()
+  // The catalog shares the inference adapter so a test transport override
+  // governs discovery exactly as it governs inference.
+  const modelCatalog =
+    options.modelCatalog ??
+    (() => {
+      if (options.secretCipher === undefined) {
+        throw new Error('createApp requires a modelCatalog or a secretCipher')
+      }
+      return new ModelCatalogService({ database, cipher: options.secretCipher, inference })
+    })()
 
   return new Elysia()
     .use(openapi({ path: '/docs', documentation: { info: { title: 'Iroha', version: '0.1.0' } } }))
     .use(createAuthRoutes({ identity }))
     .use(createAdminRoutes({ identity, providers, gatewayKeys }))
     .use(createDirectoryRoutes({ gatewayKeys }))
-    .use(createInferenceRoutes({ gatewayKeys, providers, inference }))
+    .use(createCatalogRoutes({ identity, modelCatalog }))
+    .use(createInferenceRoutes({ gatewayKeys, providers, inference, modelCatalog }))
     .get('/health/live', () => ({ status: 'alive' as const }), {
       detail: {
         summary: 'Process liveness',

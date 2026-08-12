@@ -310,6 +310,13 @@ export interface ModelCatalogRepository {
    * survives a discovery that stops reporting the model.
    */
   syncDiscovered(connectionId: string, modelIds: readonly string[], at: Date): Promise<void>
+  /**
+   * Contributes the Provider Template's known models to the catalog. Only
+   * absent models are added (source `template`); an existing row and an Owner
+   * exclusion are never disturbed, so template knowledge fills gaps without
+   * overriding discovery, additions, or intent.
+   */
+  syncTemplate(connectionId: string, modelIds: readonly string[], at: Date): Promise<void>
   /** Marks a model as an Owner addition. Unknown models become `owner_added`. */
   addOwnerModel(connectionId: string, modelId: string, at: Date): Promise<void>
   /** Removes an Owner addition. Returns whether an owner-added row was removed. */

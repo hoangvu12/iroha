@@ -4,6 +4,7 @@ import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
 import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
+import { ModelCatalogService } from '../../src/models/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import {
   ProviderConnectionRegistry,
@@ -27,6 +28,7 @@ export interface TestApp {
   /** The probe the app's Provider Connection registry is using. */
   readonly upstreamKeyProbe: UpstreamKeyProbe
   readonly gatewayKeys: GatewayKeyRegistry
+  readonly modelCatalog: ModelCatalogService
   /** Sends a request the way a same-origin browser would. */
   fetch(path: string, init?: RequestInit & { csrf?: string }): Promise<Response>
   dispose(): Promise<void>
@@ -87,6 +89,15 @@ export function gatewayKeyRegistryFor(database: Database): GatewayKeyRegistry {
   return new GatewayKeyRegistry({ database })
 }
 
+/** The standard model catalog service for tests that assemble an app by hand. */
+export function modelCatalogFor(database: Database): ModelCatalogService {
+  return new ModelCatalogService({
+    database,
+    cipher: createSecretCipher(TEST_MASTER_KEY),
+    inference: createGenericInferenceAdapter({ fetch: stubUpstreamTransport() }),
+  })
+}
+
 /**
  * The seam the spec names: the assembled application driven through its Web
  * `fetch` interface, over a real database, with only time, password cost, the
@@ -125,13 +136,20 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   const inference = createGenericInferenceAdapter({
     fetch: options.upstreamTransport ?? stubUpstreamTransport(),
   })
+  const modelCatalog = new ModelCatalogService({
+    database,
+    cipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
+    inference,
+  })
   const app = createApp({
     database,
     readiness,
     identity,
     providers,
     gatewayKeys,
+    secretCipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
     inference,
+    modelCatalog,
   })
 
   const cookies = new Map<string, string>()
@@ -143,6 +161,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     clock,
     upstreamKeyProbe,
     gatewayKeys,
+    modelCatalog,
 
     async fetch(path, init = {}) {
       const { csrf, headers, ...rest } = init

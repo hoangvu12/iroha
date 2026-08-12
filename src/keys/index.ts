@@ -5,6 +5,7 @@
  */
 export {
   GatewayKeyRegistry,
+  type ConnectionAuthorization,
   type CreatedGatewayKey,
   type DirectoryProvider,
   type DiscoveryResult,

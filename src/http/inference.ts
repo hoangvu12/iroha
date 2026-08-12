@@ -1,13 +1,15 @@
 import { randomBytes } from 'node:crypto'
 import { Elysia } from 'elysia'
 import type { InferenceAdapter } from '../inference/index.ts'
-import type { GatewayKeyRegistry, InferenceAuthorization } from '../keys/index.ts'
-import type { ProviderConnectionRegistry, ProviderFailure } from '../providers/index.ts'
+import type { GatewayKeyRegistry } from '../keys/index.ts'
+import type { ModelCatalogService } from '../models/index.ts'
+import type { ProviderConnectionRegistry } from '../providers/index.ts'
 
 export interface InferenceRoutesOptions {
   readonly gatewayKeys: GatewayKeyRegistry
   readonly providers: ProviderConnectionRegistry
   readonly inference: InferenceAdapter
+  readonly modelCatalog: ModelCatalogService
 }
 
 /**
@@ -17,79 +19,122 @@ export interface InferenceRoutesOptions {
  * authorization never travels beyond this boundary.
  */
 export function createInferenceRoutes(options: InferenceRoutesOptions) {
-  const { gatewayKeys, providers, inference } = options
+  const { gatewayKeys, providers, inference, modelCatalog } = options
 
-  return new Elysia({ name: 'iroha/inference', prefix: '/providers' }).post(
-    '/:connectionId/v1/chat/completions',
-    async ({ request, params }) => {
-      const correlationId = newRequestId()
-      const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
+  return new Elysia({ name: 'iroha/inference', prefix: '/providers' })
+    .get(
+      '/:connectionId/v1/models',
+      async ({ request, params }) => {
+        const correlationId = newRequestId()
+        const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
 
-      const envelope = readEnvelope(await request.text())
-      if (!envelope.ok) {
-        return error(
-          envelope.status,
-          baseHeaders,
-          { code: envelope.code, message: envelope.message },
-          correlationId,
+        const token = bearerToken(request.headers)
+        const authorization = await gatewayKeys.authorizeConnection(params.connectionId, token)
+        if (!authorization.ok) {
+          const refusal = authorizationRefusal(authorization)
+          return error(refusal.status, baseHeaders, refusal, correlationId)
+        }
+
+        const result = await modelCatalog.listForScope(params.connectionId, authorization.models)
+        if (!result.ok) {
+          const refusal = resolutionRefusal(result.failure)
+          return error(refusal.status, baseHeaders, refusal, correlationId)
+        }
+
+        return new Response(
+          JSON.stringify({
+            object: 'list',
+            data: result.value.map((model) => ({ id: model.id, object: 'model', created: model.created })),
+          }),
+          { status: 200, headers: baseHeaders },
         )
-      }
+      },
+    )
+    .post(
+      '/:connectionId/v1/chat/completions',
+      async ({ request, params }) => {
+        const correlationId = newRequestId()
+        const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
 
-      const token = bearerToken(request.headers)
-      const authorization = await gatewayKeys.authorizeInference(
-        params.connectionId,
-        envelope.model,
-        token,
-      )
-      if (!authorization.ok) {
-        const refusal = authorizationRefusal(authorization)
-        return error(refusal.status, baseHeaders, refusal, correlationId)
-      }
+        const envelope = readEnvelope(await request.text())
+        if (!envelope.ok) {
+          return error(
+            envelope.status,
+            baseHeaders,
+            { code: envelope.code, message: envelope.message },
+            correlationId,
+          )
+        }
 
-      const target = await providers.resolveInference(params.connectionId)
-      if (!target.ok) {
-        const refusal = resolutionRefusal(target.failure)
-        return error(refusal.status, baseHeaders, refusal, correlationId)
-      }
-
-      let upstream
-      try {
-        upstream = await inference.forward({
-          baseUrl: target.value.baseUrl,
-          allowInsecureHttp: target.value.allowInsecureHttp,
-          path: '/chat/completions',
-          method: 'POST',
-          body: envelope.raw,
-          headers: headersOf(request),
-          upstreamKey: target.value.upstreamKey,
-          signal: request.signal,
-        })
-      } catch (cause) {
-        // The caller went away: propagating the abort is the honest answer,
-        // and any response would reach nobody anyway.
-        if (isAbort(cause)) throw cause
-        return error(
-          502,
-          baseHeaders,
-          { code: 'upstream_unreachable', message: 'The Provider could not be reached.' },
-          correlationId,
+        const token = bearerToken(request.headers)
+        const authorization = await gatewayKeys.authorizeInference(
+          params.connectionId,
+          envelope.model,
+          token,
         )
-      }
+        if (!authorization.ok) {
+          const refusal = authorizationRefusal(authorization)
+          return error(refusal.status, baseHeaders, refusal, correlationId)
+        }
 
-      if (upstream.status >= 200 && upstream.status < 300) {
-        return new Response(upstream.body, {
-          status: upstream.status,
-          headers: {
-            'content-type': upstream.headers['content-type'] ?? 'application/json',
-            'x-request-id': correlationId,
-          },
-        })
-      }
+        // An Owner exclusion blocks a model the same way the Key Scope does,
+        // and it applies to unknown and catalogued models alike.
+        if (await modelCatalog.isExcluded(params.connectionId, envelope.model)) {
+          return error(
+            403,
+            baseHeaders,
+            {
+              code: 'model_excluded',
+              message: 'This model is excluded on this Provider Connection.',
+            },
+            correlationId,
+          )
+        }
 
-      const refusal = upstreamRefusal(upstream.status, upstream.headers)
-      return error(refusal.status, { ...baseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) }, refusal, correlationId)
-    },
-  )
+        const target = await providers.resolveInference(params.connectionId)
+        if (!target.ok) {
+          const refusal = resolutionRefusal(target.failure)
+          return error(refusal.status, baseHeaders, refusal, correlationId)
+        }
+
+        let upstream
+        try {
+          upstream = await inference.forward({
+            baseUrl: target.value.baseUrl,
+            allowInsecureHttp: target.value.allowInsecureHttp,
+            path: '/chat/completions',
+            method: 'POST',
+            body: envelope.raw,
+            headers: headersOf(request),
+            upstreamKey: target.value.upstreamKey,
+            signal: request.signal,
+          })
+        } catch (cause) {
+          // The caller went away: propagating the abort is the honest answer,
+          // and any response would reach nobody anyway.
+          if (isAbort(cause)) throw cause
+          return error(
+            502,
+            baseHeaders,
+            { code: 'upstream_unreachable', message: 'The Provider could not be reached.' },
+            correlationId,
+          )
+        }
+
+        if (upstream.status >= 200 && upstream.status < 300) {
+          return new Response(upstream.body, {
+            status: upstream.status,
+            headers: {
+              'content-type': upstream.headers['content-type'] ?? 'application/json',
+              'x-request-id': correlationId,
+            },
+          })
+        }
+
+        const refusal = upstreamRefusal(upstream.status, upstream.headers)
+        return error(refusal.status, { ...baseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) }, refusal, correlationId)
+      },
+    )
 }
 
 export type InferenceRoutes = ReturnType<typeof createInferenceRoutes>
@@ -129,7 +174,9 @@ function readEnvelope(raw: string): Envelope {
 
 type Refusal = { readonly status: number; readonly code: string; readonly message: string; readonly retryAfter?: string }
 
-function authorizationRefusal(authorization: Extract<InferenceAuthorization, { ok: false }>): Refusal {
+function authorizationRefusal(
+  authorization: { readonly code: 'gateway_key_invalid' | 'connection_not_allowed' | 'model_not_allowed' },
+): Refusal {
   switch (authorization.code) {
     case 'gateway_key_invalid':
       return { status: 401, code: 'gateway_key_invalid', message: 'This Gateway Key is not valid.' }
@@ -148,7 +195,7 @@ function authorizationRefusal(authorization: Extract<InferenceAuthorization, { o
   }
 }
 
-function resolutionRefusal(failure: ProviderFailure): Refusal {
+function resolutionRefusal(failure: { readonly code: string }): Refusal {
   switch (failure.code) {
     case 'connection_not_found':
       return { status: 404, code: 'connection_not_found', message: 'No such Provider Connection.' }

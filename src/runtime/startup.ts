@@ -114,6 +114,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     identity,
     providers,
     gatewayKeys,
+    secretCipher: createSecretCipher(configuration.masterKey),
     frontendDirectory: options.frontendDirectory ?? DEFAULT_FRONTEND_DIRECTORY,
   })
 

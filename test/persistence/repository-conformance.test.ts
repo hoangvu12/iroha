@@ -534,6 +534,107 @@ for (const engine of availableEngines) {
         expect(await database.providers.listKeys('pc_one')).toEqual([])
       })
     })
+
+    describe('model catalog', () => {
+      const at = new Date('2026-01-01T00:00:00.000Z')
+      const later = new Date('2026-01-02T00:00:00.000Z')
+
+      const connection = (
+        id: string,
+        overrides: Partial<ProviderConnectionRecord> = {},
+      ): ProviderConnectionRecord => ({
+        id,
+        displayName: 'Example',
+        baseUrl: 'https://api.example.com/v1',
+        allowInsecureHttp: false,
+        enabled: true,
+        archivedAt: null,
+        templateId: null,
+        capabilities: {
+          chat: false,
+          streaming: false,
+          tools: false,
+          structuredOutput: false,
+          responses: false,
+        },
+        createdAt: at,
+        updatedAt: at,
+        ...overrides,
+      })
+
+      test('merges discovery, prunes only stale discovered rows, and keeps Owner intent', async () => {
+        await database.providers.insertConnection(connection('pc_catalog'))
+
+        await database.modelCatalog.syncDiscovered('pc_catalog', ['gpt-4o-mini', 'gpt-4o'], at)
+        await database.modelCatalog.addOwnerModel('pc_catalog', 'custom-model', at)
+        await database.modelCatalog.setExcluded('pc_catalog', 'o1-preview', true, at)
+
+        const afterDiscovery = (await database.modelCatalog.listEntries('pc_catalog')).map(
+          (entry) => `${entry.modelId}:${entry.source}:${entry.excluded}`,
+        )
+        expect(afterDiscovery.sort()).toEqual([
+          'custom-model:owner_added:false',
+          'gpt-4o-mini:discovered:false',
+          'gpt-4o:discovered:false',
+          'o1-preview:excluded:true',
+        ])
+
+        // A later discovery omits gpt-4o but re-reports gpt-4o-mini: only the
+        // stale discovered row goes; Owner additions and exclusions survive.
+        await database.modelCatalog.syncDiscovered('pc_catalog', ['gpt-4o-mini'], later)
+
+        const afterResync = (await database.modelCatalog.listEntries('pc_catalog')).map(
+          (entry) => `${entry.modelId}:${entry.source}:${entry.excluded}`,
+        )
+        expect(afterResync.sort()).toEqual([
+          'custom-model:owner_added:false',
+          'gpt-4o-mini:discovered:false',
+          'o1-preview:excluded:true',
+        ])
+      })
+
+      test('scopes every entry operation to its own connection', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertConnection(connection('pc_two'))
+
+        await database.modelCatalog.syncDiscovered('pc_one', ['gpt-4o-mini'], at)
+        await database.modelCatalog.syncDiscovered('pc_two', ['claude-3.5'], at)
+
+        // An edit aimed at one connection must not touch the other's rows.
+        expect(await database.modelCatalog.removeOwnerModel('pc_two', 'gpt-4o-mini')).toBe(false)
+        expect(await database.modelCatalog.isExcluded('pc_two', 'gpt-4o-mini')).toBe(false)
+        await database.modelCatalog.setExcluded('pc_one', 'gpt-4o-mini', true, later)
+        expect(await database.modelCatalog.isExcluded('pc_two', 'gpt-4o-mini')).toBe(false)
+        expect(await database.modelCatalog.isExcluded('pc_one', 'gpt-4o-mini')).toBe(true)
+      })
+
+      test('tracks overrides per model without leaking across connections', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertConnection(connection('pc_two'))
+
+        await database.modelCatalog.updateOverrides(
+          'pc_one',
+          'gpt-4o-mini',
+          { streaming: true },
+          at,
+        )
+        await database.modelCatalog.updateOverrides(
+          'pc_two',
+          'gpt-4o-mini',
+          { streaming: false },
+          at,
+        )
+
+        const one = await database.modelCatalog.listEntries('pc_one')
+        const two = await database.modelCatalog.listEntries('pc_two')
+        expect(one.find((entry) => entry.modelId === 'gpt-4o-mini')?.overrides).toEqual({
+          streaming: true,
+        })
+        expect(two.find((entry) => entry.modelId === 'gpt-4o-mini')?.overrides).toEqual({
+          streaming: false,
+        })
+      })
+    })
   })
 }
 

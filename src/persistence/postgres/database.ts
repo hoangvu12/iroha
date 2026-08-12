@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { desc, eq, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, lt, sql } from 'drizzle-orm'
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { Pool } from 'pg'
@@ -553,8 +553,10 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
         .select({ id: modelCatalogEntries.modelId })
         .from(modelCatalogEntries)
         .where(
-          eq(modelCatalogEntries.connectionId, connectionId) &&
+          and(
+            eq(modelCatalogEntries.connectionId, connectionId),
             eq(modelCatalogEntries.modelId, modelId),
+          ),
         )
         .limit(1)
 
@@ -573,8 +575,10 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
           .update(modelCatalogEntries)
           .set({ source: 'discovered', updatedAt: at })
           .where(
-            eq(modelCatalogEntries.connectionId, connectionId) &&
+            and(
+              eq(modelCatalogEntries.connectionId, connectionId),
               eq(modelCatalogEntries.modelId, modelId),
+            ),
           )
       }
     }
@@ -588,11 +592,39 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
         await this.handle
           .delete(modelCatalogEntries)
           .where(
-            eq(modelCatalogEntries.connectionId, connectionId) &&
-              eq(modelCatalogEntries.modelId, row.modelId) &&
+            and(
+              eq(modelCatalogEntries.connectionId, connectionId),
+              eq(modelCatalogEntries.modelId, row.modelId),
               eq(modelCatalogEntries.source, 'discovered'),
+            ),
           )
       }
+    }
+  }
+
+  async syncTemplate(connectionId: string, modelIds: readonly string[], at: Date): Promise<void> {
+    for (const modelId of modelIds) {
+      const [existing] = await this.handle
+        .select({ id: modelCatalogEntries.modelId })
+        .from(modelCatalogEntries)
+        .where(
+          and(
+            eq(modelCatalogEntries.connectionId, connectionId),
+            eq(modelCatalogEntries.modelId, modelId),
+          ),
+        )
+        .limit(1)
+      if (existing !== undefined) continue
+
+      await this.handle.insert(modelCatalogEntries).values({
+        connectionId,
+        modelId,
+        source: 'template',
+        excluded: false,
+        overrides: null,
+        createdAt: at,
+        updatedAt: at,
+      })
     }
   }
 
@@ -601,8 +633,10 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
       .select({ source: modelCatalogEntries.source })
       .from(modelCatalogEntries)
       .where(
-        eq(modelCatalogEntries.connectionId, connectionId) &&
+        and(
+          eq(modelCatalogEntries.connectionId, connectionId),
           eq(modelCatalogEntries.modelId, modelId),
+        ),
       )
       .limit(1)
 
@@ -624,8 +658,10 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
         .update(modelCatalogEntries)
         .set({ source: 'owner_added', excluded: false, updatedAt: at })
         .where(
-          eq(modelCatalogEntries.connectionId, connectionId) &&
+          and(
+            eq(modelCatalogEntries.connectionId, connectionId),
             eq(modelCatalogEntries.modelId, modelId),
+          ),
         )
     }
   }
@@ -634,9 +670,11 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
     const removed = await this.handle
       .delete(modelCatalogEntries)
       .where(
-        eq(modelCatalogEntries.connectionId, connectionId) &&
-          eq(modelCatalogEntries.modelId, modelId) &&
+        and(
+          eq(modelCatalogEntries.connectionId, connectionId),
+          eq(modelCatalogEntries.modelId, modelId),
           eq(modelCatalogEntries.source, 'owner_added'),
+        ),
       )
       .returning({ id: modelCatalogEntries.modelId })
     return removed.length > 0
@@ -647,8 +685,10 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
       .select({ source: modelCatalogEntries.source })
       .from(modelCatalogEntries)
       .where(
-        eq(modelCatalogEntries.connectionId, connectionId) &&
+        and(
+          eq(modelCatalogEntries.connectionId, connectionId),
           eq(modelCatalogEntries.modelId, modelId),
+        ),
       )
       .limit(1)
 
@@ -668,8 +708,10 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
           .update(modelCatalogEntries)
           .set({ excluded: true, updatedAt: at })
           .where(
-            eq(modelCatalogEntries.connectionId, connectionId) &&
+            and(
+              eq(modelCatalogEntries.connectionId, connectionId),
               eq(modelCatalogEntries.modelId, modelId),
+            ),
           )
       }
       return
@@ -681,16 +723,20 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
       await this.handle
         .delete(modelCatalogEntries)
         .where(
-          eq(modelCatalogEntries.connectionId, connectionId) &&
+          and(
+            eq(modelCatalogEntries.connectionId, connectionId),
             eq(modelCatalogEntries.modelId, modelId),
+          ),
         )
     } else {
       await this.handle
         .update(modelCatalogEntries)
         .set({ excluded: false, updatedAt: at })
         .where(
-          eq(modelCatalogEntries.connectionId, connectionId) &&
+          and(
+            eq(modelCatalogEntries.connectionId, connectionId),
             eq(modelCatalogEntries.modelId, modelId),
+          ),
         )
     }
   }
@@ -705,8 +751,10 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
       .select({ id: modelCatalogEntries.modelId })
       .from(modelCatalogEntries)
       .where(
-        eq(modelCatalogEntries.connectionId, connectionId) &&
+        and(
+          eq(modelCatalogEntries.connectionId, connectionId),
           eq(modelCatalogEntries.modelId, modelId),
+        ),
       )
       .limit(1)
 
@@ -725,8 +773,10 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
         .update(modelCatalogEntries)
         .set({ overrides, updatedAt: at })
         .where(
-          eq(modelCatalogEntries.connectionId, connectionId) &&
+          and(
+            eq(modelCatalogEntries.connectionId, connectionId),
             eq(modelCatalogEntries.modelId, modelId),
+          ),
         )
     }
   }
@@ -736,8 +786,10 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
       .select({ excluded: modelCatalogEntries.excluded })
       .from(modelCatalogEntries)
       .where(
-        eq(modelCatalogEntries.connectionId, connectionId) &&
+        and(
+          eq(modelCatalogEntries.connectionId, connectionId),
           eq(modelCatalogEntries.modelId, modelId),
+        ),
       )
       .limit(1)
     return row?.excluded === true

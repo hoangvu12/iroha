@@ -65,6 +65,18 @@ export type InferenceAuthorization =
       readonly code: 'gateway_key_invalid' | 'connection_not_allowed' | 'model_not_allowed'
     }
 
+/**
+ * Whether one Gateway Key may list models on one provider-scoped connection.
+ * The scope's model restriction travels with the success so the route can shape
+ * the exact list; `null` means every effective catalog model is listable.
+ */
+export type ConnectionAuthorization =
+  | { readonly ok: true; readonly keyId: string; readonly models: readonly string[] | null }
+  | {
+      readonly ok: false
+      readonly code: 'gateway_key_invalid' | 'connection_not_allowed'
+    }
+
 export interface GatewayKeyRegistryOptions {
   readonly database: Database
   readonly clock?: Clock
@@ -207,18 +219,41 @@ export class GatewayKeyRegistry {
     model: string,
     token: string | null,
   ): Promise<InferenceAuthorization> {
+    const located = await this.#authorizeScope(connectionId, token)
+    if (!located.ok) return located
+
+    if (located.models !== null && !located.models.includes(model)) {
+      return { ok: false, code: 'model_not_allowed' }
+    }
+
+    return { ok: true, keyId: located.keyId }
+  }
+
+  /**
+   * Authorizes one provider-scoped Models list. The connection must be inside
+   * the key's scope; the scope's exact model restriction (null for every model)
+   * is returned so the route can shape the list. Failures are as silent as the
+   * inference authorization's.
+   */
+  async authorizeConnection(
+    connectionId: string,
+    token: string | null,
+  ): Promise<ConnectionAuthorization> {
+    return await this.#authorizeScope(connectionId, token)
+  }
+
+  async #authorizeScope(
+    connectionId: string,
+    token: string | null,
+  ): Promise<ConnectionAuthorization> {
     const key = await this.#locateKey(token)
     if (key === null) return { ok: false, code: 'gateway_key_invalid' }
 
     const entry = key.scope.find((candidate) => candidate.connectionId === connectionId)
     if (entry === undefined) return { ok: false, code: 'connection_not_allowed' }
 
-    if (entry.models !== null && !entry.models.includes(model)) {
-      return { ok: false, code: 'model_not_allowed' }
-    }
-
     await this.#database.gatewayKeys.markUsed(key.id, this.#clock.now())
-    return { ok: true, keyId: key.id }
+    return { ok: true, keyId: key.id, models: entry.models }
   }
 
   async #locateKey(token: string | null): Promise<GatewayKeyRecord | null> {

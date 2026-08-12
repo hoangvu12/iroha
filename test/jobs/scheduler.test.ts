@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { sqliteEngine } from '../persistence/engines.ts'
+import { availableEngines } from '../persistence/engines.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import {
   BackgroundScheduler,
   BackgroundScheduleSettingsService,
   BackgroundJobError,
+  connectionIsDue,
+  effectiveIntervalFor,
   type BackgroundJob,
   type BackgroundJobRunResult,
   type BackgroundScheduleSettings,
@@ -80,14 +82,15 @@ function asyncRecordingJob(
   }
 }
 
-describe('background scheduler', () => {
+for (const engine of availableEngines) {
+describe(`${engine.name} background scheduler`, () => {
   let database: Database
   let dispose: () => Promise<void>
   let clock: ReturnType<typeof testClock>
   let settings: BackgroundScheduleSettingsService
 
   beforeEach(async () => {
-    ;({ database, dispose } = await sqliteEngine.open())
+    ;({ database, dispose } = await engine.open())
     clock = testClock()
     settings = new BackgroundScheduleSettingsService({ database, clock })
   })
@@ -342,6 +345,230 @@ describe('background scheduler', () => {
     expect(listed.map((record) => record.jobId)).toEqual(['job_b', 'job_a'])
   })
 })
+}
+
+describe('connectionIsDue', () => {
+  test('a connection with no prior run is always due', () => {
+    expect(connectionIsDue({
+      lastSyncedAt: null,
+      effectiveIntervalSeconds: 60,
+      now: new Date('2026-01-01T00:00:00.000Z'),
+    })).toBe(true)
+  })
+
+  test('a connection whose last run is within the interval is not due', () => {
+    const now = new Date('2026-01-01T00:01:00.000Z')
+    const lastSyncedAt = new Date(now.getTime() - 30_000) // 30s ago
+    expect(connectionIsDue({
+      lastSyncedAt,
+      effectiveIntervalSeconds: 60,
+      now,
+    })).toBe(false)
+  })
+
+  test('a connection whose last run is exactly at the interval boundary is due', () => {
+    const now = new Date('2026-01-01T00:01:00.000Z')
+    const lastSyncedAt = new Date(now.getTime() - 60_000)
+    expect(connectionIsDue({
+      lastSyncedAt,
+      effectiveIntervalSeconds: 60,
+      now,
+    })).toBe(true)
+  })
+
+  test('a connection whose last run exceeds the interval is due', () => {
+    const now = new Date('2026-01-01T00:01:00.000Z')
+    const lastSyncedAt = new Date(now.getTime() - 90_000)
+    expect(connectionIsDue({
+      lastSyncedAt,
+      effectiveIntervalSeconds: 60,
+      now,
+    })).toBe(true)
+  })
+})
+
+describe('effectiveIntervalFor', () => {
+  const baseSchedule = (): BackgroundScheduleSettings => ({
+    modelSync: { intervalSeconds: 3600 },
+    usage: { intervalSeconds: 60 },
+    cooldownRecovery: { intervalSeconds: 30 },
+    retentionCleanup: { intervalSeconds: 3600, requestBatchSize: 1000 },
+    sessionCleanup: { intervalSeconds: 3600, batchSize: 1000 },
+    overrides: {
+      modelSync: {},
+      usage: {},
+    },
+  })
+
+  test('returns the global interval when no override is set', () => {
+    const schedule = baseSchedule()
+    expect(effectiveIntervalFor(schedule, 'modelSync', 'pc-alpha')).toBe(3600)
+    expect(effectiveIntervalFor(schedule, 'usage', 'pc-alpha')).toBe(60)
+  })
+
+  test('returns the override when one is set', () => {
+    const schedule: BackgroundScheduleSettings = {
+      ...baseSchedule(),
+      overrides: {
+        modelSync: { 'pc-alpha': 120 },
+        usage: { 'pc-alpha': 15 },
+      },
+    }
+    expect(effectiveIntervalFor(schedule, 'modelSync', 'pc-alpha')).toBe(120)
+    expect(effectiveIntervalFor(schedule, 'usage', 'pc-alpha')).toBe(15)
+  })
+
+  test('an override for one connection does not affect another', () => {
+    const schedule: BackgroundScheduleSettings = {
+      ...baseSchedule(),
+      overrides: {
+        modelSync: { 'pc-alpha': 120 },
+        usage: {},
+      },
+    }
+    expect(effectiveIntervalFor(schedule, 'modelSync', 'pc-alpha')).toBe(120)
+    expect(effectiveIntervalFor(schedule, 'modelSync', 'pc-beta')).toBe(3600)
+  })
+})
+
+for (const engine of availableEngines) {
+describe(`${engine.name} retention cleanup boundaries`, () => {
+  // The cleanup job must never monopolize the database with a giant DELETE.
+  // It runs the prune in bounded batches and stops at the iteration guard.
+  // These tests drive the actual job from `buildDefaultJobs` with a stub
+  // request-history collaborator so the boundary semantics are visible
+  // without touching the real history table.
+  let database: Database
+  let dispose: () => Promise<void>
+  let clock: ReturnType<typeof testClock>
+  let settings: BackgroundScheduleSettingsService
+
+  beforeEach(async () => {
+    ;({ database, dispose } = await engine.open())
+    clock = testClock()
+    settings = new BackgroundScheduleSettingsService({ database, clock })
+  })
+
+  afterEach(async () => {
+    await dispose()
+  })
+
+  /**
+   * A request-history stub that returns its prepared sequence of batch sizes.
+   * The cleanup job keeps calling `pruneBounded` until it sees a short batch
+   * or hits the iteration guard; the stub's sequence is what makes the
+   * boundary visible.
+   */
+  function makeHistoryStub(batches: number[]) {
+    const calls: number[] = []
+    let index = 0
+    return {
+      calls,
+      async pruneBounded(batchSize: number): Promise<number> {
+        calls.push(batchSize)
+        const value = batches[index] ?? 0
+        index += 1
+        return value
+      },
+    }
+  }
+
+  test('a short batch stops the loop without further calls', async () => {
+    const history = makeHistoryStub([500])
+    await settings.write({ retentionCleanup: { intervalSeconds: 60, requestBatchSize: 1000 } })
+
+    const { buildDefaultJobs } = await import('../../src/jobs/jobs.ts')
+    const job = buildDefaultJobs().find((j) => j.id === 'retention_cleanup')!
+    const result = await job.run({
+      database,
+      clock,
+      schedule: await settings.read(),
+      jobs: {
+        modelCatalog: null as never,
+        providers: null as never,
+        usage: null as never,
+        requestHistory: history as never,
+        removeExpiredSessions: async () => 0,
+      },
+    })
+    expect(result.outcome).toBe('success')
+    expect(result.affectedCount).toBe(500)
+    expect(history.calls).toEqual([1000])
+  })
+
+  test('consecutive full batches run until one returns short', async () => {
+    const history = makeHistoryStub([1000, 1000, 1000, 250])
+    await settings.write({ retentionCleanup: { intervalSeconds: 60, requestBatchSize: 1000 } })
+
+    const { buildDefaultJobs } = await import('../../src/jobs/jobs.ts')
+    const job = buildDefaultJobs().find((j) => j.id === 'retention_cleanup')!
+    const result = await job.run({
+      database,
+      clock,
+      schedule: await settings.read(),
+      jobs: {
+        modelCatalog: null as never,
+        providers: null as never,
+        usage: null as never,
+        requestHistory: history as never,
+        removeExpiredSessions: async () => 0,
+      },
+    })
+    expect(result.outcome).toBe('success')
+    expect(result.affectedCount).toBe(3250)
+    // Exactly one call past the short-batch termination is the stop signal.
+    expect(history.calls.length).toBe(4)
+  })
+
+  test('the iteration guard caps a runaway backlog so a single tick cannot monopolize the database', async () => {
+    // Five full batches in a row, never short: the guard stops the loop
+    // before the backlog can be exhausted in one tick.
+    const history = makeHistoryStub([1000, 1000, 1000, 1000, 1000, 1000])
+    await settings.write({ retentionCleanup: { intervalSeconds: 60, requestBatchSize: 1000 } })
+
+    const { buildDefaultJobs } = await import('../../src/jobs/jobs.ts')
+    const job = buildDefaultJobs().find((j) => j.id === 'retention_cleanup')!
+    const result = await job.run({
+      database,
+      clock,
+      schedule: await settings.read(),
+      jobs: {
+        modelCatalog: null as never,
+        providers: null as never,
+        usage: null as never,
+        requestHistory: history as never,
+        removeExpiredSessions: async () => 0,
+      },
+    })
+    expect(result.outcome).toBe('success')
+    expect(result.affectedCount).toBe(5000)
+    expect(history.calls.length).toBe(5)
+  })
+
+  test('a smaller batch size is honoured end to end', async () => {
+    const history = makeHistoryStub([10, 10, 0])
+    await settings.write({ retentionCleanup: { intervalSeconds: 60, requestBatchSize: 10 } })
+
+    const { buildDefaultJobs } = await import('../../src/jobs/jobs.ts')
+    const job = buildDefaultJobs().find((j) => j.id === 'retention_cleanup')!
+    const result = await job.run({
+      database,
+      clock,
+      schedule: await settings.read(),
+      jobs: {
+        modelCatalog: null as never,
+        providers: null as never,
+        usage: null as never,
+        requestHistory: history as never,
+        removeExpiredSessions: async () => 0,
+      },
+    })
+    expect(result.outcome).toBe('success')
+    expect(result.affectedCount).toBe(20)
+    expect(history.calls).toEqual([10, 10, 10])
+  })
+})
+}
 
 async function schedulerRecoveryStatus(database: Database, jobId: string) {
   return await database.backgroundJobs.get(jobId)

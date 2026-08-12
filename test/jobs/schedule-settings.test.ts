@@ -85,4 +85,101 @@ describe('background schedule settings', () => {
     const reloaded = await settings.read()
     expect(reloaded.modelSync.intervalSeconds).toBe(600)
   })
+
+  test('a fresh installation has empty per-connection overrides', async () => {
+    const current = await settings.read()
+    expect(current.overrides.modelSync).toEqual({})
+    expect(current.overrides.usage).toEqual({})
+  })
+
+  test('a write accepts overrides and returns the sanitized values', async () => {
+    const stored = await settings.write({
+      overrides: {
+        modelSync: { 'pc-alpha': 120 },
+        usage: { 'pc-alpha': 30, 'pc-beta': 90 },
+      },
+    })
+    expect(stored.overrides.modelSync).toEqual({ 'pc-alpha': 120 })
+    expect(stored.overrides.usage).toEqual({ 'pc-alpha': 30, 'pc-beta': 90 })
+    // Global intervals are untouched when only overrides are supplied.
+    expect(stored.modelSync.intervalSeconds).toBe(DEFAULT_BACKGROUND_SCHEDULE.modelSync.intervalSeconds)
+    expect(stored.usage.intervalSeconds).toBe(DEFAULT_BACKGROUND_SCHEDULE.usage.intervalSeconds)
+  })
+
+  test('override values are clamped to the same bounds as the global intervals', async () => {
+    const stored = await settings.write({
+      overrides: {
+        modelSync: { 'pc-small': 0, 'pc-large': 10_000_000 },
+        usage: { 'pc-neg': -5 },
+      },
+    })
+    expect(stored.overrides.modelSync['pc-small']).toBe(1)
+    expect(stored.overrides.modelSync['pc-large']).toBeLessThanOrEqual(86_400 * 7)
+    expect(stored.overrides.usage['pc-neg']).toBe(1)
+  })
+
+  test('non-integer override values reject the whole write', async () => {
+    await expect(
+      settings.write({
+        overrides: {
+          modelSync: { 'pc-alpha': 60.5 },
+        },
+      }),
+    ).rejects.toBeInstanceOf(SettingsValidationError)
+    // Defaults are still in place after a rejected write.
+    expect((await settings.read()).overrides.modelSync).toEqual({})
+  })
+
+  test('a non-object inner override map rejects the whole write', async () => {
+    await expect(
+      settings.write({
+        overrides: {
+          modelSync: 'not-an-object' as unknown as Record<string, number>,
+        },
+      }),
+    ).rejects.toBeInstanceOf(SettingsValidationError)
+
+    await expect(
+      settings.write({
+        overrides: {
+          usage: ['not', 'an', 'object'] as unknown as Record<string, number>,
+        },
+      }),
+    ).rejects.toBeInstanceOf(SettingsValidationError)
+  })
+
+  test('an overrides object that is not an object rejects the whole write', async () => {
+    await expect(
+      settings.write({
+        overrides: 'not-an-object' as unknown as Record<string, Record<string, number>>,
+      }),
+    ).rejects.toBeInstanceOf(SettingsValidationError)
+  })
+
+  test('overrides survive a cache invalidation', async () => {
+    await settings.write({
+      overrides: { modelSync: { 'pc-alpha': 300 } },
+    })
+    settings.invalidate()
+    const reloaded = await settings.read()
+    expect(reloaded.overrides.modelSync).toEqual({ 'pc-alpha': 300 })
+  })
+
+  test('a stale stored record with missing overrides is sanitized to empty maps', async () => {
+    // Simulate a record written before overrides existed: the legacy shape
+    // should still load, with empty override maps so callers can rely on the
+    // field always being present.
+    await database.settings.put('background.schedule', {
+      modelSync: { intervalSeconds: 120 },
+      usage: { intervalSeconds: 60 },
+      cooldownRecovery: { intervalSeconds: 30 },
+      retentionCleanup: { intervalSeconds: 3600, requestBatchSize: 1000 },
+      sessionCleanup: { intervalSeconds: 3600, batchSize: 1000 },
+    })
+    settings.invalidate()
+    const reloaded = await settings.read()
+    expect(reloaded.overrides.modelSync).toEqual({})
+    expect(reloaded.overrides.usage).toEqual({})
+    expect(reloaded.modelSync.intervalSeconds).toBe(120)
+  })
 })

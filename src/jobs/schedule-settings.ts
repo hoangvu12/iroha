@@ -31,6 +31,10 @@ export const DEFAULT_BACKGROUND_SCHEDULE: BackgroundScheduleSettings = {
     intervalSeconds: 3600,
     batchSize: 1000,
   },
+  overrides: {
+    modelSync: {},
+    usage: {},
+  },
 }
 
 export interface BackgroundScheduleSettings {
@@ -44,6 +48,18 @@ export interface BackgroundScheduleSettings {
   readonly sessionCleanup: {
     readonly intervalSeconds: number
     readonly batchSize: number
+  }
+  /**
+   * Per-connection interval overrides for the two jobs that visit every
+   * Provider Connection: model catalog synchronization and Usage Adapter
+   * polling. A connection that does not appear in a map uses the global
+   * interval for that job. The values share the same clamping bounds as the
+   * global intervals so a typo cannot make a single connection fire every
+   * millisecond while the others behave normally.
+   */
+  readonly overrides: {
+    readonly modelSync: Readonly<Record<string, number>>
+    readonly usage: Readonly<Record<string, number>>
   }
 }
 
@@ -121,6 +137,10 @@ interface SettingsParseSuccess {
   readonly cooldownRecovery: { intervalSeconds: number }
   readonly retentionCleanup: { intervalSeconds: number; requestBatchSize: number }
   readonly sessionCleanup: { intervalSeconds: number; batchSize: number }
+  readonly overrides: {
+    readonly modelSync: Record<string, number>
+    readonly usage: Record<string, number>
+  }
 }
 
 type RetentionCleanupParse = {
@@ -160,18 +180,81 @@ function parseSettingsPatch(input: unknown): SettingsParseSuccess | { readonly p
     'sessionCleanup',
     problems,
   )
+  next.overrides = parseOverrides(record.overrides, problems)
 
   if (problems.length > 0) return { problems }
   return next as unknown as SettingsParseSuccess
 }
 
-function parseIntervalObject(
+function parseOverrides(
+  value: unknown,
+  problems: { field: string; message: string } [],
+): { modelSync: Record<string, number>; usage: Record<string, number> } {
+  if (value === undefined || value === null) {
+    return { modelSync: {}, usage: {} }
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    problems.push({ field: 'overrides', message: 'must be an object' })
+    return { modelSync: {}, usage: {} }
+  }
+  const record = value as Record<string, unknown>
+  return {
+    modelSync: parseOverrideMap(record.modelSync, 'overrides.modelSync', problems),
+    usage: parseOverrideMap(record.usage, 'overrides.usage', problems),
+  }
+}
+
+function parseOverrideMap(
   value: unknown,
   field: string,
   problems: { field: string; message: string } [],
+): Record<string, number> {
+  if (value === undefined || value === null) {
+    return {}
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    problems.push({ field, message: 'must be an object' })
+    return {}
+  }
+  return collectOverrideEntries(
+    value as Record<string, unknown>,
+    field,
+    { problems },
+  )
+}
+
+/**
+ * Walks an override map and produces a sanitized record. When `problems` is
+ * supplied the walker reports structural errors per entry (used during the
+ * Owner write path); without it the walker silently drops bad entries
+ * (used during the read path, where a stored value that is not an integer
+ * should be ignored rather than crash the read).
+ */
+function collectOverrideEntries(
+  record: Record<string, unknown>,
+  field: string,
+  options: { readonly problems?: { field: string; message: string }[] } = {},
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [connectionId, raw] of Object.entries(record)) {
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || !Number.isInteger(raw)) {
+      options.problems?.push({ field: `${field}.${connectionId}`, message: 'must be an integer' })
+      continue
+    }
+    out[connectionId] = clamp(raw)
+  }
+  return out
+}
+
+type IntervalField = 'modelSync' | 'usage' | 'cooldownRecovery'
+
+function parseIntervalObject(
+  value: unknown,
+  field: IntervalField,
+  problems: { field: string; message: string } [],
 ): { intervalSeconds: number } {
   if (value === undefined || value === null) {
-    return { intervalSeconds: DEFAULT_BACKGROUND_SCHEDULE[field as keyof BackgroundScheduleSettings].intervalSeconds }
+    return { intervalSeconds: DEFAULT_BACKGROUND_SCHEDULE[field].intervalSeconds }
   }
   if (typeof value !== 'object' || Array.isArray(value)) {
     problems.push({ field, message: 'must be an object' })
@@ -179,7 +262,7 @@ function parseIntervalObject(
   }
   const record = value as Record<string, unknown>
   const out: { intervalSeconds: number } = {
-    intervalSeconds: DEFAULT_BACKGROUND_SCHEDULE[field as keyof BackgroundScheduleSettings].intervalSeconds,
+    intervalSeconds: DEFAULT_BACKGROUND_SCHEDULE[field].intervalSeconds,
   }
   if (record.intervalSeconds !== undefined) {
     out.intervalSeconds = readIntervalSeconds(record.intervalSeconds, `${field}.intervalSeconds`, problems)
@@ -270,7 +353,16 @@ function normalizeSettings(value: BackgroundScheduleSettings): BackgroundSchedul
       intervalSeconds: clamp(value.sessionCleanup.intervalSeconds),
       batchSize: clampBatch(value.sessionCleanup.batchSize),
     },
+    overrides: {
+      modelSync: sanitizeOverrideMap(value.overrides.modelSync),
+      usage: sanitizeOverrideMap(value.overrides.usage),
+    },
   }
+}
+
+function sanitizeOverrideMap(value: Readonly<Record<string, number>>): Record<string, number> {
+  if (value === null || typeof value !== 'object') return {}
+  return collectOverrideEntries(value as Record<string, unknown>, 'overrides')
 }
 
 function clamp(value: number): number {
@@ -292,7 +384,21 @@ function sanitizeStored(value: unknown): BackgroundScheduleSettings {
     cooldownRecovery: parseSettingsGroup(record.cooldownRecovery, 'cooldownRecovery'),
     retentionCleanup: parseRetentionStored(record.retentionCleanup, 'retentionCleanup') as BackgroundScheduleSettings['retentionCleanup'],
     sessionCleanup: parseRetentionStored(record.sessionCleanup, 'sessionCleanup') as BackgroundScheduleSettings['sessionCleanup'],
+    overrides: {
+      modelSync: parseOverridesFromStored(record.overrides, 'modelSync'),
+      usage: parseOverridesFromStored(record.overrides, 'usage'),
+    },
   }
+}
+
+function parseOverridesFromStored(
+  value: unknown,
+  field: 'modelSync' | 'usage',
+): Record<string, number> {
+  if (value === null || typeof value !== 'object') return {}
+  const inner = (value as Record<string, unknown>)[field]
+  if (inner === null || typeof inner !== 'object') return {}
+  return collectOverrideEntries(inner as Record<string, unknown>, `overrides.${field}`)
 }
 
 function parseSettingsGroup(

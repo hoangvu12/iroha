@@ -6,6 +6,50 @@ import {
 } from './scheduler.ts'
 
 /**
+ * The two background jobs that visit every Provider Connection and therefore
+ * accept a per-connection interval override. Cleanup and cooldown-recovery
+ * jobs operate process-wide and have no override.
+ */
+export type ConnectionVisitingJob = 'modelSync' | 'usage'
+
+/**
+ * Resolves the effective interval for one connection and one connection-visiting
+ * job. The override takes precedence over the global interval when the Owner
+ * has set one; otherwise the global cadence applies.
+ *
+ * Centralising the lookup keeps the per-job logic honest: a job that reads
+ * `schedule.overrides.modelSync[id]` and `schedule.modelSync.intervalSeconds`
+ * separately can drift from this rule across refactors; this function is the
+ * one place the precedence lives.
+ */
+export function effectiveIntervalFor(
+  schedule: import('./schedule-settings.ts').BackgroundScheduleSettings,
+  job: ConnectionVisitingJob,
+  connectionId: string,
+): number {
+  const override = schedule.overrides[job][connectionId]
+  if (override !== undefined) return override
+  return schedule[job].intervalSeconds
+}
+
+/**
+ * Whether a per-connection background job should process `connectionId` on
+ * `now`. A connection that has never been processed is always due. Otherwise
+ * the elapsed time since the last processed timestamp must meet or exceed the
+ * effective interval. The boundary is inclusive: at exactly the interval the
+ * connection is considered due, so a job that fires on the wall-clock minute
+ * will pick up connections synced exactly one interval ago.
+ */
+export function connectionIsDue(input: {
+  readonly lastSyncedAt: Date | null
+  readonly effectiveIntervalSeconds: number
+  readonly now: Date
+}): boolean {
+  if (input.lastSyncedAt === null) return true
+  return input.now.getTime() - input.lastSyncedAt.getTime() >= input.effectiveIntervalSeconds * 1000
+}
+
+/**
  * The id of every background job the scheduler knows. The HTTP route reads
  * this set so the management UI can render button labels and the audit
  * lookup can join without a hard-coded list.
@@ -38,12 +82,26 @@ export function buildDefaultJobs(): BackgroundJob[] {
       id: JOB_IDS.modelSync,
       label: 'Model catalog synchronization',
       intervalSeconds: (settings) => settings.modelSync.intervalSeconds,
-      async run({ jobs, database }: BackgroundJobContext): Promise<BackgroundJobRunResult> {
+      async run({ jobs, database, schedule, clock }: BackgroundJobContext): Promise<BackgroundJobRunResult> {
         const connections = await database.providers.listConnections()
         const targets = connections.filter((connection) => connection.archivedAt === null && connection.enabled)
         let succeeded = 0
         let affected = 0
         for (const connection of targets) {
+          const effective = effectiveIntervalFor(schedule, 'modelSync', connection.id)
+          const prior = await database.modelCatalog.getSync(connection.id)
+          if (!connectionIsDue({
+            lastSyncedAt: prior?.syncedAt ?? null,
+            effectiveIntervalSeconds: effective,
+            // The decision is evaluated against the wall-clock at the moment
+            // the connection is about to be processed, not the tick start.
+            // A long-running fleet loop could otherwise compare later
+            // connections against a stale `now` and either starve or
+            // stampede a connection whose own clock has moved on.
+            now: clock.now(),
+          })) {
+            continue
+          }
           try {
             const result = await jobs.modelCatalog.refresh(connection.id)
             if (result.ok) {
@@ -60,6 +118,9 @@ export function buildDefaultJobs(): BackgroundJob[] {
             )
           }
         }
+        // A tick that visits no eligible connection still completes cleanly;
+        // the Owner sees `affectedCount` reflect the work the scheduler did
+        // actually do, not the size of the configured fleet.
         return succeeded === 0 && targets.length === 0
           ? { outcome: 'success', affectedCount: 0 }
           : { outcome: 'success', affectedCount: affected }
@@ -69,11 +130,20 @@ export function buildDefaultJobs(): BackgroundJob[] {
       id: JOB_IDS.usage,
       label: 'Usage Adapter polling',
       intervalSeconds: (settings) => settings.usage.intervalSeconds,
-      async run({ jobs, database }: BackgroundJobContext): Promise<BackgroundJobRunResult> {
+      async run({ jobs, database, schedule, clock }: BackgroundJobContext): Promise<BackgroundJobRunResult> {
         const connections = await database.providers.listConnections()
         const targets = connections.filter((connection) => connection.archivedAt === null && connection.enabled)
         let succeeded = 0
         for (const connection of targets) {
+          const effective = effectiveIntervalFor(schedule, 'usage', connection.id)
+          const prior = await database.usage.get(connection.id)
+          if (!connectionIsDue({
+            lastSyncedAt: prior?.syncedAt ?? null,
+            effectiveIntervalSeconds: effective,
+            now: clock.now(),
+          })) {
+            continue
+          }
           const result = await jobs.usage.refresh(connection.id)
           if (result.ok || result.failure.code === 'rate_limited') {
             succeeded += 1

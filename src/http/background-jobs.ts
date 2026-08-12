@@ -234,6 +234,10 @@ const settingsResponse = t.Object({
     intervalSeconds: t.Number(),
     batchSize: t.Number(),
   }),
+  overrides: t.Object({
+    modelSync: t.Record(t.String(), t.Number()),
+    usage: t.Record(t.String(), t.Number()),
+  }),
 })
 
 const errorResponse = t.Object({
@@ -287,6 +291,10 @@ function toScheduleDto(settings: BackgroundScheduleSettings): SettingsDto {
     sessionCleanup: {
       intervalSeconds: settings.sessionCleanup.intervalSeconds,
       batchSize: settings.sessionCleanup.batchSize,
+    },
+    overrides: {
+      modelSync: { ...settings.overrides.modelSync },
+      usage: { ...settings.overrides.usage },
     },
   }
 }

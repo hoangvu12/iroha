@@ -165,4 +165,57 @@ describe('background jobs HTTP routes', () => {
     expect(body.error.code).toBe('validation_failed')
     expect(body.error.problems[0]?.field).toBe('modelSync.intervalSeconds')
   })
+
+  test('the settings endpoint reports empty overrides by default', async () => {
+    const response = await app.fetch('/api/v1/admin/background-jobs/settings')
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      overrides: { modelSync: Record<string, number>; usage: Record<string, number> }
+    }
+    expect(body.overrides.modelSync).toEqual({})
+    expect(body.overrides.usage).toEqual({})
+  })
+
+  test('the settings endpoint accepts per-connection overrides and returns them', async () => {
+    const response = await app.fetch('/api/v1/admin/background-jobs/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        overrides: {
+          modelSync: { 'pc-alpha': 120 },
+          usage: { 'pc-alpha': 30, 'pc-beta': 90 },
+        },
+      }),
+      csrf: session.csrf,
+    })
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      overrides: { modelSync: Record<string, number>; usage: Record<string, number> }
+    }
+    expect(body.overrides.modelSync).toEqual({ 'pc-alpha': 120 })
+    expect(body.overrides.usage).toEqual({ 'pc-alpha': 30, 'pc-beta': 90 })
+
+    // The overrides survive a subsequent read.
+    const reread = await app.fetch('/api/v1/admin/background-jobs/settings')
+    const rereadBody = await reread.json() as {
+      overrides: { modelSync: Record<string, number>; usage: Record<string, number> }
+    }
+    expect(rereadBody.overrides.modelSync).toEqual({ 'pc-alpha': 120 })
+    expect(rereadBody.overrides.usage).toEqual({ 'pc-alpha': 30, 'pc-beta': 90 })
+  })
+
+  test('the settings endpoint rejects a non-integer override value with 400', async () => {
+    const response = await app.fetch('/api/v1/admin/background-jobs/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        overrides: { modelSync: { 'pc-alpha': 60.5 } },
+      }),
+      csrf: session.csrf,
+    })
+    expect(response.status).toBe(400)
+    const body = await response.json() as { error: { code: string; problems: Array<{ field: string }> } }
+    expect(body.error.code).toBe('validation_failed')
+    expect(body.error.problems[0]?.field).toBe('overrides.modelSync.pc-alpha')
+  })
 })

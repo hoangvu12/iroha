@@ -20,5 +20,8 @@ export {
 export {
   JOB_IDS,
   buildDefaultJobs,
+  connectionIsDue,
+  effectiveIntervalFor,
+  type ConnectionVisitingJob,
   type JobId,
 } from './jobs.ts'

@@ -8,17 +8,23 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   activateKey,
+  addKey,
   archiveConnection,
   createConnection,
+  createUpstreamAccount,
+  deleteUpstreamAccount,
   disableKey,
   duplicateConnection,
   fetchConnections,
   ManagementError,
   purgeConnection,
+  removeKey,
   testKey,
   updateConnection,
+  updateKeySettings,
   type ConnectionView,
   type KeyView,
+  type UpstreamAccountView,
 } from '@/lib/providers'
 
 interface ProvidersAreaProps {
@@ -27,11 +33,6 @@ interface ProvidersAreaProps {
   readonly onSignedOut: () => void
 }
 
-/**
- * The Providers area: the Provider Connections the Gateway reaches, and the
- * one Upstream Key each connection carries in this version. Creation keeps to
- * the essential fields; everything else lives on the row it affects.
- */
 export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
   const [connections, setConnections] = useState<readonly ConnectionView[] | null>(null)
   const [error, setError] = useState<ManagementError | null>(null)
@@ -174,7 +175,7 @@ function CreateConnectionForm({
         <h3 className="text-sm font-semibold tracking-tight">New Provider Connection</h3>
         <p className="text-muted-foreground text-xs">
           Only the essentials: a name, the provider’s OpenAI-compatible base URL, and one Upstream
-          Key. Advanced behaviour arrives under settings in later tickets.
+          Key. Add more keys and shared accounts from the connection after creation.
         </p>
       </div>
 
@@ -349,12 +350,22 @@ function ConnectionRow({
               key={key.id}
               connectionId={connection.id}
               keyView={key}
+              accounts={connection.accounts}
               archived={connection.archived}
               csrfToken={csrfToken}
               busy={busy}
               onRun={run}
             />
           ))}
+
+          {!connection.archived && (
+            <ConnectionCapacityControls
+              connection={connection}
+              csrfToken={csrfToken}
+              busy={busy}
+              onRun={run}
+            />
+          )}
         </>
       )}
 
@@ -371,6 +382,7 @@ function ConnectionRow({
 function KeyLine({
   connectionId,
   keyView,
+  accounts,
   archived,
   csrfToken,
   busy,
@@ -378,28 +390,42 @@ function KeyLine({
 }: {
   connectionId: string
   keyView: KeyView
+  accounts: readonly UpstreamAccountView[]
   archived: boolean
   csrfToken: string
   busy: string | null
   onRun: (action: string, perform: () => Promise<unknown>) => void
 }) {
   const probe = describeProbe(keyView)
+  const [editing, setEditing] = useState(false)
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
+  const account = accounts.find((candidate) => candidate.id === keyView.accountId)
 
   return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="min-w-0">
-        <p className="flex flex-wrap items-center gap-2 text-xs">
-          <Badge variant={keyView.health === 'active' ? 'default' : 'secondary'}>
-            {HEALTH_LABELS[keyView.health]}
-          </Badge>
-          <span className="text-muted-foreground">
-            {probe ?? 'Not tested yet. Save traffic by testing before relying on this key.'}
-          </span>
-        </p>
-      </div>
+    <div className="flex flex-col gap-2 rounded-md border px-3 py-2">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant={keyView.health === 'active' ? 'default' : 'secondary'}>
+              {HEALTH_LABELS[keyView.health]}
+            </Badge>
+            <span className="text-muted-foreground">
+              {probe ?? 'Not tested yet. Save traffic by testing before relying on this key.'}
+            </span>
+            <span className="text-muted-foreground font-mono">{keyView.id}</span>
+          </p>
+          <p className="text-muted-foreground mt-1 flex flex-wrap gap-x-2 text-xs">
+            <span>
+              {account === undefined
+                ? 'Independent capacity'
+                : `Shared account: ${account.displayName}`}
+            </span>
+            <span>{describeModelPolicy(keyView)}</span>
+          </p>
+        </div>
 
-      {!archived && (
-        <div className="flex shrink-0 items-center gap-1">
+        {!archived && (
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
           <Button
             type="button"
             variant="ghost"
@@ -435,10 +461,242 @@ function KeyLine({
               {busy === 'disable' ? 'Disabling…' : 'Disable'}
             </Button>
           )}
-        </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setEditing((open) => !open)}
+              disabled={busy !== null}
+            >
+              Configure
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (confirmingRemove) {
+                  void onRun(`remove-${keyView.id}`, () =>
+                    removeKey(connectionId, keyView.id, csrfToken),
+                  )
+                } else {
+                  setConfirmingRemove(true)
+                }
+              }}
+              onBlur={() => setConfirmingRemove(false)}
+              disabled={busy !== null}
+            >
+              {busy === `remove-${keyView.id}`
+                ? 'Removing…'
+                : confirmingRemove
+                  ? 'Confirm remove'
+                  : 'Remove'}
+            </Button>
+          </div>
+        )}
+      </div>
+      {editing && (
+        <KeySettingsForm
+          connectionId={connectionId}
+          keyView={keyView}
+          accounts={accounts}
+          csrfToken={csrfToken}
+          onRun={onRun}
+          onDone={() => setEditing(false)}
+        />
       )}
     </div>
   )
+}
+
+function ConnectionCapacityControls({
+  connection,
+  csrfToken,
+  busy,
+  onRun,
+}: {
+  connection: ConnectionView
+  csrfToken: string
+  busy: string | null
+  onRun: (action: string, perform: () => Promise<unknown>) => void
+}) {
+  const [upstreamKey, setUpstreamKey] = useState('')
+  const [accountName, setAccountName] = useState('')
+
+  return (
+    <div className="bg-muted/30 mt-2 grid gap-4 rounded-md border p-3 md:grid-cols-2">
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void onRun('add-key', async () => {
+            await addKey(connection.id, upstreamKey, csrfToken)
+            setUpstreamKey('')
+          })
+        }}
+      >
+        <div>
+          <p className="text-xs font-medium">Add Upstream Key</p>
+          <p className="text-muted-foreground text-xs">
+            New keys start independent, allow all models, and remain Unverified until tested.
+          </p>
+        </div>
+        <Label htmlFor={`add-key-${connection.id}`}>New upstream key</Label>
+        <Input
+          id={`add-key-${connection.id}`}
+          type="password"
+          autoComplete="off"
+          value={upstreamKey}
+          onChange={(event) => setUpstreamKey(event.target.value)}
+        />
+        <Button type="submit" size="sm" className="self-start" disabled={busy !== null}>
+          {busy === 'add-key' ? 'Adding…' : 'Add key'}
+        </Button>
+      </form>
+
+      <div className="flex flex-col gap-2">
+        <div>
+          <p className="text-xs font-medium">Upstream Accounts</p>
+          <p className="text-muted-foreground text-xs">
+            Group keys only when they share provider billing or capacity. Ungrouped keys stay
+            independent by default.
+          </p>
+        </div>
+        {connection.accounts.map((account) => (
+          <div key={account.id} className="flex items-center justify-between gap-2 text-xs">
+            <span>{account.displayName}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() =>
+                void onRun(`delete-account-${account.id}`, () =>
+                  deleteUpstreamAccount(connection.id, account.id, csrfToken),
+                )
+              }
+            >
+              {busy === `delete-account-${account.id}` ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        ))}
+        <form
+          className="flex items-end gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void onRun('create-account', async () => {
+              await createUpstreamAccount(connection.id, accountName, csrfToken)
+              setAccountName('')
+            })
+          }}
+        >
+          <div className="flex flex-1 flex-col gap-1.5">
+            <Label htmlFor={`account-${connection.id}`}>Account name</Label>
+            <Input
+              id={`account-${connection.id}`}
+              value={accountName}
+              onChange={(event) => setAccountName(event.target.value)}
+            />
+          </div>
+          <Button type="submit" size="sm" disabled={busy !== null}>
+            {busy === 'create-account' ? 'Creating…' : 'Create account'}
+          </Button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function KeySettingsForm({
+  connectionId,
+  keyView,
+  accounts,
+  csrfToken,
+  onRun,
+  onDone,
+}: {
+  connectionId: string
+  keyView: KeyView
+  accounts: readonly UpstreamAccountView[]
+  csrfToken: string
+  onRun: (action: string, perform: () => Promise<unknown>) => void
+  onDone: () => void
+}) {
+  const [accountId, setAccountId] = useState(keyView.accountId ?? '')
+  const [allowedModels, setAllowedModels] = useState(keyView.allowedModels?.join(', ') ?? '')
+  const [deniedModels, setDeniedModels] = useState(keyView.deniedModels?.join(', ') ?? '')
+
+  return (
+    <form
+      className="grid gap-3 border-t pt-3 md:grid-cols-3"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void onRun(`configure-${keyView.id}`, async () => {
+          await updateKeySettings(
+            connectionId,
+            keyView.id,
+            {
+              accountId: accountId === '' ? null : accountId,
+              allowedModels: parseModelList(allowedModels),
+              deniedModels: parseModelList(deniedModels),
+            },
+            csrfToken,
+          )
+          onDone()
+        })
+      }}
+    >
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`key-${keyView.id}-account`}>Shared account</Label>
+        <select
+          id={`key-${keyView.id}-account`}
+          className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+          value={accountId}
+          onChange={(event) => setAccountId(event.target.value)}
+        >
+          <option value="">Independent</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.displayName}
+            </option>
+          ))}
+        </select>
+      </div>
+      <Field
+        id={`key-${keyView.id}-allowed`}
+        label="Only allow models"
+        hint="Comma-separated exact model IDs. Blank allows all."
+        value={allowedModels}
+        onChange={setAllowedModels}
+      />
+      <Field
+        id={`key-${keyView.id}-denied`}
+        label="Exclude models"
+        hint="Comma-separated exact model IDs."
+        value={deniedModels}
+        onChange={setDeniedModels}
+      />
+      <div className="md:col-span-3">
+        <Button type="submit" size="sm">
+          Save key settings
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function parseModelList(value: string): readonly string[] | null {
+  const models = value
+    .split(',')
+    .map((model) => model.trim())
+    .filter((model) => model !== '')
+  return models.length === 0 ? null : models
+}
+
+function describeModelPolicy(key: KeyView): string {
+  if (key.allowedModels !== null) return `Only ${key.allowedModels.join(', ')}`
+  if (key.deniedModels !== null) return `All models except ${key.deniedModels.join(', ')}`
+  return 'All connection models'
 }
 
 function EditConnectionForm({

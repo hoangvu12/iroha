@@ -5,6 +5,7 @@ import {
   type KeyView,
   type ProviderConnectionRegistry,
   type ProviderFailure,
+  type UpstreamAccountView,
 } from '../providers/index.ts'
 import type {
   CreatedGatewayKey,
@@ -351,6 +352,196 @@ export function createAdminRoutes({ identity, providers, gatewayKeys }: AdminRou
         },
       },
     )
+    .post(
+      '/provider-connections/:id/keys',
+      async ({ params, body, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const input = asObject(body)
+        const result = await providers.addKey(params.id, { upstreamKey: input.upstreamKey })
+        if (!result.ok) {
+          const failure = toFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(201, toConnectionDto(result.value))
+      },
+      {
+        detail: {
+          summary: 'Add an Upstream Key',
+          description:
+            'Adds another Upstream Key to a connection. It is encrypted, saved Unverified, and tested once with the low-cost probe like the first key. Existing keys are untouched.',
+        },
+        response: { 201: connectionResponse, ...errorResponses },
+      },
+    )
+    .patch(
+      '/provider-connections/:id/keys/:keyId',
+      async ({ params, body, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const input = asObject(body)
+        const result = await providers.updateKeySettings(params.id, params.keyId, {
+          ...('accountId' in input ? { accountId: input.accountId } : {}),
+          ...('allowedModels' in input ? { allowedModels: input.allowedModels } : {}),
+          ...('deniedModels' in input ? { deniedModels: input.deniedModels } : {}),
+        })
+        if (!result.ok) {
+          const failure = toFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(200, toConnectionDto(result.value))
+      },
+      {
+        detail: {
+          summary: 'Configure an Upstream Key',
+          description:
+            'Changes which Upstream Account the key shares billing or capacity with, and which exact models it may or may not serve. Null model lists mean no restriction.',
+        },
+        response: {
+          200: connectionResponse,
+          ...errorResponses,
+        },
+      },
+    )
+    .delete(
+      '/provider-connections/:id/keys/:keyId',
+      async ({ params, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const result = await providers.removeKey(params.id, params.keyId)
+        if (!result.ok) {
+          const failure = toFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(200, toConnectionDto(result.value))
+      },
+      {
+        detail: {
+          summary: 'Remove an Upstream Key',
+          description:
+            'Removes one key permanently. The other keys and any Upstream Accounts on the connection are untouched.',
+        },
+        response: {
+          200: connectionResponse,
+          ...errorResponses,
+        },
+      },
+    )
+    .post(
+      '/provider-connections/:id/accounts',
+      async ({ params, body, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const input = asObject(body)
+        const result = await providers.createAccount(params.id, { displayName: input.displayName })
+        if (!result.ok) {
+          const failure = toFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(201, toConnectionDto(result.value))
+      },
+      {
+        detail: {
+          summary: 'Create an Upstream Account',
+          description:
+            'Creates a group of Upstream Keys that share Provider billing or capacity. Assign keys to the account to group them; keys outside an account stay independent.',
+        },
+        response: { 201: connectionResponse, ...errorResponses },
+      },
+    )
+    .patch(
+      '/provider-connections/:id/accounts/:accountId',
+      async ({ params, body, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const input = asObject(body)
+        const result = await providers.updateAccount(params.id, params.accountId, {
+          ...('displayName' in input ? { displayName: input.displayName } : {}),
+        })
+        if (!result.ok) {
+          const failure = toFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(200, toConnectionDto(result.value))
+      },
+      {
+        detail: {
+          summary: 'Rename an Upstream Account',
+          description:
+            'Renames an account. Its identity stays put, so keys already assigned to it keep their grouping.',
+        },
+        response: {
+          200: connectionResponse,
+          ...errorResponses,
+        },
+      },
+    )
+    .delete(
+      '/provider-connections/:id/accounts/:accountId',
+      async ({ params, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const result = await providers.deleteAccount(params.id, params.accountId)
+        if (!result.ok) {
+          const failure = toFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(200, toConnectionDto(result.value))
+      },
+      {
+        detail: {
+          summary: 'Delete an Upstream Account',
+          description:
+            'Removes an account and its grouping. Its keys become independent again; nothing else is deleted.',
+        },
+        response: {
+          200: connectionResponse,
+          ...errorResponses,
+        },
+      },
+    )
     .get(
       '/gateway-keys',
       async ({ request, cookie, status }) => {
@@ -477,6 +668,7 @@ export type AdminRoutes = ReturnType<typeof createAdminRoutes>
 
 const probeVerdict = t.Union([t.Literal('usable'), t.Literal('rejected'), t.Literal('inconclusive')])
 const keyHealth = t.Union([t.Literal('unverified'), t.Literal('active'), t.Literal('disabled')])
+const modelList = t.Union([t.Null(), t.Array(t.String())])
 
 const keyResponse = t.Object({
   id: t.String(),
@@ -489,6 +681,16 @@ const keyResponse = t.Object({
       reason: t.Union([t.Null(), t.String()]),
     }),
   ]),
+  accountId: t.Union([t.Null(), t.String()]),
+  allowedModels: modelList,
+  deniedModels: modelList,
+  createdAt: t.String(),
+  updatedAt: t.String(),
+})
+
+const accountResponse = t.Object({
+  id: t.String(),
+  displayName: t.String(),
   createdAt: t.String(),
   updatedAt: t.String(),
 })
@@ -503,6 +705,7 @@ const connectionResponse = t.Object({
   createdAt: t.String(),
   updatedAt: t.String(),
   keys: t.Array(keyResponse),
+  accounts: t.Array(accountResponse),
 })
 
 const connectionListResponse = t.Object({ connections: t.Array(connectionResponse) })
@@ -553,6 +756,7 @@ const errorResponses = {
 
 type ConnectionDto = typeof connectionResponse.static
 type KeyDto = typeof keyResponse.static
+type AccountDto = typeof accountResponse.static
 type ErrorDto = typeof errorResponse.static
 type GatewayKeyDto = typeof gatewayKeyResponse.static
 
@@ -567,6 +771,7 @@ function toConnectionDto(view: ConnectionView): ConnectionDto {
     createdAt: view.createdAt.toISOString(),
     updatedAt: view.updatedAt.toISOString(),
     keys: view.keys.map(toKeyDto),
+    accounts: view.accounts.map(toAccountDto),
   }
 }
 
@@ -582,8 +787,20 @@ function toKeyDto(key: KeyView): KeyDto {
             verdict: key.lastProbe.verdict,
             reason: key.lastProbe.reason,
           },
+    accountId: key.accountId,
+    allowedModels: key.allowedModels === null ? null : [...key.allowedModels],
+    deniedModels: key.deniedModels === null ? null : [...key.deniedModels],
     createdAt: key.createdAt.toISOString(),
     updatedAt: key.updatedAt.toISOString(),
+  }
+}
+
+function toAccountDto(account: UpstreamAccountView): AccountDto {
+  return {
+    id: account.id,
+    displayName: account.displayName,
+    createdAt: account.createdAt.toISOString(),
+    updatedAt: account.updatedAt.toISOString(),
   }
 }
 
@@ -631,6 +848,11 @@ function toFailure(failure: ProviderFailure): { statusCode: 400 | 404 | 409 | 50
       return {
         statusCode: 404,
         body: adminError('key_not_found', 'No such Upstream Key on this connection.'),
+      }
+    case 'account_not_found':
+      return {
+        statusCode: 404,
+        body: adminError('account_not_found', 'No such Upstream Account on this connection.'),
       }
     case 'connection_archived':
       return {

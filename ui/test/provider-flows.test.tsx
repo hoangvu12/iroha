@@ -124,6 +124,43 @@ describe('Provider Connections in the browser', () => {
     await screen.findByText('Active')
   })
 
+  test('adds an independent key, groups it into a shared account, and removes it', async () => {
+    await openProviders()
+    await fillCreateForm()
+    await screen.findByText('Example')
+
+    await user.type(screen.getByLabelText('New upstream key'), 'sk-second-upstream-key-for-tests')
+    await user.click(screen.getByRole('button', { name: 'Add key' }))
+    await waitFor(() => expect(screen.getAllByText('Independent capacity')).toHaveLength(2))
+
+    await user.type(screen.getByLabelText('Account name'), 'Shared plan')
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+    await screen.findByText('Shared plan')
+
+    const configureButtons = screen.getAllByRole('button', { name: 'Configure' })
+    await user.click(configureButtons[1]!)
+    await user.selectOptions(screen.getByLabelText('Shared account'), 'Shared plan')
+    await user.type(screen.getByLabelText('Only allow models'), 'gpt-4o, gpt-4o-mini')
+    await user.click(screen.getByRole('button', { name: 'Save key settings' }))
+
+    await screen.findByText('Shared account: Shared plan')
+    expect(screen.getByText('Only gpt-4o, gpt-4o-mini')).toBeDefined()
+
+    const [connection] = await iroha.database.providers.listConnections()
+    const keys = await iroha.database.providers.listKeys(connection!.id)
+    const accounts = await iroha.database.providers.listAccounts(connection!.id)
+    expect(keys).toHaveLength(2)
+    expect(accounts).toHaveLength(1)
+    expect(keys[1]!.accountId).toBe(accounts[0]!.id)
+
+    const removeButtons = screen.getAllByRole('button', { name: 'Remove' })
+    await user.click(removeButtons[1]!)
+    await user.click(screen.getByRole('button', { name: 'Confirm remove' }))
+    await waitFor(async () =>
+      expect(await iroha.database.providers.listKeys(connection!.id)).toHaveLength(1),
+    )
+  })
+
   test('edits the display name and keeps the connection in place', async () => {
     await openProviders()
     await fillCreateForm({ name: 'Before' })

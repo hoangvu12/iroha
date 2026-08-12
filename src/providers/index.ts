@@ -11,7 +11,9 @@ export {
   type ProviderConnectionRegistryOptions,
   type ProviderFailure,
   type ProviderResult,
+  type UpstreamAccountView,
 } from './connection-registry.ts'
+export { RoundRobinSelector } from './round-robin.ts'
 export {
   createGenericKeyProbe,
   type KeyProbeOptions,

@@ -164,6 +164,24 @@ export type KeyProbeVerdict = 'usable' | 'rejected' | 'inconclusive'
 export type UpstreamKeyHealth = 'unverified' | 'active' | 'disabled'
 
 /**
+ * One Owner-configured group of Upstream Keys that share Provider billing or
+ * capacity. Accounts are optional: keys outside an account are independent.
+ * Deleting an account ungroups its keys rather than removing them.
+ */
+export interface UpstreamAccountRecord {
+  readonly id: string
+  readonly connectionId: string
+  readonly displayName: string
+  readonly createdAt: Date
+  readonly updatedAt: Date
+}
+
+/** Only fields the Owner may edit on an account. The ID is never patchable. */
+export interface UpstreamAccountPatch {
+  readonly displayName?: string
+}
+
+/**
  * One Upstream Key attached to a Provider Connection. The key material itself
  * appears only as cipher output, so copying the database does not copy the
  * Provider's keys.
@@ -176,6 +194,15 @@ export interface UpstreamKeyRecord {
   readonly lastProbeAt: Date | null
   readonly lastProbeVerdict: KeyProbeVerdict | null
   readonly lastProbeReason: string | null
+  /**
+   * The Upstream Account the key shares billing or capacity with, or null when
+   * the key is independent.
+   */
+  readonly accountId: string | null
+  /** Exact models the key may serve, or null for every connection model. */
+  readonly allowedModels: readonly string[] | null
+  /** Exact models the key never serves, or null for no exclusion. */
+  readonly deniedModels: readonly string[] | null
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -196,6 +223,12 @@ export interface UpstreamKeyPatch {
   readonly lastProbeAt?: Date | null
   readonly lastProbeVerdict?: KeyProbeVerdict | null
   readonly lastProbeReason?: string | null
+  /** Moves the key into an Upstream Account, or back to independence. */
+  readonly accountId?: string | null
+  /** Replaces the exact-model allow list; null means every model is allowed. */
+  readonly allowedModels?: readonly string[] | null
+  /** Replaces the exact-model deny list; null means nothing is excluded. */
+  readonly deniedModels?: readonly string[] | null
 }
 
 export interface ProviderRepository {
@@ -218,8 +251,27 @@ export interface ProviderRepository {
   insertKey(key: UpstreamKeyRecord): Promise<UpstreamKeyRecord>
   /** Applies only the supplied fields and moves `updatedAt`. Null when unknown. */
   updateKey(id: string, patch: UpstreamKeyPatch, at: Date): Promise<UpstreamKeyRecord | null>
+  /** Removes one key. Returns whether a key existed to remove. */
+  deleteKey(id: string): Promise<boolean>
   /** Removes every key of a connection, returning how many were removed. */
   deleteKeysForConnection(connectionId: string): Promise<number>
+
+  /** Accounts of one connection, oldest first. */
+  listAccounts(connectionId: string): Promise<readonly UpstreamAccountRecord[]>
+  getAccount(id: string): Promise<UpstreamAccountRecord | null>
+  insertAccount(account: UpstreamAccountRecord): Promise<UpstreamAccountRecord>
+  /** Applies only the supplied fields and moves `updatedAt`. Null when unknown. */
+  updateAccount(
+    id: string,
+    patch: UpstreamAccountPatch,
+    at: Date,
+  ): Promise<UpstreamAccountRecord | null>
+  /**
+   * Removes an account, leaving its keys independent. The `set null` foreign
+   * key does the ungrouping, so a single delete cannot strand a key in a
+   * vanished account.
+   */
+  deleteAccount(id: string): Promise<boolean>
 }
 
 /**

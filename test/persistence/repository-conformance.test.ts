@@ -3,6 +3,7 @@ import type {
   Database,
   ProviderConnectionRecord,
   SessionRecord,
+  UpstreamAccountRecord,
   UpstreamKeyRecord,
 } from '../../src/persistence/index.ts'
 import { availableEngines, POSTGRES_URL } from './engines.ts'
@@ -383,11 +384,27 @@ for (const engine of availableEngines) {
       ): UpstreamKeyRecord => ({
         id,
         connectionId,
+        accountId: null,
         encryptedKey: `v1.stored.${id}`,
         health: 'unverified',
         lastProbeAt: null,
         lastProbeVerdict: null,
         lastProbeReason: null,
+        allowedModels: null,
+        deniedModels: null,
+        createdAt: at,
+        updatedAt: at,
+        ...overrides,
+      })
+
+      const account = (
+        id: string,
+        connectionId: string,
+        overrides: Partial<UpstreamAccountRecord> = {},
+      ): UpstreamAccountRecord => ({
+        id,
+        connectionId,
+        displayName: 'Shared account',
         createdAt: at,
         updatedAt: at,
         ...overrides,
@@ -508,6 +525,131 @@ for (const engine of availableEngines) {
       test('reports an unknown key', async () => {
         expect(await database.providers.getKey('uk_absent')).toBeNull()
         expect(await database.providers.updateKey('uk_absent', { health: 'active' }, at)).toBeNull()
+      })
+
+      test('round-trips key model lists and an account assignment', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertAccount(account('ua_one', 'pc_one'))
+
+        const created = await database.providers.insertKey(
+          key('uk_one', 'pc_one', {
+            accountId: 'ua_one',
+            allowedModels: ['gpt-4o', 'gpt-4o-mini'],
+            deniedModels: ['o1-preview'],
+          }),
+        )
+
+        expect(created).toEqual(
+          key('uk_one', 'pc_one', {
+            accountId: 'ua_one',
+            allowedModels: ['gpt-4o', 'gpt-4o-mini'],
+            deniedModels: ['o1-preview'],
+          }),
+        )
+        expect(await database.providers.getKey('uk_one')).toEqual(created)
+      })
+
+      test('patches the account and the per-key model lists', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertAccount(account('ua_one', 'pc_one'))
+        await database.providers.insertKey(key('uk_one', 'pc_one'))
+        const later = new Date('2026-02-01T00:00:00.000Z')
+
+        const updated = await database.providers.updateKey(
+          'uk_one',
+          {
+            accountId: 'ua_one',
+            allowedModels: ['gpt-4o'],
+            deniedModels: null,
+          },
+          later,
+        )
+
+        expect(updated?.accountId).toBe('ua_one')
+        expect(updated?.allowedModels).toEqual(['gpt-4o'])
+        expect(updated?.deniedModels).toBeNull()
+        expect(updated?.updatedAt).toEqual(later)
+        expect(updated?.encryptedKey).toBe('v1.stored.uk_one')
+      })
+
+      test('removes a single key', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertKey(key('uk_one', 'pc_one'))
+        await database.providers.insertKey(key('uk_two', 'pc_one'))
+
+        expect(await database.providers.deleteKey('uk_one')).toBe(true)
+        expect(await database.providers.deleteKey('uk_one')).toBe(false)
+        expect((await database.providers.listKeys('pc_one')).map((record) => record.id)).toEqual([
+          'uk_two',
+        ])
+      })
+
+      test('round-trips an Upstream Account', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        const created = await database.providers.insertAccount(account('ua_one', 'pc_one'))
+
+        expect(created).toEqual(account('ua_one', 'pc_one'))
+        expect(await database.providers.getAccount('ua_one')).toEqual(account('ua_one', 'pc_one'))
+      })
+
+      test('lists only the accounts of one connection, oldest first', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertConnection(connection('pc_two'))
+
+        await database.providers.insertAccount(account('ua_other', 'pc_two'))
+        await database.providers.insertAccount(
+          account('ua_newer', 'pc_one', { createdAt: new Date('2026-01-02T00:00:00.000Z') }),
+        )
+        await database.providers.insertAccount(account('ua_older', 'pc_one'))
+
+        expect((await database.providers.listAccounts('pc_one')).map((record) => record.id)).toEqual([
+          'ua_older',
+          'ua_newer',
+        ])
+      })
+
+      test('renames an account and moves updatedAt', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertAccount(account('ua_one', 'pc_one'))
+        const later = new Date('2026-02-01T00:00:00.000Z')
+
+        const updated = await database.providers.updateAccount('ua_one', { displayName: 'Renamed' }, later)
+
+        expect(updated?.displayName).toBe('Renamed')
+        expect(updated?.updatedAt).toEqual(later)
+        expect(updated?.id).toBe('ua_one')
+      })
+
+      test('deleting an account leaves its keys independent', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertAccount(account('ua_one', 'pc_one'))
+        await database.providers.insertKey(key('uk_one', 'pc_one', { accountId: 'ua_one' }))
+
+        expect(await database.providers.deleteAccount('ua_one')).toBe(true)
+        expect(await database.providers.getAccount('ua_one')).toBeNull()
+
+        const stored = await database.providers.getKey('uk_one')
+        expect(stored?.accountId).toBeNull()
+        expect(stored?.encryptedKey).toBe('v1.stored.uk_one')
+      })
+
+      test('reports an update or removal against an unknown account', async () => {
+        expect(await database.providers.getAccount('ua_absent')).toBeNull()
+        expect(await database.providers.updateAccount('ua_absent', { displayName: 'Nope' }, at)).toBeNull()
+        expect(await database.providers.deleteAccount('ua_absent')).toBe(false)
+      })
+
+      test('takes an account with its connection in a purge, inside a transaction', async () => {
+        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertAccount(account('ua_one', 'pc_one'))
+
+        const removed = await database.transaction(async (repositories) => {
+          await repositories.providers.deleteKeysForConnection('pc_one')
+          return await repositories.providers.deleteConnection('pc_one')
+        })
+
+        expect(removed).toBe(true)
+        expect(await database.providers.getAccount('ua_one')).toBeNull()
       })
 
       test('removes every key of a connection', async () => {

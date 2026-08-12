@@ -6,6 +6,16 @@ export interface KeyView {
     readonly verdict: 'usable' | 'rejected' | 'inconclusive'
     readonly reason: string | null
   } | null
+  readonly accountId: string | null
+  readonly allowedModels: readonly string[] | null
+  readonly deniedModels: readonly string[] | null
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+export interface UpstreamAccountView {
+  readonly id: string
+  readonly displayName: string
   readonly createdAt: string
   readonly updatedAt: string
 }
@@ -20,6 +30,7 @@ export interface ConnectionView {
   readonly createdAt: string
   readonly updatedAt: string
   readonly keys: readonly KeyView[]
+  readonly accounts: readonly UpstreamAccountView[]
 }
 
 export interface FieldProblem {
@@ -138,6 +149,71 @@ export async function disableKey(
   return await request<ConnectionView>(
     'POST',
     `/provider-connections/${encodeURIComponent(connectionId)}/keys/${encodeURIComponent(keyId)}/disable`,
+    { csrfToken },
+  )
+}
+
+export async function addKey(
+  connectionId: string,
+  upstreamKey: string,
+  csrfToken: string,
+): Promise<ConnectionView> {
+  return await request<ConnectionView>(
+    'POST',
+    `/provider-connections/${encodeURIComponent(connectionId)}/keys`,
+    { body: { upstreamKey }, csrfToken },
+  )
+}
+
+export async function updateKeySettings(
+  connectionId: string,
+  keyId: string,
+  settings: {
+    accountId: string | null
+    allowedModels: readonly string[] | null
+    deniedModels: readonly string[] | null
+  },
+  csrfToken: string,
+): Promise<ConnectionView> {
+  return await request<ConnectionView>(
+    'PATCH',
+    `/provider-connections/${encodeURIComponent(connectionId)}/keys/${encodeURIComponent(keyId)}`,
+    { body: settings, csrfToken },
+  )
+}
+
+export async function removeKey(
+  connectionId: string,
+  keyId: string,
+  csrfToken: string,
+): Promise<ConnectionView> {
+  return await request<ConnectionView>(
+    'DELETE',
+    `/provider-connections/${encodeURIComponent(connectionId)}/keys/${encodeURIComponent(keyId)}`,
+    { csrfToken },
+  )
+}
+
+export async function createUpstreamAccount(
+  connectionId: string,
+  displayName: string,
+  csrfToken: string,
+): Promise<ConnectionView> {
+  return await request<ConnectionView>(
+    'POST',
+    `/provider-connections/${encodeURIComponent(connectionId)}/accounts`,
+    { body: { displayName }, csrfToken },
+  )
+}
+
+export async function deleteUpstreamAccount(
+  connectionId: string,
+  accountId: string,
+  csrfToken: string,
+): Promise<ConnectionView> {
+  return await request<ConnectionView>(
+    'DELETE',
+    `/provider-connections/${encodeURIComponent(connectionId)}/accounts/${encodeURIComponent(accountId)}`,
     { csrfToken },
   )
 }

@@ -31,6 +31,8 @@ import {
   type SessionRepository,
   type SettingRecord,
   type SettingsRepository,
+  type UpstreamAccountPatch,
+  type UpstreamAccountRecord,
   type UpstreamKeyHealth,
   type UpstreamKeyPatch,
   type UpstreamKeyRecord,
@@ -44,6 +46,7 @@ import {
   ownerSessions,
   providerConnections,
   settings,
+  upstreamAccounts,
   upstreamKeys,
 } from './schema.ts'
 
@@ -458,8 +461,9 @@ class SqliteProviderRepository implements ProviderRepository {
   }
 
   async insertKey(key: UpstreamKeyRecord): Promise<UpstreamKeyRecord> {
-    const [row] = await this.handle.insert(upstreamKeys).values(key).returning()
-    return toKey(row ?? key)
+    const encoded = encodeKey(key)
+    const [row] = await this.handle.insert(upstreamKeys).values(encoded).returning()
+    return toKey(row ?? encoded)
   }
 
   async updateKey(
@@ -467,13 +471,21 @@ class SqliteProviderRepository implements ProviderRepository {
     patch: UpstreamKeyPatch,
     at: Date,
   ): Promise<UpstreamKeyRecord | null> {
-    const changed = { ...patch, updatedAt: at }
+    const changed = { ...encodePatch(patch), updatedAt: at }
     const [row] = await this.handle
       .update(upstreamKeys)
       .set(changed)
       .where(eq(upstreamKeys.id, id))
       .returning()
     return row ? toKey(row) : null
+  }
+
+  async deleteKey(id: string): Promise<boolean> {
+    const removed = await this.handle
+      .delete(upstreamKeys)
+      .where(eq(upstreamKeys.id, id))
+      .returning({ id: upstreamKeys.id })
+    return removed.length > 0
   }
 
   async deleteKeysForConnection(connectionId: string): Promise<number> {
@@ -483,6 +495,87 @@ class SqliteProviderRepository implements ProviderRepository {
       .returning({ id: upstreamKeys.id })
     return removed.length
   }
+
+  async listAccounts(connectionId: string): Promise<readonly UpstreamAccountRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(upstreamAccounts)
+      .where(eq(upstreamAccounts.connectionId, connectionId))
+      .orderBy(upstreamAccounts.createdAt, upstreamAccounts.id)
+    return rows.map(toAccount)
+  }
+
+  async getAccount(id: string): Promise<UpstreamAccountRecord | null> {
+    const [row] = await this.handle
+      .select()
+      .from(upstreamAccounts)
+      .where(eq(upstreamAccounts.id, id))
+      .limit(1)
+    return row ? toAccount(row) : null
+  }
+
+  async insertAccount(account: UpstreamAccountRecord): Promise<UpstreamAccountRecord> {
+    const [row] = await this.handle.insert(upstreamAccounts).values(account).returning()
+    return toAccount(row ?? account)
+  }
+
+  async updateAccount(
+    id: string,
+    patch: UpstreamAccountPatch,
+    at: Date,
+  ): Promise<UpstreamAccountRecord | null> {
+    const [row] = await this.handle
+      .update(upstreamAccounts)
+      .set({ ...patch, updatedAt: at })
+      .where(eq(upstreamAccounts.id, id))
+      .returning()
+    return row ? toAccount(row) : null
+  }
+
+  async deleteAccount(id: string): Promise<boolean> {
+    const removed = await this.handle
+      .delete(upstreamAccounts)
+      .where(eq(upstreamAccounts.id, id))
+      .returning({ id: upstreamAccounts.id })
+    return removed.length > 0
+  }
+}
+
+type AccountRow = typeof upstreamAccounts.$inferSelect
+
+function toAccount(row: AccountRow): UpstreamAccountRecord {
+  return {
+    id: row.id,
+    connectionId: row.connectionId,
+    displayName: row.displayName,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
+/** SQLite keeps the model lists as JSON text, so the record's arrays are encoded here. */
+function encodeKey(key: UpstreamKeyRecord): KeyRow {
+  return {
+    ...key,
+    allowedModels: encodeModels(key.allowedModels),
+    deniedModels: encodeModels(key.deniedModels),
+  }
+}
+
+/** Patches carry the same JSON encoding for the same two columns. */
+function encodePatch(patch: UpstreamKeyPatch): Partial<KeyRow> {
+  const encoded = { ...patch } as Record<string, unknown>
+  if (patch.allowedModels !== undefined) {
+    encoded.allowedModels = encodeModels(patch.allowedModels)
+  }
+  if (patch.deniedModels !== undefined) {
+    encoded.deniedModels = encodeModels(patch.deniedModels)
+  }
+  return encoded as Partial<KeyRow>
+}
+
+function encodeModels(models: readonly string[] | null | undefined): string | null {
+  return models === null || models === undefined ? null : JSON.stringify(models)
 }
 
 class SqliteGatewayKeyRepository implements GatewayKeyRepository {
@@ -572,14 +665,23 @@ function toKey(row: KeyRow): UpstreamKeyRecord {
   return {
     id: row.id,
     connectionId: row.connectionId,
+    accountId: row.accountId,
     encryptedKey: row.encryptedKey,
     health: row.health as UpstreamKeyHealth,
     lastProbeAt: row.lastProbeAt,
     lastProbeVerdict: row.lastProbeVerdict as KeyProbeVerdict | null,
     lastProbeReason: row.lastProbeReason,
+    allowedModels: decodeModels(row.allowedModels),
+    deniedModels: decodeModels(row.deniedModels),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
+}
+
+function decodeModels(raw: string | null): readonly string[] | null {
+  if (raw === null) return null
+  const parsed = JSON.parse(raw) as unknown
+  return Array.isArray(parsed) ? (parsed as string[]) : null
 }
 
 class SqliteModelCatalogRepository implements ModelCatalogRepository {

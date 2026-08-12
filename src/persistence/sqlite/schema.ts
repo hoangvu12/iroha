@@ -64,19 +64,40 @@ export const providerConnections = sqliteTable('provider_connections', {
 })
 
 /**
+ * An optional group of Upstream Keys on one Provider Connection that share
+ * Provider billing or capacity. Deleting an account ungroups its keys instead
+ * of deleting them.
+ */
+export const upstreamAccounts = sqliteTable('upstream_accounts', {
+  id: text('id').primaryKey(),
+  connectionId: text('connection_id')
+    .notNull()
+    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+  displayName: text('display_name').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+/**
  * An Upstream Key attached to one Provider Connection. Only cipher output is
- * stored, so a copy of the database does not copy the Provider's keys.
+ * stored, so a copy of the database does not copy the Provider's keys. Model
+ * allow/deny lists are JSON text, owned by the repository like settings.
  */
 export const upstreamKeys = sqliteTable('upstream_keys', {
   id: text('id').primaryKey(),
   connectionId: text('connection_id')
     .notNull()
     .references(() => providerConnections.id, { onDelete: 'cascade' }),
+  accountId: text('account_id').references(() => upstreamAccounts.id, {
+    onDelete: 'set null',
+  }),
   encryptedKey: text('encrypted_key').notNull(),
   health: text('health').notNull(),
   lastProbeAt: integer('last_probe_at', { mode: 'timestamp_ms' }),
   lastProbeVerdict: text('last_probe_verdict'),
   lastProbeReason: text('last_probe_reason'),
+  allowedModels: text('allowed_models'),
+  deniedModels: text('denied_models'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 })

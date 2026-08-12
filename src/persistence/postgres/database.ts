@@ -30,6 +30,8 @@ import {
   type SessionRepository,
   type SettingRecord,
   type SettingsRepository,
+  type UpstreamAccountPatch,
+  type UpstreamAccountRecord,
   type UpstreamKeyHealth,
   type UpstreamKeyPatch,
   type UpstreamKeyRecord,
@@ -43,6 +45,7 @@ import {
   ownerSessions,
   providerConnections,
   settings,
+  upstreamAccounts,
   upstreamKeys,
 } from './schema.ts'
 
@@ -420,6 +423,7 @@ class PostgresProviderRepository implements ProviderRepository {
   }
 
   async insertKey(key: UpstreamKeyRecord): Promise<UpstreamKeyRecord> {
+    // The jsonb model lists pass through unchanged; no encoding lives here.
     const [row] = await this.handle.insert(upstreamKeys).values(key).returning()
     return toKey(row ?? key)
   }
@@ -438,12 +442,76 @@ class PostgresProviderRepository implements ProviderRepository {
     return row ? toKey(row) : null
   }
 
+  async deleteKey(id: string): Promise<boolean> {
+    const removed = await this.handle
+      .delete(upstreamKeys)
+      .where(eq(upstreamKeys.id, id))
+      .returning({ id: upstreamKeys.id })
+    return removed.length > 0
+  }
+
   async deleteKeysForConnection(connectionId: string): Promise<number> {
     const removed = await this.handle
       .delete(upstreamKeys)
       .where(eq(upstreamKeys.connectionId, connectionId))
       .returning({ id: upstreamKeys.id })
     return removed.length
+  }
+
+  async listAccounts(connectionId: string): Promise<readonly UpstreamAccountRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(upstreamAccounts)
+      .where(eq(upstreamAccounts.connectionId, connectionId))
+      .orderBy(upstreamAccounts.createdAt, upstreamAccounts.id)
+    return rows.map(toAccount)
+  }
+
+  async getAccount(id: string): Promise<UpstreamAccountRecord | null> {
+    const [row] = await this.handle
+      .select()
+      .from(upstreamAccounts)
+      .where(eq(upstreamAccounts.id, id))
+      .limit(1)
+    return row ? toAccount(row) : null
+  }
+
+  async insertAccount(account: UpstreamAccountRecord): Promise<UpstreamAccountRecord> {
+    const [row] = await this.handle.insert(upstreamAccounts).values(account).returning()
+    return toAccount(row ?? account)
+  }
+
+  async updateAccount(
+    id: string,
+    patch: UpstreamAccountPatch,
+    at: Date,
+  ): Promise<UpstreamAccountRecord | null> {
+    const [row] = await this.handle
+      .update(upstreamAccounts)
+      .set({ ...patch, updatedAt: at })
+      .where(eq(upstreamAccounts.id, id))
+      .returning()
+    return row ? toAccount(row) : null
+  }
+
+  async deleteAccount(id: string): Promise<boolean> {
+    const removed = await this.handle
+      .delete(upstreamAccounts)
+      .where(eq(upstreamAccounts.id, id))
+      .returning({ id: upstreamAccounts.id })
+    return removed.length > 0
+  }
+}
+
+type AccountRow = typeof upstreamAccounts.$inferSelect
+
+function toAccount(row: AccountRow): UpstreamAccountRecord {
+  return {
+    id: row.id,
+    connectionId: row.connectionId,
+    displayName: row.displayName,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   }
 }
 
@@ -523,11 +591,14 @@ function toKey(row: KeyRow): UpstreamKeyRecord {
   return {
     id: row.id,
     connectionId: row.connectionId,
+    accountId: row.accountId,
     encryptedKey: row.encryptedKey,
     health: row.health as UpstreamKeyHealth,
     lastProbeAt: row.lastProbeAt,
     lastProbeVerdict: row.lastProbeVerdict as KeyProbeVerdict | null,
     lastProbeReason: row.lastProbeReason,
+    allowedModels: row.allowedModels as readonly string[] | null,
+    deniedModels: row.deniedModels as readonly string[] | null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }

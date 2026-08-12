@@ -111,7 +111,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           )
         }
 
-        const target = await providers.resolveInference(params.connectionId)
+        const target = await providers.resolveInference(params.connectionId, envelope.model)
         if (!target.ok) {
           const refusal = resolutionRefusal(target.failure)
           return error(refusal.status, baseHeaders, refusal, correlationId)
@@ -411,8 +411,8 @@ async function streamChatCompletion(
     return new Response(answer.body, {
       status: answer.status,
       headers: {
+        ...baseHeaders,
         'content-type': answer.headers['content-type'] ?? 'text/event-stream',
-        'x-request-id': correlationId,
       },
     })
   }
@@ -427,8 +427,8 @@ async function streamChatCompletion(
   return new Response(guarded.stream, {
     status: answer.status,
     headers: {
+      ...baseHeaders,
       'content-type': answer.headers['content-type'] ?? 'text/event-stream',
-      'x-request-id': correlationId,
     },
   })
 }

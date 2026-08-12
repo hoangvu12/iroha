@@ -36,6 +36,13 @@
       "when": 1786513520428,
       "tag": "0004_lethal_betty_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786520562549,
+      "tag": "0005_demonic_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }

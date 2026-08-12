@@ -27,6 +27,8 @@ export type {
   SessionRepository,
   SettingRecord,
   SettingsRepository,
+  UpstreamAccountPatch,
+  UpstreamAccountRecord,
   UpstreamKeyPatch,
   UpstreamKeyRecord,
   UpstreamKeyHealth,

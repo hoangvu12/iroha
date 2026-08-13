@@ -23,7 +23,7 @@ const errorResponse = t.Object({
  * The Provider Directory: what an application may use, authenticated with its
  * Gateway Key. No Owner session is involved; the key's scope decides the whole
  * answer. Every failure answers the same way, so discovery never reveals which
- * keys or connections exist.
+ * keys or providers exist.
  */
 export function createDirectoryRoutes({ gatewayKeys }: DirectoryRoutesOptions) {
   return new Elysia({ name: 'iroha/directory', prefix: '/api/v1/directory' })
@@ -42,9 +42,9 @@ export function createDirectoryRoutes({ gatewayKeys }: DirectoryRoutesOptions) {
         detail: {
           tags: ['Gateway Keys'],
           security: [{ GatewayKey: [] }],
-          summary: 'Discover permitted Provider Connections',
+          summary: 'Discover permitted Providers',
           description:
-            'Lists only the Provider Connections and exact model IDs this Gateway Key is scoped to. Base URLs, balances, secrets, and health are never returned.',
+            'Lists only the Providers and exact model IDs this Gateway Key is scoped to. Base URLs, balances, secrets, and health are never returned.',
         },
         response: { 200: directoryResponse, 401: errorResponse },
       },

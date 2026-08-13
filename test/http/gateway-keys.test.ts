@@ -161,8 +161,8 @@ describe('Gateway Key administration', () => {
       expect(failure.problems.map((problem) => problem.field)).toEqual(['name'])
     })
 
-    test('refuses a scope entry that names an unknown connection', async () => {
-      const response = await createKeyRequest({ scope: [{ providerId: 'pc_absent' }] })
+    test('refuses a scope entry that names an unknown Provider', async () => {
+      const response = await createKeyRequest({ scope: [{ providerId: 'pr_absent' }] })
 
       expect(response.status).toBe(400)
 
@@ -171,7 +171,7 @@ describe('Gateway Key administration', () => {
       expect(failure.problems.map((problem) => problem.field)).toEqual(['scope'])
     })
 
-    test('refuses a scope entry that names an archived connection', async () => {
+    test('refuses a scope entry that names an archived Provider', async () => {
       const connection = await createConnection('To be archived')
       await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
         method: 'POST',
@@ -313,7 +313,7 @@ describe('Gateway Key administration', () => {
   })
 
   describe('directory scope filtering', () => {
-    test('returns only the connections and models the key may use', async () => {
+    test('returns only the Providers and models the key may use', async () => {
       const alpha = await createConnection('Alpha')
       const beta = await createConnection('Beta')
       await createConnection('Gamma')
@@ -352,7 +352,7 @@ describe('Gateway Key administration', () => {
       })
     })
 
-    test('drops connections the scope names once they are archived or purged', async () => {
+    test('drops Providers the scope names once they are archived or purged', async () => {
       const alpha = await createConnection('Alpha')
       const beta = await createConnection('Beta')
 
@@ -379,6 +379,56 @@ describe('Gateway Key administration', () => {
 
       providers = await discoveredProviders(created.secret)
       expect(providers).toEqual([])
+    })
+
+    test('agrees with the Models endpoint on every Provider ID it lists', async () => {
+      const alpha = await createConnection('Alpha')
+      const beta = await createConnection('Beta')
+
+      const created = await createKey({
+        scope: [
+          { providerId: alpha.id, models: ['gpt-4o'] },
+          { providerId: beta.id },
+        ],
+      })
+
+      const response = await discover(created.secret)
+      expect(response.status).toBe(200)
+
+      const { providers } = (await response.json()) as {
+        providers: { id: string; displayName: string; url: string; models: string[] }[]
+      }
+
+      // For every entry the directory lists, hit `/v1/models` with the listed
+      // id and the same key: that combination must authorize AND the catalog
+      // answer must be shaped by this Provider's row, not any other. The
+      // shared `displayName` and the scoped `models` arrays are the
+      // independent fingerprints the agreement rests on; if the directory and
+      // `/v1/models` ever disagreed on what a Provider ID names, the rename
+      // would have silently broken discovery.
+      for (const provider of providers) {
+        const listing = await iroha.fetch(`${provider.url}/models`, {
+          headers: { authorization: `Bearer ${created.secret}` },
+        })
+        expect(listing.status).toBe(200)
+        const stored = await iroha.database.providers.getProvider(provider.id)
+        expect(stored).not.toBeNull()
+        expect(provider.displayName).toBe(stored!.displayName)
+        expect(provider.models).toEqual(provider.models.sort())
+        expect(provider.id).toBe(provider.url.replace(/^\/providers\//, '').replace(/\/v1$/, ''))
+      }
+
+      // A Provider listed in the directory but not in the key's scope must
+      // not be reachable from `/v1/models` even with the same key: the same
+      // Provider ID can authorise one scope and refuse another.
+      const gamma = await createConnection('Gamma')
+      const listedIds = new Set(providers.map((provider) => provider.id))
+      expect(listedIds.has(gamma.id)).toBe(false)
+
+      const unreachable = await iroha.fetch(`/providers/${gamma.id}/v1/models`, {
+        headers: { authorization: `Bearer ${created.secret}` },
+      })
+      expect(unreachable.status).toBe(403)
     })
   })
 
@@ -482,6 +532,18 @@ describe('Gateway Key administration', () => {
           '/api/v1/directory/providers',
         ]),
       )
+    })
+
+    test('the Directory endpoint describes itself as discovering Providers, not Provider Connections', async () => {
+      const document = (await (await iroha.fetch('/docs/json')).json()) as {
+        paths?: Record<string, { get?: { summary?: string; description?: string } }>
+      }
+
+      const operation = document.paths?.['/api/v1/directory/providers']?.get
+      expect(operation?.summary).toContain('Provider')
+      expect(operation?.summary).not.toContain('Connection')
+      expect(operation?.description).toContain('Provider')
+      expect(operation?.description).not.toContain('Connection')
     })
   })
 

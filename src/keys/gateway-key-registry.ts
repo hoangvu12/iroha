@@ -39,7 +39,7 @@ export interface CreatedGatewayKey {
   readonly secret: string
 }
 
-/** One Provider Connection a calling Gateway Key is permitted to use. */
+/** One Provider a calling Gateway Key is permitted to use. */
 export interface DirectoryProvider {
   readonly id: string
   readonly displayName: string
@@ -222,7 +222,7 @@ export class GatewayKeyRegistry {
   }
 
   /**
-   * The Provider Directory: which connections a presented credential may use.
+   * The Provider Directory: which Providers a presented credential may use.
    * A missing, malformed, revoked, or wrong secret all answer the same way, so
    * a caller learns nothing about which keys exist. Only a successful
    * authentication is recorded as a use.
@@ -235,15 +235,15 @@ export class GatewayKeyRegistry {
 
     const providers: DirectoryProvider[] = []
     for (const entry of key.scope) {
-      const connection = await this.#database.providers.getProvider(entry.providerId)
-      // An out-of-scope or vanished connection is absent, never an error: the
-      // caller must not learn which connections exist, only which it may use.
-      if (connection === null || connection.archivedAt !== null) continue
+      const provider = await this.#database.providers.getProvider(entry.providerId)
+      // An out-of-scope or vanished Provider is absent, never an error: the
+      // caller must not learn which Providers exist, only which it may use.
+      if (provider === null || provider.archivedAt !== null) continue
 
       providers.push({
-        id: connection.id,
-        displayName: connection.displayName,
-        url: `/providers/${connection.id}/v1`,
+        id: provider.id,
+        displayName: provider.displayName,
+        url: `/providers/${provider.id}/v1`,
         // A scope allowing every model has nothing to enumerate until the model
         // catalog exists; exact scope models are returned verbatim.
         models: entry.models ?? [],
@@ -326,7 +326,7 @@ export class GatewayKeyRegistry {
 }
 
 /**
- * Reads and validates the requested scope against the connections that exist.
+ * Reads and validates the requested scope against the Providers that exist.
  * Problems are added for every rule broken; the returned entries are only
  * meaningful when the problem list is empty.
  */
@@ -338,7 +338,7 @@ async function readScope(
   if (input === undefined || input === null) return []
 
   if (!Array.isArray(input)) {
-    problems.push({ field: 'scope', message: 'must be a list of Provider Connections' })
+    problems.push({ field: 'scope', message: 'must be a list of Providers' })
     return []
   }
 
@@ -347,26 +347,26 @@ async function readScope(
 
   for (const raw of input) {
     if (typeof raw !== 'object' || raw === null) {
-      problems.push({ field: 'scope', message: 'each entry must name a Provider Connection' })
+      problems.push({ field: 'scope', message: 'each entry must name a Provider' })
       continue
     }
 
     const entry = raw as Record<string, unknown>
     const providerId = typeof entry.providerId === 'string' ? entry.providerId.trim() : ''
     if (providerId === '') {
-      problems.push({ field: 'scope', message: 'each entry must name a Provider Connection' })
+      problems.push({ field: 'scope', message: 'each entry must name a Provider' })
       continue
     }
     if (seen.has(providerId)) continue
     seen.add(providerId)
 
-    const connection = await database.providers.getProvider(providerId)
-    if (connection === null) {
-      problems.push({ field: 'scope', message: 'names a Provider Connection that does not exist' })
+    const scopeProvider = await database.providers.getProvider(providerId)
+    if (scopeProvider === null) {
+      problems.push({ field: 'scope', message: 'names a Provider that does not exist' })
       continue
     }
-    if (connection.archivedAt !== null) {
-      problems.push({ field: 'scope', message: 'names a Provider Connection that is archived' })
+    if (scopeProvider.archivedAt !== null) {
+      problems.push({ field: 'scope', message: 'names a Provider that is archived' })
       continue
     }
 

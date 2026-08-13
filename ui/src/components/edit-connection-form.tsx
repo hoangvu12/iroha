@@ -1,0 +1,215 @@
+import { useState, type FormEvent } from 'react'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
+import { ManagementError, updateConnection, type ConnectionView } from '@/lib/providers'
+
+export function EditConnectionForm({
+  connection,
+  csrfToken,
+  onDone,
+  onCancel,
+}: {
+  readonly connection: ConnectionView
+  readonly csrfToken: string
+  readonly onDone: () => void
+  readonly onCancel: () => void
+}) {
+  const [displayName, setDisplayName] = useState(connection.displayName)
+  const [baseUrl, setBaseUrl] = useState(connection.baseUrl)
+  const [allowInsecureHttp, setAllowInsecureHttp] = useState(connection.allowInsecureHttp)
+  const [enabled, setEnabled] = useState(connection.enabled)
+  const [retryMaxAttempts, setRetryMaxAttempts] = useState(String(connection.retryMaxAttempts))
+  const [retryAmbiguousNetwork, setRetryAmbiguousNetwork] = useState(
+    connection.retryAmbiguousNetwork,
+  )
+  const form = useSubmission(async () => {
+    await updateConnection(
+      connection.id,
+      {
+        displayName,
+        baseUrl,
+        allowInsecureHttp,
+        enabled,
+        retryMaxAttempts: Number(retryMaxAttempts),
+        retryAmbiguousNetwork,
+      },
+      csrfToken,
+    )
+    onDone()
+  })
+
+  return (
+    <form className="flex flex-col gap-3" onSubmit={form.submit} noValidate>
+      <Field
+        id={`edit-${connection.id}-name`}
+        label="Display name"
+        value={displayName}
+        onChange={setDisplayName}
+        problem={form.problemFor('displayName')}
+      />
+      <Field
+        id={`edit-${connection.id}-url`}
+        label="Base URL"
+        value={baseUrl}
+        onChange={setBaseUrl}
+        problem={form.problemFor('baseUrl')}
+      />
+      <div className="flex flex-col gap-1.5">
+        <label className="text-muted-foreground flex items-center gap-2 text-xs">
+          <Checkbox
+            checked={enabled}
+            onCheckedChange={(value) => setEnabled(value === true)}
+          />
+          Enabled for inference
+        </label>
+        <label className="text-muted-foreground flex items-center gap-2 text-xs">
+          <Checkbox
+            checked={allowInsecureHttp}
+            onCheckedChange={(value) => setAllowInsecureHttp(value === true)}
+          />
+          Allow plain HTTP
+        </label>
+        <label className="text-muted-foreground flex items-center gap-2 text-xs">
+          <Checkbox
+            checked={retryAmbiguousNetwork}
+            onCheckedChange={(value) => setRetryAmbiguousNetwork(value === true)}
+          />
+          Retry ambiguous network failures. Off by default because a generation may have
+          completed.
+        </label>
+      </div>
+      <Field
+        id={`edit-${connection.id}-retry-attempts`}
+        label="Maximum attempts"
+        type="number"
+        hint="One to five attempts across retries and alternate credentials."
+        value={retryMaxAttempts}
+        onChange={setRetryMaxAttempts}
+        problem={form.problemFor('retryMaxAttempts')}
+      />
+
+      <Failure error={form.error} />
+
+      <div className="flex items-center gap-2">
+        <Button type="submit" size="sm" disabled={form.busy}>
+          {form.busy ? 'Saving…' : 'Save changes'}
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={form.busy}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+export function Field({
+  id,
+  label,
+  value,
+  onChange,
+  type = 'text',
+  autoComplete,
+  hint,
+  problem,
+}: {
+  readonly id: string
+  readonly label: string
+  readonly value: string
+  readonly onChange: (value: string) => void
+  readonly type?: string
+  readonly autoComplete?: string
+  readonly hint?: string
+  readonly problem?: string | undefined
+}) {
+  const describedBy = [problem ? `${id}-problem` : null, hint ? `${id}-hint` : null]
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type={type}
+        value={value}
+        autoComplete={autoComplete}
+        aria-invalid={problem ? true : undefined}
+        aria-describedby={describedBy === '' ? undefined : describedBy}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {hint && (
+        <p id={`${id}-hint`} className="text-muted-foreground text-xs">
+          {hint}
+        </p>
+      )}
+      {problem && (
+        <p id={`${id}-problem`} className="text-status-danger text-xs">
+          {problem}
+        </p>
+      )}
+    </div>
+  )
+}
+
+export function Failure({ error }: { error: ManagementError | null }) {
+  if (error === null) return null
+
+  return (
+    <Alert variant="destructive" role="alert">
+      <AlertTitle>{TITLES[error.code] ?? 'That did not work'}</AlertTitle>
+      <AlertDescription>{error.message}</AlertDescription>
+    </Alert>
+  )
+}
+
+export const TITLES: Record<string, string> = {
+  validation_failed: 'Check these values',
+  connection_not_found: 'Connection not found',
+  key_not_found: 'Key not found',
+  connection_archived: 'Connection archived',
+  stored_key_unreadable: 'Stored key unreadable',
+  authentication_required: 'Signed out',
+  unreachable: 'Gateway unreachable',
+}
+
+export function toManagementError(cause: unknown): ManagementError {
+  return cause instanceof ManagementError
+    ? cause
+    : new ManagementError('request_failed', 'That request could not be completed.')
+}
+
+export function useSubmission(run: () => Promise<void>, onFatal?: (error: ManagementError) => void) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<ManagementError | null>(null)
+
+  return {
+    busy,
+    error,
+
+    problemFor(field: string): string | undefined {
+      return error?.problems.find((problem) => problem.field === field)?.message
+    },
+
+    submit(event: FormEvent) {
+      event.preventDefault()
+      if (busy) return
+
+      setBusy(true)
+      setError(null)
+
+      void run()
+        .catch((cause: unknown) => {
+          const failure = toManagementError(cause)
+          if (failure.code === 'authentication_required' && onFatal) {
+            onFatal(failure)
+            return
+          }
+          setError(failure)
+        })
+        .finally(() => setBusy(false))
+    },
+  }
+}

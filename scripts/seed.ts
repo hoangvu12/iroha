@@ -8,7 +8,9 @@
  * Idempotent: fixed primary keys, so a second run replaces the same rows instead
  * of duplicating them.
  *
- * Usage: `bun run scripts/seed.ts`
+ * Usage:
+ *   `bun run scripts/seed.ts`         seed (or refresh) the sample data
+ *   `bun run scripts/seed.ts --wipe`  delete only the seeded rows, leave the rest
  */
 import { createHash, createCipheriv, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -31,6 +33,8 @@ const DATABASE_URL = process.env.DATABASE_URL
 const MASTER_KEY = process.env.IROHA_MASTER_KEY
 if (!DATABASE_URL) throw new Error('DATABASE_URL missing from .env')
 if (!MASTER_KEY) throw new Error('IROHA_MASTER_KEY missing from .env')
+
+const WIPE_ONLY = process.argv.includes('--wipe')
 
 function encryptSecret(plaintext: string): string {
   const key = createHash('sha256').update(MASTER_KEY, 'utf8').digest()
@@ -270,6 +274,12 @@ async function main(): Promise<void> {
     await client.query(`DELETE FROM provider_connections WHERE id LIKE $1`, ['seed-%'])
     await client.query(`DELETE FROM gateway_keys WHERE id = $1`, [GATEWAY_KEY_ID])
 
+    if (WIPE_ONLY) {
+      await client.query('COMMIT')
+      console.log('Wiped seeded data.')
+      return
+    }
+
     // Provider connections.
     for (const conn of CONNECTIONS) {
       await client.query(
@@ -377,6 +387,7 @@ async function main(): Promise<void> {
 
     console.log(`Seeded ${CONNECTIONS.length} connections, ${KEYS.length} keys, 1 gateway key, ${events.length} request events, ${audits.length} audit events.`)
     console.log(`Demo Gateway Key: id=${GATEWAY_KEY_ID} secret=${GATEWAY_KEY_SECRET}`)
+    console.log('Run `bun run scripts/seed.ts --wipe` to remove this sample data.')
   } catch (cause) {
     await client.query('ROLLBACK')
     throw cause

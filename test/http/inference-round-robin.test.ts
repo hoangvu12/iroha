@@ -6,6 +6,7 @@ import {
   type TestApp,
 } from '../support/app.ts'
 import { mockUpstreamTransport } from '../support/inference.ts'
+import type { ProviderView } from '../../src/providers/index.ts'
 
 const UPSTREAM_KEY = 'sk-upstream-secret-value-for-tests'
 const BASE_URL = 'https://api.example.com/v1'
@@ -14,7 +15,7 @@ const OTHER_MODEL = 'gpt-4o'
 
 interface ConnectionBody {
   id: string
-  keys: { id: string; health: string; accountId: string | null }[]
+  keys: { id: string; health: string; accountId: string | null; baseUrl: string | null }[]
 }
 
 describe('round-robin key selection on the inference path', () => {
@@ -66,6 +67,25 @@ describe('round-robin key selection on the inference path', () => {
       throw new Error(`Add key failed with ${response.status}: ${await response.text()}`)
     }
     return (await response.json()) as ConnectionBody
+  }
+
+  /**
+   * Adds a key directly through the ProviderRegistry so the test can attach a
+   * per-Key base URL override. The admin POST does not yet accept baseUrl
+   * (that field arrives with ticket 04's admin rename); the inference route
+   * already honors the override.
+   */
+  const addKeyWithOverride = async (
+    providerId: string,
+    upstreamKey: string,
+    baseUrl: string,
+  ): Promise<ProviderView> => {
+    const result = await iroha.providers.addKey(providerId, {
+      upstreamKey,
+      baseUrl,
+    })
+    if (!result.ok) throw new Error(`Add key failed with ${result.failure.code}`)
+    return result.value
   }
 
   const configureKey = async (providerId: string, keyId: string, patch: Record<string, unknown>) => {
@@ -217,5 +237,48 @@ describe('round-robin key selection on the inference path', () => {
     const accepted = await chat(OTHER_MODEL)
     expect(accepted.status).toBe(200)
     expect(upstream.calls.at(-1)?.headers.authorization).toBe(`Bearer ${UPSTREAM_KEY}`)
+  })
+
+  test('round-robin uses each key\'s own base URL when it wins', async () => {
+    const overrideUrl = 'https://api.override.example.com/v1'
+    const overrideKey = 'sk-override-upstream-key-for-tests'
+
+    await connect()
+    const view = await addKeyWithOverride(connection.id, overrideKey, overrideUrl)
+    expect(view.keys).toHaveLength(2)
+
+    for (let index = 0; index < 4; index += 1) {
+      const response = await chat()
+      expect(response.status).toBe(200)
+    }
+
+    const defaultCalls = upstream.calls.filter((call) => call.url.startsWith(`${BASE_URL}/`))
+    const overrideCalls = upstream.calls.filter((call) => call.url.startsWith(`${overrideUrl}/`))
+    expect(defaultCalls).toHaveLength(2)
+    expect(overrideCalls).toHaveLength(2)
+    expect(defaultCalls.every((call) => call.headers.authorization === `Bearer ${UPSTREAM_KEY}`)).toBe(true)
+    expect(overrideCalls.every((call) => call.headers.authorization === `Bearer ${overrideKey}`)).toBe(true)
+  })
+
+  test('clearing a key\'s base URL override makes it inherit the Provider default', async () => {
+    const overrideUrl = 'https://api.override.example.com/v1'
+    const overrideKey = 'sk-override-upstream-key-for-tests'
+
+    await connect()
+    const view = await addKeyWithOverride(connection.id, overrideKey, overrideUrl)
+    const overrideKeyRow = view.keys.find((candidate) => candidate.baseUrl === overrideUrl)
+    expect(overrideKeyRow).toBeDefined()
+
+    const cleared = await iroha.providers.updateKeySettings(connection.id, overrideKeyRow!.id, {
+      baseUrl: null,
+    })
+    expect(cleared.ok).toBe(true)
+
+    for (let index = 0; index < 4; index += 1) {
+      const response = await chat()
+      expect(response.status).toBe(200)
+    }
+
+    expect(upstream.calls.every((call) => call.url.startsWith(`${BASE_URL}/`))).toBe(true)
   })
 })

@@ -5,6 +5,7 @@ import {
   fakeKeyProbe,
   type TestApp,
 } from '../support/app.ts'
+import { hashSecret, randomSecret } from '../../src/identity/secrets.ts'
 import {
   mockUpstreamTransport,
   type RecordedUpstreamCall,
@@ -425,6 +426,104 @@ describe('provider-scoped Chat Completions', () => {
 
       expect(response.status).toBe(404)
       expect((await openError(response)).error.code).toBe('provider_not_found')
+    })
+
+    test('a stale connection ID in the URL is refused, never silently routed', async () => {
+      // After the rename every Provider ID carries the `pr_` prefix; any
+      // `pc_*` URL the application still carries is a stale config. The
+      // renamed route must answer with an OpenAI-shaped error, never a
+      // successful answer or a redirect to the new path.
+      const key = await connect()
+      const stalePath = `/providers/pc_stale-id-from-before-rename/v1/chat/completions`
+
+      const response = await iroha.fetch(stalePath, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${key.secret}`,
+        },
+        body: JSON.stringify(completionBody()),
+      })
+
+      // The Gateway Key is scoped to the real Provider, so the scope check
+      // refuses the stale ID first; what matters is that the route answers
+      // with a refusal and never a 2xx or a redirect.
+      expect(response.status).toBe(403)
+      expect((await openError(response)).error.code).toBe('connection_not_allowed')
+      expect(response.headers.get('location')).toBeNull()
+      expect(upstream.calls).toHaveLength(0)
+    })
+
+    test('a stale connection ID scoped into the Gateway Key reaches the resolver and 404s', async () => {
+      // The scope check is a string match, not a Provider lookup: a Key
+      // whose scope names a stale `pc_*` ID still passes authorization. The
+      // resolver then has to surface a `provider_not_found` 404. The
+      // realistic way to get a Key scoped to a stale ID is the migration
+      // path: an old Key carried over before the rename, then the old
+      // Provider was purged. We insert the Key directly to mirror that
+      // shape, since the admin POST refuses to write a scope pointing at a
+      // non-existent Provider.
+      const staleId = 'pc_stale-id-from-before-rename'
+      const secret = randomSecret()
+      await iroha.database.gatewayKeys.insert({
+        id: 'gk_stale',
+        name: 'Pre-rename Key',
+        secretHash: hashSecret(secret),
+        scope: [{ providerId: staleId, models: null }],
+        corsOrigins: [],
+        createdAt: new Date(),
+        lastUsedAt: null,
+        revokedAt: null,
+      })
+
+      const response = await iroha.fetch(`/providers/${staleId}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer gk_stale.${secret}` },
+        body: JSON.stringify(completionBody()),
+      })
+
+      expect(response.status).toBe(404)
+      expect((await openError(response)).error.code).toBe('provider_not_found')
+      expect(upstream.calls).toHaveLength(0)
+    })
+
+    test('a Provider whose ID was purged is reported as 404, not routed to a similar one', async () => {
+      // The Gateway Key scope check is a string match, not a lookup: a Key
+      // whose scope entry names a Provider that has since been purged still
+      // passes authorization. Inference then reaches the resolver, which
+      // surfaces `provider_not_found`. A regression that mapped the stale
+      // ID to a surviving Provider would quietly reroute traffic and pass
+      // every other test in this file; this case pins the 404.
+      await connect()
+      const created = await iroha.fetch('/api/v1/admin/gateway-keys', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Scoped to a soon-purged Provider',
+          scope: [{ providerId: connection.id }],
+        }),
+        csrf,
+      })
+      const secret = ((await created.json()) as { secret: string }).secret
+
+      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/archive`, {
+        method: 'POST',
+        csrf,
+      })
+      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/purge`, {
+        method: 'POST',
+        csrf,
+      })
+
+      const response = await iroha.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+        body: JSON.stringify(completionBody()),
+      })
+
+      expect(response.status).toBe(404)
+      expect((await openError(response)).error.code).toBe('provider_not_found')
+      expect(upstream.calls).toHaveLength(0)
     })
 
     test('reports no eligible Upstream Key', async () => {

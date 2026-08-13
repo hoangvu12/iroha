@@ -38,6 +38,7 @@ export interface TestApp {
   readonly clock: TestClock
   /** The probe the app's Provider Connection registry is using. */
   readonly upstreamKeyProbe: UpstreamKeyProbe
+  readonly providers: ProviderRegistry
   readonly gatewayKeys: GatewayKeyRegistry
   readonly modelCatalog: ModelCatalogService
   /** The Adapter Registry the assembled app is using. */
@@ -252,6 +253,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     identity,
     clock,
     upstreamKeyProbe,
+    providers,
     gatewayKeys,
     modelCatalog,
     adapterRegistry,

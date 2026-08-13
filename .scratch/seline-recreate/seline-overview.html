@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seline Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #fbfbfc; /* Very subtle off-white for the app background */
+            color: #111827; /* Gray 900 for main text */
+        }
+        
+        /* Custom Shadow Utilities injected as variables for cleaner HTML */
+        :root {
+            --shadow-compact: 0px 2px 3px -1px rgba(0,0,0,0.1), 0px 1px 0px 0px rgba(25,28,33,0.02), 0px 0px 0px 1px rgba(25,28,33,0.08);
+            --shadow-card: 0px 0px 0px 1px rgba(0,0,0,0.06), 0px 1px 1px -0.5px rgba(0,0,0,0.06), 0px 3px 3px -1.5px rgba(0,0,0,0.06), 0px 6px 6px -3px rgba(0,0,0,0.06), 0px 12px 12px -6px rgba(0,0,0,0.06), 0px 24px 24px -12px rgba(0,0,0,0.06);
+            --shadow-hero: 0 2.8px 2.2px rgba(0, 0, 0, 0.034), 0 6.7px 5.3px rgba(0, 0, 0, 0.048), 0 12.5px 10px rgba(0, 0, 0, 0.06), 0 22.3px 17.9px rgba(0, 0, 0, 0.072), 0 41.8px 33.4px rgba(0, 0, 0, 0.086), 0 100px 80px rgba(0, 0, 0, 0.12);
+        }
+
+        .shadow-compact { box-shadow: var(--shadow-compact); }
+        .shadow-card { box-shadow: var(--shadow-card); }
+        .shadow-hero { box-shadow: var(--shadow-hero); }
+
+        /* Animation utilities */
+        .fade-in-up {
+            animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        
+        .stagger-1 { animation-delay: 0.1s; }
+        .stagger-2 { animation-delay: 0.2s; }
+        .stagger-3 { animation-delay: 0.3s; }
+
+        @keyframes fadeInUp {
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, ::before, ::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }
+            .fade-in-up { opacity: 1; transform: none; }
+        }
+
+        /* Hide scrollbar for clean dashboard look */
+        ::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+        }
+    </style>
+</head>
+<body class="antialiased h-screen w-full flex overflow-hidden selection:bg-blue-100 selection:text-blue-900">
+
+    <!-- Sidebar -->
+    <aside class="w-64 flex flex-col h-full bg-[#fbfbfc] pt-6 pb-6 px-4 hidden md:flex border-r border-gray-200/60 z-20">
+        
+        <!-- Logo -->
+        <div class="flex items-center gap-2 mb-8 px-2">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="text-gray-900">
+                <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" fill="currentColor"/>
+                <path d="M15.5 9.5C15.5 10.3284 14.8284 11 14 11C13.1716 11 12.5 10.3284 12.5 9.5C12.5 8.67157 13.1716 8 14 8C14.8284 8 15.5 8.67157 15.5 9.5Z" fill="white"/>
+                <path d="M10 9.5C10 10.3284 9.32843 11 8.5 11C7.67157 11 7 10.3284 7 9.5C7 8.67157 7.67157 8 8.5 8C9.32843 8 10 8.67157 10 9.5Z" fill="white"/>
+                <path d="M14 15.5C14 16.3284 13.1046 17 12 17C10.8954 17 10 16.3284 10 15.5" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+                <!-- Added little top hat/bump to vaguely resemble the logo -->
+                <path d="M9 4L11 2H13L15 4" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            </svg>
+            <span class="font-medium text-sm tracking-tight">Seline</span>
+        </div>
+
+        <!-- Project Selector -->
+        <button class="flex items-center justify-between w-full px-2 py-1.5 mb-6 rounded-lg hover:bg-gray-100/80 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300">
+            <div class="flex items-center gap-2.5">
+                <div class="w-5 h-5 bg-gray-900 rounded flex items-center justify-center text-white text-xs font-bold">A</div>
+                <span class="text-sm font-semibold text-gray-900">ASMobbin</span>
+            </div>
+            <i data-lucide="chevron-up-down" class="w-4 h-4 text-gray-400"></i>
+        </button>
+
+        <!-- Time Context -->
+        <div class="flex items-center justify-between px-2 mb-2">
+            <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">Time</span>
+            <div class="px-2 py-1 bg-white border border-gray-200/80 shadow-sm rounded text-xs font-medium text-gray-600">
+                12:41 AM
+            </div>
+        </div>
+
+        <!-- Main Navigation -->
+        <nav class="mt-4 flex-1">
+            <ul class="space-y-1">
+                <li>
+                    <a href="#" class="flex items-center justify-between px-2 py-1.5 rounded-md text-sm font-medium text-blue-600 bg-[#eff6ff] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                        <div class="flex items-center gap-3">
+                            <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+                            Dashboard
+                        </div>
+                        <kbd class="text-xs bg-white border border-gray-200 shadow-sm rounded px-1.5 py-0.5 text-gray-400 font-sans">D</kbd>
+                    </a>
+                </li>
+                <li>
+                    <a href="#" class="flex items-center justify-between px-2 py-1.5 rounded-md text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-100/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300">
+                        <div class="flex items-center gap-3">
+                            <i data-lucide="users" class="w-4 h-4"></i>
+                            Visitors
+                        </div>
+                        <kbd class="text-xs bg-white border border-gray-200 shadow-sm rounded px-1.5 py-0.5 text-gray-400 font-sans">V</kbd>
+                    </a>
+                </li>
+                <li>
+                    <a href="#" class="flex items-center justify-between px-2 py-1.5 rounded-md text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-100/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300">
+                        <div class="flex items-center gap-3">
+                            <!-- Using route as a proxy for funnel arrows -->
+                            <i data-lucide="route" class="w-4 h-4"></i>
+                            Funnels
+                        </div>
+                        <kbd class="text-xs bg-white border border-gray-200 shadow-sm rounded px-1.5 py-0.5 text-gray-400 font-sans">F</kbd>
+                    </a>
+                </li>
+                <li class="pt-4">
+                    <a href="#" class="flex items-center gap-3 px-2 py-1.5 rounded-md text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-100/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300">
+                        <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+                        Settings
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Footer Navigation -->
+        <div class="mt-auto space-y-3 px-2">
+            <a href="#" class="flex items-center gap-2.5 text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors focus-visible:outline-none focus-visible:underline">
+                <i data-lucide="file-text" class="w-4 h-4"></i>
+                Docs
+            </a>
+            <a href="#" class="flex items-center gap-2.5 text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors focus-visible:outline-none focus-visible:underline">
+                <i data-lucide="message-circle" class="w-4 h-4"></i>
+                Live chat
+            </a>
+            <div class="pt-4 mt-2">
+                <a href="#" class="text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors focus-visible:outline-none focus-visible:underline">
+                    Sign out
+                </a>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col h-full overflow-y-auto relative bg-[#fbfbfc]">
+        
+        <div class="max-w-6xl w-full mx-auto p-6 md:p-10 pb-32">
+            
+            <!-- Header -->
+            <header class="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-8 fade-in-up">
+                <div>
+                    <h1 class="text-3xl font-semibold tracking-tight text-gray-900">Dashboard</h1>
+                    <p class="text-gray-500 text-sm mt-1.5">content-mobbin.com</p>
+                </div>
+                
+                <div class="flex items-center gap-3 self-start">
+                    <!-- Dotted placeholder -->
+                    <div class="w-[42px] h-[34px] rounded-lg border border-dashed border-gray-300 bg-gray-50/50 hidden sm:block"></div>
+                    
+                    <!-- Filter Button -->
+                    <button class="flex items-center h-[34px] px-3 bg-white border border-gray-200/80 shadow-compact rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                        <i data-lucide="list-filter" class="w-3.5 h-3.5 text-gray-400 mr-2"></i>
+                        Filter
+                        <kbd class="ml-2 text-xs bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5 text-gray-400 font-sans leading-none">R</kbd>
+                    </button>
+                    
+                    <!-- Date Selector -->
+                    <button class="flex items-center h-[34px] pl-3 pr-2 bg-white border border-gray-200/80 shadow-compact rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                        <i data-lucide="calendar" class="w-3.5 h-3.5 text-gray-400 mr-2"></i>
+                        Last 30 days
+                        <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-gray-400 ml-1.5 mr-2"></i>
+                        
+                        <!-- Complex Keyboard Shortcut Badge -->
+                        <div class="flex flex-col gap-[2px] ml-1 pl-2 border-l border-gray-200/80 py-1">
+                            <div class="flex gap-[2px]">
+                                <kbd class="text-xs leading-[10px] bg-gray-50 border border-gray-200 rounded w-3.5 h-3.5 flex items-center justify-center text-gray-400 font-sans">Z</kbd>
+                                <kbd class="text-xs leading-[10px] bg-gray-50 border border-gray-200 rounded w-3.5 h-3.5 flex items-center justify-center text-gray-400 font-sans">←</kbd>
+                            </div>
+                            <div class="flex gap-[2px]">
+                                <kbd class="text-xs leading-[10px] bg-gray-50 border border-gray-200 rounded w-3.5 h-3.5 flex items-center justify-center text-gray-400 font-sans">X</kbd>
+                                <kbd class="text-xs leading-[10px] bg-gray-50 border border-gray-200 rounded w-3.5 h-3.5 flex items-center justify-center text-gray-400 font-sans">→</kbd>
+                            </div>
+                        </div>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Top Stats Row -->
+            <div class="bg-white rounded-xl shadow-card mb-6 fade-in-up stagger-1">
+                <div class="grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-gray-100">
+                    
+                    <!-- Stat 1 -->
+                    <div class="p-5 flex flex-col gap-3">
+                        <div class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+                            <i data-lucide="heart" class="w-3.5 h-3.5 text-gray-400"></i>
+                            Total Visits
+                        </div>
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-2xl font-semibold text-gray-900 tracking-tight">9</span>
+                            <span class="text-xs text-gray-400 flex items-center gap-0.5 font-medium">
+                                <i data-lucide="trending-up" class="w-3 h-3 text-gray-400"></i>
+                                0%
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Stat 2 -->
+                    <div class="p-5 flex flex-col gap-3">
+                        <div class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+                            <!-- Proxy for branch/split icon -->
+                            <i data-lucide="git-branch" class="w-3.5 h-3.5 text-gray-400 transform -rotate-90"></i>
+                            Views per Visit
+                        </div>
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-2xl font-semibold text-gray-900 tracking-tight">2.56</span>
+                            <span class="text-xs text-gray-400 flex items-center gap-0.5 font-medium">
+                                <i data-lucide="trending-up" class="w-3 h-3 text-gray-400"></i>
+                                0%
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Stat 3 -->
+                    <div class="p-5 flex flex-col gap-3">
+                        <div class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+                            <i data-lucide="clock" class="w-3.5 h-3.5 text-gray-400"></i>
+                            Visit Duration
+                        </div>
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-2xl font-semibold text-gray-900 tracking-tight">36s</span>
+                            <span class="text-xs text-gray-400 flex items-center gap-0.5 font-medium">
+                                <i data-lucide="trending-up" class="w-3 h-3 text-gray-400"></i>
+                                0%
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Stat 4 -->
+                    <div class="p-5 flex flex-col gap-3">
+                        <div class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+                            <i data-lucide="wind" class="w-3.5 h-3.5 text-gray-400"></i>
+                            Bounce Rate
+                        </div>
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-2xl font-semibold text-gray-900 tracking-tight">56%</span>
+                            <span class="text-xs text-gray-400 flex items-center gap-0.5 font-medium">
+                                <i data-lucide="trending-up" class="w-3 h-3 text-gray-400"></i>
+                                0%
+                            </span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6 fade-in-up stagger-2">
+                
+                <!-- Chart 1: Unique Visitors -->
+                <div class="bg-white rounded-xl shadow-card p-5 pb-4 flex flex-col h-72">
+                    <div class="flex justify-between items-start mb-6">
+                        <div>
+                            <h2 class="text-sm font-semibold text-gray-900 mb-1">Unique Visitors</h2>
+                            <div class="flex items-center gap-1.5 text-xs text-gray-500">
+                                <span class="relative flex h-2 w-2">
+                                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                  <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500 border border-white"></span>
+                                </span>
+                                0 online
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="flex items-baseline justify-end gap-2">
+                                <span class="text-3xl leading-none font-semibold text-gray-900 tracking-tight">9</span>
+                            </div>
+                            <div class="flex items-center justify-end gap-1 text-xs text-gray-400 mt-1 font-medium">
+                                <i data-lucide="trending-up" class="w-3 h-3"></i>
+                                0% <br class="hidden"/> <span class="hidden sm:inline">vs previous 30 days</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Fake Chart Area -->
+                    <div class="flex-1 relative mt-auto border-b border-gray-100">
+                        <div class="absolute bottom-0 right-4 flex items-end gap-1 h-[80%]">
+                            <!-- Small Bar -->
+                            <div class="w-3.5 bg-blue-500 rounded-t-sm" style="height: 15%;"></div>
+                            <!-- Tall Bar -->
+                            <div class="w-3.5 bg-blue-500 rounded-t-sm" style="height: 100%;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- X-Axis Labels -->
+                    <div class="flex justify-between pt-2 px-1 text-xs text-gray-400 font-medium">
+                        <span>03.</span>
+                        <span>06.</span>
+                        <span>09.</span>
+                        <span>12.</span>
+                        <span>15.</span>
+                        <span>18.</span>
+                        <span>21.</span>
+                        <span>24.</span>
+                        <span>27.</span>
+                        <span>31.</span>
+                    </div>
+                </div>
+
+                <!-- Chart 2: Page Views -->
+                <div class="bg-white rounded-xl shadow-card p-5 pb-4 flex flex-col h-72">
+                    <div class="flex justify-between items-start mb-6">
+                        <div>
+                            <h2 class="text-sm font-semibold text-gray-900 mb-1">Page Views</h2>
+                        </div>
+                        <div class="text-right">
+                            <div class="flex items-baseline justify-end gap-2">
+                                <span class="text-3xl leading-none font-semibold text-gray-900 tracking-tight">23</span>
+                            </div>
+                            <div class="flex items-center justify-end gap-1 text-xs text-gray-400 mt-1 font-medium">
+                                <i data-lucide="trending-up" class="w-3 h-3"></i>
+                                0% <br class="hidden"/> <span class="hidden sm:inline">vs previous 30 days</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Fake Chart Area -->
+                    <div class="flex-1 relative mt-auto border-b border-gray-100">
+                        <div class="absolute bottom-0 right-4 flex items-end gap-1 h-[80%]">
+                            <!-- Small Bar -->
+                            <div class="w-3.5 bg-blue-500 rounded-t-sm" style="height: 10%;"></div>
+                            <!-- Medium Bar -->
+                            <div class="w-3.5 bg-blue-500 rounded-t-sm" style="height: 25%;"></div>
+                            <!-- Tall Bar -->
+                            <div class="w-3.5 bg-blue-500 rounded-t-sm" style="height: 100%;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- X-Axis Labels -->
+                    <div class="flex justify-between pt-2 px-1 text-xs text-gray-400 font-medium">
+                        <span>03.</span>
+                        <span>06.</span>
+                        <span>09.</span>
+                        <span>12.</span>
+                        <span>15.</span>
+                        <span>18.</span>
+                        <span>21.</span>
+                        <span>24.</span>
+                        <span>27.</span>
+                        <span>31.</span>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Lists Row -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 fade-in-up stagger-3">
+                
+                <!-- Pages List -->
+                <div class="bg-white rounded-xl shadow-card p-5 min-h-[300px]">
+                    <div class="flex justify-between items-start mb-6">
+                        <div>
+                            <div class="flex items-center gap-1.5 mb-1">
+                                <h2 class="text-sm font-semibold text-gray-900">Pages</h2>
+                                <i data-lucide="scan" class="w-3 h-3 text-gray-400"></i>
+                            </div>
+                            <p class="text-xs text-gray-500">5 unique pages</p>
+                        </div>
+                        
+                        <!-- Segmented Control -->
+                        <div class="flex bg-gray-50/80 p-0.5 rounded-lg border border-gray-200/80 shadow-compact">
+                            <button class="px-3 py-1 text-xs font-medium text-gray-900 bg-white rounded-md shadow-sm ring-1 ring-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 z-10">Top</button>
+                            <button class="px-3 py-1 text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md">Entry</button>
+                            <button class="px-1 py-1 text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md ml-0.5">
+                                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <ul class="space-y-[2px]">
+                        <!-- List Item -->
+                        <li class="relative group rounded-md overflow-hidden">
+                            <div class="absolute inset-y-0 left-0 bg-[#eff6ff] z-0" style="width: 85%"></div>
+                            <a href="#" class="relative z-10 flex justify-between items-center px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md">
+                                <span class="text-xs font-medium text-gray-900 truncate pr-4">/</span>
+                                <span class="text-xs text-gray-500">15</span>
+                            </a>
+                        </li>
+                        <li class="relative group rounded-md overflow-hidden">
+                            <div class="absolute inset-y-0 left-0 bg-[#eff6ff] z-0" style="width: 25%"></div>
+                            <a href="#" class="relative z-10 flex justify-between items-center px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md">
+                                <span class="text-xs font-medium text-gray-900 truncate pr-4">/auth/login</span>
+                                <span class="text-xs text-gray-500">4</span>
+                            </a>
+                        </li>
+                        <li class="relative group rounded-md overflow-hidden">
+                            <div class="absolute inset-y-0 left-0 bg-[#eff6ff] z-0" style="width: 12%"></div>
+                            <a href="#" class="relative z-10 flex justify-between items-center px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md">
+                                <span class="text-xs font-medium text-gray-900 truncate pr-4">/auth/sign-up</span>
+                                <span class="text-xs text-gray-500">2</span>
+                            </a>
+                        </li>
+                        <li class="relative group rounded-md overflow-hidden">
+                            <div class="absolute inset-y-0 left-0 bg-[#eff6ff] z-0" style="width: 5%"></div>
+                            <a href="#" class="relative z-10 flex justify-between items-center px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md">
+                                <span class="text-xs font-medium text-gray-900 truncate pr-4">/auth/forgot-password</span>
+                                <span class="text-xs text-gray-500">1</span>
+                            </a>
+                        </li>
+                        <li class="relative group rounded-md overflow-hidden">
+                            <div class="absolute inset-y-0 left-0 bg-[#eff6ff] z-0" style="width: 5%"></div>
+                            <a href="#" class="relative z-10 flex justify-between items-center px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md">
+                                <span class="text-xs font-medium text-gray-900 truncate pr-4">/auth/sign-up-success</span>
+                                <span class="text-xs text-gray-500">1</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Sources List -->
+                <div class="bg-white rounded-xl shadow-card p-5 min-h-[300px]">
+                    <div class="flex justify-between items-start mb-6">
+                        <div>
+                            <div class="flex items-center gap-1.5 mb-1">
+                                <h2 class="text-sm font-semibold text-gray-900">Sources</h2>
+                                <i data-lucide="scan" class="w-3 h-3 text-gray-400"></i>
+                            </div>
+                            <p class="text-xs text-gray-500">2 referrers</p>
+                        </div>
+                        
+                        <!-- Segmented Control -->
+                        <div class="flex bg-gray-50/80 p-0.5 rounded-lg border border-gray-200/80 shadow-compact">
+                            <button class="px-3 py-1 text-xs font-medium text-gray-900 bg-white rounded-md shadow-sm ring-1 ring-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 z-10">Referrer</button>
+                            <button class="px-3 py-1 text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md">Campaign</button>
+                            <button class="px-1 py-1 text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md ml-0.5">
+                                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <ul class="space-y-[2px]">
+                        <!-- List Item -->
+                        <li class="relative group rounded-md overflow-hidden">
+                            <div class="absolute inset-y-0 left-0 bg-[#eff6ff] z-0" style="width: 80%"></div>
+                            <a href="#" class="relative z-10 flex justify-between items-center px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md">
+                                <div class="flex items-center gap-2 truncate pr-4">
+                                    <i data-lucide="globe" class="w-3.5 h-3.5 text-gray-400 shrink-0"></i>
+                                    <span class="text-xs font-medium text-gray-900 truncate">direct/unknown</span>
+                                </div>
+                                <span class="text-xs text-gray-500">8</span>
+                            </a>
+                        </li>
+                        <li class="relative group rounded-md overflow-hidden">
+                            <div class="absolute inset-y-0 left-0 bg-[#eff6ff] z-0" style="width: 10%"></div>
+                            <a href="#" class="relative z-10 flex justify-between items-center px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-md">
+                                <div class="flex items-center gap-2 truncate pr-4">
+                                    <i data-lucide="globe" class="w-3.5 h-3.5 text-gray-400 shrink-0"></i>
+                                    <span class="text-xs font-medium text-gray-900 truncate">com.slack</span>
+                                </div>
+                                <span class="text-xs text-gray-500">1</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Floating Action Bar -->
+    <div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 fade-in-up stagger-3">
+        <form class="flex items-center bg-white rounded-full p-1.5 shadow-hero border border-gray-200/80 w-[340px] md:w-[400px]">
+            <button type="button" aria-label="AI Options" class="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100/80 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <i data-lucide="sparkles" class="w-4 h-4"></i>
+            </button>
+            <input 
+                type="text" 
+                placeholder="Ask Seline..." 
+                class="flex-1 bg-transparent border-none text-sm px-3 py-2 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0"
+            >
+            <button type="submit" aria-label="Submit query" class="p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500">
+                <i data-lucide="arrow-up" class="w-4 h-4"></i>
+            </button>
+        </form>
+    </div>
+
+    <script>
+        // Initialize Lucide icons with specific stroke width matching the reference
+        lucide.createIcons({
+            strokeWidth: 1.5
+        });
+    </script>
+</body>
+</html>

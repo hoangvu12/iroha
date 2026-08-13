@@ -14,16 +14,16 @@ export interface UsageRoutesOptions {
 }
 
 /**
- * The Owner's Usage Adapter surface for one Provider Connection: the last
- * successful normalized reading, freshness, the latest polling failure, and
- * a manual refresh action that drives the adapter once on demand. The route
- * never echoes secret material or free upstream text: failure messages are
- * the structural descriptions the service recorded.
+ * The Owner's Usage Adapter surface for one Provider: the last successful
+ * normalized reading, freshness, the latest polling failure, and a manual
+ * refresh action that drives the adapter once on demand. The route never
+ * echoes secret material or free upstream text: failure messages are the
+ * structural descriptions the service recorded.
  */
 export function createUsageRoutes({ identity, usage }: UsageRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
-  return new Elysia({ name: 'iroha/usage', prefix: '/api/v1/admin/provider-connections/:id' }).guard(
+  return new Elysia({ name: 'iroha/usage', prefix: '/api/v1/admin/providers/:id' }).guard(
     { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
     (app) => app
       .onError({ as: 'scoped' }, ({ code, status }) => {
@@ -54,9 +54,9 @@ export function createUsageRoutes({ identity, usage }: UsageRoutesOptions) {
       {
         detail: {
           tags: ['Usage'],
-          summary: 'Inspect a connection usage reading',
+          summary: 'Inspect a Provider usage reading',
           description:
-            'Returns the last successful Usage Adapter reading for one Provider Connection, with freshness and the latest polling failure when one happened. The Owner sees Unknown honestly when the configured adapter is reactive-only.',
+            'Returns the last successful Usage Adapter reading for one Provider, with freshness and the latest polling failure when one happened. The Owner sees Unknown honestly when the configured adapter is reactive-only.',
         },
         response: { 200: usageResponse, ...errorResponses },
       },
@@ -82,7 +82,7 @@ export function createUsageRoutes({ identity, usage }: UsageRoutesOptions) {
       {
         detail: {
           tags: ['Usage'],
-          summary: 'Refresh a connection usage reading',
+          summary: 'Refresh a Provider usage reading',
           description:
             'Polls the configured Usage Adapter once and records the outcome. A failed poll retains the previous successful reading and only marks it stale.',
         },

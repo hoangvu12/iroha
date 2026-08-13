@@ -143,7 +143,7 @@ describe('readiness and Provider outages', () => {
     const test: TestApp = await createTestApp({ upstreamTransport: upstream.fetch })
     const signedIn = await completeSetup(test)
     try {
-      const connectionResponse = await test.fetch('/api/v1/admin/provider-connections', {
+      const connectionResponse = await test.fetch('/api/v1/admin/providers', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ displayName: 'Outage example', baseUrl: 'https://api.example.com/v1', upstreamKey: 'upstream-secret' }),

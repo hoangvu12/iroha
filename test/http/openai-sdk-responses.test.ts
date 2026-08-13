@@ -200,7 +200,7 @@ function responseBody(model: string, store: boolean) {
 }
 
 async function createConnection(iroha: TestApp, csrf: string): Promise<string> {
-  const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+  const response = await iroha.fetch('/api/v1/admin/providers', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ displayName: 'SDK Responses', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),

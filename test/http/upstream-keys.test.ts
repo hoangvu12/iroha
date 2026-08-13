@@ -10,7 +10,7 @@ import {
 
 const UPSTREAM_KEY = 'sk-upstream-secret-value-for-tests'
 const BASE_URL = 'https://api.example.com/v1'
-const BASE = '/api/v1/admin/provider-connections'
+const BASE = '/api/v1/admin/providers'
 
 interface KeyBody {
   id: string

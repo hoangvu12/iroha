@@ -43,7 +43,7 @@ describe('Gateway Key administration', () => {
   })
 
   const createConnection = async (displayName: string): Promise<ConnectionBody> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -173,7 +173,7 @@ describe('Gateway Key administration', () => {
 
     test('refuses a scope entry that names an archived connection', async () => {
       const connection = await createConnection('To be archived')
-      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/archive`, {
+      await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
         method: 'POST',
         csrf,
       })
@@ -360,7 +360,7 @@ describe('Gateway Key administration', () => {
         scope: [{ providerId: alpha.id }, { providerId: beta.id }],
       })
 
-      await iroha.fetch(`/api/v1/admin/provider-connections/${beta.id}/archive`, {
+      await iroha.fetch(`/api/v1/admin/providers/${beta.id}/archive`, {
         method: 'POST',
         csrf,
       })
@@ -368,11 +368,11 @@ describe('Gateway Key administration', () => {
       let providers = await discoveredProviders(created.secret)
       expect(providers.map((provider) => provider.id)).toEqual([alpha.id])
 
-      await iroha.fetch(`/api/v1/admin/provider-connections/${alpha.id}/archive`, {
+      await iroha.fetch(`/api/v1/admin/providers/${alpha.id}/archive`, {
         method: 'POST',
         csrf,
       })
-      await iroha.fetch(`/api/v1/admin/provider-connections/${alpha.id}/purge`, {
+      await iroha.fetch(`/api/v1/admin/providers/${alpha.id}/purge`, {
         method: 'POST',
         csrf,
       })

@@ -73,7 +73,7 @@ describe('private request history and audit', () => {
   })
 
   const createConnection = async (): Promise<ConnectionBody> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -149,7 +149,7 @@ describe('private request history and audit', () => {
       // Two active keys; the first to be picked by round-robin returns 401,
       // forcing the inference loop to rotate to the second which succeeds.
       const second = await iroha.fetch(
-        '/api/v1/admin/provider-connections/' + connection.id + '/keys',
+        '/api/v1/admin/providers/' + connection.id + '/keys',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -206,7 +206,7 @@ describe('private request history and audit', () => {
       // Disable every key so no eligible Upstream Key remains.
       for (const key of connection.keys) {
         const response = await iroha.fetch(
-          `/api/v1/admin/provider-connections/${connection.id}/keys/${key.id}/disable`,
+          `/api/v1/admin/providers/${connection.id}/keys/${key.id}/disable`,
           { method: 'POST', csrf },
         )
         expect(response.status).toBe(200)
@@ -276,7 +276,7 @@ describe('private request history and audit', () => {
       await createConnection()
       // Model catalog mutation
       const add = await iroha.fetch(
-        `/api/v1/admin/provider-connections/${connection.id}/catalog/models`,
+        `/api/v1/admin/providers/${connection.id}/catalog/models`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -313,7 +313,7 @@ describe('private request history and audit', () => {
       }
       const initialTotal = initial.total
 
-      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/archive`, {
+      await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
         method: 'POST',
         csrf,
       })

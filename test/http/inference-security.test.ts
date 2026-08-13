@@ -51,7 +51,7 @@ async function createConnection(
   csrf: string,
   fields: Record<string, unknown> = {},
 ): Promise<ConnectionBody> {
-  const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+  const response = await iroha.fetch('/api/v1/admin/providers', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -155,7 +155,7 @@ describe('provider transport security boundaries', () => {
   })
 
   test('callers cannot override the static headers configured on the connection', async () => {
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -497,7 +497,7 @@ describe('advanced transport configuration validation', () => {
   })
 
   test('rejects an unknown authentication header name', async () => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -515,7 +515,7 @@ describe('advanced transport configuration validation', () => {
   })
 
   test('accepts a canonical custom authentication header name', async () => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -532,7 +532,7 @@ describe('advanced transport configuration validation', () => {
   })
 
   test('rejects an authentication prefix containing control characters', async () => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -550,7 +550,7 @@ describe('advanced transport configuration validation', () => {
   })
 
   test('rejects a timeout value below the minimum', async () => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -568,7 +568,7 @@ describe('advanced transport configuration validation', () => {
   })
 
   test('rejects an HTTP base URL when the explicit allow flag is not set', async () => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -585,7 +585,7 @@ describe('advanced transport configuration validation', () => {
   })
 
   test('accepts an explicit insecure HTTP connection and surfaces the warning', async () => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -603,7 +603,7 @@ describe('advanced transport configuration validation', () => {
   })
 
   test('static headers are encrypted at rest and only their names are visible', async () => {
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -645,7 +645,7 @@ describe('per-connection transport overrides reach the runtime', () => {
       timer,
     })
     csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

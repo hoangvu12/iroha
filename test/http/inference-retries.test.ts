@@ -18,14 +18,14 @@ describe('scoped inference retries', () => {
     upstream = mockUpstreamTransport()
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ displayName: 'Retry', baseUrl: BASE_URL, upstreamKey: FIRST_KEY }),
       csrf,
     })
     providerId = ((await created.json()) as { id: string }).id
-    await iroha.fetch(`/api/v1/admin/provider-connections/${providerId}/keys`, {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}/keys`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ upstreamKey: SECOND_KEY }),
@@ -103,7 +103,7 @@ describe('scoped inference retries', () => {
       },
     })
     csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ displayName: 'Retry delay', baseUrl: BASE_URL, upstreamKey: FIRST_KEY }),
@@ -145,7 +145,7 @@ describe('scoped inference retries', () => {
   })
 
   test('connection policy can explicitly allow one ambiguous network replay', async () => {
-    await iroha.fetch(`/api/v1/admin/provider-connections/${providerId}`, {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ retryMaxAttempts: 2, retryAmbiguousNetwork: true }),
@@ -164,7 +164,7 @@ describe('scoped inference retries', () => {
   })
 
   test('connection attempt maximum stops retry before another credential', async () => {
-    await iroha.fetch(`/api/v1/admin/provider-connections/${providerId}`, {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ retryMaxAttempts: 1 }),

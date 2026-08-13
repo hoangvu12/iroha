@@ -12,9 +12,11 @@ import {
 
 const UPSTREAM_KEY = 'sk-upstream-secret-value-for-tests'
 const BASE_URL = 'https://api.example.com/v1'
-const BASE = '/api/v1/admin/provider-connections'
+const BASE = '/api/v1/admin/providers'
+const OLD_BASE = '/api/v1/admin/provider-connections'
+const KEY_BASE_URL = 'https://key.example.com/v1'
 
-interface ConnectionBody {
+interface ProviderBody {
   id: string
   displayName: string
   baseUrl: string
@@ -34,7 +36,7 @@ interface ConnectionBody {
   }[]
 }
 
-describe('Provider Connection administration', () => {
+describe('Provider administration', () => {
   let iroha: TestApp
   let probe: FakeKeyProbe
   let csrf: string
@@ -57,15 +59,46 @@ describe('Provider Connection administration', () => {
       csrf,
     })
 
-  const createConnection = async (fields: Record<string, unknown> = {}): Promise<ConnectionBody> => {
+  const createProvider = async (fields: Record<string, unknown> = {}): Promise<ProviderBody> => {
     const response = await createRequest(fields)
     if (response.status !== 201) {
       throw new Error(`Create failed with ${response.status}: ${await response.text()}`)
     }
-    return (await response.json()) as ConnectionBody
+    return (await response.json()) as ProviderBody
   }
 
   const body = (data: Record<string, unknown>) => JSON.stringify(data)
+
+  describe('route naming', () => {
+    test('the old /provider-connections path is gone, no redirect', async () => {
+      // The rename is hard-cut: callers still pointing at the old URL must
+      // learn the answer is 404, not a redirect they could follow blindly.
+      const response = await iroha.fetch(OLD_BASE)
+      expect(response.status).toBe(404)
+      expect(response.headers.get('location')).toBeNull()
+    })
+
+    test('POST to the old /provider-connections path returns 404', async () => {
+      const response = await iroha.fetch(OLD_BASE, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ displayName: 'Example', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),
+      })
+      expect(response.status).toBe(404)
+    })
+
+    test('a stale sub-path under the old prefix is also 404', async () => {
+      const response = await iroha.fetch(`${OLD_BASE}/pr_anything/purge`, {
+        method: 'POST',
+      })
+      expect(response.status).toBe(404)
+    })
+
+    test('the new /providers path answers', async () => {
+      const response = await iroha.fetch(BASE)
+      expect(response.status).toBe(200)
+    })
+  })
 
   describe('protection', () => {
     test('refuses an unsigned-out browser', async () => {
@@ -99,13 +132,13 @@ describe('Provider Connection administration', () => {
 
     test('lists and inspects without a CSRF token, but never without a session', async () => {
       expect((await iroha.fetch(BASE)).status).toBe(200)
-      expect((await iroha.fetch(`${BASE}/pc_absent`)).status).toBe(404)
+      expect((await iroha.fetch(`${BASE}/pr_absent`)).status).toBe(404)
     })
   })
 
   describe('creation', () => {
-    test('creates a connection with an immutable ID and one encrypted key', async () => {
-      const created = await createConnection()
+    test('creates a Provider with an immutable ID and one encrypted key', async () => {
+      const created = await createProvider()
 
       expect(created.id).toMatch(/^pr_/)
       expect(created.displayName).toBe('Example')
@@ -122,7 +155,7 @@ describe('Provider Connection administration', () => {
     })
 
     test('sends the submitted key to the provider seam, not to storage', async () => {
-      await createConnection()
+      await createProvider()
 
       expect(probe.calls).toEqual([{ baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }])
     })
@@ -130,7 +163,7 @@ describe('Provider Connection administration', () => {
     test('keeps a usable probe result and activates the key on creation', async () => {
       probe.respondWith({ verdict: 'usable', reason: null })
 
-      const created = await createConnection()
+      const created = await createProvider()
 
       expect(created.keys[0]?.health).toBe('active')
     })
@@ -141,7 +174,7 @@ describe('Provider Connection administration', () => {
         reason: 'the provider rate-limited the test (HTTP 429)',
       })
 
-      const created = await createConnection()
+      const created = await createProvider()
 
       expect(created.keys[0]?.health).toBe('unverified')
       expect(created.keys[0]?.lastProbe).toMatchObject({
@@ -153,7 +186,7 @@ describe('Provider Connection administration', () => {
     test('keeps the key Unverified after the provider rejects it', async () => {
       probe.respondWith({ verdict: 'rejected', reason: 'the provider rejected the key (HTTP 401)' })
 
-      const created = await createConnection()
+      const created = await createProvider()
 
       expect(created.keys[0]?.health).toBe('unverified')
       expect(created.keys[0]?.lastProbe?.verdict).toBe('rejected')
@@ -178,7 +211,7 @@ describe('Provider Connection administration', () => {
           csrf: signedIn.csrf,
         })
 
-        const created = (await response.json()) as ConnectionBody
+        const created = (await response.json()) as ProviderBody
         expect(response.status).toBe(201)
         expect(created.keys[0]?.health).toBe('unverified')
         expect(created.keys[0]?.lastProbe?.reason).toBe('the key test did not complete')
@@ -188,7 +221,7 @@ describe('Provider Connection administration', () => {
     })
 
     test('encrypts the key at rest with the installation master key', async () => {
-      await createConnection()
+      await createProvider()
 
       const [stored] = await iroha.database.providers.listKeys(
         (await iroha.database.providers.listProviders())[0]!.id,
@@ -214,7 +247,7 @@ describe('Provider Connection administration', () => {
     test('accepts an insecure base URL once explicitly allowed', async () => {
       probe.respondWith({ verdict: 'usable', reason: null })
 
-      const created = await createConnection({
+      const created = await createProvider({
         baseUrl: 'http://localhost:8000/v1',
         allowInsecureHttp: true,
       })
@@ -279,18 +312,18 @@ describe('Provider Connection administration', () => {
   })
 
   describe('inspection and listing', () => {
-    test('lists every connection, most recently created first', async () => {
-      const first = await createConnection({ displayName: 'First' })
+    test('lists every Provider, most recently created first', async () => {
+      const first = await createProvider({ displayName: 'First' })
       iroha.clock.advance(60)
-      const second = await createConnection({ displayName: 'Second' })
+      const second = await createProvider({ displayName: 'Second' })
 
-      const listed = (await (await iroha.fetch(BASE)).json()) as { connections: ConnectionBody[] }
+      const listed = (await (await iroha.fetch(BASE)).json()) as { providers: ProviderBody[] }
 
-      expect(listed.connections.map((connection) => connection.id)).toEqual([second.id, first.id])
+      expect(listed.providers.map((provider) => provider.id)).toEqual([second.id, first.id])
     })
 
-    test('inspects one connection by its immutable ID', async () => {
-      const created = await createConnection({ displayName: 'Named' })
+    test('inspects one Provider by its immutable ID', async () => {
+      const created = await createProvider({ displayName: 'Named' })
 
       const response = await iroha.fetch(`${BASE}/${created.id}`)
 
@@ -298,8 +331,8 @@ describe('Provider Connection administration', () => {
       expect(await response.json()).toEqual(created)
     })
 
-    test('reports an unknown connection', async () => {
-      const response = await iroha.fetch(`${BASE}/pc_absent`)
+    test('reports an unknown Provider', async () => {
+      const response = await iroha.fetch(`${BASE}/pr_absent`)
 
       expect(response.status).toBe(404)
       expect(await errorCode(response)).toBe('provider_not_found')
@@ -308,7 +341,7 @@ describe('Provider Connection administration', () => {
 
   describe('editing', () => {
     test('edits the display name and base URL without touching the ID', async () => {
-      const created = await createConnection()
+      const created = await createProvider()
       iroha.clock.advance(30)
 
       const response = await iroha.fetch(`${BASE}/${created.id}`, {
@@ -320,7 +353,7 @@ describe('Provider Connection administration', () => {
 
       expect(response.status).toBe(200)
 
-      const updated = (await response.json()) as ConnectionBody
+      const updated = (await response.json()) as ProviderBody
       expect(updated.id).toBe(created.id)
       expect(updated.displayName).toBe('Renamed')
       expect(updated.baseUrl).toBe('https://other.example.com/v1')
@@ -331,7 +364,7 @@ describe('Provider Connection administration', () => {
     })
 
     test('toggles the enabled state', async () => {
-      const created = await createConnection()
+      const created = await createProvider()
 
       await iroha.fetch(`${BASE}/${created.id}`, {
         method: 'PATCH',
@@ -344,8 +377,8 @@ describe('Provider Connection administration', () => {
       expect(stored?.enabled).toBe(false)
     })
 
-    test('refuses to move a live connection onto plain HTTP without the exception', async () => {
-      const created = await createConnection()
+    test('refuses to move a live Provider onto plain HTTP without the exception', async () => {
+      const created = await createProvider()
 
       const response = await iroha.fetch(`${BASE}/${created.id}`, {
         method: 'PATCH',
@@ -359,7 +392,7 @@ describe('Provider Connection administration', () => {
     })
 
     test('refuses to withdraw the insecure exception under a plain-HTTP URL', async () => {
-      const created = await createConnection({
+      const created = await createProvider({
         baseUrl: 'http://localhost:8000/v1',
         allowInsecureHttp: true,
       })
@@ -377,8 +410,8 @@ describe('Provider Connection administration', () => {
       ])
     })
 
-    test('reports an unknown connection', async () => {
-      const response = await iroha.fetch(`${BASE}/pc_absent`, {
+    test('reports an unknown Provider', async () => {
+      const response = await iroha.fetch(`${BASE}/pr_absent`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: body({ displayName: 'Nope' }),
@@ -390,7 +423,7 @@ describe('Provider Connection administration', () => {
     })
 
     test('audits which fields changed, not what they changed to', async () => {
-      const created = await createConnection()
+      const created = await createProvider()
 
       await iroha.fetch(`${BASE}/${created.id}`, {
         method: 'PATCH',
@@ -412,7 +445,7 @@ describe('Provider Connection administration', () => {
   describe('key actions', () => {
     test('manually activates an inconclusively tested key', async () => {
       probe.respondWith({ verdict: 'inconclusive', reason: 'the provider could not be reached' })
-      const created = await createConnection()
+      const created = await createProvider()
 
       const keyId = created.keys[0]!.id
       const response = await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/activate`, {
@@ -422,14 +455,14 @@ describe('Provider Connection administration', () => {
 
       expect(response.status).toBe(200)
 
-      const updated = (await response.json()) as ConnectionBody
+      const updated = (await response.json()) as ProviderBody
       expect(updated.keys[0]?.health).toBe('active')
       expect(updated.keys[0]?.lastProbe?.reason).toBe('the provider could not be reached')
     })
 
     test('a usable retest activates an Unverified key', async () => {
       probe.respondWith({ verdict: 'inconclusive', reason: 'the provider could not be reached' })
-      const created = await createConnection()
+      const created = await createProvider()
 
       probe.respondWith({ verdict: 'usable', reason: null })
       const keyId = created.keys[0]!.id
@@ -438,14 +471,14 @@ describe('Provider Connection administration', () => {
         csrf,
       })
 
-      const updated = (await response.json()) as ConnectionBody
+      const updated = (await response.json()) as ProviderBody
       expect(response.status).toBe(200)
       expect(updated.keys[0]?.health).toBe('active')
       expect(updated.keys[0]?.lastProbe).toMatchObject({ verdict: 'usable', reason: null })
     })
 
     test('retesting a Disabled key records the outcome but keeps it disabled', async () => {
-      const created = await createConnection()
+      const created = await createProvider()
       const keyId = created.keys[0]!.id
 
       await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/disable`, { method: 'POST', csrf })
@@ -456,13 +489,13 @@ describe('Provider Connection administration', () => {
         csrf,
       })
 
-      const updated = (await response.json()) as ConnectionBody
+      const updated = (await response.json()) as ProviderBody
       expect(updated.keys[0]?.health).toBe('disabled')
       expect(updated.keys[0]?.lastProbe?.verdict).toBe('usable')
     })
 
     test('disable and activate are audited without secret values', async () => {
-      const created = await createConnection()
+      const created = await createProvider()
       const keyId = created.keys[0]!.id
 
       await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/disable`, { method: 'POST', csrf })
@@ -477,8 +510,8 @@ describe('Provider Connection administration', () => {
       }
     })
 
-    test('refuses a key that does not belong to the connection', async () => {
-      const created = await createConnection()
+    test('refuses a key that does not belong to the Provider', async () => {
+      const created = await createProvider()
 
       const response = await iroha.fetch(`${BASE}/${created.id}/keys/uk_absent/test`, {
         method: 'POST',
@@ -488,18 +521,143 @@ describe('Provider Connection administration', () => {
       expect(response.status).toBe(404)
       expect(await errorCode(response)).toBe('key_not_found')
     })
+
+    test('adds a key with an optional per-key base URL override', async () => {
+      const created = await createProvider()
+
+      const response = await iroha.fetch(`${BASE}/${created.id}/keys`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ upstreamKey: UPSTREAM_KEY, baseUrl: KEY_BASE_URL }),
+        csrf,
+      })
+      expect(response.status).toBe(201)
+
+      const updated = (await response.json()) as ProviderBody
+      expect(updated.keys).toHaveLength(2)
+      const newKey = updated.keys.find((key) => key.id !== created.keys[0]!.id)!
+      expect(newKey.baseUrl).toBe(KEY_BASE_URL)
+      expect(newKey.effectiveBaseUrl).toBe(KEY_BASE_URL)
+    })
+
+    test('a blank baseUrl on add inherits the Provider default', async () => {
+      const created = await createProvider()
+      const response = await iroha.fetch(`${BASE}/${created.id}/keys`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ upstreamKey: UPSTREAM_KEY, baseUrl: '   ' }),
+        csrf,
+      })
+      expect(response.status).toBe(201)
+
+      const updated = (await response.json()) as ProviderBody
+      const newKey = updated.keys.find((key) => key.id !== created.keys[0]!.id)!
+      expect(newKey.baseUrl).toBeNull()
+      expect(newKey.effectiveBaseUrl).toBe(BASE_URL)
+    })
+
+    test('omitting baseUrl on add inherits the Provider default', async () => {
+      const created = await createProvider()
+      const response = await iroha.fetch(`${BASE}/${created.id}/keys`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ upstreamKey: UPSTREAM_KEY }),
+        csrf,
+      })
+      expect(response.status).toBe(201)
+
+      const updated = (await response.json()) as ProviderBody
+      const newKey = updated.keys.find((key) => key.id !== created.keys[0]!.id)!
+      expect(newKey.baseUrl).toBeNull()
+      expect(newKey.effectiveBaseUrl).toBe(BASE_URL)
+    })
+
+    test('rejects an invalid per-key baseUrl at add time', async () => {
+      const created = await createProvider()
+      const response = await iroha.fetch(`${BASE}/${created.id}/keys`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ upstreamKey: UPSTREAM_KEY, baseUrl: 'not a url' }),
+        csrf,
+      })
+      expect(response.status).toBe(400)
+      const failure = await errorOf(response)
+      expect(failure.code).toBe('validation_failed')
+      expect(failure.problems.map((problem) => problem.field)).toEqual(['baseUrl'])
+    })
+
+    test('updates a per-key base URL override on the existing key', async () => {
+      const created = await createProvider()
+      const keyId = created.keys[0]!.id
+
+      const response = await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: body({ baseUrl: KEY_BASE_URL }),
+        csrf,
+      })
+      expect(response.status).toBe(200)
+
+      const updated = (await response.json()) as ProviderBody
+      expect(updated.keys[0]?.baseUrl).toBe(KEY_BASE_URL)
+      expect(updated.keys[0]?.effectiveBaseUrl).toBe(KEY_BASE_URL)
+    })
+
+    test('a blank baseUrl on patch clears the override and falls back to the Provider default', async () => {
+      const created = await createProvider()
+      const keyId = created.keys[0]!.id
+
+      await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: body({ baseUrl: KEY_BASE_URL }),
+        csrf,
+      })
+
+      const response = await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: body({ baseUrl: '' }),
+        csrf,
+      })
+      expect(response.status).toBe(200)
+
+      const updated = (await response.json()) as ProviderBody
+      expect(updated.keys[0]?.baseUrl).toBeNull()
+      expect(updated.keys[0]?.effectiveBaseUrl).toBe(BASE_URL)
+    })
+
+    test('audits per-key base URL changes without echoing the URL', async () => {
+      const created = await createProvider()
+      const keyId = created.keys[0]!.id
+
+      await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: body({ baseUrl: KEY_BASE_URL }),
+        csrf,
+      })
+
+      const events = await iroha.database.audit.list()
+      const configured = events.find((event) => event.action === 'key.configured')
+      expect(configured?.detail).toEqual({
+        providerId: created.id,
+        keyId,
+        fields: ['baseUrl'],
+      })
+    })
   })
 
   describe('archive and purge', () => {
-    test('archiving disables the connection but preserves its identity', async () => {
-      const created = await createConnection()
+    test('archiving disables the Provider but preserves its identity', async () => {
+      const created = await createProvider()
       iroha.clock.advance(30)
 
       const response = await iroha.fetch(`${BASE}/${created.id}/archive`, { method: 'POST', csrf })
 
       expect(response.status).toBe(200)
 
-      const archived = (await response.json()) as ConnectionBody
+      const archived = (await response.json()) as ProviderBody
       expect(archived.id).toBe(created.id)
       expect(archived.archived).toBe(true)
       expect(archived.enabled).toBe(false)
@@ -507,17 +665,17 @@ describe('Provider Connection administration', () => {
     })
 
     test('archiving twice changes nothing the second time', async () => {
-      const created = await createConnection()
+      const created = await createProvider()
 
       await iroha.fetch(`${BASE}/${created.id}/archive`, { method: 'POST', csrf })
       const second = await iroha.fetch(`${BASE}/${created.id}/archive`, { method: 'POST', csrf })
 
       expect(second.status).toBe(200)
-      expect(((await second.json()) as ConnectionBody).archived).toBe(true)
+      expect(((await second.json()) as ProviderBody).archived).toBe(true)
     })
 
-    test('an archived connection refuses edits and key actions', async () => {
-      const created = await createConnection()
+    test('an archived Provider refuses edits and key actions', async () => {
+      const created = await createProvider()
       await iroha.fetch(`${BASE}/${created.id}/archive`, { method: 'POST', csrf })
       const keyId = created.keys[0]!.id
 
@@ -540,8 +698,8 @@ describe('Provider Connection administration', () => {
       }
     })
 
-    test('refuses to purge a connection before it is archived', async () => {
-      const created = await createConnection()
+    test('refuses to purge a Provider before it is archived', async () => {
+      const created = await createProvider()
 
       const refused = await iroha.fetch(`${BASE}/${created.id}/purge`, { method: 'POST', csrf })
 
@@ -550,8 +708,8 @@ describe('Provider Connection administration', () => {
       expect(await iroha.database.providers.getProvider(created.id)).not.toBeNull()
     })
 
-    test('purge removes an archived connection and its keys permanently', async () => {
-      const created = await createConnection()
+    test('purge removes an archived Provider and its keys permanently', async () => {
+      const created = await createProvider()
       await iroha.fetch(`${BASE}/${created.id}/archive`, { method: 'POST', csrf })
 
       const response = await iroha.fetch(`${BASE}/${created.id}/purge`, { method: 'POST', csrf })
@@ -562,8 +720,8 @@ describe('Provider Connection administration', () => {
       expect((await iroha.fetch(`${BASE}/${created.id}`)).status).toBe(404)
     })
 
-    test('purging an absent connection reports it', async () => {
-      const response = await iroha.fetch(`${BASE}/pc_absent/purge`, { method: 'POST', csrf })
+    test('purging an absent Provider reports it', async () => {
+      const response = await iroha.fetch(`${BASE}/pr_absent/purge`, { method: 'POST', csrf })
 
       expect(response.status).toBe(404)
       expect(await errorCode(response)).toBe('provider_not_found')
@@ -572,7 +730,7 @@ describe('Provider Connection administration', () => {
 
   describe('duplication', () => {
     test('duplicates under a new identity without touching the original', async () => {
-      const created = await createConnection({ displayName: 'Original' })
+      const created = await createProvider({ displayName: 'Original' })
 
       const response = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
         method: 'POST',
@@ -581,7 +739,7 @@ describe('Provider Connection administration', () => {
 
       expect(response.status).toBe(201)
 
-      const copy = (await response.json()) as ConnectionBody
+      const copy = (await response.json()) as ProviderBody
       expect(copy.id).not.toBe(created.id)
       expect(copy.id).toMatch(/^pr_/)
       expect(copy.displayName).toBe('Original (copy)')
@@ -591,21 +749,21 @@ describe('Provider Connection administration', () => {
       expect(copy.keys[0]?.id).not.toBe(created.keys[0]?.id)
       expect(copy.keys[0]?.health).toBe('active')
 
-      const original = (await (await iroha.fetch(`${BASE}/${created.id}`)).json()) as ConnectionBody
+      const original = (await (await iroha.fetch(`${BASE}/${created.id}`)).json()) as ProviderBody
       expect(original.displayName).toBe('Original')
     })
 
     test('re-encrypts the copied key freshly while keeping the same material', async () => {
-      const created = await createConnection()
+      const created = await createProvider()
 
       await iroha.fetch(`${BASE}/${created.id}/duplicate`, { method: 'POST', csrf })
 
-      const connections = await iroha.database.providers.listProviders()
-      expect(connections).toHaveLength(2)
+      const providers = await iroha.database.providers.listProviders()
+      expect(providers).toHaveLength(2)
 
       const stored = []
-      for (const connection of connections) {
-        const [key] = await iroha.database.providers.listKeys(connection.id)
+      for (const provider of providers) {
+        const [key] = await iroha.database.providers.listKeys(provider.id)
         stored.push(key!.encryptedKey)
       }
 
@@ -618,7 +776,7 @@ describe('Provider Connection administration', () => {
     })
 
     test('tests the copied key, and keeps it Unverified when the test is inconclusive', async () => {
-      const created = await createConnection()
+      const created = await createProvider()
       probe.respondWith({ verdict: 'inconclusive', reason: 'the provider could not be reached' })
 
       const response = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
@@ -626,13 +784,13 @@ describe('Provider Connection administration', () => {
         csrf,
       })
 
-      const copy = (await response.json()) as ConnectionBody
+      const copy = (await response.json()) as ProviderBody
       expect(copy.keys[0]?.health).toBe('unverified')
       expect(copy.keys[0]?.lastProbe?.verdict).toBe('inconclusive')
     })
 
-    test('duplicating an archived connection returns the copy to active use', async () => {
-      const created = await createConnection()
+    test('duplicating an archived Provider returns the copy to active use', async () => {
+      const created = await createProvider()
       await iroha.fetch(`${BASE}/${created.id}/archive`, { method: 'POST', csrf })
 
       const response = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
@@ -642,7 +800,7 @@ describe('Provider Connection administration', () => {
 
       expect(response.status).toBe(201)
 
-      const copy = (await response.json()) as ConnectionBody
+      const copy = (await response.json()) as ProviderBody
       expect(copy.archived).toBe(false)
       expect(copy.enabled).toBe(true)
     })
@@ -652,7 +810,7 @@ describe('Provider Connection administration', () => {
     test('no administrative response over the whole lifecycle echoes the key', async () => {
       const responses: Response[] = []
 
-      const created = await createConnection()
+      const created = await createProvider()
       const keyId = created.keys[0]!.id
 
       responses.push(await createRequest({ displayName: 'Second' }))
@@ -683,7 +841,7 @@ describe('Provider Connection administration', () => {
     })
 
     test('audit history never carries the key', async () => {
-      const created = await createConnection()
+      const created = await createProvider()
       await iroha.fetch(`${BASE}/${created.id}/archive`, { method: 'POST', csrf })
       await iroha.fetch(`${BASE}/${created.id}/purge`, { method: 'POST', csrf })
 
@@ -696,15 +854,15 @@ describe('Provider Connection administration', () => {
     })
 
     test('every stored key is encrypted and decrypts only with the master key', async () => {
-      await createConnection()
-      await createConnection({ displayName: 'Another' })
+      await createProvider()
+      await createProvider({ displayName: 'Another' })
 
-      const connections = await iroha.database.providers.listProviders()
+      const providers = await iroha.database.providers.listProviders()
       const cipher = createSecretCipher(TEST_MASTER_KEY)
       const wrongCipher = createSecretCipher('a-different-master-key-0123456789abcdef')
 
-      for (const connection of connections) {
-        const [key] = await iroha.database.providers.listKeys(connection.id)
+      for (const provider of providers) {
+        const [key] = await iroha.database.providers.listKeys(provider.id)
         expect(key!.encryptedKey).not.toContain(UPSTREAM_KEY)
         expect(await cipher.decrypt(key!.encryptedKey)).toBe(UPSTREAM_KEY)
         await expect(wrongCipher.decrypt(key!.encryptedKey)).rejects.toThrow()
@@ -713,7 +871,7 @@ describe('Provider Connection administration', () => {
   })
 
   describe('generated API documentation', () => {
-    test('represents the admin Provider Connection surface', async () => {
+    test('represents the admin Provider surface', async () => {
       const document = (await (await iroha.fetch('/docs/json')).json()) as {
         paths?: Record<string, unknown>
       }
@@ -722,23 +880,32 @@ describe('Provider Connection administration', () => {
 
       expect(paths).toEqual(
         expect.arrayContaining([
-          '/api/v1/admin/provider-connections',
-          '/api/v1/admin/provider-connections/{id}',
-          '/api/v1/admin/provider-connections/{id}/archive',
-          '/api/v1/admin/provider-connections/{id}/duplicate',
-          '/api/v1/admin/provider-connections/{id}/purge',
-          '/api/v1/admin/provider-connections/{id}/keys/{keyId}/test',
-          '/api/v1/admin/provider-connections/{id}/keys/{keyId}/activate',
-          '/api/v1/admin/provider-connections/{id}/keys/{keyId}/disable',
+          '/api/v1/admin/providers',
+          '/api/v1/admin/providers/{id}',
+          '/api/v1/admin/providers/{id}/archive',
+          '/api/v1/admin/providers/{id}/duplicate',
+          '/api/v1/admin/providers/{id}/purge',
+          '/api/v1/admin/providers/{id}/keys/{keyId}/test',
+          '/api/v1/admin/providers/{id}/keys/{keyId}/activate',
+          '/api/v1/admin/providers/{id}/keys/{keyId}/disable',
         ]),
       )
 
-      const createdPath = document.paths?.['/api/v1/admin/provider-connections'] as {
+      const createdPath = document.paths?.['/api/v1/admin/providers'] as {
         post?: { responses?: Record<string, unknown> }
       }
       expect(Object.keys(createdPath.post?.responses ?? {})).toEqual(
         expect.arrayContaining(['201', '400', '401', '403']),
       )
+    })
+
+    test('no longer documents the old provider-connections paths', async () => {
+      const document = (await (await iroha.fetch('/docs/json')).json()) as {
+        paths?: Record<string, unknown>
+      }
+
+      const paths = Object.keys(document.paths ?? {})
+      expect(paths.some((path) => path.includes('/admin/provider-connections'))).toBe(false)
     })
   })
 })

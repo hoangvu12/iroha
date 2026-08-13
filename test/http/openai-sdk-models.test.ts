@@ -89,7 +89,7 @@ describe('the official OpenAI SDK through the Models surface', () => {
   })
 
   const createConnection = async (): Promise<string> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -107,7 +107,7 @@ describe('the official OpenAI SDK through the Models surface', () => {
 
   const refreshCatalog = async (): Promise<void> => {
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${providerId}/catalog/refresh`,
+      `/api/v1/admin/providers/${providerId}/catalog/refresh`,
       { method: 'POST', csrf },
     )
     if (response.status !== 200) {

@@ -45,7 +45,7 @@ describe('Provider Template contribution to the model catalog', () => {
   })
 
   const createConnection = async (displayName: string, templateId: string): Promise<ConnectionBody> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -64,7 +64,7 @@ describe('Provider Template contribution to the model catalog', () => {
 
   const refreshCatalog = async (): Promise<CatalogBody> => {
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/catalog/refresh`,
+      `/api/v1/admin/providers/${connection.id}/catalog/refresh`,
       { method: 'POST', csrf },
     )
     if (response.status !== 200) {
@@ -119,7 +119,7 @@ describe('Provider Template contribution to the model catalog', () => {
     // the Owner can review the block, but the model must not join the
     // provider-scoped Models list.
     await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/catalog/models/gpt-4o`,
+      `/api/v1/admin/providers/${connection.id}/catalog/models/gpt-4o`,
       {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
@@ -128,7 +128,7 @@ describe('Provider Template contribution to the model catalog', () => {
       },
     )
 
-    const response = await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog`)
+    const response = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog`)
     const body = (await response.json()) as {
       entries: { modelId: string; excluded: boolean; source: string }[]
     }

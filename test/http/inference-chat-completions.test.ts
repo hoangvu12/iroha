@@ -42,7 +42,7 @@ describe('provider-scoped Chat Completions', () => {
   const createConnection = async (
     fields: Record<string, unknown> = {},
   ): Promise<ConnectionBody> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -383,7 +383,7 @@ describe('provider-scoped Chat Completions', () => {
   describe('connection state', () => {
     test('reports an archived connection', async () => {
       const key = await connect()
-      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/archive`, {
+      await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
         method: 'POST',
         csrf,
       })
@@ -397,7 +397,7 @@ describe('provider-scoped Chat Completions', () => {
 
     test('reports a disabled connection', async () => {
       const key = await connect()
-      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}`, {
+      await iroha.fetch(`/api/v1/admin/providers/${connection.id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ enabled: false }),
@@ -413,11 +413,11 @@ describe('provider-scoped Chat Completions', () => {
 
     test('reports a purged connection', async () => {
       const key = await connect()
-      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/archive`, {
+      await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
         method: 'POST',
         csrf,
       })
-      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/purge`, {
+      await iroha.fetch(`/api/v1/admin/providers/${connection.id}/purge`, {
         method: 'POST',
         csrf,
       })
@@ -506,11 +506,11 @@ describe('provider-scoped Chat Completions', () => {
       })
       const secret = ((await created.json()) as { secret: string }).secret
 
-      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/archive`, {
+      await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
         method: 'POST',
         csrf,
       })
-      await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/purge`, {
+      await iroha.fetch(`/api/v1/admin/providers/${connection.id}/purge`, {
         method: 'POST',
         csrf,
       })
@@ -534,7 +534,7 @@ describe('provider-scoped Chat Completions', () => {
       const app = await createTestApp({ upstreamKeyProbe: inconclusive, upstreamTransport: upstream.fetch })
       try {
         const signedIn = await completeSetup(app)
-        const response = await app.fetch('/api/v1/admin/provider-connections', {
+        const response = await app.fetch('/api/v1/admin/providers', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({

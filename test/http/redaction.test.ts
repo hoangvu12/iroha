@@ -35,7 +35,7 @@ describe('secret redaction across the Owner surface', () => {
   })
 
   const createConnection = async (): Promise<{ id: string }> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -101,7 +101,7 @@ describe('secret redaction across the Owner surface', () => {
     // bug would surface it.
     const maliciousBase = `https://attacker.example/v1?leak=${UPSTREAM_KEY}`
     const update = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}`,
+      `/api/v1/admin/providers/${connection.id}`,
       {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
@@ -177,7 +177,7 @@ describe('secret redaction across the Owner surface', () => {
     // the secret value back; the Owner's secret material must never appear
     // in a diagnostic, even when the validation message references the field.
     const maliciousKey = `${UPSTREAM_KEY}-malicious`
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

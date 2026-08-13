@@ -73,6 +73,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Providers'],
           summary: 'List Provider Connections',
           description:
             'Lists every Provider Connection, archived ones included. Upstream Key material is never listed; each key appears as its identity, health, and last test outcome.',
@@ -94,6 +95,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Provider Templates'],
           summary: 'List built-in Provider Templates',
           description:
             'Lists the Provider Templates Iroha ships with. Each one carries safe defaults the Owner may override; the template never contains an account, secret, or per-tenant URL.',
@@ -148,6 +150,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Providers'],
           summary: 'Create a Provider Connection',
           description:
             'Creates one OpenAI-compatible Provider Connection with an immutable ID and one Upstream Key. The key is encrypted with the installation master key, saved as Unverified, and tested once with a low-cost probe; a usable test activates it, any other outcome keeps it with the reason. Supplying a templateId prefills safe defaults; the Owner may override every field.',
@@ -176,6 +179,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Providers'],
           summary: 'Inspect a Provider Connection',
           description:
             'Returns one Provider Connection with its Upstream Keys as identities, health, and last test outcomes. Key material is never returned.',
@@ -238,6 +242,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Providers'],
           summary: 'Edit a Provider Connection',
           description:
             'Changes the display name, base URL, insecure-HTTP exception, or enabled state of a live connection. The ID never changes, so client URLs stay valid.',
@@ -269,6 +274,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Providers'],
           summary: 'Archive a Provider Connection',
           description:
             'Takes a connection out of active use while preserving its identity and history. Archived connections can still be duplicated or purged, and nothing else.',
@@ -300,6 +306,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Providers'],
           summary: 'Duplicate a Provider Connection',
           description:
             'Copies a connection under a new immutable ID without touching the original. Copied keys start Unverified again and are tested once.',
@@ -328,6 +335,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Providers'],
           summary: 'Purge a Provider Connection',
           description:
             'Permanently deletes an archived connection and its Upstream Keys. Deletion is archive-first: a live connection must be archived before it can be purged, and there is no restore.',
@@ -359,6 +367,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Upstream Keys'],
           summary: 'Test an Upstream Key',
           description:
             'Runs the low-cost key test on demand and records the outcome. A usable test activates an Unverified key; a Disabled key keeps its state.',
@@ -390,6 +399,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Upstream Keys'],
           summary: 'Activate an Upstream Key',
           description:
             'Explicitly activates an Unverified or Disabled key, for when the test endpoint is unavailable but the Owner knows the key works.',
@@ -421,6 +431,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Upstream Keys'],
           summary: 'Disable an Upstream Key',
           description: 'Takes a key out of use until the Owner activates it again.',
         },
@@ -457,6 +468,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Upstream Keys'],
           summary: 'Add an Upstream Key',
           description:
             'Adds another Upstream Key to a connection. It is encrypted, saved Unverified, and tested once with the low-cost probe like the first key. Existing keys are untouched. accountId, allowedModels and deniedModels follow the same shape as PATCH /provider-connections/:id/keys/:keyId so the Owner can scope a new key in one round trip.',
@@ -490,6 +502,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Upstream Keys'],
           summary: 'Configure an Upstream Key',
           description:
             'Changes which Upstream Account the key shares billing or capacity with, and which exact models it may or may not serve. Null model lists mean no restriction.',
@@ -521,6 +534,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Upstream Keys'],
           summary: 'Remove an Upstream Key',
           description:
             'Removes one key permanently. The other keys and any Upstream Accounts on the connection are untouched.',
@@ -553,6 +567,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Upstream Accounts'],
           summary: 'Create an Upstream Account',
           description:
             'Creates a group of Upstream Keys that share Provider billing or capacity. Assign keys to the account to group them; keys outside an account stay independent.',
@@ -584,6 +599,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Upstream Accounts'],
           summary: 'Rename an Upstream Account',
           description:
             'Renames an account. Its identity stays put, so keys already assigned to it keep their grouping.',
@@ -615,6 +631,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Upstream Accounts'],
           summary: 'Delete an Upstream Account',
           description:
             'Removes an account and its grouping. Its keys become independent again; nothing else is deleted.',
@@ -641,6 +658,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Gateway Keys'],
           summary: 'List Gateway Keys',
           description:
             'Lists every Gateway Key with its name, creation and last-used times, scope, and revocation state. Secrets are never listed or stored in plaintext.',
@@ -675,6 +693,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Gateway Keys'],
           summary: 'Create a Gateway Key',
           description:
             'Issues a named application credential restricted to the requested Provider Connections and exact model IDs. The usable secret is returned exactly once; only its hash is stored.',
@@ -703,6 +722,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Gateway Keys'],
           summary: 'Inspect a Gateway Key',
           description:
             'Returns one Gateway Key with its metadata and scope. The usable secret was shown once at creation and is never returned again.',
@@ -736,6 +756,7 @@ export function createAdminRoutes({
       },
       {
         detail: {
+          tags: ['Gateway Keys'],
           summary: 'Revoke a Gateway Key',
           description:
             'Ends an application credential permanently. The key stays listed with its metadata so the Owner can see what was revoked.',

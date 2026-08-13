@@ -58,6 +58,7 @@ export function createBackgroundRoutes({
       },
       {
         detail: {
+          tags: ['Background Jobs'],
           summary: 'List background jobs',
           description:
             'Returns every scheduled background job, its current status, and the last completed run with timing, outcome, and structural error context.',
@@ -87,6 +88,7 @@ export function createBackgroundRoutes({
       },
       {
         detail: {
+          tags: ['Background Jobs'],
           summary: 'Inspect a background job',
           description:
             'Returns the current status and last completed run of one background job. The Owner can see whether the job is running, when it last ran, and what its last outcome was.',
@@ -116,6 +118,7 @@ export function createBackgroundRoutes({
       },
       {
         detail: {
+          tags: ['Background Jobs'],
           summary: 'Run a background job on demand',
           description:
             'Triggers one job through the same tryClaim path the scheduler uses; a running job cannot be triggered again until it has finished. The route blocks until the run completes so the response carries the terminal status.',
@@ -138,6 +141,7 @@ export function createBackgroundRoutes({
       },
       {
         detail: {
+          tags: ['Background Jobs'],
           summary: 'Read background schedule settings',
           description:
             'Returns the per-job interval and batch sizes the scheduler will use on its next tick. Toggles take effect on the next tick without a restart.',
@@ -182,6 +186,7 @@ export function createBackgroundRoutes({
       },
       {
         detail: {
+          tags: ['Background Jobs'],
           summary: 'Update background schedule settings',
           description:
             'Replaces the per-job interval and batch sizes. The scheduler reads the stored values at the start of every tick, so a successful write takes effect on the next tick.',

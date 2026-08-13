@@ -74,6 +74,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       async ({ request, cookie }) => await state(await guard.resolveSession(request, cookie)),
       {
         detail: {
+          tags: ['Auth'],
           summary: 'Authentication state',
           description:
             'Reports whether first-run setup is still open, whether this browser is signed in, and whether recovery is configured. The Owner username is disclosed only to a signed-in browser.',
@@ -102,6 +103,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Auth'],
           summary: 'Claim the installation',
           description:
             'Creates the sole Owner using the configured setup token and signs the browser in. Once an Owner exists this route is permanently closed and cannot replace them.',
@@ -129,6 +131,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Auth'],
           summary: 'Sign in',
           description:
             'Exchanges the Owner username and password for a session cookie. Failures are reported identically whether the username, the password, or both were wrong.',
@@ -147,6 +150,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Auth'],
           security: [{ OwnerSession: [] }],
           summary: 'Sign out',
           description: 'Revokes the session this browser is using and clears its cookie.',
@@ -163,6 +167,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Auth'],
           security: [{ OwnerSession: [] }],
           summary: 'List sessions',
           description:
@@ -182,6 +187,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Auth'],
           security: [{ OwnerSession: [] }],
           summary: 'Sign out everywhere',
           description: 'Revokes every Owner session, including the one making the request.',
@@ -204,6 +210,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Auth'],
           security: [{ OwnerSession: [] }],
           summary: 'Revoke a session',
           description:
@@ -232,6 +239,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Auth'],
           summary: 'Recover access',
           description:
             'Sets a new Owner password using the configured recovery token and revokes every existing session. Attempts are throttled and audited.',

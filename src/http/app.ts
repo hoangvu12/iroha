@@ -168,6 +168,22 @@ export function createApp(options: AppOptions) {
           description: 'Iroha discovery and Owner administration APIs. The OpenAI-compatible provider-scoped surface is linked to the capability matrix rather than duplicated here.',
         },
         externalDocs: { description: 'Iroha OpenAI capability matrix', url: '/docs/capability-matrix' },
+        tags: [
+          { name: 'Auth', description: 'Owner session lifecycle: first-run setup, sign in, sign out, session list and revocation, and recovery.' },
+          { name: 'Health', description: 'Process liveness and traffic-readiness probes.' },
+          { name: 'Providers', description: 'Provider Connection lifecycle: list, create, inspect, edit, archive, duplicate, and purge.' },
+          { name: 'Provider Templates', description: 'Built-in Provider Templates the Owner can seed a new connection from.' },
+          { name: 'Upstream Keys', description: 'Upstream Key lifecycle scoped to one Provider Connection: add, configure, test, activate, disable, remove.' },
+          { name: 'Upstream Accounts', description: 'Upstream Account groupings that share Provider billing or capacity across keys.' },
+          { name: 'Gateway Keys', description: 'Application credentials the Owner issues: list, create, inspect, revoke, and self-discover permitted connections.' },
+          { name: 'Catalog', description: 'Per-connection model catalog: discover, refresh, add, exclude, override capabilities, remove.' },
+          { name: 'Usage', description: 'Per-connection Usage Adapter reading and on-demand refresh.' },
+          { name: 'Audit', description: 'Administrative event log.' },
+          { name: 'Request History', description: 'Read-only inference metadata, including the request-history retention setting.' },
+          { name: 'Settings', description: 'Iroha-wide settings the Owner can read or update.' },
+          { name: 'Background Jobs', description: 'Scheduled job status, manual triggers, and per-job schedule settings.' },
+          { name: 'Metrics', description: 'Bounded Prometheus metrics and the optional exposure switch.' },
+        ],
         components: {
           securitySchemes: {
             GatewayKey: { type: 'http', scheme: 'bearer', bearerFormat: 'Gateway Key' },
@@ -242,6 +258,7 @@ export function createApp(options: AppOptions) {
     )
     .get('/health/live', () => ({ status: 'alive' as const }), {
       detail: {
+        tags: ['Health'],
         summary: 'Process liveness',
         description:
           'Reports that the Iroha process is running. It does not consider migrations, the database, or upstream Providers, so a restart loop cannot be triggered by an outage Iroha cannot fix by restarting.',
@@ -268,6 +285,7 @@ export function createApp(options: AppOptions) {
       },
       {
         detail: {
+          tags: ['Health'],
           summary: 'Traffic readiness',
           description:
             'Reports that configuration is valid, migrations have completed, and the database is responding. Upstream Provider outages do not affect this result.',

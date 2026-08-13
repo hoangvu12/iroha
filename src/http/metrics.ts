@@ -59,6 +59,7 @@ export function createMetricsRoutes({
       },
       {
         detail: {
+          tags: ['Metrics'],
           security: [{ OwnerSession: [] }],
           summary: 'Read bounded Iroha metrics',
           description:
@@ -76,6 +77,7 @@ export function createMetricsRoutes({
       },
       {
         detail: {
+          tags: ['Settings', 'Metrics'],
           security: [{ OwnerSession: [] }],
           summary: 'Read metrics exposure settings',
           description: 'Returns whether the optional authenticated metrics endpoint is enabled.',
@@ -106,6 +108,7 @@ export function createMetricsRoutes({
       },
       {
         detail: {
+          tags: ['Settings', 'Metrics'],
           security: [{ OwnerSession: [] }],
           summary: 'Update metrics exposure settings',
           description: 'Enables or disables the optional authenticated metrics endpoint.',

@@ -36,6 +36,7 @@ export function createSettingsRoutes({ identity, requestHistory, database }: Set
       },
       {
         detail: {
+          tags: ['Settings', 'Request History'],
           summary: 'Read request-history retention',
           description:
             'Returns the configured retention window. Zero days means history is disabled.',
@@ -70,6 +71,7 @@ export function createSettingsRoutes({ identity, requestHistory, database }: Set
       },
       {
         detail: {
+          tags: ['Settings', 'Request History'],
           summary: 'Update request-history retention',
           description:
             'Sets how long inference metadata is kept. Zero days disables storage entirely; the next inference call writes no event or attempt rows.',

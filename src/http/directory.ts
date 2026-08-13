@@ -40,6 +40,7 @@ export function createDirectoryRoutes({ gatewayKeys }: DirectoryRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Gateway Keys'],
           security: [{ GatewayKey: [] }],
           summary: 'Discover permitted Provider Connections',
           description:

@@ -43,6 +43,7 @@ export function createRequestHistoryRoutes({ identity, requestHistory }: Request
       },
       {
         detail: {
+          tags: ['Request History'],
           summary: 'List request history',
           description:
             'Lists recent inference calls with their connection, model, selected key identity, status, latency, and Provider-supplied usage. No prompts, responses, or Upstream Key material.',
@@ -78,6 +79,7 @@ export function createRequestHistoryRoutes({ identity, requestHistory }: Request
       },
       {
         detail: {
+          tags: ['Request History'],
           summary: 'Inspect a request',
           description:
             'Returns one inference call with every attempt in order, showing which Upstream Key each one tried, the resulting status, and any retry decision.',

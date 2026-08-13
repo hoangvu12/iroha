@@ -53,6 +53,7 @@ export function createUsageRoutes({ identity, usage }: UsageRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Usage'],
           summary: 'Inspect a connection usage reading',
           description:
             'Returns the last successful Usage Adapter reading for one Provider Connection, with freshness and the latest polling failure when one happened. The Owner sees Unknown honestly when the configured adapter is reactive-only.',
@@ -80,6 +81,7 @@ export function createUsageRoutes({ identity, usage }: UsageRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Usage'],
           summary: 'Refresh a connection usage reading',
           description:
             'Polls the configured Usage Adapter once and records the outcome. A failed poll retains the previous successful reading and only marks it stale.',

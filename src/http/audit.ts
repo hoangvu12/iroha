@@ -48,6 +48,7 @@ export function createAuditRoutes({ identity, database }: AuditRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Audit'],
           summary: 'List audit events',
           description:
             'Lists every recorded administrative event with the action, outcome, structured detail, and timestamp. Entries remain until the Owner explicitly clears the feed.',
@@ -77,6 +78,7 @@ export function createAuditRoutes({ identity, database }: AuditRoutesOptions) {
       },
       {
         detail: {
+          tags: ['Audit'],
           summary: 'Clear the audit feed',
           description:
             'Removes every recorded audit event and records the act of clearing. Request history is unaffected.',

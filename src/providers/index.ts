@@ -1,6 +1,6 @@
 /**
- * Provider Connections: how the Owner configures the accounts and servers the
- * Gateway reaches, and the Upstream Keys attached to them.
+ * Providers: how the Owner configures the upstream services the Gateway
+ * reaches, and the Upstream Keys attached to them.
  */
 export {
   AdapterRegistry,
@@ -11,16 +11,16 @@ export {
   type AdapterRegistryOptions,
 } from './adapter-registry.ts'
 export {
-  ProviderConnectionRegistry,
-  type ConnectionView,
+  ProviderRegistry,
   type FieldProblem,
   type InferenceTarget,
   type KeyView,
-  type ProviderConnectionRegistryOptions,
   type ProviderFailure,
+  type ProviderRegistryOptions,
   type ProviderResult,
+  type ProviderView,
   type UpstreamAccountView,
-} from './connection-registry.ts'
+} from './provider-registry.ts'
 export { RoundRobinSelector } from './round-robin.ts'
 export {
   createGenericKeyProbe,

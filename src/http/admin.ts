@@ -1,11 +1,11 @@
 import { Elysia, t } from 'elysia'
 import type { OwnerIdentity } from '../identity/index.ts'
 import {
-  type ConnectionView,
   type KeyView,
-  type ProviderConnectionRegistry,
   type ProviderFailure,
+  type ProviderRegistry,
   type ProviderTemplate,
+  type ProviderView,
   type UpstreamAccountView,
 } from '../providers/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
@@ -19,7 +19,7 @@ import { createOwnerGuard, managementError, type ManagementError } from './owner
 
 export interface AdminRoutesOptions {
   readonly identity: OwnerIdentity
-  readonly providers: ProviderConnectionRegistry
+  readonly providers: ProviderRegistry
   readonly gatewayKeys: GatewayKeyRegistry
   /**
    * The Adapter Registry that supplies the Provider Templates the Owner
@@ -69,7 +69,7 @@ export function createAdminRoutes({
             : status(401, toErrorDto(guardResult.response.body))
         }
 
-        return status(200, { connections: (await providers.list()).map(toConnectionDto) })
+        return status(200, { connections: (await providers.listProviders()).map(toConnectionDto) })
       },
       {
         detail: {
@@ -170,9 +170,9 @@ export function createAdminRoutes({
             : status(401, toErrorDto(guardResult.response.body))
         }
 
-        const view = await providers.get(params.id)
+        const view = await providers.getProvider(params.id)
         if (view === null) {
-          return status(404, adminError('connection_not_found', 'No such Provider Connection.'))
+          return status(404, adminError('provider_not_found', 'No such Provider.'))
         }
 
         return status(200, toConnectionDto(view))
@@ -931,7 +931,7 @@ type AccountDto = typeof accountResponse.static
 type ErrorDto = typeof errorResponse.static
 type GatewayKeyDto = typeof gatewayKeyResponse.static
 
-function toConnectionDto(view: ConnectionView): ConnectionDto {
+function toConnectionDto(view: ProviderView): ConnectionDto {
   return {
     id: view.id,
     displayName: view.displayName,
@@ -1051,24 +1051,24 @@ function toErrorDto(body: ManagementError): ErrorDto {
 
 function toFailure(failure: ProviderFailure): { statusCode: 400 | 404 | 409 | 500; body: ErrorDto } {
   switch (failure.code) {
-    case 'connection_not_found':
-      return { statusCode: 404, body: adminError('connection_not_found', 'No such Provider Connection.') }
+    case 'provider_not_found':
+      return { statusCode: 404, body: adminError('provider_not_found', 'No such Provider.') }
     case 'key_not_found':
       return {
         statusCode: 404,
-        body: adminError('key_not_found', 'No such Upstream Key on this connection.'),
+        body: adminError('key_not_found', 'No such Upstream Key on this Provider.'),
       }
     case 'account_not_found':
       return {
         statusCode: 404,
-        body: adminError('account_not_found', 'No such Upstream Account on this connection.'),
+        body: adminError('account_not_found', 'No such Upstream Account on this Provider.'),
       }
-    case 'connection_archived':
+    case 'provider_archived':
       return {
         statusCode: 409,
         body: adminError(
-          'connection_archived',
-          'This connection is archived. Duplicate it to bring it back into use, or purge it.',
+          'provider_archived',
+          'This Provider is archived. Duplicate it to bring it back into use, or purge it.',
         ),
       }
     case 'not_archived':

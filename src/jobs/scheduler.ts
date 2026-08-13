@@ -68,7 +68,7 @@ export interface BackgroundJobContext {
  */
 export interface BackgroundJobCollaborators {
   readonly modelCatalog: import('../models/index.ts').ModelCatalogService
-  readonly providers: import('../providers/index.ts').ProviderConnectionRegistry
+  readonly providers: import('../providers/index.ts').ProviderRegistry
   readonly usage: import('../usage/index.ts').UsageService
   readonly requestHistory: import('../history/index.ts').RequestHistoryService
   /** Removes every Owner session whose expiry has passed. */

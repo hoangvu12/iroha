@@ -23,9 +23,9 @@ export interface FieldProblem {
 }
 
 export type UsageServiceFailure =
-  | { readonly code: 'connection_not_found' }
-  | { readonly code: 'connection_archived' }
-  | { readonly code: 'connection_disabled' }
+  | { readonly code: 'provider_not_found' }
+  | { readonly code: 'provider_archived' }
+  | { readonly code: 'provider_disabled' }
   | { readonly code: 'no_eligible_key' }
   | { readonly code: 'stored_key_unreadable' }
   | { readonly code: 'rate_limited'; readonly retryAfterSeconds: number; readonly retryAt: Date }
@@ -129,8 +129,8 @@ export class UsageService {
   /** The view the Owner sees for one connection: reading, freshness, last error. */
   async view(providerId: string): Promise<UsageServiceResult<UsageView>> {
     const connection = await this.#database.providers.getProvider(providerId)
-    if (connection === null) return failed({ code: 'connection_not_found' })
-    if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
+    if (connection === null) return failed({ code: 'provider_not_found' })
+    if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
 
     const snapshot = await this.#database.usage.get(providerId)
     const stale = snapshot?.lastFailureAt !== null && snapshot?.lastFailureAt !== undefined
@@ -152,9 +152,9 @@ export class UsageService {
    */
   async refresh(providerId: string): Promise<UsageServiceResult<UsageView>> {
     const connection = await this.#database.providers.getProvider(providerId)
-    if (connection === null) return failed({ code: 'connection_not_found' })
-    if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
-    if (!connection.enabled) return failed({ code: 'connection_disabled' })
+    if (connection === null) return failed({ code: 'provider_not_found' })
+    if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
+    if (!connection.enabled) return failed({ code: 'provider_disabled' })
 
     const target = await this.#resolveTarget(connection)
     if (!target.ok) return target

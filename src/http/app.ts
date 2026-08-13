@@ -11,7 +11,7 @@ import { ModelCatalogService, templateKnowledgeFromRegistry } from '../models/in
 import type { Database } from '../persistence/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import { createBuiltInAdapterRegistry } from '../providers/adapter-registry.ts'
-import type { ProviderConnectionRegistry } from '../providers/index.ts'
+import type { ProviderRegistry } from '../providers/index.ts'
 import type { ShutdownController } from '../runtime/shutdown.ts'
 import type { Timer } from '../runtime/timer.ts'
 import { UsageService, type UsageAdapter } from '../usage/index.ts'
@@ -36,7 +36,7 @@ export interface AppOptions {
   readonly database: Database
   readonly readiness: ReadinessState
   readonly identity: OwnerIdentity
-  readonly providers: ProviderConnectionRegistry
+  readonly providers: ProviderRegistry
   readonly gatewayKeys: GatewayKeyRegistry
   /** Decrypts stored Upstream Keys for the catalog's read-only discovery GET. */
   readonly secretCipher?: SecretCipher | undefined

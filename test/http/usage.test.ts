@@ -295,14 +295,14 @@ describe('the Owner usage surface', () => {
     expect(refresh.status).toBe(401)
   })
 
-  test('reports an unknown connection as connection_not_found', async () => {
+  test('reports an unknown connection as provider_not_found', async () => {
     const view = await iroha.fetch('/api/v1/admin/provider-connections/pc_unknown/usage')
     expect(view.status).toBe(404)
     const body = (await view.json()) as { error: { code: string } }
-    expect(body.error.code).toBe('connection_not_found')
+    expect(body.error.code).toBe('provider_not_found')
   })
 
-  test('reports an archived connection as connection_archived', async () => {
+  test('reports an archived connection as provider_archived', async () => {
     await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/archive`, {
       method: 'POST',
       csrf,
@@ -313,7 +313,7 @@ describe('the Owner usage surface', () => {
     )
     expect(view.status).toBe(409)
     const body = (await view.json()) as { error: { code: string } }
-    expect(body.error.code).toBe('connection_archived')
+    expect(body.error.code).toBe('provider_archived')
   })
 
   test('a reactive-only adapter never produces recovery evidence', async () => {

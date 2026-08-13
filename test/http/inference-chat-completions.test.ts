@@ -390,7 +390,7 @@ describe('provider-scoped Chat Completions', () => {
       const response = await chat(key.secret, completionBody())
 
       expect(response.status).toBe(409)
-      expect((await openError(response)).error.code).toBe('connection_archived')
+      expect((await openError(response)).error.code).toBe('provider_archived')
       expect(upstream.calls).toHaveLength(0)
     })
 
@@ -406,7 +406,7 @@ describe('provider-scoped Chat Completions', () => {
       const response = await chat(key.secret, completionBody())
 
       expect(response.status).toBe(409)
-      expect((await openError(response)).error.code).toBe('connection_disabled')
+      expect((await openError(response)).error.code).toBe('provider_disabled')
       expect(upstream.calls).toHaveLength(0)
     })
 
@@ -424,7 +424,7 @@ describe('provider-scoped Chat Completions', () => {
       const response = await chat(key.secret, completionBody())
 
       expect(response.status).toBe(404)
-      expect((await openError(response)).error.code).toBe('connection_not_found')
+      expect((await openError(response)).error.code).toBe('provider_not_found')
     })
 
     test('reports no eligible Upstream Key', async () => {

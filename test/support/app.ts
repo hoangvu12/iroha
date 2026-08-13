@@ -10,7 +10,7 @@ import { ModelCatalogService, templateKnowledgeFromRegistry } from '../../src/mo
 import type { Database } from '../../src/persistence/index.ts'
 import {
   createBuiltInAdapterRegistry,
-  ProviderConnectionRegistry,
+  ProviderRegistry,
   type KeyProbeResult,
   type UpstreamKeyProbe,
 } from '../../src/providers/index.ts'
@@ -113,8 +113,8 @@ export function fakeKeyProbe(initial: KeyProbeResult = { verdict: 'usable', reas
 }
 
 /** The standard Provider Connection registry for tests that only need one to exist. */
-export function providerRegistryFor(database: Database): ProviderConnectionRegistry {
-  return new ProviderConnectionRegistry({
+export function providerRegistryFor(database: Database): ProviderRegistry {
+  return new ProviderRegistry({
     database,
     cipher: createSecretCipher(TEST_MASTER_KEY),
     keyProbe: fakeKeyProbe(),
@@ -174,7 +174,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
 
   const upstreamKeyProbe = options.upstreamKeyProbe ?? fakeKeyProbe()
   const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry()
-  const providers = new ProviderConnectionRegistry({
+  const providers = new ProviderRegistry({
     database,
     cipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
     keyProbe: upstreamKeyProbe,

@@ -247,27 +247,27 @@ function toCatalogDto(view: CatalogView): CatalogDto {
 
 function toFailure(failure: ModelCatalogFailure): { statusCode: 400 | 404 | 409 | 500; body: ErrorDto } {
   switch (failure.code) {
-    case 'connection_not_found':
-      return { statusCode: 404, body: managementError('connection_not_found', 'No such Provider Connection.') }
-    case 'connection_archived':
+    case 'provider_not_found':
+      return { statusCode: 404, body: managementError('provider_not_found', 'No such Provider.') }
+    case 'provider_archived':
       return {
         statusCode: 409,
         body: managementError(
-          'connection_archived',
-          'This connection is archived. Duplicate it to manage its catalog.',
+          'provider_archived',
+          'This Provider is archived. Duplicate it to manage its catalog.',
         ),
       }
-    case 'connection_disabled':
+    case 'provider_disabled':
       return {
         statusCode: 409,
-        body: managementError('connection_disabled', 'This Provider Connection is disabled.'),
+        body: managementError('provider_disabled', 'This Provider is disabled.'),
       }
     case 'no_eligible_key':
       return {
         statusCode: 409,
         body: managementError(
           'no_eligible_key',
-          'No Upstream Key on this connection is usable for model discovery.',
+          'No Upstream Key on this Provider is usable for model discovery.',
         ),
       }
     case 'stored_key_unreadable':

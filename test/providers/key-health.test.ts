@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createSecretCipher } from '../../src/crypto/index.ts'
 import {
   createBuiltInAdapterRegistry,
-  ProviderConnectionRegistry,
+  ProviderRegistry,
 } from '../../src/providers/index.ts'
 import { sqliteEngine } from '../persistence/engines.ts'
 import { fakeKeyProbe, TEST_MASTER_KEY } from '../support/app.ts'
@@ -11,14 +11,14 @@ import { testClock, type TestClock } from '../support/identity.ts'
 describe('durable scoped Key Health', () => {
   let opened: Awaited<ReturnType<typeof sqliteEngine.open>>
   let clock: TestClock
-  let registry: ProviderConnectionRegistry
+  let registry: ProviderRegistry
   let providerId: string
   let keyIds: string[]
 
   beforeEach(async () => {
     opened = await sqliteEngine.open()
     clock = testClock()
-    registry = new ProviderConnectionRegistry({
+    registry = new ProviderRegistry({
       database: opened.database,
       cipher: createSecretCipher(TEST_MASTER_KEY),
       keyProbe: fakeKeyProbe(),
@@ -102,7 +102,7 @@ describe('durable scoped Key Health', () => {
       status: 401,
       reason: 'upstream HTTP 401',
     })
-    const restarted = new ProviderConnectionRegistry({
+    const restarted = new ProviderRegistry({
       database: opened.database,
       cipher: createSecretCipher(TEST_MASTER_KEY),
       keyProbe: fakeKeyProbe(),
@@ -110,7 +110,7 @@ describe('durable scoped Key Health', () => {
       clock,
     })
 
-    expect((await restarted.get(providerId))?.keys[0]?.health).toBe('invalid_authentication')
+    expect((await restarted.getProvider(providerId))?.keys[0]?.health).toBe('invalid_authentication')
     const target = await restarted.resolveInference(providerId, 'gpt-4o')
     if (!target.ok) throw new Error(target.failure.code)
     expect(target.value.keyId).toBe(keyIds[1]!)

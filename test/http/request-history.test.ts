@@ -292,17 +292,17 @@ describe('private request history and audit', () => {
         total: number
       }
       const actions = body.events.map((event) => event.action)
-      expect(actions).toContain('connection.created')
+      expect(actions).toContain('provider.created')
       expect(actions).toContain('model_catalog.owner_added')
       expect(body.total).toBeGreaterThan(2)
     })
 
     test('filters audit events by action prefix', async () => {
       await createConnection()
-      const response = await iroha.fetch('/api/v1/admin/audit?actionPrefix=connection')
+      const response = await iroha.fetch('/api/v1/admin/audit?actionPrefix=provider')
       const body = (await response.json()) as { events: { action: string }[]; total: number }
       for (const event of body.events) {
-        expect(event.action.startsWith('connection')).toBe(true)
+        expect(event.action.startsWith('provider')).toBe(true)
       }
     })
 
@@ -323,7 +323,7 @@ describe('private request history and audit', () => {
         total: number
       }
       expect(updated.total).toBeGreaterThan(initialTotal)
-      expect(updated.events.some((event) => event.action === 'connection.archived')).toBe(true)
+      expect(updated.events.some((event) => event.action === 'provider.archived')).toBe(true)
     })
 
     test('clears the feed and records the act of clearing', async () => {

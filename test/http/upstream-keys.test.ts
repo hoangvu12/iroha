@@ -165,7 +165,7 @@ describe('Upstream Key pools and Upstream Accounts', () => {
 
       const response = await addKey(created.id)
       expect(response.status).toBe(409)
-      expect(await errorCode(response)).toBe('connection_archived')
+      expect(await errorCode(response)).toBe('provider_archived')
     })
   })
 
@@ -392,7 +392,7 @@ describe('Upstream Key pools and Upstream Accounts', () => {
       )
 
       expect(response.status).toBe(409)
-      expect(await errorCode(response)).toBe('connection_archived')
+      expect(await errorCode(response)).toBe('provider_archived')
     })
 
     test('audits account lifecycle without secret values', async () => {

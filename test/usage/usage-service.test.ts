@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createSecretCipher } from '../../src/crypto/index.ts'
 import {
   createBuiltInAdapterRegistry,
-  ProviderConnectionRegistry,
+  ProviderRegistry,
 } from '../../src/providers/index.ts'
 import { createGenericUsageAdapter } from '../../src/usage/generic-adapter.ts'
 import {
@@ -20,7 +20,7 @@ import { testClock, type TestClock } from '../support/identity.ts'
 interface Fixture {
   opened: Awaited<ReturnType<typeof sqliteEngine.open>>
   clock: TestClock
-  registry: ProviderConnectionRegistry
+  registry: ProviderRegistry
   providerId: string
   keyId: string
   accountId: string
@@ -32,7 +32,7 @@ async function buildFixture(
   const opened = await sqliteEngine.open()
   const clock = testClock()
   const cipher = createSecretCipher(TEST_MASTER_KEY)
-  const registry = new ProviderConnectionRegistry({
+  const registry = new ProviderRegistry({
     database: opened.database,
     cipher,
     keyProbe: { async test() { return { verdict: 'usable', reason: null } } },
@@ -534,7 +534,7 @@ describe('UsageService input validation', () => {
     await dispose()
   })
 
-  test('view returns connection_not_found for an unknown connection', async () => {
+  test('view returns provider_not_found for an unknown connection', async () => {
     const view = await new UsageService({
       database: fixture.opened.database,
       cipher: createSecretCipher(TEST_MASTER_KEY),
@@ -543,10 +543,10 @@ describe('UsageService input validation', () => {
     }).view('pc_does_not_exist')
     expect(view.ok).toBe(false)
     if (view.ok) throw new Error('expected a failure')
-    expect(view.failure.code).toBe('connection_not_found')
+    expect(view.failure.code).toBe('provider_not_found')
   })
 
-  test('refresh returns connection_archived for an archived connection', async () => {
+  test('refresh returns provider_archived for an archived connection', async () => {
     await fixture.registry.archive(fixture.providerId)
     const service = new UsageService({
       database: fixture.opened.database,
@@ -557,10 +557,10 @@ describe('UsageService input validation', () => {
     const view = await service.refresh(fixture.providerId)
     expect(view.ok).toBe(false)
     if (view.ok) throw new Error('expected a failure')
-    expect(view.failure.code).toBe('connection_archived')
+    expect(view.failure.code).toBe('provider_archived')
   })
 
-  test('refresh returns connection_disabled for a disabled connection', async () => {
+  test('refresh returns provider_disabled for a disabled connection', async () => {
     await fixture.registry.update(fixture.providerId, { enabled: false })
     const service = new UsageService({
       database: fixture.opened.database,
@@ -571,7 +571,7 @@ describe('UsageService input validation', () => {
     const view = await service.refresh(fixture.providerId)
     expect(view.ok).toBe(false)
     if (view.ok) throw new Error('expected a failure')
-    expect(view.failure.code).toBe('connection_disabled')
+    expect(view.failure.code).toBe('provider_disabled')
   })
 })
 

@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia'
 import type { OwnerIdentity } from '../identity/index.ts'
-import type { ProviderConnectionRegistry } from '../providers/index.ts'
+import type { ProviderRegistry } from '../providers/index.ts'
 import type { Database, UpstreamKeyHealth } from '../persistence/index.ts'
 import {
   ALL_KEY_HEALTH_STATES,
@@ -13,7 +13,7 @@ import { createOwnerGuard, type ManagementError } from './owner-guard.ts'
 export interface MetricsRoutesOptions {
   readonly identity: OwnerIdentity
   readonly database: Database
-  readonly providers: ProviderConnectionRegistry
+  readonly providers: ProviderRegistry
   readonly metrics: MetricsCollector
   readonly metricsSettings: MetricsSettingsService
 }
@@ -47,7 +47,7 @@ export function createMetricsRoutes({
           return errorResponseJson(404, { error: { code: 'metrics_disabled', message: 'Metrics are disabled.' } })
         }
 
-        const connections = await providers.list()
+        const connections = await providers.listProviders()
         const keyHealth = Object.fromEntries(ALL_KEY_HEALTH_STATES.map((health) => [health, 0])) as { [health in UpstreamKeyHealth]: number }
         for (const connection of connections) {
           for (const key of connection.keys) keyHealth[key.health] = (keyHealth[key.health] ?? 0) + 1

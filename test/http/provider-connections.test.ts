@@ -107,7 +107,7 @@ describe('Provider Connection administration', () => {
     test('creates a connection with an immutable ID and one encrypted key', async () => {
       const created = await createConnection()
 
-      expect(created.id).toMatch(/^pc_/)
+      expect(created.id).toMatch(/^pr_/)
       expect(created.displayName).toBe('Example')
       expect(created.baseUrl).toBe(BASE_URL)
       expect(created.allowInsecureHttp).toBe(false)
@@ -302,7 +302,7 @@ describe('Provider Connection administration', () => {
       const response = await iroha.fetch(`${BASE}/pc_absent`)
 
       expect(response.status).toBe(404)
-      expect(await errorCode(response)).toBe('connection_not_found')
+      expect(await errorCode(response)).toBe('provider_not_found')
     })
   })
 
@@ -386,7 +386,7 @@ describe('Provider Connection administration', () => {
       })
 
       expect(response.status).toBe(404)
-      expect(await errorCode(response)).toBe('connection_not_found')
+      expect(await errorCode(response)).toBe('provider_not_found')
     })
 
     test('audits which fields changed, not what they changed to', async () => {
@@ -400,7 +400,7 @@ describe('Provider Connection administration', () => {
       })
 
       const events = await iroha.database.audit.list()
-      const updated = events.find((event) => event.action === 'connection.updated')
+      const updated = events.find((event) => event.action === 'provider.updated')
 
       expect(updated?.detail).toEqual({
         providerId: created.id,
@@ -536,7 +536,7 @@ describe('Provider Connection administration', () => {
         })
 
         expect(response.status).toBe(409)
-        expect(await errorCode(response)).toBe('connection_archived')
+        expect(await errorCode(response)).toBe('provider_archived')
       }
     })
 
@@ -566,7 +566,7 @@ describe('Provider Connection administration', () => {
       const response = await iroha.fetch(`${BASE}/pc_absent/purge`, { method: 'POST', csrf })
 
       expect(response.status).toBe(404)
-      expect(await errorCode(response)).toBe('connection_not_found')
+      expect(await errorCode(response)).toBe('provider_not_found')
     })
   })
 
@@ -583,7 +583,7 @@ describe('Provider Connection administration', () => {
 
       const copy = (await response.json()) as ConnectionBody
       expect(copy.id).not.toBe(created.id)
-      expect(copy.id).toMatch(/^pc_/)
+      expect(copy.id).toMatch(/^pr_/)
       expect(copy.displayName).toBe('Original (copy)')
       expect(copy.baseUrl).toBe(created.baseUrl)
       expect(copy.archived).toBe(false)

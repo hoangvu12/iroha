@@ -16,9 +16,9 @@ export interface FieldProblem {
 }
 
 export type ModelCatalogFailure =
-  | { readonly code: 'connection_not_found' }
-  | { readonly code: 'connection_archived' }
-  | { readonly code: 'connection_disabled' }
+  | { readonly code: 'provider_not_found' }
+  | { readonly code: 'provider_archived' }
+  | { readonly code: 'provider_disabled' }
   /** No Upstream Key on the connection is usable for a read-only discovery. */
   | { readonly code: 'no_eligible_key' }
   /** Encrypted material could not be read; the master key likely changed. */
@@ -129,7 +129,7 @@ export class ModelCatalogService {
   /** The current catalog and sync state of one connection. Read-only. */
   async view(providerId: string): Promise<ModelCatalogResult<CatalogView>> {
     const connection = await this.#database.providers.getProvider(providerId)
-    if (connection === null) return failed({ code: 'connection_not_found' })
+    if (connection === null) return failed({ code: 'provider_not_found' })
     return await this.#viewOf(providerId)
   }
 
@@ -141,8 +141,8 @@ export class ModelCatalogService {
    */
   async refresh(providerId: string): Promise<ModelCatalogResult<CatalogView>> {
     const connection = await this.#database.providers.getProvider(providerId)
-    if (connection === null) return failed({ code: 'connection_not_found' })
-    if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
+    if (connection === null) return failed({ code: 'provider_not_found' })
+    if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
 
     const target = await this.#discoveryTarget(providerId)
     if (!target.ok) return target
@@ -330,9 +330,9 @@ export class ModelCatalogService {
     allowedModels: readonly string[] | null,
   ): Promise<ModelCatalogResult<readonly ListableModel[]>> {
     const connection = await this.#database.providers.getProvider(providerId)
-    if (connection === null) return failed({ code: 'connection_not_found' })
-    if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
-    if (!connection.enabled) return failed({ code: 'connection_disabled' })
+    if (connection === null) return failed({ code: 'provider_not_found' })
+    if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
+    if (!connection.enabled) return failed({ code: 'provider_disabled' })
 
     const entries = await this.#database.modelCatalog.listEntries(providerId)
     const byModel = new Map(entries.map((entry) => [entry.modelId, entry]))
@@ -385,7 +385,7 @@ export class ModelCatalogService {
     }>
   > {
     const connection = await this.#database.providers.getProvider(providerId)
-    if (connection === null) return failed({ code: 'connection_not_found' })
+    if (connection === null) return failed({ code: 'provider_not_found' })
 
     const key =
       (await this.#database.providers.listKeys(providerId)).find(
@@ -445,8 +445,8 @@ export class ModelCatalogService {
     providerId: string,
   ): Promise<ModelCatalogResult<ProviderRecord>> {
     const connection = await this.#database.providers.getProvider(providerId)
-    if (connection === null) return failed({ code: 'connection_not_found' })
-    if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
+    if (connection === null) return failed({ code: 'provider_not_found' })
+    if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
     return { ok: true, value: connection }
   }
 

@@ -4,7 +4,7 @@ import { createGenericInferenceAdapter } from '../../src/inference/generic-adapt
 import {
   AdapterRegistry,
   createBuiltInAdapterRegistry,
-  ProviderConnectionRegistry,
+  ProviderRegistry,
 } from '../../src/providers/index.ts'
 import {
   GENERIC_INFERENCE_ADAPTER_ID,
@@ -42,7 +42,7 @@ function safeTemplate(id: string, over: Partial<ProviderTemplate> = {}): Provide
 describe('Provider Connection templates', () => {
   let opened: Awaited<ReturnType<typeof sqliteEngine.open>>
   let clock: TestClock
-  let registry: ProviderConnectionRegistry
+  let registry: ProviderRegistry
   let adapterRegistry: AdapterRegistry
   let dispose: () => Promise<void>
 
@@ -50,7 +50,7 @@ describe('Provider Connection templates', () => {
     opened = await sqliteEngine.open()
     clock = testClock()
     adapterRegistry = createBuiltInAdapterRegistry()
-    registry = new ProviderConnectionRegistry({
+    registry = new ProviderRegistry({
       database: opened.database,
       cipher: createSecretCipher(TEST_MASTER_KEY),
       keyProbe: fakeKeyProbe(),
@@ -183,7 +183,7 @@ describe('Provider Connection templates', () => {
 
     const opened2 = await sqliteEngine.open()
     try {
-      const customRegistry = new ProviderConnectionRegistry({
+      const customRegistry = new ProviderRegistry({
         database: opened2.database,
         cipher: createSecretCipher(TEST_MASTER_KEY),
         keyProbe: fakeKeyProbe(),

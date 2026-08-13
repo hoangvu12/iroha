@@ -22,7 +22,7 @@ import {
   AdapterRegistry,
   createBuiltInAdapterRegistry,
   createGenericKeyProbe,
-  ProviderConnectionRegistry,
+  ProviderRegistry,
   type UpstreamKeyProbe,
 } from '../providers/index.ts'
 import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
@@ -131,7 +131,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
 
   const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry()
 
-  const providers = new ProviderConnectionRegistry({
+  const providers = new ProviderRegistry({
     database,
     cipher: createSecretCipher(configuration.masterKey),
     keyProbe: options.keyProbe ?? createGenericKeyProbe(),

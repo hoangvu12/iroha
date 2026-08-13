@@ -12,7 +12,7 @@ import {
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
-import type { InferenceTarget, ProviderConnectionRegistry } from '../providers/index.ts'
+import type { InferenceTarget, ProviderRegistry } from '../providers/index.ts'
 import type { MetricsCollector } from '../metrics/metrics.ts'
 import type { InferenceActivity, ShutdownController } from '../runtime/shutdown.ts'
 import { systemTimer, type Timer } from '../runtime/timer.ts'
@@ -86,7 +86,7 @@ export interface TransportDefaults {
 
 export interface InferenceRoutesOptions {
   readonly gatewayKeys: GatewayKeyRegistry
-  readonly providers: ProviderConnectionRegistry
+  readonly providers: ProviderRegistry
   readonly inference: InferenceAdapter
   readonly modelCatalog: ModelCatalogService
   /** Streaming deadlines; tests inject a fake timer to drive them. */
@@ -277,7 +277,7 @@ async function forwardGeneration(options: {
   upstreamPath: '/chat/completions' | '/responses'
   database?: Database | null
   gatewayKeys: GatewayKeyRegistry
-  providers: ProviderConnectionRegistry
+  providers: ProviderRegistry
   inference: InferenceAdapter
   modelCatalog: ModelCatalogService
   timer: Timer
@@ -361,7 +361,7 @@ async function forwardGeneration(options: {
 
   const attemptedKeys: string[] = []
   const startedAt = timer.now()
-  const retryPolicy = await providers.get(providerId)
+  const retryPolicy = await providers.getProvider(providerId)
   const maxAttempts = retryPolicy?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
   const retryAmbiguousNetwork = retryPolicy?.retryAmbiguousNetwork ?? false
   const totalRetryBudgetMs = retryPolicy?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
@@ -852,19 +852,19 @@ function authorizationRefusal(
 
 function resolutionRefusal(failure: { readonly code: string }): Refusal {
   switch (failure.code) {
-    case 'connection_not_found':
-      return { status: 404, code: 'connection_not_found', message: 'No such Provider Connection.' }
-    case 'connection_archived':
+    case 'provider_not_found':
+      return { status: 404, code: 'provider_not_found', message: 'No such Provider.' }
+    case 'provider_archived':
       return {
         status: 409,
-        code: 'connection_archived',
-        message: 'This Provider Connection is archived and serves no inference.',
+        code: 'provider_archived',
+        message: 'This Provider is archived and serves no inference.',
       }
-    case 'connection_disabled':
+    case 'provider_disabled':
       return {
         status: 409,
-        code: 'connection_disabled',
-        message: 'This Provider Connection is disabled and serves no inference.',
+        code: 'provider_disabled',
+        message: 'This Provider is disabled and serves no inference.',
       }
     case 'no_eligible_key':
       return {

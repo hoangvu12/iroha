@@ -41,6 +41,7 @@ export interface ConnectionView {
   readonly retryMaxAttempts: number
   readonly retryAmbiguousNetwork: boolean
   readonly archived: boolean
+  readonly templateId: string | null
   readonly createdAt: string
   readonly updatedAt: string
   readonly keys: readonly KeyView[]
@@ -67,6 +68,27 @@ export class ManagementError extends Error {
 
 const BASE = '/api/v1/admin'
 
+export interface ProviderTemplateCapabilities {
+  readonly chat: boolean
+  readonly streaming: boolean
+  readonly tools: boolean
+  readonly structuredOutput: boolean
+  readonly responses: boolean
+}
+
+export interface ProviderTemplateView {
+  readonly id: string
+  readonly displayName: string
+  readonly description: string
+  readonly baseUrl: string
+  readonly authHeader: string
+  readonly authPrefix: string
+  readonly capabilities: ProviderTemplateCapabilities
+  readonly knownModels: readonly string[]
+  readonly inferenceAdapterId: string
+  readonly usageAdapterId: string | null
+}
+
 export async function fetchConnections(signal?: AbortSignal): Promise<readonly ConnectionView[]> {
   const body = await request<{ connections: readonly ConnectionView[] }>(
     'GET',
@@ -76,17 +98,36 @@ export async function fetchConnections(signal?: AbortSignal): Promise<readonly C
   return body.connections
 }
 
+export async function fetchProviderTemplates(
+  signal?: AbortSignal,
+): Promise<readonly ProviderTemplateView[]> {
+  const body = await request<{ templates: readonly ProviderTemplateView[] }>(
+    'GET',
+    '/provider-templates',
+    { signal },
+  )
+  return body.templates
+}
+
 export async function createConnection(
   input: {
     displayName: string
     baseUrl: string
     upstreamKey: string
     allowInsecureHttp: boolean
+    templateId: string | null
   },
   csrfToken: string,
 ): Promise<ConnectionView> {
+  const body: Record<string, unknown> = {
+    displayName: input.displayName,
+    baseUrl: input.baseUrl,
+    upstreamKey: input.upstreamKey,
+    allowInsecureHttp: input.allowInsecureHttp,
+  }
+  if (input.templateId !== null) body.templateId = input.templateId
   return await request<ConnectionView>('POST', '/provider-connections', {
-    body: input,
+    body,
     csrfToken,
   })
 }

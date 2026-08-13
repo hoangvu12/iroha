@@ -248,6 +248,7 @@ function ConnectionHeader({
         <ProviderIcon
           displayName={connection.displayName}
           baseUrl={connection.baseUrl}
+          {...(connection.templateId === null ? {} : { templateId: connection.templateId })}
         />
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2.5">

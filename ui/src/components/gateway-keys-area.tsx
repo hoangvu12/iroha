@@ -322,7 +322,14 @@ function ScopeIcons({
               title={title}
               className="ring-card inline-flex ring-2"
             >
-              <ProviderIcon displayName={label} baseUrl={baseUrl} size="sm" />
+              <ProviderIcon
+                displayName={label}
+                baseUrl={baseUrl}
+                {...(conn?.templateId === undefined || conn.templateId === null
+                  ? {}
+                  : { templateId: conn.templateId })}
+                size="sm"
+              />
             </span>
           )
         })}
@@ -459,6 +466,9 @@ function CreateGatewayKeyForm({
                   <ProviderIcon
                     displayName={connection.displayName}
                     baseUrl={connection.baseUrl}
+                    {...(connection.templateId === null
+                      ? {}
+                      : { templateId: connection.templateId })}
                     size="sm"
                   />
                   <span className="truncate text-sm font-medium">

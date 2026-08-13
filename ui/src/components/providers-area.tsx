@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { MoreHorizontal, Plus, Server } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -16,6 +17,13 @@ import { Card } from '@/components/card'
 import { EmptyState } from '@/components/empty-state'
 import { StatusBadge } from '@/components/status-badge'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Dot } from '@/components/dot'
 import { LineChart, Line } from '@/components/charts/line-chart'
 import {
@@ -39,9 +47,11 @@ import {
   createConnection,
   duplicateConnection,
   fetchConnections,
+  fetchProviderTemplates,
   ManagementError,
   purgeConnection,
   type ConnectionView,
+  type ProviderTemplateView,
 } from '@/lib/providers'
 import { fetchRequests } from '@/lib/requests'
 
@@ -260,6 +270,7 @@ function ConnectionRow({
           <ProviderIcon
             displayName={connection.displayName}
             baseUrl={connection.baseUrl}
+            {...(connection.templateId === null ? {} : { templateId: connection.templateId })}
           />
           <span className="truncate text-sm font-medium tracking-tight">
             {connection.displayName}
@@ -376,10 +387,69 @@ function CreateConnectionForm({
   const [baseUrl, setBaseUrl] = useState('')
   const [upstreamKey, setUpstreamKey] = useState('')
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(false)
+  const [templateId, setTemplateId] = useState<string | null>(null)
+  const [baseUrlDirty, setBaseUrlDirty] = useState(false)
+  const [templates, setTemplates] = useState<readonly ProviderTemplateView[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchProviderTemplates(controller.signal)
+      .then((list) => {
+        if (controller.signal.aborted) return
+        setTemplates(list)
+        setLoadError(null)
+        const fallback =
+          list.find((template) => template.id === 'generic-openai-compatible') ?? list[0]
+        if (fallback !== undefined) {
+          setTemplateId(fallback.id)
+          if (!baseUrlDirty) setBaseUrl(fallback.baseUrl)
+        }
+      })
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return
+        setTemplates([])
+        setLoadError(
+          cause instanceof ManagementError ? cause.message : 'Could not load provider templates.',
+        )
+      })
+    return () => controller.abort()
+  }, [])
+
+  const selectedTemplate =
+    templateId === null
+      ? null
+      : (templates?.find((template) => template.id === templateId) ?? null)
+
+  const handleTemplateChange = (next: string) => {
+    setTemplateId(next)
+    const template = templates?.find((candidate) => candidate.id === next)
+    if (template !== undefined && !baseUrlDirty) setBaseUrl(template.baseUrl)
+  }
+
+  const templateStatus =
+    loadError !== null
+      ? 'Could not load templates'
+      : templates === null
+        ? 'Loading templates…'
+        : templates.length === 0
+          ? 'No templates available'
+          : selectedTemplate?.displayName ?? 'Pick a template'
+
   const form = useSubmission(async () => {
-    await createConnection({ displayName, baseUrl, upstreamKey, allowInsecureHttp }, csrfToken)
+    await createConnection(
+      { displayName, baseUrl, upstreamKey, allowInsecureHttp, templateId },
+      csrfToken,
+    )
     onCreated()
   }, onFailure)
+
+  const baseUrlHint =
+    templateId === 'generic-openai-compatible'
+      ? 'Prefilled from the Generic OpenAI-compatible template. Override for a custom endpoint.'
+      : selectedTemplate !== null
+        ? `Prefilled from ${selectedTemplate.displayName}. Override for a self-hosted or proxy URL.`
+        : 'The provider’s OpenAI-compatible base URL, such as https://api.openai.com/v1.'
 
   return (
     <form className="flex flex-col gap-4" onSubmit={form.submit} noValidate>
@@ -390,12 +460,47 @@ function CreateConnectionForm({
         onChange={setDisplayName}
         problem={form.problemFor('displayName')}
       />
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="new-provider-template">Provider template</Label>
+        <Select
+          value={templateId ?? ''}
+          onValueChange={handleTemplateChange}
+          disabled={templates === null || templates.length === 0}
+        >
+          <SelectTrigger id="new-provider-template" className="w-full" size="sm">
+            <SelectValue>{templateStatus}</SelectValue>
+          </SelectTrigger>
+          <SelectContent align="start">
+            {templates?.map((template) => (
+              <SelectItem key={template.id} value={template.id} textValue={template.displayName}>
+                <span className="flex items-center gap-2">
+                  <ProviderIcon
+                    displayName={template.displayName}
+                    baseUrl={template.baseUrl}
+                    templateId={template.id}
+                    size="sm"
+                  />
+                  <span>{template.displayName}</span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {loadError !== null && (
+          <p className="text-status-danger text-xs">{loadError}</p>
+        )}
+      </div>
+
       <Field
         id="new-base-url"
         label="Base URL"
-        hint="The provider’s OpenAI-compatible base URL, such as https://api.openai.com/v1."
+        hint={baseUrlHint}
         value={baseUrl}
-        onChange={setBaseUrl}
+        onChange={(value) => {
+          setBaseUrl(value)
+          setBaseUrlDirty(true)
+        }}
         problem={form.problemFor('baseUrl')}
       />
       <Field

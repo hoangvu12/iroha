@@ -59,6 +59,7 @@ import {
   removeKey,
   testKey,
   updateKeySettings,
+  updateUpstreamAccount,
   type KeyView,
   type ProviderView,
 } from '@/lib/providers'
@@ -74,7 +75,7 @@ interface ProviderDetailProps {
   readonly onDeleted: () => void
 }
 
-interface ConnectionAnalytics {
+interface ProviderAnalytics {
   readonly hourlyCounts: readonly number[]
   readonly peakRpm: number
   readonly errorRate: number
@@ -94,7 +95,7 @@ export function ProviderDetail({
   onDeleted,
 }: ProviderDetailProps) {
   const [provider, setProvider] = useState<ProviderView | null>(null)
-  const [analytics, setAnalytics] = useState<ConnectionAnalytics | null>(null)
+  const [analytics, setAnalytics] = useState<ProviderAnalytics | null>(null)
   const [usage, setUsage] = useState<UsageView | null>(null)
   const [usageLoading, setUsageLoading] = useState(true)
   const [error, setError] = useState<ManagementError | null>(null)
@@ -130,7 +131,7 @@ export function ProviderDetail({
     void fetchRequests({ providerId }, { limit: 800 })
       .then((page) => {
         if (cancelled) return
-        setAnalytics(buildConnectionAnalytics(page.events))
+        setAnalytics(buildProviderAnalytics(page.events))
       })
       .catch(() => {
         if (cancelled) return
@@ -187,16 +188,16 @@ export function ProviderDetail({
 
   return (
     <div className="flex flex-col gap-6">
-      <ConnectionHeader
+      <ProviderHeader
         provider={provider}
         status={status}
         archived={archived}
         onBack={onBack}
       />
 
-      <ConnectionAnalyticsStrip analytics={analytics} />
+      <ProviderAnalyticsStrip analytics={analytics} />
 
-      <ConnectionActions
+      <ProviderActions
         provider={provider}
         csrfToken={csrfToken}
         onChanged={reload}
@@ -216,7 +217,7 @@ export function ProviderDetail({
           csrfToken={csrfToken}
           onChanged={reload}
         />
-        <ConnectionDetailsCard provider={provider} />
+        <ProviderDetailsCard provider={provider} />
         {usage !== null ? (
           <UsageAdapterCard usage={usage} providerId={providerId} />
         ) : usageLoading ? (
@@ -227,7 +228,7 @@ export function ProviderDetail({
   )
 }
 
-function ConnectionHeader({
+function ProviderHeader({
   provider,
   status,
   archived,
@@ -278,10 +279,10 @@ function ConnectionHeader({
   )
 }
 
-function ConnectionAnalyticsStrip({
+function ProviderAnalyticsStrip({
   analytics,
 }: {
-  readonly analytics: ConnectionAnalytics | null
+  readonly analytics: ProviderAnalytics | null
 }) {
   if (analytics === null) {
     return (
@@ -369,7 +370,7 @@ function AnalyticsSparkline({ hourlyCounts }: { readonly hourlyCounts: readonly 
   )
 }
 
-function ConnectionActions({
+function ProviderActions({
   provider,
   csrfToken,
   onChanged,
@@ -579,6 +580,7 @@ function UpstreamKeysCard({
       {adding && !provider.archived && (
         <AddKeyDialog
           providerId={provider.id}
+          defaultBaseUrl={provider.baseUrl}
           csrfToken={csrfToken}
           accounts={provider.accounts}
           onAdd={(input) =>
@@ -592,6 +594,7 @@ function UpstreamKeysCard({
       {configuring !== null && !provider.archived && (
         <ConfigureKeyDialog
           providerId={provider.id}
+          defaultBaseUrl={provider.baseUrl}
           keyView={configuring}
           accounts={provider.accounts}
           csrfToken={csrfToken}
@@ -620,6 +623,9 @@ function UpstreamKeysCard({
                 </th>
                 <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
                   Account
+                </th>
+                <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
+                  Effective base URL
                 </th>
                 <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
                   Model access
@@ -652,6 +658,7 @@ function UpstreamKeysCard({
 
 function AddKeyDialog({
   providerId,
+  defaultBaseUrl,
   csrfToken,
   accounts,
   onAdd,
@@ -659,10 +666,12 @@ function AddKeyDialog({
   onCancel,
 }: {
   readonly providerId: string
+  readonly defaultBaseUrl: string
   readonly csrfToken: string
   readonly accounts: ProviderView['accounts']
   readonly onAdd: (input: {
     readonly upstreamKey: string
+    readonly baseUrl?: string | null
     readonly accountId: string | null
     readonly allowedModels: readonly string[] | null
     readonly deniedModels: readonly string[] | null
@@ -671,11 +680,15 @@ function AddKeyDialog({
   readonly onCancel: () => void
 }) {
   const [value, setValue] = useState('')
+  const [baseUrl, setBaseUrl] = useState(defaultBaseUrl)
   const [accountId, setAccountId] = useState<string>('')
   const [allowedModels, setAllowedModels] = useState<readonly string[]>([])
   const [deniedModels, setDeniedModels] = useState<readonly string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ManagementError | null>(null)
+
+  const trimmedBaseUrl = baseUrl.trim()
+  const explicitOverride = trimmedBaseUrl !== '' && trimmedBaseUrl !== defaultBaseUrl
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault()
@@ -684,12 +697,14 @@ function AddKeyDialog({
     setError(null)
     void onAdd({
       upstreamKey: value,
+      baseUrl: explicitOverride ? trimmedBaseUrl : null,
       accountId: accountId === '' ? null : accountId,
       allowedModels: allowedModels.length === 0 ? null : allowedModels,
       deniedModels: deniedModels.length === 0 ? null : deniedModels,
     })
       .then(() => {
         setValue('')
+        setBaseUrl(defaultBaseUrl)
         onDone()
       })
       .catch((cause: unknown) =>
@@ -727,6 +742,28 @@ function AddKeyDialog({
               value={value}
               onChange={(event) => setValue(event.target.value)}
               className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="add-key-base-url"
+              className="text-foreground text-sm font-medium"
+            >
+              Base URL override
+            </label>
+            <p className="text-muted-foreground text-xs">
+              Optional. Leave blank or set to the Provider default to inherit it. Set a
+              different URL to send requests from this key to a separate endpoint.
+            </p>
+            <input
+              id="add-key-base-url"
+              type="url"
+              autoComplete="off"
+              placeholder={defaultBaseUrl}
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              className="border-input bg-background h-9 rounded-md border px-2 font-mono text-sm"
             />
           </div>
 
@@ -809,6 +846,7 @@ function AddKeyDialog({
 
 function ConfigureKeyDialog({
   providerId,
+  defaultBaseUrl,
   keyView,
   accounts,
   csrfToken,
@@ -816,6 +854,7 @@ function ConfigureKeyDialog({
   onCancel,
 }: {
   readonly providerId: string
+  readonly defaultBaseUrl: string
   readonly keyView: KeyView
   readonly accounts: ProviderView['accounts']
   readonly csrfToken: string
@@ -823,10 +862,15 @@ function ConfigureKeyDialog({
   readonly onCancel: () => void
 }) {
   const [accountId, setAccountId] = useState(keyView.accountId ?? '')
+  const [baseUrl, setBaseUrl] = useState(keyView.baseUrl ?? '')
   const [allowedModels, setAllowedModels] = useState<readonly string[]>(keyView.allowedModels ?? [])
   const [deniedModels, setDeniedModels] = useState<readonly string[]>(keyView.deniedModels ?? [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ManagementError | null>(null)
+
+  const trimmedBaseUrl = baseUrl.trim()
+  const explicitOverride = trimmedBaseUrl !== '' && trimmedBaseUrl !== defaultBaseUrl
+  const clearingOverride = trimmedBaseUrl === '' && keyView.baseUrl !== null
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault()
@@ -838,6 +882,7 @@ function ConfigureKeyDialog({
       keyView.id,
       {
         accountId: accountId === '' ? null : accountId,
+        baseUrl: explicitOverride ? trimmedBaseUrl : clearingOverride ? null : undefined,
         allowedModels: allowedModels.length === 0 ? null : [...allowedModels],
         deniedModels: deniedModels.length === 0 ? null : [...deniedModels],
       },
@@ -864,6 +909,42 @@ function ConfigureKeyDialog({
           </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor={`key-${keyView.id}-base-url`}
+              className="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              Base URL override
+            </label>
+            <p className="text-muted-foreground text-xs">
+              The key currently reaches{' '}
+              <span className="font-mono">{keyView.effectiveBaseUrl}</span>.
+              {keyView.baseUrl === null ? (
+                <>
+                  {' '}
+                  To override the Provider default (
+                  <span className="font-mono">{defaultBaseUrl}</span>) with a separate
+                  endpoint, enter a URL. Leave blank to keep inheriting the default.
+                </>
+              ) : (
+                <>
+                  {' '}
+                  Clear the field to fall back to the Provider default (
+                  <span className="font-mono">{defaultBaseUrl}</span>).
+                </>
+              )}
+            </p>
+            <input
+              id={`key-${keyView.id}-base-url`}
+              type="url"
+              autoComplete="off"
+              placeholder={defaultBaseUrl}
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              className="border-input bg-background h-9 rounded-md border px-2 font-mono text-sm"
+            />
+          </div>
+
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor={`key-${keyView.id}-account`}
@@ -1047,6 +1128,7 @@ function UpstreamKeyRow({
   readonly onConfigure: () => void
 }) {
   const account = accounts.find((candidate) => candidate.id === keyView.accountId)
+  const hasOverride = keyView.baseUrl !== null
 
   return (
     <tr className="hover:bg-muted/30 group transition-colors">
@@ -1064,6 +1146,16 @@ function UpstreamKeyRow({
           <span className="text-muted-foreground italic">Independent</span>
         ) : (
           <span>{account.displayName}</span>
+        )}
+      </td>
+      <td className="px-5 py-3.5 align-top">
+        <span className="font-mono text-xs" title={keyView.effectiveBaseUrl}>
+          {keyView.effectiveBaseUrl}
+        </span>
+        {hasOverride && (
+          <span className="bg-muted text-muted-foreground ml-1.5 inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium">
+            override
+          </span>
         )}
       </td>
       <td className="px-5 py-3.5 align-top text-xs">
@@ -1146,6 +1238,8 @@ function SharedAccountsCard({
   readonly onChanged: () => void
 }) {
   const [accountName, setAccountName] = useState('')
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<ManagementError | null>(null)
 
@@ -1164,6 +1258,27 @@ function SharedAccountsCard({
     } finally {
       setBusy(null)
     }
+  }
+
+  const startRename = (accountId: string, currentName: string) => {
+    setError(null)
+    setRenamingId(accountId)
+    setRenameDraft(currentName)
+  }
+
+  const cancelRename = () => {
+    setRenamingId(null)
+    setRenameDraft('')
+  }
+
+  const submitRename = async (accountId: string) => {
+    const trimmed = renameDraft.trim()
+    if (trimmed === '') return
+    await run(`rename-account-${accountId}`, async () => {
+      await updateUpstreamAccount(provider.id, accountId, trimmed, csrfToken)
+      setRenamingId(null)
+      setRenameDraft('')
+    })
   }
 
   return (
@@ -1188,35 +1303,90 @@ function SharedAccountsCard({
         <ul className="mt-4 flex flex-col gap-2">
           {provider.accounts.map((account) => {
             const memberKeys = provider.keys.filter((key) => key.accountId === account.id)
+            const isRenaming = renamingId === account.id
             return (
               <li
                 key={account.id}
-                className="border-border bg-muted/40 flex items-center justify-between rounded-lg border px-3 py-2"
+                className="border-border bg-muted/40 flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
               >
-                <div className="flex items-center gap-2">
-                  <Users className="text-muted-foreground size-3.5" aria-hidden />
-                  <span className="text-sm font-medium">{account.displayName}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-muted-foreground text-xs">
-                    {memberKeys.length} {memberKeys.length === 1 ? 'key' : 'keys'}
-                  </span>
-                  {!provider.archived && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() =>
-                        void run(`delete-account-${account.id}`, () =>
-                          deleteUpstreamAccount(provider.id, account.id, csrfToken),
-                        )
-                      }
+                {isRenaming ? (
+                  <form
+                    className="flex flex-1 items-center gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void submitRename(account.id)
+                    }}
+                  >
+                    <Users className="text-muted-foreground size-3.5" aria-hidden />
+                    <input
+                      id={`rename-account-${account.id}`}
+                      type="text"
+                      autoComplete="off"
+                      value={renameDraft}
+                      onChange={(event) => setRenameDraft(event.target.value)}
+                      className="border-input bg-background h-8 flex-1 rounded-md border px-2 text-sm"
                       disabled={busy !== null}
-                    >
-                      {busy === `delete-account-${account.id}` ? 'Deleting…' : 'Delete'}
-                    </Button>
-                  )}
-                </div>
+                    />
+                    {!provider.archived && (
+                      <>
+                        <Button
+                          type="submit"
+                          size="xs"
+                          disabled={busy !== null || renameDraft.trim() === ''}
+                        >
+                          {busy === `rename-account-${account.id}` ? 'Saving…' : 'Save'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          onClick={cancelRename}
+                          disabled={busy !== null}
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    )}
+                  </form>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Users className="text-muted-foreground size-3.5" aria-hidden />
+                      <span className="text-sm font-medium">{account.displayName}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-muted-foreground text-xs">
+                        {memberKeys.length} {memberKeys.length === 1 ? 'key' : 'keys'}
+                      </span>
+                      {!provider.archived && (
+                        <>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => startRename(account.id, account.displayName)}
+                            disabled={busy !== null}
+                          >
+                            Rename
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            onClick={() =>
+                              void run(`delete-account-${account.id}`, () =>
+                                deleteUpstreamAccount(provider.id, account.id, csrfToken),
+                              )
+                            }
+                            disabled={busy !== null}
+                          >
+                            {busy === `delete-account-${account.id}` ? 'Deleting…' : 'Delete'}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
               </li>
             )
           })}
@@ -1259,7 +1429,7 @@ function SharedAccountsCard({
   )
 }
 
-function ConnectionDetailsCard({ provider }: { readonly provider: ProviderView }) {
+function ProviderDetailsCard({ provider }: { readonly provider: ProviderView }) {
   return (
     <section className="bg-card rounded-xl border p-5">
       <h3 className="text-sm font-semibold tracking-tight">Provider details</h3>
@@ -1399,7 +1569,7 @@ function formatTime(iso: string): string {
   return formatTimeWithUtc(iso, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-function buildConnectionAnalytics(events: readonly RequestEventView[]): ConnectionAnalytics {
+function buildProviderAnalytics(events: readonly RequestEventView[]): ProviderAnalytics {
   const now = Date.now()
   const currentHourStart = Math.floor(now / HOUR_MS) * HOUR_MS
   const firstHourStart = currentHourStart - (ANALYTICS_HOURS - 1) * HOUR_MS

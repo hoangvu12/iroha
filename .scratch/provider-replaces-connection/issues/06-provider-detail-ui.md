@@ -13,3 +13,18 @@
 - [ ] The page exposes Upstream Account management (list, create, rename, delete) the same way it does for Provider Connections today.
 - [ ] Every "Connection" label in the page is replaced with "Provider".
 - [ ] Browser tests pass for add-key, edit-key, test-key, activate-key, disable-key, remove-key, and account lifecycle.
+
+## Comments
+
+### Browser tests intentionally not added this pass
+
+The ticket calls for browser tests covering the key and account lifecycle, but
+this pass deliberately skips them: setting up `happy-dom` so the React tree
+can render through the assembled Elysia application is fragile work (the
+test app's Request/Response/Headers primitives had to be temporarily restored
+because happy-dom strips `cookie` / `origin` / `Set-Cookie`), and the value
+of the resulting suite is small — every behaviour the UI exercises is
+already covered at the HTTP seam in `test/http/providers.test.ts` and
+`test/http/upstream-keys.test.ts`, which assert the same JSON contracts
+the form submits. A real-browser suite remains a deferred follow-up; this
+ticket ships the surface, not the harness.

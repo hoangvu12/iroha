@@ -171,8 +171,8 @@ function NavigationButton({
 function SidebarFooter({ version, onSignOut }: { version: string; onSignOut: () => void }) {
   return (
     <div className="border-sidebar-border mt-auto border-t p-2">
-      <FooterLink icon={FileText} label="Documentation" />
-      <FooterLink icon={Github} label="GitHub" />
+      <FooterLink icon={FileText} label="Documentation" href="/docs" />
+      <FooterLink icon={Github} label="GitHub" href="https://github.com/hoangvu12/iroha" />
       <FooterLink icon={LogOut} label="Sign out" onClick={onSignOut} />
       <div className="border-sidebar-border mt-2 flex items-center justify-between border-t pt-2">
         <span className="text-muted-foreground text-[10px] font-mono opacity-70">v{version}</span>
@@ -185,29 +185,40 @@ function SidebarFooter({ version, onSignOut }: { version: string; onSignOut: () 
 function FooterLink({
   icon: Icon,
   label,
+  href,
   onClick,
 }: {
   icon: typeof FileText
   label: string
+  href?: string
   onClick?: () => void
 }) {
-  if (onClick === undefined) {
+  const className =
+    'text-muted-foreground hover:text-foreground hover:bg-sidebar-accent flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors'
+  const icon = <Icon className="size-4 shrink-0" aria-hidden strokeWidth={1.5} />
+  const text = <span className="truncate">{label}</span>
+
+  if (href !== undefined) {
     return (
-      <span className="text-muted-foreground flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm">
-        <Icon className="size-4 shrink-0" aria-hidden strokeWidth={1.5} />
-        <span className="truncate">{label}</span>
-      </span>
+      <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
+        {icon}
+        {text}
+      </a>
+    )
+  }
+  if (onClick !== undefined) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {icon}
+        {text}
+      </button>
     )
   }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-muted-foreground hover:text-foreground hover:bg-sidebar-accent flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors"
-    >
-      <Icon className="size-4 shrink-0" aria-hidden strokeWidth={1.5} />
-      <span className="truncate">{label}</span>
-    </button>
+    <span className="text-muted-foreground flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm">
+      {icon}
+      {text}
+    </span>
   )
 }
 

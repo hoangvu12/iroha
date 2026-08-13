@@ -42,6 +42,7 @@ export default defineConfig({
       '/health': proxyToIroha,
       '/logout': proxyToIroha,
       '/setup': proxyToIroha,
+      '/docs': proxyToIroha,
     },
   },
 })

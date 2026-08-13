@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Activity, SearchX } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -6,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/empty-state'
 import {
   fetchConnections,
   type ConnectionView,
@@ -124,11 +126,21 @@ export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void
         {list === null ? (
           <Skeleton className="h-32 w-full" />
         ) : list.events.length === 0 ? (
-          <p className="text-muted-foreground py-3 text-sm">
-            {hasFilter(filter)
-              ? 'No requests match this filter.'
-              : 'No requests recorded yet. Inference calls will appear here.'}
-          </p>
+          hasFilter(filter) ? (
+            <EmptyState
+              icon={SearchX}
+              title="No requests match this filter"
+              description="Loosen the filter or clear it to see more inference activity."
+              compact
+            />
+          ) : (
+            <EmptyState
+              icon={Activity}
+              title="No requests recorded yet"
+              description="Inference calls against the Gateway will surface here as they happen."
+              compact
+            />
+          )
         ) : (
           <RequestsTable
             events={list.events}

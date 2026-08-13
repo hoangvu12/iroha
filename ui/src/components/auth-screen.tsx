@@ -26,9 +26,20 @@ export function AuthScreen({ state, onAuthenticated }: AuthScreenProps) {
   return (
     <div className="bg-canvas flex min-h-full items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
-        <div className="flex items-baseline gap-2">
-          <span className="text-base font-semibold tracking-tight">Iroha</span>
-          <span className="text-muted-foreground text-xs">Gateway</span>
+        <div className="flex items-center gap-2.5">
+          <span
+            aria-hidden
+            className="relative inline-flex size-6 items-center justify-center rounded-lg bg-[#1A1A1A] shadow-sm"
+          >
+            <span className="absolute top-1.5 flex gap-1">
+              <span className="size-1 rounded-full bg-white" />
+              <span className="size-1 rounded-full bg-white" />
+            </span>
+          </span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-base font-semibold tracking-tight">Iroha</span>
+            <span className="text-muted-foreground text-xs">Gateway</span>
+          </div>
         </div>
 
         <Separator className="my-5" />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { ClipboardList, SearchX } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -6,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/empty-state'
 import {
   AuditError,
   clearAudit,
@@ -159,11 +161,21 @@ export function AuditArea({
         {list === null ? (
           <Skeleton className="h-32 w-full" />
         ) : list.events.length === 0 ? (
-          <p className="text-muted-foreground py-3 text-sm">
-            {filter.actionPrefix !== undefined || filter.outcome !== undefined
-              ? 'No audit events match this filter.'
-              : 'No audit events yet.'}
-          </p>
+          filter.actionPrefix !== undefined || filter.outcome !== undefined ? (
+            <EmptyState
+              icon={SearchX}
+              title="No audit events match this filter"
+              description="Widen the filter or clear it to see the full audit trail."
+              compact
+            />
+          ) : (
+            <EmptyState
+              icon={ClipboardList}
+              title="No audit events yet"
+              description="Owner actions and management events will appear here."
+              compact
+            />
+          )
         ) : (
           <AuditTable
             events={list.events}

@@ -1,3 +1,4 @@
+import { KeyRound } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface HealthDistributionProps {
@@ -24,7 +25,21 @@ export function HealthDistribution({
 
   if (total === 0) {
     return (
-      <div className={cn('text-muted-foreground text-xs', className)}>No keys yet.</div>
+      <div
+        role="img"
+        aria-label="No keys configured"
+        className={cn(
+          'border-border bg-muted/40 flex h-12 items-center justify-center gap-2 rounded-md border border-dashed',
+          className,
+        )}
+      >
+        <KeyRound
+          className="text-muted-foreground size-4"
+          aria-hidden
+          strokeWidth={1.5}
+        />
+        <span className="text-muted-foreground text-xs">No upstream keys configured.</span>
+      </div>
     )
   }
 

@@ -21,7 +21,7 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.546 0.245 262.881);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -67,6 +67,28 @@
   --chart-label: oklch(0.45 0.01 260);
   --chart-tooltip-background: oklch(0.21 0.006 285 / 0.9);
   --chart-tooltip-foreground: oklch(0.985 0 0);
+
+  /* Layered card shadow, lifted from the recreation: a hairline ring at 1px
+     plus progressively softer drop shadows so cards feel slightly raised. */
+  --shadow-card: 0 0 0 1px rgb(0 0 0 / 0.04),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.06),
+    0 3px 3px -1.5px rgb(0 0 0 / 0.06),
+    0 6px 6px -3px rgb(0 0 0 / 0.05),
+    0 12px 12px -6px rgb(0 0 0 / 0.04);
+  --chart-line-primary: var(--chart-1);
+  --chart-line-secondary: var(--chart-2);
+  --chart-crosshair: oklch(0.4 0.1828 274.34);
+  --chart-brush-border: var(--chart-grid);
+  --chart-tooltip-muted: oklch(0.65 0.01 260);
+  --chart-marker-background: oklch(0.97 0.005 260);
+  --chart-marker-border: oklch(0.85 0.01 260);
+  --chart-marker-foreground: oklch(0.3 0.01 260);
+  --chart-scale-01: oklch(0.97 0.015 260);
+  --chart-scale-02: oklch(0.88 0.07 260);
+  --chart-scale-03: oklch(0.74 0.13 260);
+  --chart-scale-04: oklch(0.6 0.18 260);
+  --chart-scale-05: oklch(0.45 0.22 260);
+  --chart-scale-pattern-color: oklch(0.96 0.01 260);
 }
 
 .dark {
@@ -77,8 +99,8 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.62 0.19 263);
+  --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -121,6 +143,32 @@
   --chart-label: oklch(0.75 0.01 260);
   --chart-tooltip-background: oklch(0.21 0.006 285 / 0.9);
   --chart-tooltip-foreground: oklch(0.985 0 0);
+
+  --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.06),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.4),
+    0 6px 12px -3px rgb(0 0 0 / 0.3);
+
+  --chart-crosshair: oklch(0.45 0 0);
+
+  --chart-brush-border: var(--chart-grid);
+
+  --chart-marker-background: oklch(0.25 0.01 260);
+
+  --chart-marker-border: oklch(0.4 0.01 260);
+
+  --chart-marker-foreground: oklch(0.9 0 0);
+
+  --chart-scale-01: oklch(0.25 0.05 260);
+
+  --chart-scale-02: oklch(0.35 0.08 260);
+
+  --chart-scale-03: oklch(0.48 0.12 260);
+
+  --chart-scale-04: oklch(0.6 0.16 260);
+
+  --chart-scale-05: oklch(0.72 0.18 260);
+
+  --chart-scale-pattern-color: oklch(0.145 0 0);
 }
 
 @theme inline {
@@ -180,11 +228,27 @@
   --color-chart-tooltip-background: var(--chart-tooltip-background);
   --color-chart-tooltip-foreground: var(--chart-tooltip-foreground);
 
+  --shadow-card: var(--shadow-card);
+
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
   --radius-2xl: calc(var(--radius) * 1.8);
+  --color-chart-scale-pattern-color: var(----chart-scale-pattern-color);
+  --color-chart-scale-05: var(----chart-scale-05);
+  --color-chart-scale-04: var(----chart-scale-04);
+  --color-chart-scale-03: var(----chart-scale-03);
+  --color-chart-scale-02: var(----chart-scale-02);
+  --color-chart-scale-01: var(----chart-scale-01);
+  --color-chart-marker-foreground: var(----chart-marker-foreground);
+  --color-chart-marker-border: var(----chart-marker-border);
+  --color-chart-marker-background: var(----chart-marker-background);
+  --color-chart-tooltip-muted: var(----chart-tooltip-muted);
+  --chart-brush-border: var(----chart-brush-border);
+  --color-chart-crosshair: var(----chart-crosshair);
+  --chart-line-secondary: var(----chart-line-secondary);
+  --chart-line-primary: var(----chart-line-primary);
 }
 
 @layer base {

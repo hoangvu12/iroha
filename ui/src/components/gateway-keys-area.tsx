@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { KeyRound } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -6,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/empty-state'
 import {
   createGatewayKey,
   fetchGatewayKeys,
@@ -66,18 +68,20 @@ export function GatewayKeysArea({
               restricted to a set of Provider Connections and optional exact model IDs.
             </p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setCreating((open) => !open)
-              setIssued(null)
-            }}
-            disabled={keys === null || connections === null}
-          >
-            {creating ? 'Close form' : 'New Gateway Key'}
-          </Button>
+          {(keys === null || keys.length > 0 || creating) && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setCreating((open) => !open)
+                setIssued(null)
+              }}
+              disabled={keys === null || connections === null}
+            >
+              {creating ? 'Close form' : 'New Gateway Key'}
+            </Button>
+          )}
         </div>
 
         <Separator className="my-4" />
@@ -117,10 +121,12 @@ export function GatewayKeysArea({
         {keys === null ? (
           <Skeleton className="h-16 w-full" />
         ) : keys.length === 0 ? (
-          <p className="text-muted-foreground py-3 text-sm">
-            No Gateway Keys yet. Create the first one to give an application access to the
-            Gateway.
-          </p>
+          <EmptyState
+            icon={KeyRound}
+            title="No Gateway Keys yet"
+            description="Create the first one to give an application access to the Gateway."
+            action={{ label: 'New Gateway Key', onClick: () => setCreating(true) }}
+          />
         ) : (
           <ul className="divide-border divide-y">
             {keys.map((key) => (

@@ -12,14 +12,17 @@ const OPTIONS: ReadonlyArray<{ value: ThemePreference; label: string; icon: type
  * A three-state segmented control rather than a cycling button, so the current
  * preference is readable without activating anything.
  */
-export function ThemeToggle() {
+export function ThemeToggle({ compact = false }: { readonly compact?: boolean } = {}) {
   const { preference, setPreference } = useTheme()
 
   return (
     <div
       role="radiogroup"
       aria-label="Color theme"
-      className="border-border bg-background inline-flex items-center rounded-md border p-0.5"
+      className={cn(
+        'border-border bg-background inline-flex items-center rounded-md border p-0.5',
+        compact && 'border-sidebar-border',
+      )}
     >
       {OPTIONS.map(({ value, label, icon: Icon }) => {
         const selected = preference === value

@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowLeft,
   Archive,
+  Check,
   Copy,
+  Eye,
+  Info,
   KeyRound,
+  Loader2,
   RefreshCcw,
   Settings,
-  Users,
 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -25,22 +28,26 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { MoreHorizontal } from 'lucide-react'
 import { ProviderIcon } from '@/components/provider-icon'
 import { EditProviderForm } from '@/components/edit-provider-form'
 import { ModelListPicker } from '@/components/model-list-picker'
+import { CodeSnippetCard } from '@/components/code-snippet-card'
 import {
   HEALTH_LABELS,
   HEALTH_ORDER,
   KeyHealthBadge,
-  keyNeedsAttention,
 } from '@/components/key-health'
 import { Dot } from '@/components/dot'
 import { LineChart, Line } from '@/components/charts/line-chart'
@@ -49,17 +56,15 @@ import {
   activateKey,
   addKey,
   archiveProvider,
-  createUpstreamAccount,
-  deleteUpstreamAccount,
   disableKey,
   duplicateProvider,
   fetchProviders,
   ManagementError,
   purgeProvider,
   removeKey,
+  revealKey,
   testKey,
   updateKeySettings,
-  updateUpstreamAccount,
   type KeyView,
   type ProviderView,
 } from '@/lib/providers'
@@ -210,13 +215,10 @@ export function ProviderDetail({
         onChanged={reload}
       />
 
+      <CodeSnippetCard provider={provider} />
+
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <KeyHealthCard provider={provider} />
-        <SharedAccountsCard
-          provider={provider}
-          csrfToken={csrfToken}
-          onChanged={reload}
-        />
         <ProviderDetailsCard provider={provider} />
         {usage !== null ? (
           <UsageAdapterCard usage={usage} providerId={providerId} />
@@ -582,7 +584,6 @@ function UpstreamKeysCard({
           providerId={provider.id}
           defaultBaseUrl={provider.baseUrl}
           csrfToken={csrfToken}
-          accounts={provider.accounts}
           onAdd={(input) =>
             run('add-key', () => addKey(provider.id, input, csrfToken))
           }
@@ -596,7 +597,6 @@ function UpstreamKeysCard({
           providerId={provider.id}
           defaultBaseUrl={provider.baseUrl}
           keyView={configuring}
-          accounts={provider.accounts}
           csrfToken={csrfToken}
           onDone={() => {
             setConfiguring(null)
@@ -619,13 +619,7 @@ function UpstreamKeysCard({
                   Status
                 </th>
                 <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
-                  Key ID
-                </th>
-                <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
-                  Account
-                </th>
-                <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
-                  Effective base URL
+                  base url
                 </th>
                 <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
                   Model access
@@ -640,7 +634,6 @@ function UpstreamKeysCard({
                 <UpstreamKeyRow
                   key={key.id}
                   providerId={provider.id}
-                  accounts={provider.accounts}
                   keyView={key}
                   csrfToken={csrfToken}
                   busy={busy}
@@ -660,7 +653,6 @@ function AddKeyDialog({
   providerId,
   defaultBaseUrl,
   csrfToken,
-  accounts,
   onAdd,
   onDone,
   onCancel,
@@ -668,7 +660,6 @@ function AddKeyDialog({
   readonly providerId: string
   readonly defaultBaseUrl: string
   readonly csrfToken: string
-  readonly accounts: ProviderView['accounts']
   readonly onAdd: (input: {
     readonly upstreamKey: string
     readonly baseUrl?: string | null
@@ -681,7 +672,6 @@ function AddKeyDialog({
 }) {
   const [value, setValue] = useState('')
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl)
-  const [accountId, setAccountId] = useState<string>('')
   const [allowedModels, setAllowedModels] = useState<readonly string[]>([])
   const [deniedModels, setDeniedModels] = useState<readonly string[]>([])
   const [busy, setBusy] = useState(false)
@@ -698,7 +688,7 @@ function AddKeyDialog({
     void onAdd({
       upstreamKey: value,
       baseUrl: explicitOverride ? trimmedBaseUrl : null,
-      accountId: accountId === '' ? null : accountId,
+      accountId: null,
       allowedModels: allowedModels.length === 0 ? null : allowedModels,
       deniedModels: deniedModels.length === 0 ? null : deniedModels,
     })
@@ -767,31 +757,6 @@ function AddKeyDialog({
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="add-key-account"
-              className="text-foreground text-sm font-medium"
-            >
-              Shared account
-            </label>
-            <Select
-              value={accountId === '' ? '__independent' : accountId}
-              onValueChange={(value) => setAccountId(value === '__independent' ? '' : value)}
-            >
-              <SelectTrigger id="add-key-account" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__independent">Independent</SelectItem>
-                {accounts.map((account) => (
-                  <SelectItem key={account.id} value={account.id}>
-                    {account.displayName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           <div className="flex flex-col gap-2">
             <label className="text-foreground text-sm font-medium">
               Only allow models
@@ -848,7 +813,6 @@ function ConfigureKeyDialog({
   providerId,
   defaultBaseUrl,
   keyView,
-  accounts,
   csrfToken,
   onDone,
   onCancel,
@@ -856,12 +820,10 @@ function ConfigureKeyDialog({
   readonly providerId: string
   readonly defaultBaseUrl: string
   readonly keyView: KeyView
-  readonly accounts: ProviderView['accounts']
   readonly csrfToken: string
   readonly onDone: () => void
   readonly onCancel: () => void
 }) {
-  const [accountId, setAccountId] = useState(keyView.accountId ?? '')
   const [baseUrl, setBaseUrl] = useState(keyView.baseUrl ?? '')
   const [allowedModels, setAllowedModels] = useState<readonly string[]>(keyView.allowedModels ?? [])
   const [deniedModels, setDeniedModels] = useState<readonly string[]>(keyView.deniedModels ?? [])
@@ -881,7 +843,7 @@ function ConfigureKeyDialog({
       providerId,
       keyView.id,
       {
-        accountId: accountId === '' ? null : accountId,
+        accountId: null,
         baseUrl: explicitOverride ? trimmedBaseUrl : clearingOverride ? null : undefined,
         allowedModels: allowedModels.length === 0 ? null : [...allowedModels],
         deniedModels: deniedModels.length === 0 ? null : [...deniedModels],
@@ -945,31 +907,6 @@ function ConfigureKeyDialog({
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor={`key-${keyView.id}-account`}
-              className="text-muted-foreground text-xs tracking-wide uppercase"
-            >
-              Shared account
-            </label>
-            <Select
-              value={accountId === '' ? '__independent' : accountId}
-              onValueChange={(value) => setAccountId(value === '__independent' ? '' : value)}
-            >
-              <SelectTrigger id={`key-${keyView.id}-account`} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__independent">Independent</SelectItem>
-                {accounts.map((account) => (
-                  <SelectItem key={account.id} value={account.id}>
-                    {account.displayName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           <div className="flex flex-col gap-2">
             <label className="text-foreground text-sm font-medium">
               Only allow models
@@ -1029,6 +966,9 @@ function KeyActionsMenu({
   busy,
   run,
   onConfigure,
+  onReveal,
+  revealing,
+  revealed,
 }: {
   readonly keyView: KeyView
   readonly providerId: string
@@ -1036,83 +976,112 @@ function KeyActionsMenu({
   readonly busy: string | null
   readonly run: (label: string, perform: () => Promise<unknown>) => Promise<void>
   readonly onConfigure: () => void
+  readonly onReveal: () => void
+  readonly revealing: boolean
+  readonly revealed: boolean
 }) {
-  const [confirmingRemove, setConfirmingRemove] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const onConfirmRemove = () => {
+    void run(`remove-${keyView.id}`, () => removeKey(providerId, keyView.id, csrfToken))
+  }
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`Actions for ${keyView.id}`}
-        >
-          <MoreHorizontal className="size-3.5" aria-hidden />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-40">
-        <DropdownMenuItem onSelect={onConfigure} disabled={busy !== null}>
-          Configure
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() =>
-            void run(`test-${keyView.id}`, () => testKey(providerId, keyView.id, csrfToken))
-          }
-          disabled={busy !== null}
-        >
-          {busy === `test-${keyView.id}` ? 'Testing…' : 'Test'}
-        </DropdownMenuItem>
-        {keyView.health !== 'active' && (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Actions for ${keyView.id}`}
+          >
+            <MoreHorizontal className="size-3.5" aria-hidden />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem onSelect={onConfigure} disabled={busy !== null}>
+            Configure
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={onReveal}
+            disabled={busy !== null || revealing}
+          >
+            <Eye className="size-3.5" aria-hidden />
+            {revealing ? 'Revealing…' : revealed ? 'Reveal again' : 'Reveal value'}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={() =>
-              void run(`activate-${keyView.id}`, () =>
-                activateKey(providerId, keyView.id, csrfToken),
-              )
+              void run(`test-${keyView.id}`, () => testKey(providerId, keyView.id, csrfToken))
             }
             disabled={busy !== null}
           >
-            {busy === `activate-${keyView.id}` ? 'Activating…' : 'Activate'}
+            {busy === `test-${keyView.id}` ? 'Testing…' : 'Test'}
           </DropdownMenuItem>
-        )}
-        {keyView.health !== 'disabled' && (
+          {keyView.health !== 'active' && (
+            <DropdownMenuItem
+              onSelect={() =>
+                void run(`activate-${keyView.id}`, () =>
+                  activateKey(providerId, keyView.id, csrfToken),
+                )
+              }
+              disabled={busy !== null}
+            >
+              {busy === `activate-${keyView.id}` ? 'Activating…' : 'Activate'}
+            </DropdownMenuItem>
+          )}
+          {keyView.health !== 'disabled' && (
+            <DropdownMenuItem
+              onSelect={() =>
+                void run(`disable-${keyView.id}`, () =>
+                  disableKey(providerId, keyView.id, csrfToken),
+                )
+              }
+              disabled={busy !== null}
+            >
+              {busy === `disable-${keyView.id}` ? 'Disabling…' : 'Disable'}
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
           <DropdownMenuItem
-            onSelect={() =>
-              void run(`disable-${keyView.id}`, () =>
-                disableKey(providerId, keyView.id, csrfToken),
-              )
-            }
+            variant="destructive"
+            onSelect={() => setRemoving(true)}
             disabled={busy !== null}
           >
-            {busy === `disable-${keyView.id}` ? 'Disabling…' : 'Disable'}
+            Remove
           </DropdownMenuItem>
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          variant="destructive"
-          onSelect={() => {
-            if (confirmingRemove) {
-              void run(`remove-${keyView.id}`, () => removeKey(providerId, keyView.id, csrfToken))
-            } else {
-              setConfirmingRemove(true)
-            }
-          }}
-          disabled={busy !== null}
-        >
-          {busy === `remove-${keyView.id}`
-            ? 'Removing…'
-            : confirmingRemove
-              ? 'Confirm remove'
-              : 'Remove'}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <AlertDialog open={removing} onOpenChange={setRemoving}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove upstream key?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the upstream key and its history. Other keys on
+              this Provider are unaffected. The encrypted key value is discarded and cannot
+              be recovered.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy === `remove-${keyView.id}`}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={busy === `remove-${keyView.id}`}
+              onClick={onConfirmRemove}
+            >
+              {busy === `remove-${keyView.id}` ? 'Removing…' : 'Remove key'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
 
 function UpstreamKeyRow({
   providerId,
-  accounts,
   keyView,
   csrfToken,
   busy,
@@ -1120,43 +1089,78 @@ function UpstreamKeyRow({
   onConfigure,
 }: {
   readonly providerId: string
-  readonly accounts: ProviderView['accounts']
   readonly keyView: KeyView
   readonly csrfToken: string
   readonly busy: string | null
   readonly run: (label: string, perform: () => Promise<unknown>) => Promise<void>
   readonly onConfigure: () => void
 }) {
-  const account = accounts.find((candidate) => candidate.id === keyView.accountId)
-  const hasOverride = keyView.baseUrl !== null
+  const [reveal, setReveal] = useState<{
+    readonly value: string
+  } | null>(null)
+  const [revealing, setRevealing] = useState(false)
+  const [revealError, setRevealError] = useState<ManagementError | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const onReveal = async () => {
+    setRevealing(true)
+    setRevealError(null)
+    try {
+      const result = await revealKey(providerId, keyView.id)
+      setReveal({ value: result.value })
+    } catch (cause) {
+      setRevealError(
+        cause instanceof ManagementError
+          ? cause
+          : new ManagementError('request_failed', 'Could not reveal the key.'),
+      )
+    } finally {
+      setRevealing(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1200)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  const onCopy = async () => {
+    if (reveal === null) return
+    try {
+      if (navigator.clipboard?.writeText !== undefined) {
+        await navigator.clipboard.writeText(reveal.value)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = reveal.value
+        textarea.setAttribute('readonly', '')
+        textarea.style.position = 'absolute'
+        textarea.style.left = '-9999px'
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+      }
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
 
   return (
     <tr className="hover:bg-muted/30 group transition-colors">
       <td className="px-5 py-3.5 align-top">
-        <KeyHealthBadge health={keyView.health} />
-        {keyNeedsAttention(keyView) && keyView.healthReason !== null && (
-          <p className="text-muted-foreground mt-1 text-xs">{keyView.healthReason}</p>
-        )}
-      </td>
-      <td className="px-5 py-3.5 align-top">
-        <span className="text-muted-foreground font-mono text-xs">{keyView.id}</span>
-      </td>
-      <td className="px-5 py-3.5 align-top text-sm">
-        {account === undefined ? (
-          <span className="text-muted-foreground italic">Independent</span>
-        ) : (
-          <span>{account.displayName}</span>
-        )}
+        <TestStatusBadge
+          health={keyView.health}
+          lastProbe={keyView.lastProbe}
+          healthReason={keyView.healthReason}
+          pending={busy === `test-${keyView.id}`}
+        />
       </td>
       <td className="px-5 py-3.5 align-top">
         <span className="font-mono text-xs" title={keyView.effectiveBaseUrl}>
           {keyView.effectiveBaseUrl}
         </span>
-        {hasOverride && (
-          <span className="bg-muted text-muted-foreground ml-1.5 inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium">
-            override
-          </span>
-        )}
       </td>
       <td className="px-5 py-3.5 align-top text-xs">
         {keyView.allowedModels !== null
@@ -1166,18 +1170,156 @@ function UpstreamKeyRow({
             : 'All models'}
       </td>
       <td className="px-5 py-3.5 text-right align-top">
-        <div className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-          <KeyActionsMenu
-            keyView={keyView}
-            providerId={providerId}
-            csrfToken={csrfToken}
-            busy={busy}
-            run={run}
-            onConfigure={onConfigure}
-          />
+        <div className="flex items-center justify-end gap-1">
+          <div className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <KeyActionsMenu
+              keyView={keyView}
+              providerId={providerId}
+              csrfToken={csrfToken}
+              busy={busy}
+              run={run}
+              onConfigure={onConfigure}
+              onReveal={() => void onReveal()}
+              revealing={revealing}
+              revealed={reveal !== null}
+            />
+          </div>
+          {revealError !== null && (
+            <span
+              className="text-status-danger ml-2 text-xs"
+              role="alert"
+              title={revealError.message}
+            >
+              Reveal failed
+            </span>
+          )}
         </div>
       </td>
+      {reveal !== null && (
+        <RevealedValueDialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) {
+              setReveal(null)
+              setCopied(false)
+            }
+          }}
+          value={reveal.value}
+          copied={copied}
+          onCopy={() => void onCopy()}
+        />
+      )}
     </tr>
+  )
+}
+
+function RevealedValueDialog({
+  open,
+  onOpenChange,
+  value,
+  copied,
+  onCopy,
+}: {
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+  readonly value: string
+  readonly copied: boolean
+  readonly onCopy: () => void
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Upstream key value</DialogTitle>
+          <DialogDescription>
+            This is the secret the Provider holds for this key. Copy it once and store it in
+            your own secret manager — every reveal is recorded in the audit log.
+          </DialogDescription>
+        </DialogHeader>
+        <code className="bg-muted text-foreground block max-h-72 w-full overflow-y-auto whitespace-pre-wrap break-all rounded-md px-3 py-2 font-mono text-xs">
+          {value}
+        </code>
+        <div className="flex justify-end">
+          <Button type="button" variant="outline" size="sm" onClick={onCopy}>
+            {copied ? (
+              <>
+                <Check className="size-3.5" aria-hidden />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="size-3.5" aria-hidden />
+                Copy
+              </>
+            )}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function TestStatusBadge({
+  health,
+  lastProbe,
+  healthReason,
+  pending,
+}: {
+  readonly health: KeyView['health']
+  readonly lastProbe: KeyView['lastProbe']
+  readonly healthReason: string | null
+  readonly pending: boolean
+}) {
+  // The tooltip shows the most specific reason we have. The test reason
+  // wins when present; otherwise we fall back to the durable health reason
+  // (e.g. an upstream that 401'd during real inference, not a test).
+  const testReason = lastProbe?.reason ?? null
+  const reason =
+    testReason ??
+    (keyNeedsAttentionFor(health) ? healthReason : null)
+  const badge = pending ? <PendingTestBadge /> : <KeyHealthBadge health={health} />
+  if (pending || reason === null) {
+    return badge
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1">
+      {badge}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground inline-flex size-4 cursor-help items-center justify-center rounded"
+            aria-label={`Reason: ${reason}`}
+          >
+            <Info className="size-3" aria-hidden />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="max-w-xs">
+          {reason}
+        </TooltipContent>
+      </Tooltip>
+    </span>
+  )
+}
+
+function keyNeedsAttentionFor(health: KeyView['health']): boolean {
+  return (
+    health === 'cooling_down' ||
+    health === 'invalid_authentication' ||
+    health === 'exhausted'
+  )
+}
+
+function PendingTestBadge() {
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      className="border-border bg-muted text-muted-foreground inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium"
+    >
+      <Loader2 className="size-2.5 animate-spin" aria-hidden />
+      <span>Testing…</span>
+    </span>
   )
 }
 
@@ -1224,207 +1366,6 @@ function KeyHealthCard({ provider }: { readonly provider: ProviderView }) {
           </li>
         ))}
       </ul>
-    </section>
-  )
-}
-
-function SharedAccountsCard({
-  provider,
-  csrfToken,
-  onChanged,
-}: {
-  readonly provider: ProviderView
-  readonly csrfToken: string
-  readonly onChanged: () => void
-}) {
-  const [accountName, setAccountName] = useState('')
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [renameDraft, setRenameDraft] = useState('')
-  const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<ManagementError | null>(null)
-
-  const run = async (label: string, perform: () => Promise<unknown>) => {
-    setBusy(label)
-    setError(null)
-    try {
-      await perform()
-      onChanged()
-    } catch (cause) {
-      setError(
-        cause instanceof ManagementError
-          ? cause
-          : new ManagementError('request_failed', 'That did not work.'),
-      )
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const startRename = (accountId: string, currentName: string) => {
-    setError(null)
-    setRenamingId(accountId)
-    setRenameDraft(currentName)
-  }
-
-  const cancelRename = () => {
-    setRenamingId(null)
-    setRenameDraft('')
-  }
-
-  const submitRename = async (accountId: string) => {
-    const trimmed = renameDraft.trim()
-    if (trimmed === '') return
-    await run(`rename-account-${accountId}`, async () => {
-      await updateUpstreamAccount(provider.id, accountId, trimmed, csrfToken)
-      setRenamingId(null)
-      setRenameDraft('')
-    })
-  }
-
-  return (
-    <section className="bg-card rounded-xl border p-5">
-      <div>
-        <h3 className="text-sm font-semibold tracking-tight">Shared accounts</h3>
-        <p className="text-muted-foreground mt-1 text-xs">
-          Keys that share capacity pool their rate limits and billing.
-        </p>
-      </div>
-
-      {error && (
-        <Alert variant="destructive" role="alert" className="mt-3">
-          <AlertTitle>That did not work</AlertTitle>
-          <AlertDescription>{error.message}</AlertDescription>
-        </Alert>
-      )}
-
-      {provider.accounts.length === 0 ? (
-        <p className="text-muted-foreground mt-4 text-xs">No shared accounts yet.</p>
-      ) : (
-        <ul className="mt-4 flex flex-col gap-2">
-          {provider.accounts.map((account) => {
-            const memberKeys = provider.keys.filter((key) => key.accountId === account.id)
-            const isRenaming = renamingId === account.id
-            return (
-              <li
-                key={account.id}
-                className="border-border bg-muted/40 flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
-              >
-                {isRenaming ? (
-                  <form
-                    className="flex flex-1 items-center gap-2"
-                    onSubmit={(event) => {
-                      event.preventDefault()
-                      void submitRename(account.id)
-                    }}
-                  >
-                    <Users className="text-muted-foreground size-3.5" aria-hidden />
-                    <input
-                      id={`rename-account-${account.id}`}
-                      type="text"
-                      autoComplete="off"
-                      value={renameDraft}
-                      onChange={(event) => setRenameDraft(event.target.value)}
-                      className="border-input bg-background h-8 flex-1 rounded-md border px-2 text-sm"
-                      disabled={busy !== null}
-                    />
-                    {!provider.archived && (
-                      <>
-                        <Button
-                          type="submit"
-                          size="xs"
-                          disabled={busy !== null || renameDraft.trim() === ''}
-                        >
-                          {busy === `rename-account-${account.id}` ? 'Saving…' : 'Save'}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          onClick={cancelRename}
-                          disabled={busy !== null}
-                        >
-                          Cancel
-                        </Button>
-                      </>
-                    )}
-                  </form>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <Users className="text-muted-foreground size-3.5" aria-hidden />
-                      <span className="text-sm font-medium">{account.displayName}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-muted-foreground text-xs">
-                        {memberKeys.length} {memberKeys.length === 1 ? 'key' : 'keys'}
-                      </span>
-                      {!provider.archived && (
-                        <>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="xs"
-                            onClick={() => startRename(account.id, account.displayName)}
-                            disabled={busy !== null}
-                          >
-                            Rename
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="xs"
-                            onClick={() =>
-                              void run(`delete-account-${account.id}`, () =>
-                                deleteUpstreamAccount(provider.id, account.id, csrfToken),
-                              )
-                            }
-                            disabled={busy !== null}
-                          >
-                            {busy === `delete-account-${account.id}` ? 'Deleting…' : 'Delete'}
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
-      {!provider.archived && (
-        <form
-          className="mt-4 flex items-end gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (accountName.trim() === '') return
-            void run('create-account', async () => {
-              await createUpstreamAccount(provider.id, accountName, csrfToken)
-              setAccountName('')
-            })
-          }}
-        >
-          <div className="flex flex-1 flex-col gap-1.5">
-            <label
-              htmlFor="account-name"
-              className="text-muted-foreground text-xs tracking-wide uppercase"
-            >
-              New account name
-            </label>
-            <input
-              id="account-name"
-              type="text"
-              value={accountName}
-              onChange={(event) => setAccountName(event.target.value)}
-              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-            />
-          </div>
-          <Button type="submit" size="sm" disabled={busy !== null || accountName.trim() === ''}>
-            {busy === 'create-account' ? 'Creating…' : 'Create account'}
-          </Button>
-        </form>
-      )}
     </section>
   )
 }

@@ -378,6 +378,36 @@ export function createAdminRoutes({
         },
       },
     )
+    .get(
+      '/providers/:id/keys/:keyId/value',
+      async ({ params, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
+        if ('response' in guardResult) {
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const result = await providers.revealKey(params.id, params.keyId)
+        if (!result.ok) {
+          const failure = toFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(200, result.value)
+      },
+      {
+        detail: {
+          tags: ['Upstream Keys'],
+          summary: 'Reveal an Upstream Key value',
+          description:
+            'Decrypts and returns the plaintext of one Upstream Key so the Owner can copy it. The DB at rest stays encrypted; every reveal is recorded in the audit log.',
+        },
+        response: {
+          200: keyValueResponse,
+          ...errorResponses,
+        },
+      },
+    )
     .post(
       '/providers/:id/keys/:keyId/activate',
       async ({ params, request, cookie, status }) => {
@@ -858,6 +888,10 @@ const providerResponse = t.Object({
 })
 
 const providerListResponse = t.Object({ providers: t.Array(providerResponse) })
+
+const keyValueResponse = t.Object({
+  value: t.String(),
+})
 
 const templateCapabilitiesResponse = t.Object({
   chat: t.Boolean(),

@@ -1,6 +1,7 @@
 import { Component, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { RouterProvider } from '@tanstack/react-router'
 import { AuthScreen } from '@/components/auth-screen'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { CsrfContext } from '@/lib/csrf-context'
 import { fetchAuthState, signOut, type AuthState } from '@/lib/auth'
 import { router } from '@/router'
@@ -87,9 +88,11 @@ export default function App() {
     <CsrfContext.Provider
       value={{ csrfToken, onSignedOut: () => void handleSignedOut(), authState: auth }}
     >
-      <ErrorBoundary>
-        <RouterProvider router={router} />
-      </ErrorBoundary>
+      <TooltipProvider delayDuration={150}>
+        <ErrorBoundary>
+          <RouterProvider router={router} />
+        </ErrorBoundary>
+      </TooltipProvider>
     </CsrfContext.Provider>
   )
 }

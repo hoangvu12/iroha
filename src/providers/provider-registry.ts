@@ -741,20 +741,66 @@ export class ProviderRegistry {
     if (!probe.readable) return failed({ code: 'stored_key_unreadable' })
 
     const at = this.#clock.now()
+    // The probe verdict is the source of truth for the post-test health.
     // A disabled key stays disabled: a test informs, only activation revives.
-    // An unverified key that proves itself usable is activated on the spot.
-    const activates = probe.verdict === 'usable' && key.health !== 'disabled'
+    // For every other key, `usable` activates, `rejected` demotes to
+    // invalid_authentication, and `inconclusive` demotes to cooling_down —
+    // so the badge and any inline verdict always agree.
+    const patch = probedPatch(key, probe, at)
     await this.#database.transaction(async (repositories) => {
-      await repositories.providers.updateKey(keyId, probedPatch(probe, at, activates), at)
+      await repositories.providers.updateKey(keyId, patch, at)
       await repositories.audit.record({
         action: 'key.tested',
         outcome: probe.verdict === 'usable' ? 'success' : 'failure',
-        detail: { providerId, keyId, verdict: probe.verdict, reason: probe.reason },
+        detail: {
+          providerId,
+          keyId,
+          verdict: probe.verdict,
+          reason: probe.reason,
+          previousHealth: key.health,
+          ...(patch.health === undefined ? {} : { newHealth: patch.health }),
+        },
         at,
       })
     })
     this.#controlledTrials.delete(healthClaim(key))
     return { ok: true, value: await this.#viewOf(providerId) }
+  }
+
+  /**
+   * Decrypts one Upstream Key on demand and records the reveal in the audit
+   * log. The DB at rest stays encrypted; the plaintext exists only in the
+   * response and the Owner's browser session after they ask. Each reveal
+   * leaves an audit trail entry so a stolen admin session can be detected.
+   */
+  async revealKey(
+    providerId: string,
+    keyId: string,
+  ): Promise<ProviderResult<{ readonly value: string }>> {
+    const located = await this.#locateKey(providerId, keyId)
+    if (!located.ok) return located
+
+    const { key } = located.value
+    const at = this.#clock.now()
+    let value: string
+    try {
+      value = await this.#cipher.decrypt(key.encryptedKey)
+    } catch {
+      await this.#database.audit.record({
+        action: 'key.value.revealed',
+        outcome: 'failure',
+        detail: { providerId, keyId, reason: 'decryption_failed' },
+        at,
+      })
+      return failed({ code: 'stored_key_unreadable' })
+    }
+    await this.#database.audit.record({
+      action: 'key.value.revealed',
+      outcome: 'success',
+      detail: { providerId, keyId },
+      at,
+    })
+    return { ok: true, value: { value } }
   }
 
   /** The Owner's explicit say-so that an untested or disabled key may be used. */
@@ -1328,7 +1374,7 @@ export class ProviderRegistry {
       const at = this.#clock.now()
       await this.#database.providers.updateKey(
         key.id,
-        probedPatch(probe, at, probe.verdict === 'usable'),
+        probedPatch(key, probe, at),
         at,
       )
     }
@@ -1478,9 +1524,27 @@ type ProbeRun =
   | { readonly readable: true; readonly verdict: KeyProbeVerdict; readonly reason: string | null }
 
 /** The stored result of one probe; optionally activating an unverified key. */
-function probedPatch(probe: { readonly verdict: KeyProbeVerdict; readonly reason: string | null }, at: Date, activates: boolean): UpstreamKeyPatch {
-  return activates
-    ? {
+/**
+ * Computes the post-test patch from the probe verdict and the key's current
+ * state. A disabled key never moves on a test result; only the Owner's
+ * explicit Activate revives it. Every other key takes the verdict as the
+ * source of truth for its new health.
+ */
+function probedPatch(
+  key: { readonly id: string; readonly health: UpstreamKeyHealth },
+  probe: { readonly verdict: KeyProbeVerdict; readonly reason: string | null },
+  at: Date,
+): UpstreamKeyPatch {
+  if (key.health === 'disabled') {
+    return {
+      lastProbeAt: at,
+      lastProbeVerdict: probe.verdict,
+      lastProbeReason: probe.reason,
+    }
+  }
+  switch (probe.verdict) {
+    case 'usable':
+      return {
         health: 'active',
         healthReason: 'manual test confirmed usable',
         healthChangedAt: at,
@@ -1492,11 +1556,33 @@ function probedPatch(probe: { readonly verdict: KeyProbeVerdict; readonly reason
         lastProbeVerdict: probe.verdict,
         lastProbeReason: probe.reason,
       }
-    : {
+    case 'rejected':
+      return {
+        health: 'invalid_authentication',
+        healthReason: probe.reason ?? 'upstream rejected the test request',
+        healthChangedAt: at,
+        retryAfterAt: null,
+        healthScope: 'key',
+        healthScopeId: key.id,
+        healthModel: null,
         lastProbeAt: at,
         lastProbeVerdict: probe.verdict,
         lastProbeReason: probe.reason,
       }
+    case 'inconclusive':
+      return {
+        health: 'cooling_down',
+        healthReason: probe.reason ?? 'test could not reach the upstream',
+        healthChangedAt: at,
+        retryAfterAt: new Date(at.getTime() + 30 * 1000),
+        healthScope: 'key',
+        healthScopeId: key.id,
+        healthModel: null,
+        lastProbeAt: at,
+        lastProbeVerdict: probe.verdict,
+        lastProbeReason: probe.reason,
+      }
+  }
 }
 
 function summaryOf(connection: {

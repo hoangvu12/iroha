@@ -204,6 +204,16 @@ export async function testKey(
   )
 }
 
+export async function revealKey(
+  providerId: string,
+  keyId: string,
+): Promise<{ value: string }> {
+  return await request<{ value: string }>(
+    'GET',
+    `/providers/${encodeURIComponent(providerId)}/keys/${encodeURIComponent(keyId)}/value`,
+  )
+}
+
 export async function activateKey(
   providerId: string,
   keyId: string,

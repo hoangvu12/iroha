@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
+  ORIGIN,
+  appFetch,
   completeSetup,
   createTestApp,
   errorCode,
@@ -14,8 +16,15 @@ const BASE = '/api/v1/admin/providers'
 
 interface KeyBody {
   id: string
-  health: 'unverified' | 'active' | 'disabled'
+  health:
+    | 'unverified'
+    | 'active'
+    | 'cooling_down'
+    | 'invalid_authentication'
+    | 'exhausted'
+    | 'disabled'
   lastProbe: { at: string; verdict: string; reason: string | null } | null
+  healthReason: string | null
   accountId: string | null
   allowedModels: string[] | null
   deniedModels: string[] | null
@@ -103,14 +112,63 @@ describe('Upstream Key pools and Upstream Accounts', () => {
       expect(new Set(current.keys.map((key) => key.id)).size).toBe(3)
     })
 
-    test('an added key is Unverified when its test is inconclusive', async () => {
+    test('an added key goes to cooling_down when its first test is inconclusive', async () => {
       probe.respondWith({ verdict: 'inconclusive', reason: 'the provider could not be reached' })
       const created = await createConnection()
 
       const second = await addKey(created.id)
       const current = (await second.json()) as ConnectionBody
-      expect(current.keys[1]?.health).toBe('unverified')
+      expect(current.keys[1]?.health).toBe('cooling_down')
       expect(current.keys[1]?.lastProbe?.verdict).toBe('inconclusive')
+      expect(current.keys[1]?.lastProbe?.reason).toBe('the provider could not be reached')
+    })
+
+    test('a rejected test demotes an active key to invalid_authentication', async () => {
+      const created = await createConnection()
+      const keyId = created.keys[0]!.id
+      // The connection key was probed during create and is 'active'.
+      expect((await view(created.id)).keys[0]?.health).toBe('active')
+
+      probe.respondWith({ verdict: 'rejected', reason: 'HTTP 401 unauthorized' })
+      const tested = await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/test`, {
+        method: 'POST',
+        csrf,
+      })
+      expect(tested.status).toBe(200)
+
+      const after = ((await tested.json()) as ConnectionBody).keys[0]
+      expect(after?.health).toBe('invalid_authentication')
+      expect(after?.lastProbe?.verdict).toBe('rejected')
+      expect(after?.lastProbe?.reason).toBe('HTTP 401 unauthorized')
+    })
+
+    test('an inconclusive test demotes an active key to cooling_down', async () => {
+      const created = await createConnection()
+      const keyId = created.keys[0]!.id
+      expect((await view(created.id)).keys[0]?.health).toBe('active')
+
+      probe.respondWith({ verdict: 'inconclusive', reason: 'upstream timed out' })
+      const tested = await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/test`, {
+        method: 'POST',
+        csrf,
+      })
+      expect(tested.status).toBe(200)
+
+      const after = ((await tested.json()) as ConnectionBody).keys[0]
+      expect(after?.health).toBe('cooling_down')
+      expect(after?.lastProbe?.verdict).toBe('inconclusive')
+    })
+
+    test('a usable test on a disabled key leaves it disabled', async () => {
+      const created = await createConnection()
+      const keyId = created.keys[0]!.id
+
+      await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/disable`, { method: 'POST', csrf })
+      expect((await view(created.id)).keys[0]?.health).toBe('disabled')
+
+      probe.respondWith({ verdict: 'usable', reason: null })
+      await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/test`, { method: 'POST', csrf })
+      expect((await view(created.id)).keys[0]?.health).toBe('disabled')
     })
 
     test('removes one key without touching the others', async () => {
@@ -170,6 +228,66 @@ describe('Upstream Key pools and Upstream Accounts', () => {
       const response = await addKey(created.id)
       expect(response.status).toBe(409)
       expect(await errorCode(response)).toBe('provider_archived')
+    })
+  })
+
+  describe('revealing the Upstream Key value', () => {
+    test('returns the plaintext of an added key and audits the reveal', async () => {
+      const created = await createConnection()
+      const keyId = created.keys[0]!.id
+
+      const response = await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/value`)
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as { value: string }
+      expect(body.value).toBe(UPSTREAM_KEY)
+
+      const event = (await iroha.database.audit.list()).find(
+        (entry) => entry.action === 'key.value.revealed',
+      )
+      expect(event?.detail).toEqual({ providerId: created.id, keyId })
+      expect(event?.outcome).toBe('success')
+    })
+
+    test('returns the plaintext of a key added with a different value', async () => {
+      const created = await createConnection()
+      const firstId = created.keys[0]!.id
+      const second = await addKey(created.id, 'sk-second-secret-also-for-tests')
+      const after = (await second.json()) as ConnectionBody
+      const newKey = after.keys.find((key) => key.id !== firstId)
+      expect(newKey).toBeDefined()
+
+      const response = await iroha.fetch(`${BASE}/${created.id}/keys/${newKey!.id}/value`)
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as { value: string }
+      expect(body.value).toBe('sk-second-secret-also-for-tests')
+    })
+
+    test('refuses to reveal a key on a different connection', async () => {
+      const first = await createConnection()
+      const second = await createConnection()
+      const keyId = first.keys[0]!.id
+
+      const response = await iroha.fetch(`${BASE}/${second.id}/keys/${keyId}/value`)
+      expect(response.status).toBe(404)
+      expect(await errorCode(response)).toBe('key_not_found')
+    })
+
+    test('refuses to reveal a non-existent key', async () => {
+      const created = await createConnection()
+
+      const response = await iroha.fetch(`${BASE}/${created.id}/keys/uk_does-not-exist/value`)
+      expect(response.status).toBe(404)
+      expect(await errorCode(response)).toBe('key_not_found')
+    })
+
+    test('refuses an unauthenticated reveal', async () => {
+      const created = await createConnection()
+      const keyId = created.keys[0]!.id
+
+      const response = await appFetch(iroha.app)(
+        `${ORIGIN}${BASE}/${created.id}/keys/${keyId}/value`,
+      )
+      expect(response.status).toBe(401)
     })
   })
 

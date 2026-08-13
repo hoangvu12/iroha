@@ -63,3 +63,7 @@ _Avoid_: Role, permissions
 **Key Health**:
 Iroha's durable knowledge of whether an Upstream Key is active, temporarily cooling down, invalid, exhausted, or disabled by the Owner.
 _Avoid_: Status, availability
+
+**Test verdict**:
+The result of one probe of an Upstream Key against its upstream: `usable`, `rejected`, or `inconclusive`. The verdict is recorded on the key's `lastProbe` and surfaces in the Owner UI as the inline test feedback in the key's row.
+_Avoid_: Result, outcome, status

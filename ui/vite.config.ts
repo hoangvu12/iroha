@@ -40,7 +40,6 @@ export default defineConfig({
     proxy: {
       '/api': proxyToIroha,
       '/health': proxyToIroha,
-      '/providers': proxyToIroha,
       '/logout': proxyToIroha,
       '/setup': proxyToIroha,
     },

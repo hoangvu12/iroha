@@ -1,9 +1,43 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Component, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { RouterProvider } from '@tanstack/react-router'
 import { AuthScreen } from '@/components/auth-screen'
 import { CsrfContext } from '@/lib/csrf-context'
 import { fetchAuthState, signOut, type AuthState } from '@/lib/auth'
 import { router } from '@/router'
+
+class ErrorBoundary extends Component<
+  { readonly children: ReactNode },
+  { readonly error: Error | null }
+> {
+  state = { error: null as Error | null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('Iroha UI crashed:', error)
+  }
+
+  render() {
+    if (this.state.error !== null) {
+      return (
+        <div className="bg-canvas flex min-h-full items-center justify-center p-10">
+          <div className="bg-card max-w-md rounded-lg border p-6">
+            <h1 className="text-lg font-semibold tracking-tight">Something went wrong</h1>
+            <p className="text-muted-foreground mt-2 text-sm">
+              The UI hit an error rendering this page. Reload to try again.
+            </p>
+            <pre className="text-muted-foreground bg-muted mt-4 max-h-48 overflow-auto rounded p-3 text-xs">
+              {this.state.error.message}
+            </pre>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 export default function App() {
   const [auth, setAuth] = useState<AuthState | null>(null)
@@ -53,7 +87,9 @@ export default function App() {
     <CsrfContext.Provider
       value={{ csrfToken, onSignedOut: () => void handleSignedOut(), authState: auth }}
     >
-      <RouterProvider router={router} />
+      <ErrorBoundary>
+        <RouterProvider router={router} />
+      </ErrorBoundary>
     </CsrfContext.Provider>
   )
 }

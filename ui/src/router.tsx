@@ -3,6 +3,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  useParams,
 } from '@tanstack/react-router'
 import { AccountSettings } from '@/components/account-settings'
 import { AppShell } from '@/components/app-shell'
@@ -36,9 +37,23 @@ function ProvidersAreaRoute() {
 
 function ConnectionDetailRoute() {
   const { csrfToken } = useCsrf()
+  const { connectionId } = useParams({ strict: false }) as { connectionId?: string }
+  if (connectionId === undefined) {
+    return (
+      <div className="flex flex-col gap-4 p-6">
+        <p className="text-muted-foreground text-sm">
+          No connection ID in the URL. Go back to{' '}
+          <a href="/providers" className="text-primary underline">
+            Providers
+          </a>
+          .
+        </p>
+      </div>
+    )
+  }
   return (
     <ConnectionDetail
-      connectionId={providerDetailRoute.useParams().connectionId}
+      connectionId={connectionId}
       csrfToken={csrfToken}
       onBack={() => void router.navigate({ to: '/providers' })}
       onDeleted={() => void router.navigate({ to: '/providers' })}

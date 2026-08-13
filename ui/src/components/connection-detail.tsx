@@ -35,6 +35,7 @@ import {
   keyNeedsAttention,
 } from '@/components/key-health'
 import { Dot } from '@/components/dot'
+import { LineChart, Line } from '@/components/charts/line-chart'
 import { describeConnectionStatus } from '@/lib/connection-status'
 import {
   activateKey,
@@ -346,45 +347,16 @@ function AnalyticsSparkline({ hourlyCounts }: { readonly hourlyCounts: readonly 
 
   return (
     <div className="text-primary h-7 w-32" aria-hidden>
-      <svg viewBox="0 0 100 24" preserveAspectRatio="none" className="h-full w-full">
-        <SparklinePath data={data} />
-      </svg>
+      <LineChart
+        data={data}
+        aspectRatio="32 / 7"
+        margin={{ top: 2, right: 2, bottom: 2, left: 2 }}
+        animationDuration={0}
+        status="ready"
+      >
+        <Line dataKey="count" stroke="var(--primary)" strokeWidth={1.25} />
+      </LineChart>
     </div>
-  )
-}
-
-function SparklinePath({ data }: { readonly data: readonly { count: number }[] }) {
-  const counts = data.map((point) => point.count)
-  const max = Math.max(1, ...counts)
-  const step = 100 / Math.max(1, counts.length - 1)
-  const points = counts
-    .map(
-      (count, index) =>
-        `${(index * step).toFixed(2)},${(24 - (count / max) * 22 - 1).toFixed(2)}`,
-    )
-    .join(' ')
-  return (
-    <>
-      <defs>
-        <linearGradient id="sparkline-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="currentColor" stopOpacity="0.25" />
-          <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polyline
-        points={`0,24 ${points} 100,24`}
-        fill="url(#sparkline-fill)"
-        stroke="none"
-      />
-      <polyline
-        points={points}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </>
   )
 }
 
@@ -544,7 +516,7 @@ function UpstreamKeysCard({
   readonly onChanged: () => void
 }) {
   const [adding, setAdding] = useState(false)
-  const [newKey, setNewKey] = useState('')
+  const [configuring, setConfiguring] = useState<KeyView | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<ManagementError | null>(null)
 
@@ -580,10 +552,10 @@ function UpstreamKeysCard({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setAdding((open) => !open)}
+            onClick={() => setAdding(true)}
             disabled={busy !== null}
           >
-            {adding ? 'Cancel' : 'Add key'}
+            Add key
           </Button>
         )}
       </div>
@@ -596,38 +568,28 @@ function UpstreamKeysCard({
       )}
 
       {adding && !connection.archived && (
-        <form
-          className="border-border bg-muted/40 flex flex-wrap items-end gap-2 border-b px-5 py-3"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (newKey === '') return
-            void run('add-key', async () => {
-              await addKey(connection.id, newKey, csrfToken)
-              setNewKey('')
-              setAdding(false)
-            })
+        <AddKeyDialog
+          csrfToken={csrfToken}
+          onAdd={async (value) => {
+            await run('add-key', () => addKey(connection.id, value, csrfToken))
           }}
-        >
-          <div className="flex flex-1 flex-col gap-1.5">
-            <label
-              htmlFor="upstream-add-key"
-              className="text-muted-foreground text-xs tracking-wide uppercase"
-            >
-              New upstream key
-            </label>
-            <input
-              id="upstream-add-key"
-              type="password"
-              autoComplete="off"
-              value={newKey}
-              onChange={(event) => setNewKey(event.target.value)}
-              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-            />
-          </div>
-          <Button type="submit" size="sm" disabled={busy !== null || newKey === ''}>
-            {busy === 'add-key' ? 'Adding…' : 'Add key'}
-          </Button>
-        </form>
+          onDone={() => setAdding(false)}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+
+      {configuring !== null && !connection.archived && (
+        <ConfigureKeyDialog
+          connectionId={connection.id}
+          keyView={configuring}
+          accounts={connection.accounts}
+          csrfToken={csrfToken}
+          onDone={() => {
+            setConfiguring(null)
+            onChanged()
+          }}
+          onCancel={() => setConfiguring(null)}
+        />
       )}
 
       {connection.keys.length === 0 ? (
@@ -666,7 +628,7 @@ function UpstreamKeysCard({
                   csrfToken={csrfToken}
                   busy={busy}
                   run={run}
-                  onChanged={onChanged}
+                  onConfigure={() => setConfiguring(key)}
                 />
               ))}
             </tbody>
@@ -677,18 +639,230 @@ function UpstreamKeysCard({
   )
 }
 
+function AddKeyDialog({
+  onAdd,
+  onDone,
+  onCancel,
+}: {
+  readonly csrfToken: string
+  readonly onAdd: (value: string) => Promise<void>
+  readonly onDone: () => void
+  readonly onCancel: () => void
+}) {
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<ManagementError | null>(null)
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (busy || value === '') return
+    setBusy(true)
+    setError(null)
+    void onAdd(value)
+      .then(() => {
+        setValue('')
+        onDone()
+      })
+      .catch((cause: unknown) =>
+        setError(
+          cause instanceof ManagementError
+            ? cause
+            : new ManagementError('request_failed', 'Could not save.'),
+        ),
+      )
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add upstream key</DialogTitle>
+          <DialogDescription>
+            Encrypted with the installation master key and never shown again.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="flex flex-col gap-3" onSubmit={submit} noValidate>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="upstream-add-key"
+              className="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              New upstream key
+            </label>
+            <input
+              id="upstream-add-key"
+              type="password"
+              autoComplete="off"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+            />
+          </div>
+          {error !== null && (
+            <Alert variant="destructive" role="alert">
+              <AlertTitle>Could not save</AlertTitle>
+              <AlertDescription>{error.message}</AlertDescription>
+            </Alert>
+          )}
+          <div className="flex items-center gap-2">
+            <Button type="submit" size="sm" disabled={busy || value === ''}>
+              {busy ? 'Adding…' : 'Add key'}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ConfigureKeyDialog({
+  connectionId,
+  keyView,
+  accounts,
+  csrfToken,
+  onDone,
+  onCancel,
+}: {
+  readonly connectionId: string
+  readonly keyView: KeyView
+  readonly accounts: ConnectionView['accounts']
+  readonly csrfToken: string
+  readonly onDone: () => void
+  readonly onCancel: () => void
+}) {
+  const [accountId, setAccountId] = useState(keyView.accountId ?? '')
+  const [allowedModels, setAllowedModels] = useState(keyView.allowedModels?.join(', ') ?? '')
+  const [deniedModels, setDeniedModels] = useState(keyView.deniedModels?.join(', ') ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<ManagementError | null>(null)
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    void updateKeySettings(
+      connectionId,
+      keyView.id,
+      {
+        accountId: accountId === '' ? null : accountId,
+        allowedModels: parseModelList(allowedModels),
+        deniedModels: parseModelList(deniedModels),
+      },
+      csrfToken,
+    )
+      .then(() => onDone())
+      .catch((cause: unknown) =>
+        setError(
+          cause instanceof ManagementError
+            ? cause
+            : new ManagementError('request_failed', 'Could not save.'),
+        ),
+      )
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Configure key</DialogTitle>
+          <DialogDescription>
+            <span className="font-mono">{keyView.id}</span>
+          </DialogDescription>
+        </DialogHeader>
+        <form className="flex flex-col gap-3" onSubmit={submit} noValidate>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor={`key-${keyView.id}-account`}
+              className="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              Shared account
+            </label>
+            <select
+              id={`key-${keyView.id}-account`}
+              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+              value={accountId}
+              onChange={(event) => setAccountId(event.target.value)}
+            >
+              <option value="">Independent</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.displayName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor={`key-${keyView.id}-allowed`}
+              className="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              Only allow models
+            </label>
+            <input
+              id={`key-${keyView.id}-allowed`}
+              type="text"
+              value={allowedModels}
+              onChange={(event) => setAllowedModels(event.target.value)}
+              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+              placeholder="Comma-separated exact model IDs"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor={`key-${keyView.id}-denied`}
+              className="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              Exclude models
+            </label>
+            <input
+              id={`key-${keyView.id}-denied`}
+              type="text"
+              value={deniedModels}
+              onChange={(event) => setDeniedModels(event.target.value)}
+              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+              placeholder="Comma-separated exact model IDs"
+            />
+          </div>
+          {error !== null && (
+            <Alert variant="destructive" role="alert">
+              <AlertTitle>Could not save</AlertTitle>
+              <AlertDescription>{error.message}</AlertDescription>
+            </Alert>
+          )}
+          <div className="flex items-center gap-2">
+            <Button type="submit" size="sm" disabled={busy}>
+              {busy ? 'Saving…' : 'Save key settings'}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function KeyActionsMenu({
   keyView,
   connectionId,
   csrfToken,
   busy,
   run,
+  onConfigure,
 }: {
   readonly keyView: KeyView
   readonly connectionId: string
   readonly csrfToken: string
   readonly busy: string | null
   readonly run: (label: string, perform: () => Promise<unknown>) => Promise<void>
+  readonly onConfigure: () => void
 }) {
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   return (
@@ -704,6 +878,10 @@ function KeyActionsMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-40">
+        <DropdownMenuItem onSelect={onConfigure} disabled={busy !== null}>
+          Configure
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() =>
             void run(`test-${keyView.id}`, () => testKey(connectionId, keyView.id, csrfToken))
@@ -766,7 +944,7 @@ function UpstreamKeyRow({
   csrfToken,
   busy,
   run,
-  onChanged,
+  onConfigure,
 }: {
   readonly connectionId: string
   readonly accounts: ConnectionView['accounts']
@@ -774,150 +952,48 @@ function UpstreamKeyRow({
   readonly csrfToken: string
   readonly busy: string | null
   readonly run: (label: string, perform: () => Promise<unknown>) => Promise<void>
-  readonly onChanged: () => void
+  readonly onConfigure: () => void
 }) {
-  const [editing, setEditing] = useState(false)
-  const [accountId, setAccountId] = useState(keyView.accountId ?? '')
-  const [allowedModels, setAllowedModels] = useState(keyView.allowedModels?.join(', ') ?? '')
-  const [deniedModels, setDeniedModels] = useState(keyView.deniedModels?.join(', ') ?? '')
   const account = accounts.find((candidate) => candidate.id === keyView.accountId)
 
   return (
-    <>
-      <tr className="hover:bg-muted/30 group transition-colors">
-        <td className="px-5 py-3.5 align-top">
-          <KeyHealthBadge health={keyView.health} />
-          {keyNeedsAttention(keyView) && keyView.healthReason !== null && (
-            <p className="text-muted-foreground mt-1 text-xs">{keyView.healthReason}</p>
-          )}
-        </td>
-        <td className="px-5 py-3.5 align-top">
-          <span className="text-muted-foreground font-mono text-xs">{keyView.id}</span>
-        </td>
-        <td className="px-5 py-3.5 align-top text-sm">
-          {account === undefined ? (
-            <span className="text-muted-foreground italic">Independent</span>
-          ) : (
-            <span>{account.displayName}</span>
-          )}
-        </td>
-        <td className="px-5 py-3.5 align-top text-xs">
-          {keyView.allowedModels !== null
-            ? `Only ${keyView.allowedModels.join(', ')}`
-            : keyView.deniedModels !== null
-              ? `All except ${keyView.deniedModels.join(', ')}`
-              : 'All models'}
-        </td>
-        <td className="px-5 py-3.5 text-right align-top">
-          <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => setEditing((open) => !open)}
-              disabled={busy !== null}
-            >
-              Configure
-            </Button>
-            <KeyActionsMenu
-              keyView={keyView}
-              connectionId={connectionId}
-              csrfToken={csrfToken}
-              busy={busy}
-              run={run}
-            />
-          </div>
-        </td>
-      </tr>
-      {editing && (
-        <tr>
-          <td colSpan={5} className="bg-muted/30 border-border border-t px-5 py-3">
-            <form
-              className="grid gap-3 md:grid-cols-3"
-              onSubmit={(event) => {
-                event.preventDefault()
-                void run(`configure-${keyView.id}`, async () => {
-                  await updateKeySettings(
-                    connectionId,
-                    keyView.id,
-                    {
-                      accountId: accountId === '' ? null : accountId,
-                      allowedModels: parseModelList(allowedModels),
-                      deniedModels: parseModelList(deniedModels),
-                    },
-                    csrfToken,
-                  )
-                  setEditing(false)
-                  onChanged()
-                })
-              }}
-            >
-              <div className="flex flex-col gap-1.5">
-                <label
-                  htmlFor={`key-${keyView.id}-account`}
-                  className="text-muted-foreground text-xs tracking-wide uppercase"
-                >
-                  Shared account
-                </label>
-                <select
-                  id={`key-${keyView.id}-account`}
-                  className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                  value={accountId}
-                  onChange={(event) => setAccountId(event.target.value)}
-                >
-                  <option value="">Independent</option>
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.displayName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label
-                  htmlFor={`key-${keyView.id}-allowed`}
-                  className="text-muted-foreground text-xs tracking-wide uppercase"
-                >
-                  Only allow models
-                </label>
-                <input
-                  id={`key-${keyView.id}-allowed`}
-                  type="text"
-                  value={allowedModels}
-                  onChange={(event) => setAllowedModels(event.target.value)}
-                  className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                  placeholder="Comma-separated exact model IDs"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label
-                  htmlFor={`key-${keyView.id}-denied`}
-                  className="text-muted-foreground text-xs tracking-wide uppercase"
-                >
-                  Exclude models
-                </label>
-                <input
-                  id={`key-${keyView.id}-denied`}
-                  type="text"
-                  value={deniedModels}
-                  onChange={(event) => setDeniedModels(event.target.value)}
-                  className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                  placeholder="Comma-separated exact model IDs"
-                />
-              </div>
-              <div className="flex items-center gap-2 md:col-span-3">
-                <Button type="submit" size="sm" disabled={busy !== null}>
-                  Save key settings
-                </Button>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </td>
-        </tr>
-      )}
-    </>
+    <tr className="hover:bg-muted/30 group transition-colors">
+      <td className="px-5 py-3.5 align-top">
+        <KeyHealthBadge health={keyView.health} />
+        {keyNeedsAttention(keyView) && keyView.healthReason !== null && (
+          <p className="text-muted-foreground mt-1 text-xs">{keyView.healthReason}</p>
+        )}
+      </td>
+      <td className="px-5 py-3.5 align-top">
+        <span className="text-muted-foreground font-mono text-xs">{keyView.id}</span>
+      </td>
+      <td className="px-5 py-3.5 align-top text-sm">
+        {account === undefined ? (
+          <span className="text-muted-foreground italic">Independent</span>
+        ) : (
+          <span>{account.displayName}</span>
+        )}
+      </td>
+      <td className="px-5 py-3.5 align-top text-xs">
+        {keyView.allowedModels !== null
+          ? `Only ${keyView.allowedModels.join(', ')}`
+          : keyView.deniedModels !== null
+            ? `All except ${keyView.deniedModels.join(', ')}`
+            : 'All models'}
+      </td>
+      <td className="px-5 py-3.5 text-right align-top">
+        <div className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          <KeyActionsMenu
+            keyView={keyView}
+            connectionId={connectionId}
+            csrfToken={csrfToken}
+            busy={busy}
+            run={run}
+            onConfigure={onConfigure}
+          />
+        </div>
+      </td>
+    </tr>
   )
 }
 
@@ -1095,7 +1171,7 @@ function ConnectionDetailsCard({ connection }: { readonly connection: Connection
   return (
     <section className="bg-card rounded-xl border p-5">
       <h3 className="text-sm font-semibold tracking-tight">Connection details</h3>
-      <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+      <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
         <DetailRow label="Base URL">
           <span className="font-mono break-all">{connection.baseUrl}</span>
         </DetailRow>

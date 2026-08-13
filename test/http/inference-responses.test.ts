@@ -152,7 +152,7 @@ describe('provider-scoped Responses API', () => {
 })
 
 async function createConnection(iroha: TestApp, csrf: string): Promise<{ id: string }> {
-  const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+  const response = await iroha.fetch('/api/v1/admin/providers', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

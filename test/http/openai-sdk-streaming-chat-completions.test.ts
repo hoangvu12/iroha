@@ -150,7 +150,7 @@ describe('the official OpenAI SDK streaming through the Chat Completions surface
   })
 
   const createConnection = async (): Promise<string> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

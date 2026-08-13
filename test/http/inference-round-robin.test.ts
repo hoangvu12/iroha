@@ -37,7 +37,7 @@ describe('round-robin key selection on the inference path', () => {
   })
 
   const createConnection = async (): Promise<ConnectionBody> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -55,7 +55,7 @@ describe('round-robin key selection on the inference path', () => {
 
   const addKey = async (providerId: string, upstreamKey: string) => {
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${providerId}/keys`,
+      `/api/v1/admin/providers/${providerId}/keys`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -90,7 +90,7 @@ describe('round-robin key selection on the inference path', () => {
 
   const configureKey = async (providerId: string, keyId: string, patch: Record<string, unknown>) => {
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${providerId}/keys/${keyId}`,
+      `/api/v1/admin/providers/${providerId}/keys/${keyId}`,
       {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
@@ -158,7 +158,7 @@ describe('round-robin key selection on the inference path', () => {
 
     // Disable one, restrict another to a different model: only one key remains.
     await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/keys/${first!.id}/disable`,
+      `/api/v1/admin/providers/${connection.id}/keys/${first!.id}/disable`,
       { method: 'POST', csrf },
     )
     await configureKey(connection.id, second!.id, { allowedModels: [OTHER_MODEL] })
@@ -179,7 +179,7 @@ describe('round-robin key selection on the inference path', () => {
     await connect()
     const keyId = connection.keys[0]!.id
     await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/keys/${keyId}/disable`,
+      `/api/v1/admin/providers/${connection.id}/keys/${keyId}/disable`,
       { method: 'POST', csrf },
     )
 

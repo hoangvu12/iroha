@@ -27,7 +27,7 @@ describe('optional metrics', () => {
     expect(unauthenticated.status).toBe(401)
 
     const signedIn = await completeSetup(test)
-    const connectionResponse = await test.fetch('/api/v1/admin/provider-connections', {
+    const connectionResponse = await test.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ displayName: 'Metrics example', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),

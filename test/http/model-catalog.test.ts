@@ -42,7 +42,7 @@ describe('the provider-scoped Models API', () => {
   })
 
   const createConnection = async (): Promise<ConnectionBody> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -78,7 +78,7 @@ describe('the provider-scoped Models API', () => {
     })
 
   const refreshCatalog = async () => {
-    const response = await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/refresh`, {
+    const response = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/refresh`, {
       method: 'POST',
       csrf,
     })
@@ -143,7 +143,7 @@ describe('the provider-scoped Models API', () => {
 
   test('Owner exclusions never appear in the Models list', async () => {
     await refreshCatalog()
-    await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/models/gpt-4o`, {
+    await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/models/gpt-4o`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ excluded: true }),
@@ -175,7 +175,7 @@ describe('the Owner model catalog surface', () => {
   })
 
   const createConnection = async (): Promise<ConnectionBody> => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -192,7 +192,7 @@ describe('the Owner model catalog surface', () => {
   }
 
   const refresh = async () => {
-    const response = await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/refresh`, {
+    const response = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/refresh`, {
       method: 'POST',
       csrf,
     })
@@ -217,7 +217,7 @@ describe('the Owner model catalog surface', () => {
     await refresh()
 
     upstream.respondWith(() => new Response('provider is down', { status: 503 }))
-    const response = await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/refresh`, {
+    const response = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/refresh`, {
       method: 'POST',
       csrf,
     })
@@ -234,7 +234,7 @@ describe('the Owner model catalog surface', () => {
 
   test('an unparseable discovery answer is a recorded failure, not an error', async () => {
     upstream.respondWith(() => new Response('not json at all', { status: 200 }))
-    const response = await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/refresh`, {
+    const response = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/refresh`, {
       method: 'POST',
       csrf,
     })
@@ -249,7 +249,7 @@ describe('the Owner model catalog surface', () => {
   test('an Owner addition survives a later discovery that omits it', async () => {
     await refresh()
     const addResponse = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/catalog/models`,
+      `/api/v1/admin/providers/${connection.id}/catalog/models`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -269,7 +269,7 @@ describe('the Owner model catalog surface', () => {
 
   test('an Owner exclusion survives a later discovery that reports the model again', async () => {
     await refresh()
-    await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/models/gpt-4o`, {
+    await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/models/gpt-4o`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ excluded: true }),
@@ -283,7 +283,7 @@ describe('the Owner model catalog surface', () => {
 
   test('per-model capability overrides are stored and returned', async () => {
     await refresh()
-    const response = await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/models/${MODEL}`, {
+    const response = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/models/${MODEL}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ overrides: { streaming: true, tools: false } }),
@@ -300,14 +300,14 @@ describe('the Owner model catalog surface', () => {
 
   test('removing an Owner model drops only the owner-added row', async () => {
     await refresh()
-    await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/models`, {
+    await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/models`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ modelId: 'custom-model' }),
       csrf,
     })
 
-    await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/models/custom-model`, {
+    await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/models/custom-model`, {
       method: 'DELETE',
       csrf,
     })
@@ -318,7 +318,7 @@ describe('the Owner model catalog surface', () => {
 
   test('an excluded model is refused on inference', async () => {
     await refresh()
-    await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/catalog/models/${MODEL}`, {
+    await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/models/${MODEL}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ excluded: true }),

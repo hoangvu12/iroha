@@ -115,7 +115,7 @@ describe('creating a Provider Connection from a template', () => {
   })
 
   test('creating without templateId stores null and uses the unknown-off defaults', async () => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -132,7 +132,7 @@ describe('creating a Provider Connection from a template', () => {
   })
 
   test('creating with a templateId stores the templateId on the connection', async () => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -159,7 +159,7 @@ describe('creating a Provider Connection from a template', () => {
   })
 
   test('an unknown templateId returns validation_failed with a templateId field problem', async () => {
-    const response = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -175,8 +175,8 @@ describe('creating a Provider Connection from a template', () => {
     expect(await errorCode(response)).toBe('validation_failed')
   })
 
-  test('the listed connection in /provider-connections echoes the templateId', async () => {
-    await iroha.fetch('/api/v1/admin/provider-connections', {
+  test('the listed Provider in /providers echoes the templateId', async () => {
+    await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -188,9 +188,9 @@ describe('creating a Provider Connection from a template', () => {
       csrf,
     })
 
-    const list = await iroha.fetch('/api/v1/admin/provider-connections')
-    const body = (await list.json()) as { connections: { templateId: string | null }[] }
-    const match = body.connections.find((connection) => connection.templateId === 'openai')
+    const list = await iroha.fetch('/api/v1/admin/providers')
+    const body = (await list.json()) as { providers: { templateId: string | null }[] }
+    const match = body.providers.find((provider) => provider.templateId === 'openai')
     expect(match).toBeDefined()
   })
 })

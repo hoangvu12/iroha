@@ -57,7 +57,7 @@ describe('the Owner usage surface', () => {
   beforeEach(async () => {
     iroha = await createTestApp()
     csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -78,10 +78,10 @@ describe('the Owner usage surface', () => {
   })
 
   const viewUsage = () =>
-    iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/usage`)
+    iroha.fetch(`/api/v1/admin/providers/${connection.id}/usage`)
 
   const refreshUsage = () =>
-    iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/usage/refresh`, {
+    iroha.fetch(`/api/v1/admin/providers/${connection.id}/usage/refresh`, {
       method: 'POST',
       csrf,
     })
@@ -111,7 +111,7 @@ describe('the Owner usage surface', () => {
     await iroha.dispose()
     iroha = await createTestApp({ usageAdapter: adapter })
     csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -124,7 +124,7 @@ describe('the Owner usage surface', () => {
     connection = (await created.json()) as ConnectionBody
 
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     expect(response.status).toBe(200)
@@ -146,7 +146,7 @@ describe('the Owner usage surface', () => {
     await iroha.dispose()
     iroha = await createTestApp({ usageAdapter: adapter })
     csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -159,7 +159,7 @@ describe('the Owner usage surface', () => {
     connection = (await created.json()) as ConnectionBody
 
     const firstRefresh = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     expect(firstRefresh.status).toBe(200)
@@ -171,7 +171,7 @@ describe('the Owner usage surface', () => {
     })
 
     const second = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     expect(second.status).toBe(200)
@@ -191,7 +191,7 @@ describe('the Owner usage surface', () => {
     await iroha.dispose()
     iroha = await createTestApp({ usageAdapter: adapter })
     csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -204,7 +204,7 @@ describe('the Owner usage surface', () => {
     connection = (await created.json()) as ConnectionBody
 
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     const body = (await response.json()) as UsageBody
@@ -224,7 +224,7 @@ describe('the Owner usage surface', () => {
     await iroha.dispose()
     iroha = await createTestApp({ usageAdapter: adapter })
     csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -237,7 +237,7 @@ describe('the Owner usage surface', () => {
     connection = (await created.json()) as ConnectionBody
 
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     const body = (await response.json()) as UsageBody
@@ -257,7 +257,7 @@ describe('the Owner usage surface', () => {
     await iroha.dispose()
     iroha = await createTestApp({ usageAdapter: adapter })
     csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -270,7 +270,7 @@ describe('the Owner usage surface', () => {
     connection = (await created.json()) as ConnectionBody
 
     const refreshed = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     const body = (await refreshed.json()) as UsageBody
@@ -284,31 +284,31 @@ describe('the Owner usage surface', () => {
     await iroha.dispose()
     iroha = await createTestApp()
     const view = await iroha.fetch(
-      `/api/v1/admin/provider-connections/pc_does_not_exist/usage`,
+      `/api/v1/admin/providers/pr_does_not_exist/usage`,
     )
     expect(view.status).toBe(401)
 
     const refresh = await iroha.fetch(
-      `/api/v1/admin/provider-connections/pc_does_not_exist/usage/refresh`,
+      `/api/v1/admin/providers/pr_does_not_exist/usage/refresh`,
       { method: 'POST' },
     )
     expect(refresh.status).toBe(401)
   })
 
-  test('reports an unknown connection as provider_not_found', async () => {
-    const view = await iroha.fetch('/api/v1/admin/provider-connections/pc_unknown/usage')
+  test('reports an unknown Provider as provider_not_found', async () => {
+    const view = await iroha.fetch('/api/v1/admin/providers/pr_unknown/usage')
     expect(view.status).toBe(404)
     const body = (await view.json()) as { error: { code: string } }
     expect(body.error.code).toBe('provider_not_found')
   })
 
   test('reports an archived connection as provider_archived', async () => {
-    await iroha.fetch(`/api/v1/admin/provider-connections/${connection.id}/archive`, {
+    await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
       method: 'POST',
       csrf,
     })
     const view = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     expect(view.status).toBe(409)
@@ -318,11 +318,11 @@ describe('the Owner usage surface', () => {
 
   test('a reactive-only adapter never produces recovery evidence', async () => {
     await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     const view = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage`,
+      `/api/v1/admin/providers/${connection.id}/usage`,
     )
     const body = (await view.json()) as UsageBody
     expect(body.visibility).toBe('reactive_only')
@@ -340,7 +340,7 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
   const assemble = async (adapter: UsageAdapter) => {
     iroha = await createTestApp({ usageAdapter: adapter })
     const csrf = (await completeSetup(iroha)).csrf
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -367,7 +367,7 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
     const { csrf, connection } = await assemble(adapter)
 
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     const body = (await response.json()) as UsageBody
@@ -387,7 +387,7 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
     const { csrf, connection } = await assemble(adapter)
 
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     const body = (await response.json()) as UsageBody
@@ -406,7 +406,7 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
     const { csrf, connection } = await assemble(adapter)
 
     const firstRefresh = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     expect(firstRefresh.status).toBe(200)
@@ -418,7 +418,7 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
     })
 
     const secondRefresh = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage/refresh`,
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
       { method: 'POST', csrf },
     )
     expect(secondRefresh.status).toBe(429)
@@ -426,7 +426,7 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
     expect(errorBody.error.code).toBe('rate_limited')
 
     const view = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connection.id}/usage`,
+      `/api/v1/admin/providers/${connection.id}/usage`,
     )
     const body = (await view.json()) as UsageBody
     expect(body.stale).toBe(true)

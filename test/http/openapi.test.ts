@@ -19,7 +19,7 @@ describe('generated API documentation', () => {
     const paths = Object.keys(document.paths ?? {})
 
     expect(paths).toEqual(expect.arrayContaining([
-      '/api/v1/admin/provider-connections',
+      '/api/v1/admin/providers',
       '/api/v1/admin/metrics',
       '/api/v1/directory/providers',
       '/docs/capability-matrix',
@@ -31,7 +31,7 @@ describe('generated API documentation', () => {
     })
     expect((document.paths?.['/api/v1/directory/providers'] as { get?: { security?: unknown } })?.get?.security)
       .toEqual([{ GatewayKey: [] }])
-    expect((document.paths?.['/api/v1/admin/provider-connections'] as { get?: { security?: unknown } })?.get?.security)
+    expect((document.paths?.['/api/v1/admin/providers'] as { get?: { security?: unknown } })?.get?.security)
       .toEqual([{ OwnerSession: [] }])
     for (const [path, operations] of Object.entries(document.paths ?? {})) {
       if (!path.startsWith('/api/v1/admin/')) continue

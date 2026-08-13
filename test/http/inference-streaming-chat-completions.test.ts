@@ -84,7 +84,7 @@ describe('provider-scoped streaming Chat Completions', () => {
   })
 
   const connect = async (): Promise<{ connection: ConnectionBody; key: { secret: string } }> => {
-    const created = await iroha.fetch('/api/v1/admin/provider-connections', {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

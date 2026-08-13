@@ -23,7 +23,7 @@ export interface AdminRoutesOptions {
   readonly gatewayKeys: GatewayKeyRegistry
   /**
    * The Adapter Registry that supplies the Provider Templates the Owner
-   * may seed a new connection from. Required: the picker and the template
+   * may seed a new Provider from. Required: the picker and the template
    * validation are two sides of the same registry, and skipping it would
    * leave the picker empty without the Owner noticing.
    */
@@ -58,7 +58,7 @@ export function createAdminRoutes({
       return undefined
     })
     .get(
-      '/provider-connections',
+      '/providers',
       async ({ request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
         if ('response' in guardResult) {
@@ -69,16 +69,16 @@ export function createAdminRoutes({
             : status(401, toErrorDto(guardResult.response.body))
         }
 
-        return status(200, { connections: (await providers.listProviders()).map(toConnectionDto) })
+        return status(200, { providers: (await providers.listProviders()).map(toProviderDto) })
       },
       {
         detail: {
           tags: ['Providers'],
-          summary: 'List Provider Connections',
+          summary: 'List Providers',
           description:
-            'Lists every Provider Connection, archived ones included. Upstream Key material is never listed; each key appears as its identity, health, and last test outcome.',
+            'Lists every Provider, archived ones included. Upstream Key material is never listed; each key appears as its identity, health, and last test outcome.',
         },
-        response: { 200: connectionListResponse, 401: errorResponse, 403: errorResponse },
+        response: { 200: providerListResponse, 401: errorResponse, 403: errorResponse },
       },
     )
     .get(
@@ -104,7 +104,7 @@ export function createAdminRoutes({
       },
     )
     .post(
-      '/provider-connections',
+      '/providers',
       async ({ body, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -146,20 +146,20 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(201, toConnectionDto(result.value))
+        return status(201, toProviderDto(result.value))
       },
       {
         detail: {
           tags: ['Providers'],
-          summary: 'Create a Provider Connection',
+          summary: 'Create a Provider',
           description:
-            'Creates one OpenAI-compatible Provider Connection with an immutable ID and one Upstream Key. The key is encrypted with the installation master key, saved as Unverified, and tested once with a low-cost probe; a usable test activates it, any other outcome keeps it with the reason. Supplying a templateId prefills safe defaults; the Owner may override every field.',
+            'Creates one OpenAI-compatible Provider with an immutable ID and one Upstream Key. The key is encrypted with the installation master key, saved as Unverified, and tested once with a low-cost probe; a usable test activates it, any other outcome keeps it with the reason. Supplying a templateId prefills safe defaults; the Owner may override every field.',
         },
-        response: { 201: connectionResponse, ...errorResponses },
+        response: { 201: providerResponse, ...errorResponses },
       },
     )
     .get(
-      '/provider-connections/:id',
+      '/providers/:id',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
         if ('response' in guardResult) {
@@ -175,17 +175,17 @@ export function createAdminRoutes({
           return status(404, adminError('provider_not_found', 'No such Provider.'))
         }
 
-        return status(200, toConnectionDto(view))
+        return status(200, toProviderDto(view))
       },
       {
         detail: {
           tags: ['Providers'],
-          summary: 'Inspect a Provider Connection',
+          summary: 'Inspect a Provider',
           description:
-            'Returns one Provider Connection with its Upstream Keys as identities, health, and last test outcomes. Key material is never returned.',
+            'Returns one Provider with its Upstream Keys as identities, health, and last test outcomes. Key material is never returned.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           401: errorResponse,
           403: errorResponse,
           404: errorResponse,
@@ -193,7 +193,7 @@ export function createAdminRoutes({
       },
     )
     .patch(
-      '/provider-connections/:id',
+      '/providers/:id',
       async ({ params, body, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -238,23 +238,23 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(200, toConnectionDto(result.value))
+        return status(200, toProviderDto(result.value))
       },
       {
         detail: {
           tags: ['Providers'],
-          summary: 'Edit a Provider Connection',
+          summary: 'Edit a Provider',
           description:
-            'Changes the display name, base URL, insecure-HTTP exception, or enabled state of a live connection. The ID never changes, so client URLs stay valid.',
+            'Changes the display name, base URL, insecure-HTTP exception, or enabled state of a live Provider. The ID never changes, so client URLs stay valid.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           ...errorResponses,
         },
       },
     )
     .post(
-      '/provider-connections/:id/archive',
+      '/providers/:id/archive',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -270,23 +270,23 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(200, toConnectionDto(result.value))
+        return status(200, toProviderDto(result.value))
       },
       {
         detail: {
           tags: ['Providers'],
-          summary: 'Archive a Provider Connection',
+          summary: 'Archive a Provider',
           description:
-            'Takes a connection out of active use while preserving its identity and history. Archived connections can still be duplicated or purged, and nothing else.',
+            'Takes a Provider out of active use while preserving its identity and history. Archived Providers can still be duplicated or purged, and nothing else.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           ...errorResponses,
         },
       },
     )
     .post(
-      '/provider-connections/:id/duplicate',
+      '/providers/:id/duplicate',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -302,20 +302,20 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(201, toConnectionDto(result.value))
+        return status(201, toProviderDto(result.value))
       },
       {
         detail: {
           tags: ['Providers'],
-          summary: 'Duplicate a Provider Connection',
+          summary: 'Duplicate a Provider',
           description:
-            'Copies a connection under a new immutable ID without touching the original. Copied keys start Unverified again and are tested once.',
+            'Copies a Provider under a new immutable ID without touching the original. Copied keys start Unverified again and are tested once.',
         },
-        response: { 201: connectionResponse, ...errorResponses },
+        response: { 201: providerResponse, ...errorResponses },
       },
     )
     .post(
-      '/provider-connections/:id/purge',
+      '/providers/:id/purge',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -336,9 +336,9 @@ export function createAdminRoutes({
       {
         detail: {
           tags: ['Providers'],
-          summary: 'Purge a Provider Connection',
+          summary: 'Purge a Provider',
           description:
-            'Permanently deletes an archived connection and its Upstream Keys. Deletion is archive-first: a live connection must be archived before it can be purged, and there is no restore.',
+            'Permanently deletes an archived Provider and its Upstream Keys. Deletion is archive-first: a live Provider must be archived before it can be purged, and there is no restore.',
         },
         response: {
           204: t.Void(),
@@ -347,7 +347,7 @@ export function createAdminRoutes({
       },
     )
     .post(
-      '/provider-connections/:id/keys/:keyId/test',
+      '/providers/:id/keys/:keyId/test',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -363,7 +363,7 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(200, toConnectionDto(result.value))
+        return status(200, toProviderDto(result.value))
       },
       {
         detail: {
@@ -373,13 +373,13 @@ export function createAdminRoutes({
             'Runs the low-cost key test on demand and records the outcome. A usable test activates an Unverified key; a Disabled key keeps its state.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           ...errorResponses,
         },
       },
     )
     .post(
-      '/provider-connections/:id/keys/:keyId/activate',
+      '/providers/:id/keys/:keyId/activate',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -395,7 +395,7 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(200, toConnectionDto(result.value))
+        return status(200, toProviderDto(result.value))
       },
       {
         detail: {
@@ -405,13 +405,13 @@ export function createAdminRoutes({
             'Explicitly activates an Unverified or Disabled key, for when the test endpoint is unavailable but the Owner knows the key works.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           ...errorResponses,
         },
       },
     )
     .post(
-      '/provider-connections/:id/keys/:keyId/disable',
+      '/providers/:id/keys/:keyId/disable',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -427,7 +427,7 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(200, toConnectionDto(result.value))
+        return status(200, toProviderDto(result.value))
       },
       {
         detail: {
@@ -436,13 +436,13 @@ export function createAdminRoutes({
           description: 'Takes a key out of use until the Owner activates it again.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           ...errorResponses,
         },
       },
     )
     .post(
-      '/provider-connections/:id/keys',
+      '/providers/:id/keys',
       async ({ params, body, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -456,6 +456,7 @@ export function createAdminRoutes({
         const input = asObject(body)
         const result = await providers.addKey(params.id, {
           upstreamKey: input.upstreamKey,
+          ...('baseUrl' in input ? { baseUrl: input.baseUrl } : {}),
           ...('accountId' in input ? { accountId: input.accountId } : {}),
           ...('allowedModels' in input ? { allowedModels: input.allowedModels } : {}),
           ...('deniedModels' in input ? { deniedModels: input.deniedModels } : {}),
@@ -464,20 +465,20 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(201, toConnectionDto(result.value))
+        return status(201, toProviderDto(result.value))
       },
       {
         detail: {
           tags: ['Upstream Keys'],
           summary: 'Add an Upstream Key',
           description:
-            'Adds another Upstream Key to a connection. It is encrypted, saved Unverified, and tested once with the low-cost probe like the first key. Existing keys are untouched. accountId, allowedModels and deniedModels follow the same shape as PATCH /provider-connections/:id/keys/:keyId so the Owner can scope a new key in one round trip.',
+            'Adds another Upstream Key to a Provider. It is encrypted, saved Unverified, and tested once with the low-cost probe like the first key. Existing keys are untouched. A blank baseUrl inherits the Provider default; a non-empty value overrides it for this key only. accountId, allowedModels and deniedModels follow the same shape as PATCH /providers/:id/keys/:keyId so the Owner can scope a new key in one round trip.',
         },
-        response: { 201: connectionResponse, ...errorResponses },
+        response: { 201: providerResponse, ...errorResponses },
       },
     )
     .patch(
-      '/provider-connections/:id/keys/:keyId',
+      '/providers/:id/keys/:keyId',
       async ({ params, body, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -493,28 +494,29 @@ export function createAdminRoutes({
           ...('accountId' in input ? { accountId: input.accountId } : {}),
           ...('allowedModels' in input ? { allowedModels: input.allowedModels } : {}),
           ...('deniedModels' in input ? { deniedModels: input.deniedModels } : {}),
+          ...('baseUrl' in input ? { baseUrl: input.baseUrl } : {}),
         })
         if (!result.ok) {
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(200, toConnectionDto(result.value))
+        return status(200, toProviderDto(result.value))
       },
       {
         detail: {
           tags: ['Upstream Keys'],
           summary: 'Configure an Upstream Key',
           description:
-            'Changes which Upstream Account the key shares billing or capacity with, and which exact models it may or may not serve. Null model lists mean no restriction.',
+            'Changes which Upstream Account the key shares billing or capacity with, which exact models it may or may not serve, and the per-key base URL override. Null model lists mean no restriction; a blank baseUrl restores the inheritance; a non-empty value overrides the Provider default for this key only.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           ...errorResponses,
         },
       },
     )
     .delete(
-      '/provider-connections/:id/keys/:keyId',
+      '/providers/:id/keys/:keyId',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -530,23 +532,23 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(200, toConnectionDto(result.value))
+        return status(200, toProviderDto(result.value))
       },
       {
         detail: {
           tags: ['Upstream Keys'],
           summary: 'Remove an Upstream Key',
           description:
-            'Removes one key permanently. The other keys and any Upstream Accounts on the connection are untouched.',
+            'Removes one key permanently. The other keys and any Upstream Accounts on the Provider are untouched.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           ...errorResponses,
         },
       },
     )
     .post(
-      '/provider-connections/:id/accounts',
+      '/providers/:id/accounts',
       async ({ params, body, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -563,7 +565,7 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(201, toConnectionDto(result.value))
+        return status(201, toProviderDto(result.value))
       },
       {
         detail: {
@@ -572,11 +574,11 @@ export function createAdminRoutes({
           description:
             'Creates a group of Upstream Keys that share Provider billing or capacity. Assign keys to the account to group them; keys outside an account stay independent.',
         },
-        response: { 201: connectionResponse, ...errorResponses },
+        response: { 201: providerResponse, ...errorResponses },
       },
     )
     .patch(
-      '/provider-connections/:id/accounts/:accountId',
+      '/providers/:id/accounts/:accountId',
       async ({ params, body, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -595,7 +597,7 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(200, toConnectionDto(result.value))
+        return status(200, toProviderDto(result.value))
       },
       {
         detail: {
@@ -605,13 +607,13 @@ export function createAdminRoutes({
             'Renames an account. Its identity stays put, so keys already assigned to it keep their grouping.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           ...errorResponses,
         },
       },
     )
     .delete(
-      '/provider-connections/:id/accounts/:accountId',
+      '/providers/:id/accounts/:accountId',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
@@ -627,7 +629,7 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
-        return status(200, toConnectionDto(result.value))
+        return status(200, toProviderDto(result.value))
       },
       {
         detail: {
@@ -637,7 +639,7 @@ export function createAdminRoutes({
             'Removes an account and its grouping. Its keys become independent again; nothing else is deleted.',
         },
         response: {
-          200: connectionResponse,
+          200: providerResponse,
           ...errorResponses,
         },
       },
@@ -696,7 +698,7 @@ export function createAdminRoutes({
           tags: ['Gateway Keys'],
           summary: 'Create a Gateway Key',
           description:
-            'Issues a named application credential restricted to the requested Provider Connections and exact model IDs. The usable secret is returned exactly once; only its hash is stored.',
+            'Issues a named application credential restricted to the requested Providers and exact model IDs. The usable secret is returned exactly once; only its hash is stored.',
         },
         response: { 201: gatewayKeyCreatedResponse, ...errorResponses },
       },
@@ -828,7 +830,7 @@ const staticHeaderNameResponse = t.Object({
   name: t.String(),
 })
 
-const connectionResponse = t.Object({
+const providerResponse = t.Object({
   id: t.String(),
   displayName: t.String(),
   baseUrl: t.String(),
@@ -855,7 +857,7 @@ const connectionResponse = t.Object({
   accounts: t.Array(accountResponse),
 })
 
-const connectionListResponse = t.Object({ connections: t.Array(connectionResponse) })
+const providerListResponse = t.Object({ providers: t.Array(providerResponse) })
 
 const templateCapabilitiesResponse = t.Object({
   chat: t.Boolean(),
@@ -925,13 +927,13 @@ const errorResponses = {
   500: errorResponse,
 }
 
-type ConnectionDto = typeof connectionResponse.static
+type ProviderDto = typeof providerResponse.static
 type KeyDto = typeof keyResponse.static
 type AccountDto = typeof accountResponse.static
 type ErrorDto = typeof errorResponse.static
 type GatewayKeyDto = typeof gatewayKeyResponse.static
 
-function toConnectionDto(view: ProviderView): ConnectionDto {
+function toProviderDto(view: ProviderView): ProviderDto {
   return {
     id: view.id,
     displayName: view.displayName,
@@ -1076,7 +1078,7 @@ function toFailure(failure: ProviderFailure): { statusCode: 400 | 404 | 409 | 50
         statusCode: 409,
         body: adminError(
           'not_archived',
-          'Archive this connection first; purge only removes what is already out of active use.',
+          'Archive this Provider first; purge only removes what is already out of active use.',
         ),
       }
     case 'stored_key_unreadable':

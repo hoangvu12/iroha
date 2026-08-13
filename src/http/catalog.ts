@@ -13,7 +13,7 @@ export interface CatalogRoutesOptions {
 }
 
 /**
- * The Owner's model catalog surface for one Provider Connection: the last
+ * The Owner's model catalog surface for one Provider: the last
  * synchronization outcome with provenance and freshness, an explicit refresh
  * action, and Owner edits that discovery must respect (additions, exclusions,
  * and capability overrides). Bodies are validated by the service rather than
@@ -22,7 +22,7 @@ export interface CatalogRoutesOptions {
 export function createCatalogRoutes({ identity, modelCatalog }: CatalogRoutesOptions) {
   const guard = createOwnerGuard(identity)
 
-  return new Elysia({ name: 'iroha/catalog', prefix: '/api/v1/admin/provider-connections/:id' }).guard(
+  return new Elysia({ name: 'iroha/catalog', prefix: '/api/v1/admin/providers/:id' }).guard(
     { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
     (app) => app
       .onError({ as: 'scoped' }, ({ code, status }) => {
@@ -52,9 +52,9 @@ export function createCatalogRoutes({ identity, modelCatalog }: CatalogRoutesOpt
       {
         detail: {
           tags: ['Catalog'],
-          summary: 'Inspect a connection model catalog',
+          summary: 'Inspect a Provider model catalog',
           description:
-            'Returns every catalogued model of one Provider Connection with its provenance (discovered, template, owner-added, or excluded), exclusion state, capability overrides, and the last synchronization outcome.',
+            'Returns every catalogued model of one Provider with its provenance (discovered, template, owner-added, or excluded), exclusion state, capability overrides, and the last synchronization outcome.',
         },
         response: { 200: catalogResponse, ...errorResponses },
       },
@@ -81,7 +81,7 @@ export function createCatalogRoutes({ identity, modelCatalog }: CatalogRoutesOpt
           tags: ['Catalog'],
           summary: 'Refresh a model catalog',
           description:
-            'Re-runs the low-cost discovery GET against the connection and merges the result. A failed refresh retains the last successful catalog, records the failure, and marks the catalog stale.',
+            'Re-runs the low-cost discovery GET against the Provider and merges the result. A failed refresh retains the last successful catalog, records the failure, and marks the catalog stale.',
         },
         response: { 200: catalogResponse, ...errorResponses },
       },
@@ -109,7 +109,7 @@ export function createCatalogRoutes({ identity, modelCatalog }: CatalogRoutesOpt
           tags: ['Catalog'],
           summary: 'Add an Owner model',
           description:
-            'Names a model the Owner vouches for on this connection. It is added as owner-added and survives discovery even if the Provider never reports it.',
+            'Names a model the Owner vouches for on this Provider. It is added as owner-added and survives discovery even if the Provider never reports it.',
         },
         response: { 200: catalogResponse, ...errorResponses },
       },

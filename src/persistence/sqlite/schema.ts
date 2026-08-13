@@ -46,16 +46,22 @@ export const auditEvents = sqliteTable('audit_events', {
 })
 
 /**
- * One Owner-configured account or server. The ID is immutable and client URLs
- * are built on it; the display name, base URL, and lifecycle state are not.
+ * One Owner-configured upstream brand the Gateway reaches. The ID is immutable
+ * and client URLs are built on it; the display name, base URL, and lifecycle
+ * state are not.
  *
- * The advanced transport columns encode what the connection's Inference Adapter
- * may add and how the transport must behave. Auth header values and prefixes are
- * stored as plain text because they are not secrets: the secret lives on the
- * Upstream Key. Static headers, by contrast, are stored encrypted via the
+ * The advanced transport columns encode what the Provider's Inference Adapter
+ * may add and how the transport must behave. Auth header values and prefixes
+ * are stored as plain text because they are not secrets: the secret lives on
+ * the Upstream Key. Static headers, by contrast, are stored encrypted via the
  * SecretCipher and surfaced as a JSON-encoded array of {name, value} objects.
+ *
+ * Per-Key transport overrides do not exist; the Provider owns every transport,
+ * authentication, retry, timeout, capability, and idempotency setting the
+ * Gateway uses to reach the upstream. Per-Key base URLs do exist on
+ * `upstream_keys.base_url`.
  */
-export const providerConnections = sqliteTable('provider_connections', {
+export const providers = sqliteTable('providers', {
   id: text('id').primaryKey(),
   displayName: text('display_name').notNull(),
   baseUrl: text('base_url').notNull(),
@@ -91,30 +97,34 @@ export const providerConnections = sqliteTable('provider_connections', {
 })
 
 /**
- * An optional group of Upstream Keys on one Provider Connection that share
- * Provider billing or capacity. Deleting an account ungroups its keys instead
- * of deleting them.
+ * An optional group of Upstream Keys on one Provider that share Provider
+ * billing or capacity. Deleting an account ungroups its keys instead of
+ * deleting them.
  */
 export const upstreamAccounts = sqliteTable('upstream_accounts', {
   id: text('id').primaryKey(),
-  connectionId: text('connection_id')
+  providerId: text('provider_id')
     .notNull()
-    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+    .references(() => providers.id, { onDelete: 'cascade' }),
   displayName: text('display_name').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
 /**
- * An Upstream Key attached to one Provider Connection. Only cipher output is
- * stored, so a copy of the database does not copy the Provider's keys. Model
- * allow/deny lists are JSON text, owned by the repository like settings.
+ * An Upstream Key attached to one Provider. Only cipher output is stored, so a
+ * copy of the database does not copy the Provider's keys. The optional
+ * `base_url` column lets one Provider bind different keys to different upstream
+ * endpoints (e.g. distinct regional or branded deployments). Model allow/deny
+ * lists are JSON text, owned by the repository like settings.
  */
 export const upstreamKeys = sqliteTable('upstream_keys', {
   id: text('id').primaryKey(),
-  connectionId: text('connection_id')
+  providerId: text('provider_id')
     .notNull()
-    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  /** Per-Key override of the Provider's base URL; null means inherit the Provider's. */
+  baseUrl: text('base_url'),
   accountId: text('account_id').references(() => upstreamAccounts.id, {
     onDelete: 'set null',
   }),
@@ -155,15 +165,15 @@ export const gatewayKeys = sqliteTable('gateway_keys', {
 })
 
 /**
- * One model known to a Provider Connection's catalog. Excluded rows are kept so
- * an Owner block survives synchronization. Capability overrides are JSON text.
+ * One model known to a Provider's catalog. Excluded rows are kept so an Owner
+ * block survives synchronization. Capability overrides are JSON text.
  */
 export const modelCatalogEntries = sqliteTable(
   'model_catalog_entries',
   {
-    connectionId: text('connection_id')
+    providerId: text('provider_id')
       .notNull()
-      .references(() => providerConnections.id, { onDelete: 'cascade' }),
+      .references(() => providers.id, { onDelete: 'cascade' }),
     modelId: text('model_id').notNull(),
     source: text('source').notNull(),
     excluded: integer('excluded', { mode: 'boolean' }).notNull(),
@@ -171,14 +181,14 @@ export const modelCatalogEntries = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
-  (table) => ({ pk: primaryKey({ columns: [table.connectionId, table.modelId] }) }),
+  (table) => ({ pk: primaryKey({ columns: [table.providerId, table.modelId] }) }),
 )
 
-/** The last synchronization outcome of one connection's catalog. */
+/** The last synchronization outcome of one Provider's catalog. */
 export const modelCatalogSync = sqliteTable('model_catalog_sync', {
-  connectionId: text('connection_id')
+  providerId: text('provider_id')
     .primaryKey()
-    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+    .references(() => providers.id, { onDelete: 'cascade' }),
   syncedAt: integer('synced_at', { mode: 'timestamp_ms' }),
   lastSuccessAt: integer('last_success_at', { mode: 'timestamp_ms' }),
   lastFailureAt: integer('last_failure_at', { mode: 'timestamp_ms' }),
@@ -186,15 +196,15 @@ export const modelCatalogSync = sqliteTable('model_catalog_sync', {
 })
 
 /**
- * The last usage polling outcome of one connection. `result` holds the last
+ * The last usage polling outcome of one Provider. `result` holds the last
  * successful normalized reading; `lastFailureAt` and `lastFailureMessage` are
  * kept independently so the Owner sees the latest error without losing the
  * previous successful result.
  */
 export const usageSnapshots = sqliteTable('usage_snapshots', {
-  connectionId: text('connection_id')
+  providerId: text('provider_id')
     .primaryKey()
-    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+    .references(() => providers.id, { onDelete: 'cascade' }),
   /** The visibility the configured Usage Adapter declares. */
   visibility: text('visibility').notNull(),
   syncedAt: integer('synced_at', { mode: 'timestamp_ms' }),
@@ -224,9 +234,9 @@ export const usageSnapshots = sqliteTable('usage_snapshots', {
 export const requestEvents = sqliteTable('request_events', {
   id: text('id').primaryKey(),
   occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(),
-  connectionId: text('connection_id')
+  providerId: text('provider_id')
     .notNull()
-    .references(() => providerConnections.id, { onDelete: 'cascade' }),
+    .references(() => providers.id, { onDelete: 'cascade' }),
   model: text('model').notNull(),
   /** Public identity of the Gateway Key the application presented. */
   gatewayKeyId: text('gateway_key_id'),

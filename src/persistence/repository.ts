@@ -111,50 +111,50 @@ export interface AuditRepository {
 }
 
 /**
- * One Owner-configured account or server the Gateway reaches a Provider
- * through. The ID is immutable for the connection's whole life because client
- * URLs are built on it; everything else may change.
+ * One Owner-configured upstream brand the Gateway reaches. The ID is immutable
+ * for the Provider's whole life because client URLs are built on it; every
+ * other field may change.
  */
-export interface ProviderConnectionRecord {
+export interface ProviderRecord {
   readonly id: string
   readonly displayName: string
-  /** The Provider's OpenAI-compatible base URL, exactly as the Owner gave it. */
+  /** The Provider's default OpenAI-compatible base URL, exactly as the Owner gave it. */
   readonly baseUrl: string
-  /** The explicit per-connection exception that permits plain HTTP. */
+  /** The explicit per-Provider exception that permits plain HTTP. */
   readonly allowInsecureHttp: boolean
   readonly enabled: boolean
   readonly retryMaxAttempts: number
   readonly retryAmbiguousNetwork: boolean
-  /** Set when the connection is archived; null while it is in active use. */
+  /** Set when the Provider is archived; null while it is in active use. */
   readonly archivedAt: Date | null
   /**
-   * The Provider Template whose defaults seeded this connection, or null for a
-   * hand-configured connection. Template knowledge contributes catalog models.
+   * The Provider Template whose defaults seeded this Provider, or null for a
+   * hand-configured Provider. Template knowledge contributes catalog models.
    */
   readonly templateId: string | null
-  /** Connection-wide capability defaults; per-model overrides may replace them. */
-  readonly capabilities: ConnectionCapabilities
+  /** Provider-wide capability defaults; per-model overrides may replace them. */
+  readonly capabilities: ProviderCapabilities
   /** Canonical authentication header name (e.g. "Authorization", "X-Api-Key"). */
   readonly authHeader: string
   /** Plain-text prefix for the authentication header; empty string means none. */
   readonly authPrefix: string
   /**
-   * The stored encrypted blob of the connection's static headers. Decryption
-   * is the registry's responsibility: this column carries cipher output, and
-   * the registry surfaces a decrypted `staticHeaders` view to callers.
+   * The stored encrypted blob of the Provider's static headers. Decryption is
+   * the registry's responsibility: this column carries cipher output, and the
+   * registry surfaces a decrypted `staticHeaders` view to callers.
    */
   readonly staticHeadersEncrypted: string
   /** Whether same-origin redirects are explicitly allowed. */
   readonly redirectAllowSameOrigin: boolean
-  /** Per-connection override for the global connection timeout (ms). */
+  /** Per-Provider override for the global connection timeout (ms). */
   readonly connectionTimeoutMs: number
-  /** Per-connection override for the global first-byte timeout (ms). */
+  /** Per-Provider override for the global first-byte timeout (ms). */
   readonly firstByteTimeoutMs: number
-  /** Per-connection override for the global non-streaming total timeout (ms). */
+  /** Per-Provider override for the global non-streaming total timeout (ms). */
   readonly nonStreamingTotalTimeoutMs: number
-  /** Per-connection override for the global streaming idle timeout (ms). */
+  /** Per-Provider override for the global streaming idle timeout (ms). */
   readonly streamingIdleTimeoutMs: number
-  /** Per-connection override for the global total-retry timeout (ms). */
+  /** Per-Provider override for the global total-retry timeout (ms). */
   readonly totalRetryTimeoutMs: number
   /** The idempotency header the adapter accepts (e.g. "Idempotency-Key"). */
   readonly idempotencyHeader: string
@@ -163,11 +163,11 @@ export interface ProviderConnectionRecord {
 }
 
 /**
- * The inference capabilities a connection claims by default. Every one is a
+ * The inference capabilities a Provider claims by default. Every one is a
  * boolean so the catalog can honestly mark support as unknown-off rather than
  * silently assuming a Provider behaves like a different one.
  */
-export interface ConnectionCapabilities {
+export interface ProviderCapabilities {
   readonly chat: boolean
   readonly streaming: boolean
   readonly tools: boolean
@@ -204,7 +204,7 @@ export type CapacityScopeKind = 'key' | 'account' | 'connection_model' | 'provid
  */
 export interface UpstreamAccountRecord {
   readonly id: string
-  readonly connectionId: string
+  readonly providerId: string
   readonly displayName: string
   readonly createdAt: Date
   readonly updatedAt: Date
@@ -216,13 +216,15 @@ export interface UpstreamAccountPatch {
 }
 
 /**
- * One Upstream Key attached to a Provider Connection. The key material itself
- * appears only as cipher output, so copying the database does not copy the
- * Provider's keys.
+ * One Upstream Key attached to a Provider. The key material itself appears
+ * only as cipher output, so copying the database does not copy the Provider's
+ * keys.
  */
 export interface UpstreamKeyRecord {
   readonly id: string
-  readonly connectionId: string
+  readonly providerId: string
+  /** Per-Key override of the Provider's base URL; null means inherit the Provider's. */
+  readonly baseUrl: string | null
   readonly encryptedKey: string
   readonly health: UpstreamKeyHealth
   readonly lastProbeAt: Date | null
@@ -239,7 +241,7 @@ export interface UpstreamKeyRecord {
    * the key is independent.
    */
   readonly accountId: string | null
-  /** Exact models the key may serve, or null for every connection model. */
+  /** Exact models the key may serve, or null for every Provider model. */
   readonly allowedModels: readonly string[] | null
   /** Exact models the key never serves, or null for no exclusion. */
   readonly deniedModels: readonly string[] | null
@@ -248,7 +250,7 @@ export interface UpstreamKeyRecord {
 }
 
 /** Only fields the Owner may edit. The ID is never patchable. */
-export interface ProviderConnectionPatch {
+export interface ProviderPatch {
   readonly displayName?: string
   readonly baseUrl?: string
   readonly allowInsecureHttp?: boolean
@@ -256,8 +258,8 @@ export interface ProviderConnectionPatch {
   readonly retryMaxAttempts?: number
   readonly retryAmbiguousNetwork?: boolean
   readonly archivedAt?: Date | null
-  /** Replaces the connection-wide capability defaults. */
-  readonly capabilities?: ConnectionCapabilities
+  /** Replaces the Provider-wide capability defaults. */
+  readonly capabilities?: ProviderCapabilities
   /** Replaces the canonical authentication header name. */
   readonly authHeader?: string
   /** Replaces the authentication header prefix. */
@@ -266,15 +268,15 @@ export interface ProviderConnectionPatch {
   readonly staticHeadersEncrypted?: string
   /** Replaces the same-origin redirect flag. */
   readonly redirectAllowSameOrigin?: boolean
-  /** Per-connection override for the global connection timeout (ms). */
+  /** Per-Provider override for the global connection timeout (ms). */
   readonly connectionTimeoutMs?: number
-  /** Per-connection override for the global first-byte timeout (ms). */
+  /** Per-Provider override for the global first-byte timeout (ms). */
   readonly firstByteTimeoutMs?: number
-  /** Per-connection override for the global non-streaming total timeout (ms). */
+  /** Per-Provider override for the global non-streaming total timeout (ms). */
   readonly nonStreamingTotalTimeoutMs?: number
-  /** Per-connection override for the global streaming idle timeout (ms). */
+  /** Per-Provider override for the global streaming idle timeout (ms). */
   readonly streamingIdleTimeoutMs?: number
-  /** Per-connection override for the global total-retry timeout (ms). */
+  /** Per-Provider override for the global total-retry timeout (ms). */
   readonly totalRetryTimeoutMs?: number
   /** Replaces the idempotency header the adapter accepts. */
   readonly idempotencyHeader?: string
@@ -297,35 +299,40 @@ export interface UpstreamKeyPatch {
   readonly allowedModels?: readonly string[] | null
   /** Replaces the exact-model deny list; null means nothing is excluded. */
   readonly deniedModels?: readonly string[] | null
+  /**
+   * Replaces the per-Key base URL override; null clears the override so the
+   * Key inherits the Provider's default base URL.
+   */
+  readonly baseUrl?: string | null
 }
 
 export interface ProviderRepository {
-  /** Every connection, most recently created first, archived ones included. */
-  listConnections(): Promise<readonly ProviderConnectionRecord[]>
-  getConnection(id: string): Promise<ProviderConnectionRecord | null>
-  insertConnection(connection: ProviderConnectionRecord): Promise<ProviderConnectionRecord>
+  /** Every Provider, most recently created first, archived ones included. */
+  listProviders(): Promise<readonly ProviderRecord[]>
+  getProvider(id: string): Promise<ProviderRecord | null>
+  insertProvider(provider: ProviderRecord): Promise<ProviderRecord>
   /** Applies only the supplied fields and moves `updatedAt`. Null when unknown. */
-  updateConnection(
+  updateProvider(
     id: string,
-    patch: ProviderConnectionPatch,
+    patch: ProviderPatch,
     at: Date,
-  ): Promise<ProviderConnectionRecord | null>
-  /** Returns whether a connection existed to remove. */
-  deleteConnection(id: string): Promise<boolean>
+  ): Promise<ProviderRecord | null>
+  /** Returns whether a Provider existed to remove. */
+  deleteProvider(id: string): Promise<boolean>
 
-  /** Keys of one connection, oldest first. */
-  listKeys(connectionId: string): Promise<readonly UpstreamKeyRecord[]>
+  /** Keys of one Provider, oldest first. */
+  listKeys(providerId: string): Promise<readonly UpstreamKeyRecord[]>
   getKey(id: string): Promise<UpstreamKeyRecord | null>
   insertKey(key: UpstreamKeyRecord): Promise<UpstreamKeyRecord>
   /** Applies only the supplied fields and moves `updatedAt`. Null when unknown. */
   updateKey(id: string, patch: UpstreamKeyPatch, at: Date): Promise<UpstreamKeyRecord | null>
   /** Removes one key. Returns whether a key existed to remove. */
   deleteKey(id: string): Promise<boolean>
-  /** Removes every key of a connection, returning how many were removed. */
-  deleteKeysForConnection(connectionId: string): Promise<number>
+  /** Removes every key of a Provider, returning how many were removed. */
+  deleteKeysForProvider(providerId: string): Promise<number>
 
-  /** Accounts of one connection, oldest first. */
-  listAccounts(connectionId: string): Promise<readonly UpstreamAccountRecord[]>
+  /** Accounts of one Provider, oldest first. */
+  listAccounts(providerId: string): Promise<readonly UpstreamAccountRecord[]>
   getAccount(id: string): Promise<UpstreamAccountRecord | null>
   insertAccount(account: UpstreamAccountRecord): Promise<UpstreamAccountRecord>
   /** Applies only the supplied fields and moves `updatedAt`. Null when unknown. */
@@ -340,15 +347,23 @@ export interface ProviderRepository {
    * vanished account.
    */
   deleteAccount(id: string): Promise<boolean>
+
+  /**
+   * Resolves the base URL one upstream call should hit. The Key's `baseUrl`
+   * wins when set; otherwise the Key inherits the Provider's default. Returns
+   * `null` when the Provider does not exist, so callers can report the missing
+   * Provider without having to look it up separately.
+   */
+  providerDefaultBaseUrl(providerId: string, keyId: string): Promise<string | null>
 }
 
 /**
- * One Provider Connection a Gateway Key permits its application to use and
- * discover. `models` is `null` when every model on the connection is allowed,
- * or the exact upstream model IDs the key is restricted to.
+ * One Provider a Gateway Key permits its application to use and discover.
+ * `models` is `null` when every model on the Provider is allowed, or the exact
+ * upstream model IDs the key is restricted to.
  */
 export interface GatewayKeyScopeEntry {
-  readonly connectionId: string
+  readonly providerId: string
   readonly models: readonly string[] | null
 }
 
@@ -374,7 +389,7 @@ export interface GatewayKeyRecord {
   readonly name: string
   /** SHA-256 of the secret half of the credential, never the plaintext. */
   readonly secretHash: string
-  /** Which Provider Connections the key may use and discover, and how. */
+  /** Which Providers the key may use and discover, and how. */
   readonly scope: readonly GatewayKeyScopeEntry[]
   /** Exact browser origins allowed to use this key; empty disables browser CORS. */
   readonly corsOrigins: readonly string[]
@@ -406,27 +421,27 @@ export interface GatewayKeyRepository {
 export type ModelCatalogSource = 'discovered' | 'template' | 'owner_added' | 'excluded'
 
 /**
- * One model in a connection's catalog. Excluded rows are kept so Owner intent
+ * One model in a Provider's catalog. Excluded rows are kept so Owner intent
  * survives synchronization, but they never join the effective catalog.
  */
 export interface ModelCatalogEntryRecord {
-  readonly connectionId: string
+  readonly providerId: string
   readonly modelId: string
   readonly source: ModelCatalogSource
   readonly excluded: boolean
-  /** Per-model capability overrides; null means inherit the connection defaults. */
-  readonly overrides: Readonly<Partial<ConnectionCapabilities>> | null
+  /** Per-model capability overrides; null means inherit the Provider defaults. */
+  readonly overrides: Readonly<Partial<ProviderCapabilities>> | null
   readonly createdAt: Date
   readonly updatedAt: Date
 }
 
 /**
- * The synchronization outcome of a connection's catalog. `lastSuccessAt` is
+ * The synchronization outcome of a Provider's catalog. `lastSuccessAt` is
  * retained across failures, which is what lets a failed refresh leave the last
  * good catalog in place and only mark it stale.
  */
 export interface ModelCatalogSyncRecord {
-  readonly connectionId: string
+  readonly providerId: string
   /** The last time a synchronization was attempted, successful or not. */
   readonly syncedAt: Date | null
   readonly lastSuccessAt: Date | null
@@ -436,48 +451,48 @@ export interface ModelCatalogSyncRecord {
 }
 
 export interface ModelCatalogRepository {
-  /** Every catalog row of one connection, insertion order. */
-  listEntries(connectionId: string): Promise<readonly ModelCatalogEntryRecord[]>
+  /** Every catalog row of one Provider, insertion order. */
+  listEntries(providerId: string): Promise<readonly ModelCatalogEntryRecord[]>
   /**
-   * Replaces the connection's discovered knowledge. Newly discovered models are
+   * Replaces the Provider's discovered knowledge. Newly discovered models are
    * upserted, existing overrides and exclusions are kept, and discovered models
    * no longer seen are removed — unless the Owner excluded them, so a block
    * survives a discovery that stops reporting the model.
    */
-  syncDiscovered(connectionId: string, modelIds: readonly string[], at: Date): Promise<void>
+  syncDiscovered(providerId: string, modelIds: readonly string[], at: Date): Promise<void>
   /**
    * Contributes the Provider Template's known models to the catalog. Only
    * absent models are added (source `template`); an existing row and an Owner
    * exclusion are never disturbed, so template knowledge fills gaps without
    * overriding discovery, additions, or intent.
    */
-  syncTemplate(connectionId: string, modelIds: readonly string[], at: Date): Promise<void>
+  syncTemplate(providerId: string, modelIds: readonly string[], at: Date): Promise<void>
   /** Marks a model as an Owner addition. Unknown models become `owner_added`. */
-  addOwnerModel(connectionId: string, modelId: string, at: Date): Promise<void>
+  addOwnerModel(providerId: string, modelId: string, at: Date): Promise<void>
   /** Removes an Owner addition. Returns whether an owner-added row was removed. */
-  removeOwnerModel(connectionId: string, modelId: string): Promise<boolean>
+  removeOwnerModel(providerId: string, modelId: string): Promise<boolean>
   /** Blocks or unblocks a model. Unblocking an unknown blocked model removes it. */
-  setExcluded(connectionId: string, modelId: string, excluded: boolean, at: Date): Promise<void>
+  setExcluded(providerId: string, modelId: string, excluded: boolean, at: Date): Promise<void>
   /** Replaces per-model overrides, creating an owner-added row when absent. */
   updateOverrides(
-    connectionId: string,
+    providerId: string,
     modelId: string,
-    overrides: Readonly<Partial<ConnectionCapabilities>>,
+    overrides: Readonly<Partial<ProviderCapabilities>>,
     at: Date,
   ): Promise<void>
-  /** Whether the Owner has blocked this model on this connection. */
-  isExcluded(connectionId: string, modelId: string): Promise<boolean>
-  getSync(connectionId: string): Promise<ModelCatalogSyncRecord | null>
+  /** Whether the Owner has blocked this model on this Provider. */
+  isExcluded(providerId: string, modelId: string): Promise<boolean>
+  getSync(providerId: string): Promise<ModelCatalogSyncRecord | null>
   putSync(record: ModelCatalogSyncRecord): Promise<void>
 }
 
 /**
- * The durable state of one connection's Usage Adapter polling. `result` is the
+ * The durable state of one Provider's Usage Adapter polling. `result` is the
  * last successful normalized reading kept across failures; the failure fields
  * describe the latest poll attempt separately so the UI can render both.
  */
 export interface UsageSnapshotRecord {
-  readonly connectionId: string
+  readonly providerId: string
   /** The visibility declared by the configured Usage Adapter. */
   readonly visibility: 'reactive_only' | 'authoritative'
   readonly syncedAt: Date | null
@@ -495,7 +510,7 @@ export interface UsageSnapshotRecord {
 }
 
 export interface UsageRepository {
-  get(connectionId: string): Promise<UsageSnapshotRecord | null>
+  get(providerId: string): Promise<UsageSnapshotRecord | null>
   /**
    * Replaces the snapshot. The service passes the full record so the
    * repository never has to guess whether an absent field means "stale" or
@@ -514,7 +529,7 @@ export type RequestOutcome = 'success' | 'failure'
 export interface RequestEventRecord {
   readonly id: string
   readonly occurredAt: Date
-  readonly connectionId: string
+  readonly providerId: string
   readonly model: string
   readonly gatewayKeyId: string | null
   readonly keyId: string | null
@@ -552,7 +567,7 @@ export interface RequestAttemptRecord {
  * mean "do not filter on this field".
  */
 export interface RequestHistoryFilter {
-  readonly connectionId?: string
+  readonly providerId?: string
   readonly outcome?: RequestOutcome
   readonly model?: string
   readonly keyId?: string

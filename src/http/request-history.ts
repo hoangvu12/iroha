@@ -100,7 +100,7 @@ export type RequestHistoryRoutes = ReturnType<typeof createRequestHistoryRoutes>
 const eventDto = t.Object({
   id: t.String(),
   occurredAt: t.String(),
-  connectionId: t.String(),
+  providerId: t.String(),
   model: t.String(),
   gatewayKeyId: t.Union([t.Null(), t.String()]),
   keyId: t.Union([t.Null(), t.String()]),
@@ -156,7 +156,7 @@ type AttemptDto = typeof attemptDto.static
 function toEventDto(event: {
   id: string
   occurredAt: Date
-  connectionId: string
+  providerId: string
   model: string
   gatewayKeyId: string | null
   keyId: string | null
@@ -172,7 +172,7 @@ function toEventDto(event: {
   return {
     id: event.id,
     occurredAt: event.occurredAt.toISOString(),
-    connectionId: event.connectionId,
+    providerId: event.providerId,
     model: event.model,
     gatewayKeyId: event.gatewayKeyId,
     keyId: event.keyId,
@@ -215,13 +215,13 @@ function parseListQuery(query: Record<string, unknown>):
   | { readonly value: RequestHistoryListOptions }
   | { readonly response: ManagementError } {
   const filter: {
-    connectionId?: string
+    providerId?: string
     outcome?: 'success' | 'failure'
     model?: string
     keyId?: string
   } = {}
-  if (typeof query.connectionId === 'string' && query.connectionId !== '') {
-    filter.connectionId = query.connectionId
+  if (typeof query.providerId === 'string' && query.providerId !== '') {
+    filter.providerId = query.providerId
   }
   if (query.outcome === 'success' || query.outcome === 'failure') {
     filter.outcome = query.outcome

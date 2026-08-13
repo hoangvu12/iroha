@@ -11,7 +11,7 @@ describe('scoped inference retries', () => {
   let iroha: TestApp
   let upstream: ReturnType<typeof mockUpstreamTransport>
   let csrf: string
-  let connectionId: string
+  let providerId: string
   let secret: string
 
   beforeEach(async () => {
@@ -24,8 +24,8 @@ describe('scoped inference retries', () => {
       body: JSON.stringify({ displayName: 'Retry', baseUrl: BASE_URL, upstreamKey: FIRST_KEY }),
       csrf,
     })
-    connectionId = ((await created.json()) as { id: string }).id
-    await iroha.fetch(`/api/v1/admin/provider-connections/${connectionId}/keys`, {
+    providerId = ((await created.json()) as { id: string }).id
+    await iroha.fetch(`/api/v1/admin/provider-connections/${providerId}/keys`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ upstreamKey: SECOND_KEY }),
@@ -34,7 +34,7 @@ describe('scoped inference retries', () => {
     const key = await iroha.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Retry app', scope: [{ connectionId }] }),
+      body: JSON.stringify({ name: 'Retry app', scope: [{ providerId }] }),
       csrf,
     })
     secret = ((await key.json()) as { secret: string }).secret
@@ -45,7 +45,7 @@ describe('scoped inference retries', () => {
   })
 
   const chat = () =>
-    iroha.fetch(`/providers/${connectionId}/v1/chat/completions`, {
+    iroha.fetch(`/providers/${providerId}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
       body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }] }),
@@ -61,7 +61,7 @@ describe('scoped inference retries', () => {
     expect(response.status).toBe(200)
     expect(upstream.calls).toHaveLength(2)
     expect(upstream.calls[0]?.headers.authorization).not.toBe(upstream.calls[1]?.headers.authorization)
-    const keys = await iroha.database.providers.listKeys(connectionId)
+    const keys = await iroha.database.providers.listKeys(providerId)
     expect(keys.find((key) => key.encryptedKey !== '')?.health).toBeDefined()
     expect(keys.map((key) => key.health).sort()).toEqual(['active', 'invalid_authentication'])
   })
@@ -74,7 +74,7 @@ describe('scoped inference retries', () => {
     expect(response.status).toBe(503)
     expect(response.headers.get('retry-after')).toBe('17')
     expect(upstream.calls).toHaveLength(2)
-    const keys = await iroha.database.providers.listKeys(connectionId)
+    const keys = await iroha.database.providers.listKeys(providerId)
     expect(keys.filter((key) => key.health === 'exhausted')).toHaveLength(2)
   })
 
@@ -109,11 +109,11 @@ describe('scoped inference retries', () => {
       body: JSON.stringify({ displayName: 'Retry delay', baseUrl: BASE_URL, upstreamKey: FIRST_KEY }),
       csrf,
     })
-    connectionId = ((await created.json()) as { id: string }).id
+    providerId = ((await created.json()) as { id: string }).id
     const key = await iroha.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Retry app', scope: [{ connectionId }] }),
+      body: JSON.stringify({ name: 'Retry app', scope: [{ providerId }] }),
       csrf,
     })
     secret = ((await key.json()) as { secret: string }).secret
@@ -145,7 +145,7 @@ describe('scoped inference retries', () => {
   })
 
   test('connection policy can explicitly allow one ambiguous network replay', async () => {
-    await iroha.fetch(`/api/v1/admin/provider-connections/${connectionId}`, {
+    await iroha.fetch(`/api/v1/admin/provider-connections/${providerId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ retryMaxAttempts: 2, retryAmbiguousNetwork: true }),
@@ -164,7 +164,7 @@ describe('scoped inference retries', () => {
   })
 
   test('connection attempt maximum stops retry before another credential', async () => {
-    await iroha.fetch(`/api/v1/admin/provider-connections/${connectionId}`, {
+    await iroha.fetch(`/api/v1/admin/provider-connections/${providerId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ retryMaxAttempts: 1 }),

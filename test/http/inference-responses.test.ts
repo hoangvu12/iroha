@@ -166,11 +166,11 @@ async function createConnection(iroha: TestApp, csrf: string): Promise<{ id: str
   return (await response.json()) as { id: string }
 }
 
-async function createGatewayKey(iroha: TestApp, csrf: string, connectionId: string): Promise<string> {
+async function createGatewayKey(iroha: TestApp, csrf: string, providerId: string): Promise<string> {
   const response = await iroha.fetch('/api/v1/admin/gateway-keys', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'Responses client', scope: [{ connectionId }] }),
+    body: JSON.stringify({ name: 'Responses client', scope: [{ providerId }] }),
     csrf,
   })
   if (response.status !== 201) throw new Error(`Gateway Key create failed: ${await response.text()}`)

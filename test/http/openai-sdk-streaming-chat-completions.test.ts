@@ -47,7 +47,7 @@ describe('the official OpenAI SDK streaming through the Chat Completions surface
   let iroha: TestApp
   let csrf: string
   let client: OpenAI
-  let connectionId: string
+  let providerId: string
   let upstream: ReturnType<typeof mockUpstreamTransport>
   let timer: FakeTimer
 
@@ -60,11 +60,11 @@ describe('the official OpenAI SDK streaming through the Chat Completions surface
       streamingTimeouts: { streamingHeaderMs: 1_000, streamingIdleMs: 2_000 },
     })
     csrf = (await completeSetup(iroha)).csrf
-    connectionId = await createConnection()
-    const secret = await createGatewayKey([{ connectionId }])
+    providerId = await createConnection()
+    const secret = await createGatewayKey([{ providerId }])
     client = new OpenAI({
       apiKey: secret,
-      baseURL: `http://iroha.test/providers/${connectionId}/v1`,
+      baseURL: `http://iroha.test/providers/${providerId}/v1`,
       fetch: appFetch(iroha.app),
       // UI tests register a DOM in the same process, which makes the SDK's
       // browser guard fire; this is test-only and never carries real secrets.

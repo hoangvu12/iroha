@@ -2,9 +2,9 @@
  * Provider Templates: built-in data-only setup aids.
  *
  * A Provider Template is **never an account or a secret**. It is the known-good
- * defaults for one Provider — the canonical base URL, the canonical
+ * defaults for one Provider —€” the canonical base URL, the canonical
  * authentication header shape, the capability defaults, the model list the
- * template was reviewed against — that the Owner uses to seed a new
+ * template was reviewed against —€” that the Owner uses to seed a new
  * Provider Connection. The Owner always supplies their own Upstream Key,
  * display name, and any deviation from the defaults they need; the template
  * makes routine setup quick without ever sending a credential through Iroha's
@@ -19,7 +19,7 @@
  * reactive-only.
  */
 
-import type { ConnectionCapabilities } from '../persistence/index.ts'
+import type { ProviderCapabilities } from '../persistence/index.ts'
 
 /**
  * The well-known Inference Adapter id the generic Inference Adapter is
@@ -65,7 +65,7 @@ export interface ProviderTemplate {
   /** Plain-text prefix for the authentication header; "" means none. */
   readonly authPrefix: string
   /** Default capability claim; the Owner can override any field per model. */
-  readonly capabilities: ConnectionCapabilities
+  readonly capabilities: ProviderCapabilities
   /** Models the template was reviewed against; data-only, never a secret. */
   readonly knownModels: readonly string[]
   /** The registered Inference Adapter the template assumes. */

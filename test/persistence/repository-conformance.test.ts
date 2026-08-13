@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import type {
   Database,
-  ProviderConnectionRecord,
+  ProviderRecord,
   SessionRecord,
   UpstreamAccountRecord,
   UpstreamKeyRecord,
@@ -356,8 +356,8 @@ for (const engine of availableEngines) {
 
       const connection = (
         id: string,
-        overrides: Partial<ProviderConnectionRecord> = {},
-      ): ProviderConnectionRecord => ({
+        overrides: Partial<ProviderRecord> = {},
+      ): ProviderRecord => ({
         id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
@@ -391,11 +391,12 @@ for (const engine of availableEngines) {
 
       const key = (
         id: string,
-        connectionId: string,
+        providerId: string,
         overrides: Partial<UpstreamKeyRecord> = {},
       ): UpstreamKeyRecord => ({
         id,
-        connectionId,
+        providerId,
+        baseUrl: null,
         accountId: null,
         encryptedKey: `v1.stored.${id}`,
         health: 'unverified',
@@ -417,11 +418,11 @@ for (const engine of availableEngines) {
 
       const account = (
         id: string,
-        connectionId: string,
+        providerId: string,
         overrides: Partial<UpstreamAccountRecord> = {},
       ): UpstreamAccountRecord => ({
         id,
-        connectionId,
+        providerId,
         displayName: 'Shared account',
         createdAt: at,
         updatedAt: at,
@@ -429,43 +430,43 @@ for (const engine of availableEngines) {
       })
 
       test('round-trips a connection', async () => {
-        const created = await database.providers.insertConnection(connection('pc_one'))
+        const created = await database.providers.insertProvider(connection('pc_one'))
 
         expect(created).toEqual(connection('pc_one'))
-        expect(await database.providers.getConnection('pc_one')).toEqual(connection('pc_one'))
+        expect(await database.providers.getProvider('pc_one')).toEqual(connection('pc_one'))
       })
 
       test('preserves booleans and a null archive', async () => {
-        await database.providers.insertConnection(connection('pc_flags'))
+        await database.providers.insertProvider(connection('pc_flags'))
 
-        const stored = await database.providers.getConnection('pc_flags')
+        const stored = await database.providers.getProvider('pc_flags')
         expect(stored?.allowInsecureHttp).toBe(false)
         expect(stored?.enabled).toBe(true)
         expect(stored?.archivedAt).toBeNull()
       })
 
       test('returns null for an unknown connection', async () => {
-        expect(await database.providers.getConnection('pc_absent')).toBeNull()
+        expect(await database.providers.getProvider('pc_absent')).toBeNull()
       })
 
       test('lists connections most recently created first', async () => {
-        await database.providers.insertConnection(
+        await database.providers.insertProvider(
           connection('pc_older', { createdAt: new Date('2026-01-01T00:00:00.000Z') }),
         )
-        await database.providers.insertConnection(
+        await database.providers.insertProvider(
           connection('pc_newer', { createdAt: new Date('2026-01-02T00:00:00.000Z') }),
         )
 
         expect(
-          (await database.providers.listConnections()).map((record) => record.id),
+          (await database.providers.listProviders()).map((record) => record.id),
         ).toEqual(['pc_newer', 'pc_older'])
       })
 
       test('patches only the supplied connection fields and moves updatedAt', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         const later = new Date('2026-02-01T00:00:00.000Z')
 
-        const updated = await database.providers.updateConnection(
+        const updated = await database.providers.updateProvider(
           'pc_one',
           { displayName: 'Renamed', enabled: false },
           later,
@@ -477,32 +478,101 @@ for (const engine of availableEngines) {
       })
 
       test('records an archive and clears it', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         const archivedAt = new Date('2026-02-01T00:00:00.000Z')
 
-        await database.providers.updateConnection('pc_one', { archivedAt }, archivedAt)
-        expect((await database.providers.getConnection('pc_one'))?.archivedAt).toEqual(archivedAt)
+        await database.providers.updateProvider('pc_one', { archivedAt }, archivedAt)
+        expect((await database.providers.getProvider('pc_one'))?.archivedAt).toEqual(archivedAt)
 
-        await database.providers.updateConnection('pc_one', { archivedAt: null }, archivedAt)
-        expect((await database.providers.getConnection('pc_one'))?.archivedAt).toBeNull()
+        await database.providers.updateProvider('pc_one', { archivedAt: null }, archivedAt)
+        expect((await database.providers.getProvider('pc_one'))?.archivedAt).toBeNull()
       })
 
       test('reports an update or removal against an unknown connection', async () => {
-        expect(await database.providers.updateConnection('pc_absent', { enabled: false }, at)).toBeNull()
-        expect(await database.providers.deleteConnection('pc_absent')).toBe(false)
+        expect(await database.providers.updateProvider('pc_absent', { enabled: false }, at)).toBeNull()
+        expect(await database.providers.deleteProvider('pc_absent')).toBe(false)
       })
 
       test('round-trips an Upstream Key', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         const created = await database.providers.insertKey(key('uk_one', 'pc_one'))
 
         expect(created).toEqual(key('uk_one', 'pc_one'))
         expect(await database.providers.getKey('uk_one')).toEqual(key('uk_one', 'pc_one'))
       })
 
+      test('round-trips a Key with a per-Key base URL override', async () => {
+        await database.providers.insertProvider(connection('pc_one'))
+        const overrideUrl = 'https://override.example.com/v1'
+        const created = await database.providers.insertKey(
+          key('uk_override', 'pc_one', { baseUrl: overrideUrl }),
+        )
+
+        expect(created.baseUrl).toBe(overrideUrl)
+        expect((await database.providers.getKey('uk_override'))?.baseUrl).toBe(overrideUrl)
+      })
+
+      test('patches a Key base URL override and clears it', async () => {
+        await database.providers.insertProvider(connection('pc_one'))
+        await database.providers.insertKey(key('uk_one', 'pc_one'))
+        const later = new Date('2026-02-01T00:00:00.000Z')
+
+        const updated = await database.providers.updateKey(
+          'uk_one',
+          { baseUrl: 'https://override.example.com/v1' },
+          later,
+        )
+        expect(updated?.baseUrl).toBe('https://override.example.com/v1')
+        expect(updated?.updatedAt).toEqual(later)
+
+        const cleared = await database.providers.updateKey(
+          'uk_one',
+          { baseUrl: null },
+          later,
+        )
+        expect(cleared?.baseUrl).toBeNull()
+      })
+
+      test('resolves the Provider default base URL when a Key has no override', async () => {
+        const provider = connection('pc_default', { baseUrl: 'https://provider.example.com/v1' })
+        await database.providers.insertProvider(provider)
+        await database.providers.insertKey(key('uk_default', 'pc_default'))
+
+        expect(await database.providers.providerDefaultBaseUrl('pc_default', 'uk_default')).toBe(
+          'https://provider.example.com/v1',
+        )
+      })
+
+      test('returns the Key override when one is set', async () => {
+        const provider = connection('pc_override', { baseUrl: 'https://provider.example.com/v1' })
+        await database.providers.insertProvider(provider)
+        await database.providers.insertKey(
+          key('uk_override', 'pc_override', { baseUrl: 'https://key.example.com/v1' }),
+        )
+
+        expect(await database.providers.providerDefaultBaseUrl('pc_override', 'uk_override')).toBe(
+          'https://key.example.com/v1',
+        )
+      })
+
+      test('returns null when the Key does not belong to the Provider', async () => {
+        await database.providers.insertProvider(connection('pc_a'))
+        await database.providers.insertProvider(connection('pc_b'))
+        await database.providers.insertKey(key('uk_a', 'pc_a'))
+
+        expect(await database.providers.providerDefaultBaseUrl('pc_b', 'uk_a')).toBeNull()
+      })
+
+      test('returns null for an unknown Key or Provider', async () => {
+        await database.providers.insertProvider(connection('pc_one'))
+
+        expect(await database.providers.providerDefaultBaseUrl('pc_one', 'uk_absent')).toBeNull()
+        expect(await database.providers.providerDefaultBaseUrl('pc_absent', 'uk_anything')).toBeNull()
+      })
+
       test('lists only the keys of one connection, oldest first', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
-        await database.providers.insertConnection(connection('pc_two'))
+        await database.providers.insertProvider(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_two'))
 
         await database.providers.insertKey(
           key('uk_newer', 'pc_one', { createdAt: new Date('2026-01-02T00:00:00.000Z') }),
@@ -519,7 +589,7 @@ for (const engine of availableEngines) {
       })
 
       test('patches key health without touching the stored secret', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertKey(key('uk_one', 'pc_one'))
         const later = new Date('2026-02-01T00:00:00.000Z')
 
@@ -546,7 +616,7 @@ for (const engine of availableEngines) {
       })
 
       test('round-trips key model lists and an account assignment', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertAccount(account('ua_one', 'pc_one'))
 
         const created = await database.providers.insertKey(
@@ -568,7 +638,7 @@ for (const engine of availableEngines) {
       })
 
       test('patches the account and the per-key model lists', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertAccount(account('ua_one', 'pc_one'))
         await database.providers.insertKey(key('uk_one', 'pc_one'))
         const later = new Date('2026-02-01T00:00:00.000Z')
@@ -591,7 +661,7 @@ for (const engine of availableEngines) {
       })
 
       test('removes a single key', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertKey(key('uk_one', 'pc_one'))
         await database.providers.insertKey(key('uk_two', 'pc_one'))
 
@@ -603,7 +673,7 @@ for (const engine of availableEngines) {
       })
 
       test('round-trips an Upstream Account', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         const created = await database.providers.insertAccount(account('ua_one', 'pc_one'))
 
         expect(created).toEqual(account('ua_one', 'pc_one'))
@@ -611,8 +681,8 @@ for (const engine of availableEngines) {
       })
 
       test('lists only the accounts of one connection, oldest first', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
-        await database.providers.insertConnection(connection('pc_two'))
+        await database.providers.insertProvider(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_two'))
 
         await database.providers.insertAccount(account('ua_other', 'pc_two'))
         await database.providers.insertAccount(
@@ -627,7 +697,7 @@ for (const engine of availableEngines) {
       })
 
       test('renames an account and moves updatedAt', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertAccount(account('ua_one', 'pc_one'))
         const later = new Date('2026-02-01T00:00:00.000Z')
 
@@ -639,7 +709,7 @@ for (const engine of availableEngines) {
       })
 
       test('deleting an account leaves its keys independent', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertAccount(account('ua_one', 'pc_one'))
         await database.providers.insertKey(key('uk_one', 'pc_one', { accountId: 'ua_one' }))
 
@@ -658,12 +728,12 @@ for (const engine of availableEngines) {
       })
 
       test('takes an account with its connection in a purge, inside a transaction', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertAccount(account('ua_one', 'pc_one'))
 
         const removed = await database.transaction(async (repositories) => {
-          await repositories.providers.deleteKeysForConnection('pc_one')
-          return await repositories.providers.deleteConnection('pc_one')
+          await repositories.providers.deleteKeysForProvider('pc_one')
+          return await repositories.providers.deleteProvider('pc_one')
         })
 
         expect(removed).toBe(true)
@@ -671,26 +741,26 @@ for (const engine of availableEngines) {
       })
 
       test('removes every key of a connection', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertKey(key('uk_one', 'pc_one'))
         await database.providers.insertKey(key('uk_two', 'pc_one'))
 
-        expect(await database.providers.deleteKeysForConnection('pc_one')).toBe(2)
+        expect(await database.providers.deleteKeysForProvider('pc_one')).toBe(2)
         expect(await database.providers.listKeys('pc_one')).toEqual([])
       })
 
       test('takes a connection and its keys with it, inside a transaction', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertKey(key('uk_one', 'pc_one'))
 
         const removed = await database.transaction(async (repositories) => {
-          const keys = await repositories.providers.deleteKeysForConnection('pc_one')
-          const gone = await repositories.providers.deleteConnection('pc_one')
+          const keys = await repositories.providers.deleteKeysForProvider('pc_one')
+          const gone = await repositories.providers.deleteProvider('pc_one')
           return { keys, gone }
         })
 
         expect(removed).toEqual({ keys: 1, gone: true })
-        expect(await database.providers.listConnections()).toEqual([])
+        expect(await database.providers.listProviders()).toEqual([])
         expect(await database.providers.listKeys('pc_one')).toEqual([])
       })
     })
@@ -701,8 +771,8 @@ for (const engine of availableEngines) {
 
       const connection = (
         id: string,
-        overrides: Partial<ProviderConnectionRecord> = {},
-      ): ProviderConnectionRecord => ({
+        overrides: Partial<ProviderRecord> = {},
+      ): ProviderRecord => ({
         id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
@@ -735,7 +805,7 @@ for (const engine of availableEngines) {
       })
 
       test('merges discovery, prunes only stale discovered rows, and keeps Owner intent', async () => {
-        await database.providers.insertConnection(connection('pc_catalog'))
+        await database.providers.insertProvider(connection('pc_catalog'))
 
         await database.modelCatalog.syncDiscovered('pc_catalog', ['gpt-4o-mini', 'gpt-4o'], at)
         await database.modelCatalog.addOwnerModel('pc_catalog', 'custom-model', at)
@@ -766,8 +836,8 @@ for (const engine of availableEngines) {
       })
 
       test('scopes every entry operation to its own connection', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
-        await database.providers.insertConnection(connection('pc_two'))
+        await database.providers.insertProvider(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_two'))
 
         await database.modelCatalog.syncDiscovered('pc_one', ['gpt-4o-mini'], at)
         await database.modelCatalog.syncDiscovered('pc_two', ['claude-3.5'], at)
@@ -781,8 +851,8 @@ for (const engine of availableEngines) {
       })
 
       test('tracks overrides per model without leaking across connections', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
-        await database.providers.insertConnection(connection('pc_two'))
+        await database.providers.insertProvider(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_two'))
 
         await database.modelCatalog.updateOverrides(
           'pc_one',
@@ -814,8 +884,8 @@ for (const engine of availableEngines) {
 
       const connection = (
         id: string,
-        overrides: Partial<ProviderConnectionRecord> = {},
-      ): ProviderConnectionRecord => ({
+        overrides: Partial<ProviderRecord> = {},
+      ): ProviderRecord => ({
         id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
@@ -848,7 +918,7 @@ for (const engine of availableEngines) {
       })
 
       const snapshot = (
-        connectionId: string,
+        providerId: string,
         overrides: {
           visibility?: 'reactive_only' | 'authoritative'
           syncedAt?: Date | null
@@ -859,7 +929,7 @@ for (const engine of availableEngines) {
           result?: unknown
         } = {},
       ) => ({
-        connectionId,
+        providerId,
         visibility: 'reactive_only' as const,
         syncedAt: null,
         lastSuccessAt: null,
@@ -871,7 +941,7 @@ for (const engine of availableEngines) {
       })
 
       test('round-trips a snapshot for one connection', async () => {
-        await database.providers.insertConnection(connection('pc_usage'))
+        await database.providers.insertProvider(connection('pc_usage'))
         const stored = snapshot('pc_usage', {
           visibility: 'authoritative',
           syncedAt: at,
@@ -898,7 +968,7 @@ for (const engine of availableEngines) {
       })
 
       test('replaces the snapshot of an existing connection', async () => {
-        await database.providers.insertConnection(connection('pc_usage'))
+        await database.providers.insertProvider(connection('pc_usage'))
         await database.usage.put(snapshot('pc_usage', { visibility: 'reactive_only' }))
         await database.usage.put(
           snapshot('pc_usage', {
@@ -922,7 +992,7 @@ for (const engine of availableEngines) {
       })
 
       test('retains the prior success when a later record carries only failure data', async () => {
-        await database.providers.insertConnection(connection('pc_usage'))
+        await database.providers.insertProvider(connection('pc_usage'))
         await database.usage.put(
           snapshot('pc_usage', {
             visibility: 'authoritative',
@@ -935,7 +1005,7 @@ for (const engine of availableEngines) {
         // success fields forward alongside the new failure fields; the
         // repository faithfully stores whatever it receives.
         await database.usage.put({
-          connectionId: 'pc_usage',
+          providerId: 'pc_usage',
           visibility: 'authoritative',
           syncedAt: later,
           lastSuccessAt: at,
@@ -953,22 +1023,22 @@ for (const engine of availableEngines) {
       })
 
       test('takes the snapshot with its connection when the connection is purged', async () => {
-        await database.providers.insertConnection(connection('pc_usage'))
+        await database.providers.insertProvider(connection('pc_usage'))
         await database.usage.put(
           snapshot('pc_usage', { visibility: 'authoritative', lastSuccessAt: at }),
         )
 
         await database.transaction(async (repositories) => {
-          await repositories.providers.deleteKeysForConnection('pc_usage')
-          await repositories.providers.deleteConnection('pc_usage')
+          await repositories.providers.deleteKeysForProvider('pc_usage')
+          await repositories.providers.deleteProvider('pc_usage')
         })
 
         expect(await database.usage.get('pc_usage')).toBeNull()
       })
 
       test('scopes each snapshot to its own connection', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
-        await database.providers.insertConnection(connection('pc_two'))
+        await database.providers.insertProvider(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_two'))
 
         await database.usage.put(snapshot('pc_one', { visibility: 'authoritative' }))
         await database.usage.put(snapshot('pc_two', { visibility: 'reactive_only' }))
@@ -986,8 +1056,8 @@ for (const engine of availableEngines) {
 
       const connection = (
         id: string,
-        overrides: Partial<ProviderConnectionRecord> = {},
-      ): ProviderConnectionRecord => ({
+        overrides: Partial<ProviderRecord> = {},
+      ): ProviderRecord => ({
         id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
@@ -1021,7 +1091,7 @@ for (const engine of availableEngines) {
 
       const event = (
         id: string,
-        connectionId: string,
+        providerId: string,
         overrides: Partial<{
           occurredAt: Date
           model: string
@@ -1039,7 +1109,7 @@ for (const engine of availableEngines) {
       ) => ({
         id,
         occurredAt: at,
-        connectionId,
+        providerId,
         model: 'gpt-4o-mini',
         gatewayKeyId: 'gw_one',
         keyId: 'uk_one',
@@ -1055,7 +1125,7 @@ for (const engine of availableEngines) {
       })
 
       test('round-trips an event with every column preserved', async () => {
-        await database.providers.insertConnection(connection('pc_rh'))
+        await database.providers.insertProvider(connection('pc_rh'))
         await database.requestHistory.recordEvent(
           event('req_one', 'pc_rh', {
             gatewayKeyId: null,
@@ -1087,7 +1157,7 @@ for (const engine of availableEngines) {
       })
 
       test('overwrites an event with the same id so streaming can update usage', async () => {
-        await database.providers.insertConnection(connection('pc_rh'))
+        await database.providers.insertProvider(connection('pc_rh'))
         await database.requestHistory.recordEvent(
           event('req_one', 'pc_rh', { totalTokens: 0, isStreaming: true }),
         )
@@ -1100,7 +1170,7 @@ for (const engine of availableEngines) {
       })
 
       test('records attempts and patches the outcome', async () => {
-        await database.providers.insertConnection(connection('pc_rh'))
+        await database.providers.insertProvider(connection('pc_rh'))
         await database.requestHistory.recordEvent(event('req_one', 'pc_rh'))
 
         const started = await database.requestHistory.recordAttempt({
@@ -1143,8 +1213,8 @@ for (const engine of availableEngines) {
       })
 
       test('orders events most-recent first and supports filters', async () => {
-        await database.providers.insertConnection(connection('pc_one'))
-        await database.providers.insertConnection(connection('pc_two'))
+        await database.providers.insertProvider(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_two'))
 
         await database.requestHistory.recordEvent(event('req_a', 'pc_one', { outcome: 'success' }))
         await database.requestHistory.recordEvent(event('req_b', 'pc_two', { outcome: 'failure', status: 502 }))
@@ -1155,7 +1225,7 @@ for (const engine of availableEngines) {
         expect(all.events.map((row) => row.id)).toEqual(['req_c', 'req_b', 'req_a'])
 
         const onlyPcOne = await database.requestHistory.listEvents({
-          filter: { connectionId: 'pc_one' },
+          filter: { providerId: 'pc_one' },
         })
         expect(onlyPcOne.events.map((row) => row.id)).toEqual(['req_c', 'req_a'])
 
@@ -1167,7 +1237,7 @@ for (const engine of availableEngines) {
       })
 
       test('paginates events with a stable order under a limit', async () => {
-        await database.providers.insertConnection(connection('pc_rh'))
+        await database.providers.insertProvider(connection('pc_rh'))
         for (let i = 0; i < 5; i++) {
           await database.requestHistory.recordEvent(
             event(`req_${i}`, 'pc_rh', {
@@ -1187,7 +1257,7 @@ for (const engine of availableEngines) {
       })
 
       test('prunes events older than a cutoff', async () => {
-        await database.providers.insertConnection(connection('pc_rh'))
+        await database.providers.insertProvider(connection('pc_rh'))
         await database.requestHistory.recordEvent(event('req_old', 'pc_rh', { occurredAt: new Date('2026-01-01T00:00:00.000Z') }))
         await database.requestHistory.recordEvent(event('req_new', 'pc_rh', { occurredAt: new Date('2026-02-01T00:00:00.000Z') }))
 
@@ -1197,7 +1267,7 @@ for (const engine of availableEngines) {
       })
 
       test('cascades attempts when their event is pruned through a connection purge', async () => {
-        await database.providers.insertConnection(connection('pc_rh'))
+        await database.providers.insertProvider(connection('pc_rh'))
         await database.requestHistory.recordEvent(event('req_one', 'pc_rh'))
         await database.requestHistory.recordAttempt({
           requestId: 'req_one',
@@ -1212,8 +1282,8 @@ for (const engine of availableEngines) {
         })
 
         await database.transaction(async (repositories) => {
-          await repositories.providers.deleteKeysForConnection('pc_rh')
-          await repositories.providers.deleteConnection('pc_rh')
+          await repositories.providers.deleteKeysForProvider('pc_rh')
+          await repositories.providers.deleteProvider('pc_rh')
         })
 
         expect(await database.requestHistory.getEvent('req_one')).toBeNull()

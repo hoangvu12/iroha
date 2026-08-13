@@ -37,7 +37,7 @@ describe('optional metrics', () => {
     const keyResponse = await test.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Metrics app', scope: [{ connectionId: connection.id }] }),
+      body: JSON.stringify({ name: 'Metrics app', scope: [{ providerId: connection.id }] }),
       csrf: signedIn.csrf,
     })
     const key = (await keyResponse.json()) as { secret: string }

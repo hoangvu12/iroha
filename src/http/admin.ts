@@ -786,6 +786,10 @@ const modelList = t.Union([t.Null(), t.Array(t.String())])
 const keyResponse = t.Object({
   id: t.String(),
   health: keyHealth,
+  /** The Key's own base URL override; null means inherit the Provider's. */
+  baseUrl: t.Union([t.Null(), t.String()]),
+  /** The base URL one upstream call should hit. The Key's override wins when set. */
+  effectiveBaseUrl: t.String(),
   lastProbe: t.Union([
     t.Null(),
     t.Object({
@@ -877,7 +881,7 @@ const templateDto = t.Object({
 const templateListResponse = t.Object({ templates: t.Array(templateDto) })
 
 const gatewayKeyScopeResponse = t.Object({
-  connectionId: t.String(),
+  providerId: t.String(),
   models: t.Union([t.Null(), t.Array(t.String())]),
 })
 
@@ -975,6 +979,8 @@ function toKeyDto(key: KeyView): KeyDto {
   return {
     id: key.id,
     health: key.health,
+    baseUrl: key.baseUrl,
+    effectiveBaseUrl: key.effectiveBaseUrl,
     lastProbe:
       key.lastProbe === null
         ? null
@@ -1011,7 +1017,7 @@ function toGatewayKeyDto(key: GatewayKeyView): GatewayKeyDto {
     id: key.id,
     name: key.name,
     scope: key.scope.map((entry) => ({
-      connectionId: entry.connectionId,
+      providerId: entry.providerId,
       models: entry.models === null ? null : [...entry.models],
     })),
     corsOrigins: [...key.corsOrigins],

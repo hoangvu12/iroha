@@ -26,6 +26,8 @@ interface ConnectionBody {
   keys: {
     id: string
     health: 'unverified' | 'active' | 'disabled'
+    baseUrl: string | null
+    effectiveBaseUrl: string
     lastProbe: { at: string; verdict: string; reason: string | null } | null
     createdAt: string
     updatedAt: string
@@ -189,7 +191,7 @@ describe('Provider Connection administration', () => {
       await createConnection()
 
       const [stored] = await iroha.database.providers.listKeys(
-        (await iroha.database.providers.listConnections())[0]!.id,
+        (await iroha.database.providers.listProviders())[0]!.id,
       )
 
       expect(stored?.encryptedKey).not.toBe(UPSTREAM_KEY)
@@ -322,7 +324,10 @@ describe('Provider Connection administration', () => {
       expect(updated.id).toBe(created.id)
       expect(updated.displayName).toBe('Renamed')
       expect(updated.baseUrl).toBe('https://other.example.com/v1')
-      expect(updated.keys[0]).toEqual(created.keys[0])
+      // The Key inherits the Provider's default base URL, which the edit just
+      // changed. The Key's identity and health are unaffected.
+      expect(updated.keys[0]?.id).toBe(created.keys[0]?.id)
+      expect(updated.keys[0]?.effectiveBaseUrl).toBe('https://other.example.com/v1')
     })
 
     test('toggles the enabled state', async () => {
@@ -335,7 +340,7 @@ describe('Provider Connection administration', () => {
         csrf,
       })
 
-      const stored = await iroha.database.providers.getConnection(created.id)
+      const stored = await iroha.database.providers.getProvider(created.id)
       expect(stored?.enabled).toBe(false)
     })
 
@@ -398,7 +403,7 @@ describe('Provider Connection administration', () => {
       const updated = events.find((event) => event.action === 'connection.updated')
 
       expect(updated?.detail).toEqual({
-        connectionId: created.id,
+        providerId: created.id,
         fields: ['displayName', 'baseUrl'],
       })
     })
@@ -542,7 +547,7 @@ describe('Provider Connection administration', () => {
 
       expect(refused.status).toBe(409)
       expect(await errorCode(refused)).toBe('not_archived')
-      expect(await iroha.database.providers.getConnection(created.id)).not.toBeNull()
+      expect(await iroha.database.providers.getProvider(created.id)).not.toBeNull()
     })
 
     test('purge removes an archived connection and its keys permanently', async () => {
@@ -552,7 +557,7 @@ describe('Provider Connection administration', () => {
       const response = await iroha.fetch(`${BASE}/${created.id}/purge`, { method: 'POST', csrf })
 
       expect(response.status).toBe(204)
-      expect(await iroha.database.providers.getConnection(created.id)).toBeNull()
+      expect(await iroha.database.providers.getProvider(created.id)).toBeNull()
       expect(await iroha.database.providers.listKeys(created.id)).toEqual([])
       expect((await iroha.fetch(`${BASE}/${created.id}`)).status).toBe(404)
     })
@@ -595,7 +600,7 @@ describe('Provider Connection administration', () => {
 
       await iroha.fetch(`${BASE}/${created.id}/duplicate`, { method: 'POST', csrf })
 
-      const connections = await iroha.database.providers.listConnections()
+      const connections = await iroha.database.providers.listProviders()
       expect(connections).toHaveLength(2)
 
       const stored = []
@@ -694,7 +699,7 @@ describe('Provider Connection administration', () => {
       await createConnection()
       await createConnection({ displayName: 'Another' })
 
-      const connections = await iroha.database.providers.listConnections()
+      const connections = await iroha.database.providers.listProviders()
       const cipher = createSecretCipher(TEST_MASTER_KEY)
       const wrongCipher = createSecretCipher('a-different-master-key-0123456789abcdef')
 

@@ -235,7 +235,7 @@ export class GatewayKeyRegistry {
 
     const providers: DirectoryProvider[] = []
     for (const entry of key.scope) {
-      const connection = await this.#database.providers.getConnection(entry.connectionId)
+      const connection = await this.#database.providers.getProvider(entry.providerId)
       // An out-of-scope or vanished connection is absent, never an error: the
       // caller must not learn which connections exist, only which it may use.
       if (connection === null || connection.archivedAt !== null) continue
@@ -261,11 +261,11 @@ export class GatewayKeyRegistry {
    * from the discovery failure, so probing cannot learn which keys exist.
    */
   async authorizeInference(
-    connectionId: string,
+    providerId: string,
     model: string,
     token: string | null,
   ): Promise<InferenceAuthorization> {
-    const located = await this.#authorizeScope(connectionId, token)
+    const located = await this.#authorizeScope(providerId, token)
     if (!located.ok) return located
 
     if (located.models !== null && !located.models.includes(model)) {
@@ -282,20 +282,20 @@ export class GatewayKeyRegistry {
    * inference authorization's.
    */
   async authorizeConnection(
-    connectionId: string,
+    providerId: string,
     token: string | null,
   ): Promise<ConnectionAuthorization> {
-    return await this.#authorizeScope(connectionId, token)
+    return await this.#authorizeScope(providerId, token)
   }
 
   async #authorizeScope(
-    connectionId: string,
+    providerId: string,
     token: string | null,
   ): Promise<ConnectionAuthorization> {
     const key = await this.#locateKey(token)
     if (key === null) return { ok: false, code: 'gateway_key_invalid' }
 
-    const entry = key.scope.find((candidate) => candidate.connectionId === connectionId)
+    const entry = key.scope.find((candidate) => candidate.providerId === providerId)
     if (entry === undefined) return { ok: false, code: 'connection_not_allowed' }
 
     await this.#database.gatewayKeys.markUsed(key.id, this.#clock.now())
@@ -352,15 +352,15 @@ async function readScope(
     }
 
     const entry = raw as Record<string, unknown>
-    const connectionId = typeof entry.connectionId === 'string' ? entry.connectionId.trim() : ''
-    if (connectionId === '') {
+    const providerId = typeof entry.providerId === 'string' ? entry.providerId.trim() : ''
+    if (providerId === '') {
       problems.push({ field: 'scope', message: 'each entry must name a Provider Connection' })
       continue
     }
-    if (seen.has(connectionId)) continue
-    seen.add(connectionId)
+    if (seen.has(providerId)) continue
+    seen.add(providerId)
 
-    const connection = await database.providers.getConnection(connectionId)
+    const connection = await database.providers.getProvider(providerId)
     if (connection === null) {
       problems.push({ field: 'scope', message: 'names a Provider Connection that does not exist' })
       continue
@@ -370,7 +370,7 @@ async function readScope(
       continue
     }
 
-    entries.push({ connectionId, models: readModels(entry.models, problems) })
+    entries.push({ providerId, models: readModels(entry.models, problems) })
   }
 
   return entries

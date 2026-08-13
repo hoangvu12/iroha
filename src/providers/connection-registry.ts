@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto'
 import { SecretCipherError, type SecretCipher } from '../crypto/index.ts'
 import type {
-  ConnectionCapabilities,
+  ProviderCapabilities,
   Database,
   KeyProbeVerdict,
-  ProviderConnectionRecord,
+  ProviderRecord,
   ProviderRepository,
   ProviderStaticHeader,
   UpstreamAccountRecord,
@@ -48,6 +48,14 @@ export type ProviderResult<T> =
 export interface KeyView {
   readonly id: string
   readonly health: UpstreamKeyHealth
+  /** The Key's own base URL override; null means inherit the Provider's default. */
+  readonly baseUrl: string | null
+  /**
+   * The base URL one upstream call should hit. The Key's own override wins when
+   * set; otherwise this is the Provider's default. The UI never has to compute
+   * the inheritance — the registry does it once and reports the result.
+   */
+  readonly effectiveBaseUrl: string
   readonly lastProbe: {
     readonly at: Date
     readonly verdict: KeyProbeVerdict
@@ -214,7 +222,7 @@ export class ProviderConnectionRegistry {
 
   /** Every connection, archived ones included, most recently created first. */
   async list(): Promise<readonly ConnectionView[]> {
-    const connections = await this.#database.providers.listConnections()
+    const connections = await this.#database.providers.listProviders()
 
     return await Promise.all(
       connections.map(async (connection) => ({
@@ -224,7 +232,7 @@ export class ProviderConnectionRegistry {
   }
 
   async get(id: string): Promise<ConnectionView | null> {
-    const connection = await this.#database.providers.getConnection(id)
+    const connection = await this.#database.providers.getProvider(id)
     if (connection === null) return null
     return await this.#viewOf(id)
   }
@@ -318,14 +326,14 @@ export class ProviderConnectionRegistry {
     const encryptedKey = await this.#cipher.encrypt(upstreamKey)
     const staticHeadersEncrypted = await this.#encryptStaticHeaders(staticHeadersResult)
     const at = this.#clock.now()
-    const connectionId = newId('pc')
-    const capabilities: ConnectionCapabilities = template !== null
+    const providerId = newId('pc')
+    const capabilities: ProviderCapabilities = template !== null
       ? { ...template.capabilities }
       : defaultCapabilities()
 
     await this.#database.transaction(async (repositories) => {
-      await repositories.providers.insertConnection({
-        id: connectionId,
+      await repositories.providers.insertProvider({
+        id: providerId,
         displayName,
         baseUrl,
         allowInsecureHttp,
@@ -350,7 +358,8 @@ export class ProviderConnectionRegistry {
       })
       await repositories.providers.insertKey({
         id: newId('uk'),
-        connectionId,
+        providerId,
+        baseUrl: null,
         accountId: null,
         encryptedKey,
         health: 'unverified',
@@ -371,14 +380,14 @@ export class ProviderConnectionRegistry {
       await repositories.audit.record({
         action: 'connection.created',
         outcome: 'success',
-        detail: { connectionId, displayName },
+        detail: { providerId, displayName },
         at,
       })
     })
 
-    await this.#probeConnectionKeys(connectionId)
+    await this.#probeConnectionKeys(providerId)
 
-    const created = await this.get(connectionId)
+    const created = await this.get(providerId)
     return created === null ? failed({ code: 'connection_not_found' }) : { ok: true, value: created }
   }
 
@@ -404,7 +413,7 @@ export class ProviderConnectionRegistry {
       idempotencyHeader?: unknown
     },
   ): Promise<ProviderResult<ConnectionView>> {
-    const connection = await this.#database.providers.getConnection(id)
+    const connection = await this.#database.providers.getProvider(id)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
 
@@ -549,12 +558,12 @@ export class ProviderConnectionRegistry {
 
     const at = this.#clock.now()
     await this.#database.transaction(async (repositories) => {
-      await repositories.providers.updateConnection(id, changes, at)
+      await repositories.providers.updateProvider(id, changes, at)
       await repositories.audit.record({
         action: 'connection.updated',
         outcome: 'success',
         // Field names only: a base URL may carry as much secret as a key.
-        detail: { connectionId: id, fields: Object.keys(changes) },
+        detail: { providerId: id, fields: Object.keys(changes) },
         at,
       })
     })
@@ -564,17 +573,17 @@ export class ProviderConnectionRegistry {
 
   /** Archiving preserves the connection's identity and takes it out of use. */
   async archive(id: string): Promise<ProviderResult<ConnectionView>> {
-    const connection = await this.#database.providers.getConnection(id)
+    const connection = await this.#database.providers.getProvider(id)
     if (connection === null) return failed({ code: 'connection_not_found' })
 
     if (connection.archivedAt === null) {
       const at = this.#clock.now()
       await this.#database.transaction(async (repositories) => {
-        await repositories.providers.updateConnection(id, { enabled: false, archivedAt: at }, at)
+        await repositories.providers.updateProvider(id, { enabled: false, archivedAt: at }, at)
         await repositories.audit.record({
           action: 'connection.archived',
           outcome: 'success',
-          detail: { connectionId: id },
+          detail: { providerId: id },
           at,
         })
       })
@@ -589,12 +598,12 @@ export class ProviderConnectionRegistry {
    * like the originals.
    */
   async duplicate(id: string): Promise<ProviderResult<ConnectionView>> {
-    const source = await this.#database.providers.getConnection(id)
+    const source = await this.#database.providers.getProvider(id)
     if (source === null) return failed({ code: 'connection_not_found' })
 
     const sourceKeys = await this.#database.providers.listKeys(id)
     const at = this.#clock.now()
-    const connectionId = newId('pc')
+    const providerId = newId('pc')
 
     const material: { keyId: string; plaintext: string }[] = []
     try {
@@ -607,8 +616,8 @@ export class ProviderConnectionRegistry {
     }
 
     await this.#database.transaction(async (repositories) => {
-      await repositories.providers.insertConnection({
-        id: connectionId,
+      await repositories.providers.insertProvider({
+        id: providerId,
         displayName: copiedName(source.displayName),
         baseUrl: source.baseUrl,
         allowInsecureHttp: source.allowInsecureHttp,
@@ -635,8 +644,9 @@ export class ProviderConnectionRegistry {
       for (const copied of material) {
         await repositories.providers.insertKey({
           id: copied.keyId,
-          connectionId,
-          accountId: null,
+          providerId,
+        baseUrl: null,
+        accountId: null,
           encryptedKey: await this.#cipher.encrypt(copied.plaintext),
           health: 'unverified',
           lastProbeAt: null,
@@ -658,14 +668,14 @@ export class ProviderConnectionRegistry {
       await repositories.audit.record({
         action: 'connection.duplicated',
         outcome: 'success',
-        detail: { connectionId, sourceId: id },
+        detail: { providerId, sourceId: id },
         at,
       })
     })
 
-    await this.#probeConnectionKeys(connectionId)
+    await this.#probeConnectionKeys(providerId)
 
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   /**
@@ -674,18 +684,18 @@ export class ProviderConnectionRegistry {
    * use can be purged.
    */
   async purge(id: string): Promise<ProviderResult<boolean>> {
-    const connection = await this.#database.providers.getConnection(id)
+    const connection = await this.#database.providers.getProvider(id)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt === null) return failed({ code: 'not_archived' })
 
     const at = this.#clock.now()
     await this.#database.transaction(async (repositories) => {
-      await repositories.providers.deleteKeysForConnection(id)
-      await repositories.providers.deleteConnection(id)
+      await repositories.providers.deleteKeysForProvider(id)
+      await repositories.providers.deleteProvider(id)
       await repositories.audit.record({
         action: 'connection.purged',
         outcome: 'success',
-        detail: { connectionId: id, displayName: connection.displayName },
+        detail: { providerId: id, displayName: connection.displayName },
         at,
       })
     })
@@ -694,8 +704,8 @@ export class ProviderConnectionRegistry {
   }
 
   /** Runs the key test on demand and records what it learned. */
-  async testKey(connectionId: string, keyId: string): Promise<ProviderResult<ConnectionView>> {
-    const located = await this.#locateKey(connectionId, keyId)
+  async testKey(providerId: string, keyId: string): Promise<ProviderResult<ConnectionView>> {
+    const located = await this.#locateKey(providerId, keyId)
     if (!located.ok) return located
 
     const { connection, key } = located.value
@@ -711,17 +721,17 @@ export class ProviderConnectionRegistry {
       await repositories.audit.record({
         action: 'key.tested',
         outcome: probe.verdict === 'usable' ? 'success' : 'failure',
-        detail: { connectionId, keyId, verdict: probe.verdict, reason: probe.reason },
+        detail: { providerId, keyId, verdict: probe.verdict, reason: probe.reason },
         at,
       })
     })
     this.#controlledTrials.delete(healthClaim(key))
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   /** The Owner's explicit say-so that an untested or disabled key may be used. */
-  async activateKey(connectionId: string, keyId: string): Promise<ProviderResult<ConnectionView>> {
-    const located = await this.#locateKey(connectionId, keyId)
+  async activateKey(providerId: string, keyId: string): Promise<ProviderResult<ConnectionView>> {
+    const located = await this.#locateKey(providerId, keyId)
     if (!located.ok) return located
 
     if (located.value.key.health !== 'active') {
@@ -743,17 +753,17 @@ export class ProviderConnectionRegistry {
         await repositories.audit.record({
           action: 'key.activated',
           outcome: 'success',
-          detail: { connectionId, keyId },
+          detail: { providerId, keyId },
           at,
         })
       })
     }
 
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
-  async disableKey(connectionId: string, keyId: string): Promise<ProviderResult<ConnectionView>> {
-    const located = await this.#locateKey(connectionId, keyId)
+  async disableKey(providerId: string, keyId: string): Promise<ProviderResult<ConnectionView>> {
+    const located = await this.#locateKey(providerId, keyId)
     if (!located.ok) return located
 
     if (located.value.key.health !== 'disabled') {
@@ -775,36 +785,43 @@ export class ProviderConnectionRegistry {
         await repositories.audit.record({
           action: 'key.disabled',
           outcome: 'success',
-          detail: { connectionId, keyId },
+          detail: { providerId, keyId },
           at,
         })
       })
     }
 
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   /**
-   * Adds another Upstream Key to a connection. Like the first, it is stored
+   * Adds another Upstream Key to a Provider. Like the first, it is stored
    * encrypted and Unverified, then tested; a usable test activates it. Adding
    * a key never disturbs the keys already there.
    */
   async addKey(
-    connectionId: string,
+    providerId: string,
     input: {
       upstreamKey: unknown
+      /**
+       * Per-Key override of the Provider's base URL. A blank string is treated
+       * as "no override" so the Owner UI can ship a prefilled empty field that
+       * means the same thing as omitting it.
+       */
+      baseUrl?: unknown
       accountId?: unknown
       allowedModels?: unknown
       deniedModels?: unknown
     },
   ): Promise<ProviderResult<ConnectionView>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
 
     const upstreamProblems = upstreamKeyProblems(input.upstreamKey)
     const problems: FieldProblem[] = [...upstreamProblems]
-    const settings = await readKeySettings(this.#database.providers, connectionId, input, problems)
+    const baseUrl = readKeyBaseUrl(input.baseUrl, connection.baseUrl, problems)
+    const settings = await readKeySettings(this.#database.providers, providerId, input, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
     const at = this.#clock.now()
@@ -812,7 +829,8 @@ export class ProviderConnectionRegistry {
     await this.#database.transaction(async (repositories) => {
       await repositories.providers.insertKey({
         id: keyId,
-        connectionId,
+        providerId,
+        baseUrl,
         accountId: settings.accountId === undefined ? null : settings.accountId,
         encryptedKey: await this.#cipher.encrypt((input.upstreamKey as string).trim()),
         health: 'unverified',
@@ -834,25 +852,26 @@ export class ProviderConnectionRegistry {
         action: 'key.created',
         outcome: 'success',
         detail: {
-          connectionId,
+          providerId,
           keyId,
+          ...(baseUrl !== null ? { baseUrlInherited: false } : {}),
           ...(Object.keys(settings).length > 0 ? { configuredFields: Object.keys(settings) } : {}),
         },
         at,
       })
     })
 
-    await this.#probeConnectionKeys(connectionId)
+    await this.#probeConnectionKeys(providerId)
 
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   /**
    * Removes one key permanently. The key's history goes with it; the other
    * keys and any accounts on the connection are untouched.
    */
-  async removeKey(connectionId: string, keyId: string): Promise<ProviderResult<ConnectionView>> {
-    const located = await this.#locateKey(connectionId, keyId)
+  async removeKey(providerId: string, keyId: string): Promise<ProviderResult<ConnectionView>> {
+    const located = await this.#locateKey(providerId, keyId)
     if (!located.ok) return located
 
     const at = this.#clock.now()
@@ -861,12 +880,12 @@ export class ProviderConnectionRegistry {
       await repositories.audit.record({
         action: 'key.removed',
         outcome: 'success',
-        detail: { connectionId, keyId },
+        detail: { providerId, keyId },
         at,
       })
     })
 
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   /**
@@ -875,15 +894,15 @@ export class ProviderConnectionRegistry {
    * serve. `null` lists mean no restriction; the ID is never patchable.
    */
   async updateKeySettings(
-    connectionId: string,
+    providerId: string,
     keyId: string,
     patch: { accountId?: unknown; allowedModels?: unknown; deniedModels?: unknown },
   ): Promise<ProviderResult<ConnectionView>> {
-    const located = await this.#locateKey(connectionId, keyId)
+    const located = await this.#locateKey(providerId, keyId)
     if (!located.ok) return located
 
     const problems: FieldProblem[] = []
-    const settings = await readKeySettings(this.#database.providers, connectionId, patch, problems)
+    const settings = await readKeySettings(this.#database.providers, providerId, patch, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
     const changes: {
@@ -903,21 +922,21 @@ export class ProviderConnectionRegistry {
           action: 'key.configured',
           outcome: 'success',
           // Field names only: model IDs are configuration, not secrets.
-          detail: { connectionId, keyId, fields: Object.keys(changes) },
+          detail: { providerId, keyId, fields: Object.keys(changes) },
           at,
         })
       })
     }
 
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   /** Creates an Upstream Account that groups keys sharing Provider billing or capacity. */
   async createAccount(
-    connectionId: string,
+    providerId: string,
     input: { displayName: unknown },
   ): Promise<ProviderResult<ConnectionView>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
 
@@ -929,7 +948,7 @@ export class ProviderConnectionRegistry {
     await this.#database.transaction(async (repositories) => {
       await repositories.providers.insertAccount({
         id: accountId,
-        connectionId,
+        providerId,
         displayName: (input.displayName as string).trim(),
         createdAt: at,
         updatedAt: at,
@@ -937,21 +956,21 @@ export class ProviderConnectionRegistry {
       await repositories.audit.record({
         action: 'account.created',
         outcome: 'success',
-        detail: { connectionId, accountId },
+        detail: { providerId, accountId },
         at,
       })
     })
 
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   /** Renames an account. The identity stays put so assigned keys keep their grouping. */
   async updateAccount(
-    connectionId: string,
+    providerId: string,
     accountId: string,
     input: { displayName?: unknown },
   ): Promise<ProviderResult<ConnectionView>> {
-    const account = await this.#locateAccount(connectionId, accountId)
+    const account = await this.#locateAccount(providerId, accountId)
     if (!account.ok) return account
 
     if (input.displayName !== undefined) {
@@ -968,13 +987,13 @@ export class ProviderConnectionRegistry {
         await repositories.audit.record({
           action: 'account.updated',
           outcome: 'success',
-          detail: { connectionId, accountId },
+          detail: { providerId, accountId },
           at,
         })
       })
     }
 
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   /**
@@ -982,10 +1001,10 @@ export class ProviderConnectionRegistry {
    * deleted, so nothing the Owner configured is lost except the grouping.
    */
   async deleteAccount(
-    connectionId: string,
+    providerId: string,
     accountId: string,
   ): Promise<ProviderResult<ConnectionView>> {
-    const account = await this.#locateAccount(connectionId, accountId)
+    const account = await this.#locateAccount(providerId, accountId)
     if (!account.ok) return account
 
     const at = this.#clock.now()
@@ -994,12 +1013,12 @@ export class ProviderConnectionRegistry {
       await repositories.audit.record({
         action: 'account.removed',
         outcome: 'success',
-        detail: { connectionId, accountId },
+        detail: { providerId, accountId },
         at,
       })
     })
 
-    return { ok: true, value: await this.#viewOf(connectionId) }
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   /**
@@ -1012,18 +1031,18 @@ export class ProviderConnectionRegistry {
    * guessed at. Selection never writes to the database.
    */
   async resolveInference(
-    connectionId: string,
+    providerId: string,
     model: string,
     excludedKeyIds: readonly string[] = [],
     ignoreUnknownScope = false,
   ): Promise<ProviderResult<InferenceTarget>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
     if (!connection.enabled) return failed({ code: 'connection_disabled' })
 
     const excluded = new Set(excludedKeyIds)
-    const keys = await this.#database.providers.listKeys(connectionId)
+    const keys = await this.#database.providers.listKeys(providerId)
     const at = this.#clock.now()
     const eligible = keys.filter((candidate) => {
       if (excluded.has(candidate.id) || !keyServesModel(candidate, model)) return false
@@ -1036,7 +1055,7 @@ export class ProviderConnectionRegistry {
     })
     if (eligible.length === 0) return failed({ code: 'no_eligible_key' })
 
-    const key = this.#selector.select(connectionId, eligible)
+    const key = this.#selector.select(providerId, eligible)
     if (key === null) return failed({ code: 'no_eligible_key' })
     if (key.health !== 'active') {
       const claim = healthClaim(key)
@@ -1080,9 +1099,9 @@ export class ProviderConnectionRegistry {
     }
   }
 
-  async earliestRetryAfterSeconds(connectionId: string): Promise<number | null> {
+  async earliestRetryAfterSeconds(providerId: string): Promise<number | null> {
     const at = this.#clock.now()
-    const seconds = (await this.#database.providers.listKeys(connectionId))
+    const seconds = (await this.#database.providers.listKeys(providerId))
       .flatMap((key) =>
         key.retryAfterAt === null
           ? []
@@ -1127,14 +1146,14 @@ export class ProviderConnectionRegistry {
    * any cooldown.
    */
   async reactivateFromUsage(
-    connectionId: string,
+    providerId: string,
     evidence: UsageRecoveryEvidence,
   ): Promise<{ readonly reactivated: readonly string[] }> {
     if (!evidence.authoritative || !evidence.hasCapacity) {
       return { reactivated: [] }
     }
 
-    const keys = await this.#database.providers.listKeys(connectionId)
+    const keys = await this.#database.providers.listKeys(providerId)
     const affected = eligibleForUsageRecovery(keys, evidence)
 
     const at = this.#clock.now()
@@ -1162,7 +1181,7 @@ export class ProviderConnectionRegistry {
         action: 'key.reactivated_by_usage',
         outcome: 'success',
         detail: {
-          connectionId,
+          providerId,
           reactivated: [...reactivated],
           scope: evidence.scope.kind,
         },
@@ -1206,7 +1225,7 @@ export class ProviderConnectionRegistry {
       const scopeId = key.accountId
       const affected =
         scope === 'account'
-          ? (await this.#database.providers.listKeys(key.connectionId)).filter(
+          ? (await this.#database.providers.listKeys(key.providerId)).filter(
               (candidate) => candidate.accountId === key.accountId,
             )
           : [key]
@@ -1230,7 +1249,7 @@ export class ProviderConnectionRegistry {
           at,
           retryAfterAt,
           'connection_model',
-          key.connectionId,
+          key.providerId,
           input.model,
         ),
         at,
@@ -1239,27 +1258,27 @@ export class ProviderConnectionRegistry {
   }
 
   async #locateKey(
-    connectionId: string,
+    providerId: string,
     keyId: string,
   ): Promise<
-    ProviderResult<{ readonly connection: ProviderConnectionRecord; readonly key: UpstreamKeyRecord }>
+    ProviderResult<{ readonly connection: ProviderRecord; readonly key: UpstreamKeyRecord }>
   > {
-    const connection = await this.#database.providers.getConnection(connectionId)
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
 
     const key = await this.#database.providers.getKey(keyId)
-    if (key === null || key.connectionId !== connectionId) return failed({ code: 'key_not_found' })
+    if (key === null || key.providerId !== providerId) return failed({ code: 'key_not_found' })
 
     return { ok: true, value: { connection, key } }
   }
 
   /** Tests every unverified key of one connection the way creation and duplication do. */
-  async #probeConnectionKeys(connectionId: string): Promise<void> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+  async #probeConnectionKeys(providerId: string): Promise<void> {
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return
 
-    for (const key of await this.#database.providers.listKeys(connectionId)) {
+    for (const key of await this.#database.providers.listKeys(providerId)) {
       if (key.health !== 'unverified') continue
 
       const probe = await this.#runProbe(connection.baseUrl, key.encryptedKey)
@@ -1294,12 +1313,22 @@ export class ProviderConnectionRegistry {
     }
   }
 
-  async #keysOf(connectionId: string): Promise<readonly KeyView[]> {
-    const keys = await this.#database.providers.listKeys(connectionId)
+  async #keysOf(providerId: string): Promise<readonly KeyView[]> {
+    const keys = await this.#database.providers.listKeys(providerId)
+    // Keys cannot exist without their Provider (FK), so the lookup is
+    // structural: a missing Provider here is a data-integrity violation,
+    // not a normal condition the view needs to render gracefully.
+    const provider = await this.#database.providers.getProvider(providerId)
+    if (provider === null) {
+      throw new Error(`Provider ${providerId} vanished mid-render`)
+    }
+    const providerDefault = provider.baseUrl
 
     return keys.map((key) => ({
       id: key.id,
       health: key.health,
+      baseUrl: key.baseUrl,
+      effectiveBaseUrl: key.baseUrl ?? providerDefault,
       lastProbe:
         key.lastProbeAt === null || key.lastProbeVerdict === null
           ? null
@@ -1318,8 +1347,8 @@ export class ProviderConnectionRegistry {
     }))
   }
 
-  async #accountsOf(connectionId: string): Promise<readonly UpstreamAccountView[]> {
-    const accounts = await this.#database.providers.listAccounts(connectionId)
+  async #accountsOf(providerId: string): Promise<readonly UpstreamAccountView[]> {
+    const accounts = await this.#database.providers.listAccounts(providerId)
 
     return accounts.map((account) => ({
       id: account.id,
@@ -1330,15 +1359,15 @@ export class ProviderConnectionRegistry {
   }
 
   async #locateAccount(
-    connectionId: string,
+    providerId: string,
     accountId: string,
   ): Promise<ProviderResult<UpstreamAccountRecord>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
 
     const account = await this.#database.providers.getAccount(accountId)
-    if (account === null || account.connectionId !== connectionId) {
+    if (account === null || account.providerId !== providerId) {
       return failed({ code: 'account_not_found' })
     }
 
@@ -1346,7 +1375,7 @@ export class ProviderConnectionRegistry {
   }
 
   async #viewOf(id: string): Promise<ConnectionView> {
-    const connection = await this.#database.providers.getConnection(id)
+    const connection = await this.#database.providers.getProvider(id)
     if (connection === null) throw new Error(`Provider connection ${id} vanished mid-operation`)
 
     let staticHeaders: readonly ProviderStaticHeader[] = []
@@ -1722,11 +1751,11 @@ function scopeUnavailable(
       case 'account':
         return candidate.healthScopeId !== null && candidate.healthScopeId === key.accountId
       case 'connection_model':
-        return candidate.connectionId === key.connectionId && candidate.healthModel === model
+        return candidate.providerId === key.providerId && candidate.healthModel === model
       case 'provider':
-        return candidate.connectionId === key.connectionId
+        return candidate.providerId === key.providerId
       case 'unknown':
-        return !ignoreUnknownScope && candidate.connectionId === key.connectionId
+        return !ignoreUnknownScope && candidate.providerId === key.providerId
     }
   })
 }
@@ -1796,6 +1825,42 @@ function readModelList(
 }
 
 /**
+ * Reads and validates a per-Key base URL override. The inheritance rules live
+ * here rather than in the HTTP layer so the same validation applies whether
+ * the Key is being added through the Owner dialog or through a future Owner API
+ * call: a blank string means "no override", an unset value means "use the
+ * Provider's default" (`null`), and a non-empty value is validated like a
+ * regular base URL.
+ */
+function readKeyBaseUrl(
+  input: unknown,
+  providerBaseUrl: string,
+  problems: FieldProblem[],
+): string | null {
+  if (input === undefined || input === null) return null
+  if (typeof input !== 'string') {
+    problems.push({ field: 'baseUrl', message: 'must be a base URL string or null' })
+    return null
+  }
+  const trimmed = input.trim()
+  if (trimmed === '') return null
+  // Reuse the connection-level validation so the Owner UI applies the same
+  // http-vs-https rules to per-Key URLs as to the Provider URL itself.
+  const allowInsecureHttp = (() => {
+    try {
+      return new URL(providerBaseUrl).protocol === 'http:'
+    } catch {
+      return false
+    }
+  })()
+  const fieldProblems = baseUrlProblems(trimmed, allowInsecureHttp)
+  for (const problem of fieldProblems) {
+    problems.push({ field: 'baseUrl', message: problem.message })
+  }
+  return trimmed
+}
+
+/**
  * Reads the Owner-editable settings for an Upstream Key — which account it
  * shares billing or capacity with, and which exact model IDs it may or may
  * not serve. Each field is optional on the input: `undefined` means "leave
@@ -1806,7 +1871,7 @@ function readModelList(
  */
 async function readKeySettings(
   providers: ProviderRepository,
-  connectionId: string,
+  providerId: string,
   input: { accountId?: unknown; allowedModels?: unknown; deniedModels?: unknown },
   problems: FieldProblem[],
 ): Promise<{
@@ -1825,7 +1890,7 @@ async function readKeySettings(
       result.accountId = null
     } else if (typeof input.accountId === 'string' && input.accountId.trim() !== '') {
       const account = await providers.getAccount(input.accountId.trim())
-      if (account === null || account.connectionId !== connectionId) {
+      if (account === null || account.providerId !== providerId) {
         problems.push({
           field: 'accountId',
           message: 'names an Upstream Account this connection does not own',
@@ -1892,7 +1957,7 @@ function eligibleForUsageRecovery(
  * enrich these claims later without Iroha silently assuming a Provider behaves
  * like a different one.
  */
-function defaultCapabilities(): ConnectionCapabilities {
+function defaultCapabilities(): ProviderCapabilities {
   return {
     chat: false,
     streaming: false,

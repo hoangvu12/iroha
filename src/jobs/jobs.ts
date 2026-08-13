@@ -25,15 +25,15 @@ export type ConnectionVisitingJob = 'modelSync' | 'usage'
 export function effectiveIntervalFor(
   schedule: import('./schedule-settings.ts').BackgroundScheduleSettings,
   job: ConnectionVisitingJob,
-  connectionId: string,
+  providerId: string,
 ): number {
-  const override = schedule.overrides[job][connectionId]
+  const override = schedule.overrides[job][providerId]
   if (override !== undefined) return override
   return schedule[job].intervalSeconds
 }
 
 /**
- * Whether a per-connection background job should process `connectionId` on
+ * Whether a per-connection background job should process `providerId` on
  * `now`. A connection that has never been processed is always due. Otherwise
  * the elapsed time since the last processed timestamp must meet or exceed the
  * effective interval. The boundary is inclusive: at exactly the interval the
@@ -83,7 +83,7 @@ export function buildDefaultJobs(): BackgroundJob[] {
       label: 'Model catalog synchronization',
       intervalSeconds: (settings) => settings.modelSync.intervalSeconds,
       async run({ jobs, database, schedule, clock }: BackgroundJobContext): Promise<BackgroundJobRunResult> {
-        const connections = await database.providers.listConnections()
+        const connections = await database.providers.listProviders()
         const targets = connections.filter((connection) => connection.archivedAt === null && connection.enabled)
         let succeeded = 0
         let affected = 0
@@ -131,7 +131,7 @@ export function buildDefaultJobs(): BackgroundJob[] {
       label: 'Usage Adapter polling',
       intervalSeconds: (settings) => settings.usage.intervalSeconds,
       async run({ jobs, database, schedule, clock }: BackgroundJobContext): Promise<BackgroundJobRunResult> {
-        const connections = await database.providers.listConnections()
+        const connections = await database.providers.listProviders()
         const targets = connections.filter((connection) => connection.archivedAt === null && connection.enabled)
         let succeeded = 0
         for (const connection of targets) {
@@ -166,7 +166,7 @@ export function buildDefaultJobs(): BackgroundJob[] {
         // Cooldown recovery is authoritative-only: it never makes a paid
         // inference probe. A reactive-only adapter cannot prove capacity, so
         // a connection whose adapter is reactive_only gets nothing.
-        const connections = await database.providers.listConnections()
+        const connections = await database.providers.listProviders()
         const targets = connections.filter((connection) => connection.archivedAt === null && connection.enabled)
         let reactivated = 0
         for (const connection of targets) {
@@ -217,22 +217,22 @@ const MAX_CLEANUP_ITERATIONS = 5
 
 function failureFromModelCatalogFailure(
   failure: { code: string; message?: string },
-  connectionId: string,
+  providerId: string,
 ): never {
   throw new BackgroundJobError(
     'model_sync_failed',
     failure.code === 'no_eligible_key'
-      ? `No Upstream Key is eligible to sync the model catalog for ${connectionId}.`
-      : `Could not refresh the model catalog for ${connectionId}: ${failure.code}.`,
+      ? `No Upstream Key is eligible to sync the model catalog for ${providerId}.`
+      : `Could not refresh the model catalog for ${providerId}: ${failure.code}.`,
   )
 }
 
 function failureFromUsageFailure(
   failure: { code: string; message?: string },
-  connectionId: string,
+  providerId: string,
 ): never {
   throw new BackgroundJobError(
     'usage_poll_failed',
-    `Could not poll usage for ${connectionId}: ${failure.code}.`,
+    `Could not poll usage for ${providerId}: ${failure.code}.`,
   )
 }

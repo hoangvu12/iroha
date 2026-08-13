@@ -198,7 +198,7 @@ describe('Provider Connection templates', () => {
       if (!created.ok) throw new Error(created.failure.code)
       expect(created.value.templateId).toBe('experimental')
 
-      const stored = await opened2.database.providers.getConnection(created.value.id)
+      const stored = await opened2.database.providers.getProvider(created.value.id)
       expect(stored?.templateId).toBe('experimental')
     } finally {
       await opened2.dispose()
@@ -220,7 +220,7 @@ describe('Provider Connection templates', () => {
   })
 
   test('template defaults never include a secret', async () => {
-    // The audit log records the create event with the connectionId and
+    // The audit log records the create event with the providerId and
     // display name; the template defaults and the connection itself never
     // carry the Upstream Key, so the audit row must not echo it.
     const created = await registry.create({

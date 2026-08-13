@@ -74,7 +74,7 @@ describe('provider-scoped Chat Completions', () => {
   const connect = async (fields: Record<string, unknown> = {}, scope: unknown[] | null = null) => {
     connection = await createConnection(fields)
     path = `/providers/${connection.id}/v1/chat/completions`
-    const scoped = scope === null ? [{ connectionId: connection.id }] : scope
+    const scoped = scope === null ? [{ providerId: connection.id }] : scope
     return await createKey(scoped)
   }
 
@@ -143,7 +143,7 @@ describe('provider-scoped Chat Completions', () => {
     test('rejects a key scoped to a different connection', async () => {
       await connect()
       const other = await createConnection({ displayName: 'Other' })
-      const key = await createKey([{ connectionId: other.id }])
+      const key = await createKey([{ providerId: other.id }])
 
       const response = await chat(key.secret, completionBody())
 
@@ -154,7 +154,7 @@ describe('provider-scoped Chat Completions', () => {
 
     test('rejects a key whose allowed models do not include the request', async () => {
       await connect()
-      const key = await createKey([{ connectionId: connection.id, models: [OTHER_MODEL] }])
+      const key = await createKey([{ providerId: connection.id, models: [OTHER_MODEL] }])
 
       const response = await chat(key.secret, completionBody())
 
@@ -165,7 +165,7 @@ describe('provider-scoped Chat Completions', () => {
 
     test('scope restrictions are enforced for unknown models too', async () => {
       await connect()
-      const key = await createKey([{ connectionId: connection.id, models: ['gpt-4o'] }])
+      const key = await createKey([{ providerId: connection.id, models: ['gpt-4o'] }])
 
       const response = await chat(key.secret, completionBody('gpt-3.5-turbo'))
 
@@ -453,7 +453,7 @@ describe('provider-scoped Chat Completions', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             name: 'Untested app',
-            scope: [{ connectionId: untested.id }],
+            scope: [{ providerId: untested.id }],
           }),
           csrf: signedIn.csrf,
         })

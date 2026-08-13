@@ -19,7 +19,6 @@ import {
   type BackgroundJobRecord,
   type BackgroundJobRepository,
   type BackgroundJobStatus,
-  type ConnectionCapabilities,
   type Database,
   type GatewayKeyRecord,
   type GatewayKeyRepository,
@@ -31,8 +30,9 @@ import {
   type ModelCatalogSyncRecord,
   type OwnerRecord,
   type OwnerRepository,
-  type ProviderConnectionPatch,
-  type ProviderConnectionRecord,
+  type ProviderCapabilities,
+  type ProviderPatch,
+  type ProviderRecord,
   type ProviderRepository,
   type Repositories,
   type RequestAttemptRecord,
@@ -62,7 +62,7 @@ import {
   modelCatalogSync,
   owner,
   ownerSessions,
-  providerConnections,
+  providers,
   requestAttempts,
   requestEvents,
   settings,
@@ -422,58 +422,56 @@ function toAuditEvent(row: {
 class SqliteProviderRepository implements ProviderRepository {
   constructor(private readonly handle: Handle) {}
 
-  async listConnections(): Promise<readonly ProviderConnectionRecord[]> {
+  async listProviders(): Promise<readonly ProviderRecord[]> {
     const rows = await this.handle
       .select()
-      .from(providerConnections)
-      .orderBy(desc(providerConnections.createdAt), desc(providerConnections.id))
-    return rows.map(toConnection)
+      .from(providers)
+      .orderBy(desc(providers.createdAt), desc(providers.id))
+    return rows.map(toProvider)
   }
 
-  async getConnection(id: string): Promise<ProviderConnectionRecord | null> {
+  async getProvider(id: string): Promise<ProviderRecord | null> {
     const [row] = await this.handle
       .select()
-      .from(providerConnections)
-      .where(eq(providerConnections.id, id))
+      .from(providers)
+      .where(eq(providers.id, id))
       .limit(1)
-    return row ? toConnection(row) : null
+    return row ? toProvider(row) : null
   }
 
-  async insertConnection(
-    connection: ProviderConnectionRecord,
-  ): Promise<ProviderConnectionRecord> {
-    const encoded = encodeConnectionRow(connection)
-    const [row] = await this.handle.insert(providerConnections).values(encoded).returning()
-    return toConnection(row ?? encoded)
+  async insertProvider(provider: ProviderRecord): Promise<ProviderRecord> {
+    const encoded = encodeProviderRow(provider)
+    const [row] = await this.handle.insert(providers).values(encoded).returning()
+    return toProvider(row ?? encoded)
   }
 
-  async updateConnection(
+  async updateProvider(
     id: string,
-    patch: ProviderConnectionPatch,
+    patch: ProviderPatch,
     at: Date,
-  ): Promise<ProviderConnectionRecord | null> {
-    const changed = { ...encodeConnectionPatch(patch), updatedAt: at }
+  ): Promise<ProviderRecord | null> {
+    const changed = { ...encodeProviderPatch(patch), updatedAt: at }
     const [row] = await this.handle
-      .update(providerConnections)
+      .update(providers)
       .set(changed)
-      .where(eq(providerConnections.id, id))
+      .where(eq(providers.id, id))
       .returning()
-    return row ? toConnection(row) : null
+    return row ? toProvider(row) : null
   }
 
-  async deleteConnection(id: string): Promise<boolean> {
+  async deleteProvider(id: string): Promise<boolean> {
     const removed = await this.handle
-      .delete(providerConnections)
-      .where(eq(providerConnections.id, id))
-      .returning({ id: providerConnections.id })
+      .delete(providers)
+      .where(eq(providers.id, id))
+      .returning({ id: providers.id })
     return removed.length > 0
   }
 
-  async listKeys(connectionId: string): Promise<readonly UpstreamKeyRecord[]> {
+  async listKeys(providerId: string): Promise<readonly UpstreamKeyRecord[]> {
     const rows = await this.handle
       .select()
       .from(upstreamKeys)
-      .where(eq(upstreamKeys.connectionId, connectionId))
+      .where(eq(upstreamKeys.providerId, providerId))
       .orderBy(upstreamKeys.createdAt, upstreamKeys.id)
     return rows.map(toKey)
   }
@@ -511,19 +509,19 @@ class SqliteProviderRepository implements ProviderRepository {
     return removed.length > 0
   }
 
-  async deleteKeysForConnection(connectionId: string): Promise<number> {
+  async deleteKeysForProvider(providerId: string): Promise<number> {
     const removed = await this.handle
       .delete(upstreamKeys)
-      .where(eq(upstreamKeys.connectionId, connectionId))
+      .where(eq(upstreamKeys.providerId, providerId))
       .returning({ id: upstreamKeys.id })
     return removed.length
   }
 
-  async listAccounts(connectionId: string): Promise<readonly UpstreamAccountRecord[]> {
+  async listAccounts(providerId: string): Promise<readonly UpstreamAccountRecord[]> {
     const rows = await this.handle
       .select()
       .from(upstreamAccounts)
-      .where(eq(upstreamAccounts.connectionId, connectionId))
+      .where(eq(upstreamAccounts.providerId, providerId))
       .orderBy(upstreamAccounts.createdAt, upstreamAccounts.id)
     return rows.map(toAccount)
   }
@@ -562,6 +560,14 @@ class SqliteProviderRepository implements ProviderRepository {
       .returning({ id: upstreamAccounts.id })
     return removed.length > 0
   }
+
+  async providerDefaultBaseUrl(providerId: string, keyId: string): Promise<string | null> {
+    const key = await this.getKey(keyId)
+    if (key === null || key.providerId !== providerId) return null
+    if (key.baseUrl !== null) return key.baseUrl
+    const provider = await this.getProvider(providerId)
+    return provider?.baseUrl ?? null
+  }
 }
 
 type AccountRow = typeof upstreamAccounts.$inferSelect
@@ -569,7 +575,7 @@ type AccountRow = typeof upstreamAccounts.$inferSelect
 function toAccount(row: AccountRow): UpstreamAccountRecord {
   return {
     id: row.id,
-    connectionId: row.connectionId,
+    providerId: row.providerId,
     displayName: row.displayName,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -698,10 +704,10 @@ function decodeOrigins(raw: string): readonly string[] {
   return Array.isArray(parsed) ? (parsed as string[]) : []
 }
 
-type ConnectionRow = typeof providerConnections.$inferSelect
+type ProviderRow = typeof providers.$inferSelect
 type KeyRow = typeof upstreamKeys.$inferSelect
 
-function toConnection(row: ConnectionRow): ProviderConnectionRecord {
+function toProvider(row: ProviderRow): ProviderRecord {
   return {
     id: row.id,
     displayName: row.displayName,
@@ -732,10 +738,10 @@ function toConnection(row: ConnectionRow): ProviderConnectionRecord {
  * The row a caller hands the SQLite repository carries the cipher output of
  * `staticHeadersEncrypted` and a JSON-encoded `capabilities` blob. The caller
  * (the registry) is responsible for encrypting the static headers before
- * `insertConnection` and for supplying `staticHeadersEncrypted` on the patch
- * passed to `updateConnection`.
+ * `insertProvider` and for supplying `staticHeadersEncrypted` on the patch
+ * passed to `updateProvider`.
  */
-function encodeConnectionRow(connection: ProviderConnectionRecord): {
+function encodeProviderRow(provider: ProviderRecord): {
   id: string
   displayName: string
   baseUrl: string
@@ -760,44 +766,45 @@ function encodeConnectionRow(connection: ProviderConnectionRecord): {
   updatedAt: Date
 } {
   return {
-    id: connection.id,
-    displayName: connection.displayName,
-    baseUrl: connection.baseUrl,
-    allowInsecureHttp: connection.allowInsecureHttp,
-    enabled: connection.enabled,
-    retryMaxAttempts: connection.retryMaxAttempts,
-    retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
-    archivedAt: connection.archivedAt,
-    templateId: connection.templateId,
-    capabilities: JSON.stringify(connection.capabilities),
-    authHeader: connection.authHeader,
-    authPrefix: connection.authPrefix,
-    staticHeadersEncrypted: connection.staticHeadersEncrypted,
-    redirectAllowSameOrigin: connection.redirectAllowSameOrigin,
-    connectionTimeoutMs: connection.connectionTimeoutMs,
-    firstByteTimeoutMs: connection.firstByteTimeoutMs,
-    nonStreamingTotalTimeoutMs: connection.nonStreamingTotalTimeoutMs,
-    streamingIdleTimeoutMs: connection.streamingIdleTimeoutMs,
-    totalRetryTimeoutMs: connection.totalRetryTimeoutMs,
-    idempotencyHeader: connection.idempotencyHeader,
-    createdAt: connection.createdAt,
-    updatedAt: connection.updatedAt,
+    id: provider.id,
+    displayName: provider.displayName,
+    baseUrl: provider.baseUrl,
+    allowInsecureHttp: provider.allowInsecureHttp,
+    enabled: provider.enabled,
+    retryMaxAttempts: provider.retryMaxAttempts,
+    retryAmbiguousNetwork: provider.retryAmbiguousNetwork,
+    archivedAt: provider.archivedAt,
+    templateId: provider.templateId,
+    capabilities: JSON.stringify(provider.capabilities),
+    authHeader: provider.authHeader,
+    authPrefix: provider.authPrefix,
+    staticHeadersEncrypted: provider.staticHeadersEncrypted,
+    redirectAllowSameOrigin: provider.redirectAllowSameOrigin,
+    connectionTimeoutMs: provider.connectionTimeoutMs,
+    firstByteTimeoutMs: provider.firstByteTimeoutMs,
+    nonStreamingTotalTimeoutMs: provider.nonStreamingTotalTimeoutMs,
+    streamingIdleTimeoutMs: provider.streamingIdleTimeoutMs,
+    totalRetryTimeoutMs: provider.totalRetryTimeoutMs,
+    idempotencyHeader: provider.idempotencyHeader,
+    createdAt: provider.createdAt,
+    updatedAt: provider.updatedAt,
   }
 }
 
-/** Same encoding shape as {@link encodeConnectionRow} but only the supplied fields. */
-function encodeConnectionPatch(patch: ProviderConnectionPatch): Partial<ReturnType<typeof encodeConnectionRow>> {
+/** Same encoding shape as {@link encodeProviderRow} but only the supplied fields. */
+function encodeProviderPatch(patch: ProviderPatch): Partial<ReturnType<typeof encodeProviderRow>> {
   const encoded = { ...(patch as Record<string, unknown>) }
   if (patch.capabilities !== undefined) {
     encoded.capabilities = JSON.stringify(patch.capabilities)
   }
-  return encoded as Partial<ReturnType<typeof encodeConnectionRow>>
+  return encoded as Partial<ReturnType<typeof encodeProviderRow>>
 }
 
 function toKey(row: KeyRow): UpstreamKeyRecord {
   return {
     id: row.id,
-    connectionId: row.connectionId,
+    providerId: row.providerId,
+    baseUrl: row.baseUrl,
     accountId: row.accountId,
     encryptedKey: row.encryptedKey,
     health: row.health as UpstreamKeyHealth,
@@ -826,16 +833,16 @@ function decodeModels(raw: string | null): readonly string[] | null {
 class SqliteModelCatalogRepository implements ModelCatalogRepository {
   constructor(private readonly handle: Handle) {}
 
-  async listEntries(connectionId: string): Promise<readonly ModelCatalogEntryRecord[]> {
+  async listEntries(providerId: string): Promise<readonly ModelCatalogEntryRecord[]> {
     const rows = await this.handle
       .select()
       .from(modelCatalogEntries)
-      .where(eq(modelCatalogEntries.connectionId, connectionId))
+      .where(eq(modelCatalogEntries.providerId, providerId))
       .orderBy(modelCatalogEntries.createdAt, modelCatalogEntries.modelId)
     return rows.map(toModelEntry)
   }
 
-  async syncDiscovered(connectionId: string, modelIds: readonly string[], at: Date): Promise<void> {
+  async syncDiscovered(providerId: string, modelIds: readonly string[], at: Date): Promise<void> {
     const desired = new Set(modelIds)
 
     for (const modelId of modelIds) {
@@ -844,7 +851,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
         .from(modelCatalogEntries)
         .where(
           and(
-            eq(modelCatalogEntries.connectionId, connectionId),
+            eq(modelCatalogEntries.providerId, providerId),
             eq(modelCatalogEntries.modelId, modelId),
           ),
         )
@@ -852,7 +859,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
 
       if (existing === undefined) {
         await this.handle.insert(modelCatalogEntries).values({
-          connectionId,
+          providerId,
           modelId,
           source: 'discovered',
           excluded: false,
@@ -866,7 +873,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
           .set({ source: 'discovered', updatedAt: at })
           .where(
             and(
-              eq(modelCatalogEntries.connectionId, connectionId),
+              eq(modelCatalogEntries.providerId, providerId),
               eq(modelCatalogEntries.modelId, modelId),
             ),
           )
@@ -876,14 +883,14 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
     const rows = await this.handle
       .select({ modelId: modelCatalogEntries.modelId, excluded: modelCatalogEntries.excluded })
       .from(modelCatalogEntries)
-      .where(eq(modelCatalogEntries.connectionId, connectionId))
+      .where(eq(modelCatalogEntries.providerId, providerId))
     for (const row of rows) {
       if (!row.excluded && !desired.has(row.modelId)) {
         await this.handle
           .delete(modelCatalogEntries)
           .where(
             and(
-              eq(modelCatalogEntries.connectionId, connectionId),
+              eq(modelCatalogEntries.providerId, providerId),
               eq(modelCatalogEntries.modelId, row.modelId),
               eq(modelCatalogEntries.source, 'discovered'),
             ),
@@ -892,14 +899,14 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
     }
   }
 
-  async syncTemplate(connectionId: string, modelIds: readonly string[], at: Date): Promise<void> {
+  async syncTemplate(providerId: string, modelIds: readonly string[], at: Date): Promise<void> {
     for (const modelId of modelIds) {
       const [existing] = await this.handle
         .select({ id: modelCatalogEntries.modelId })
         .from(modelCatalogEntries)
         .where(
           and(
-            eq(modelCatalogEntries.connectionId, connectionId),
+            eq(modelCatalogEntries.providerId, providerId),
             eq(modelCatalogEntries.modelId, modelId),
           ),
         )
@@ -907,7 +914,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
       if (existing !== undefined) continue
 
       await this.handle.insert(modelCatalogEntries).values({
-        connectionId,
+        providerId,
         modelId,
         source: 'template',
         excluded: false,
@@ -918,13 +925,13 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
     }
   }
 
-  async addOwnerModel(connectionId: string, modelId: string, at: Date): Promise<void> {
+  async addOwnerModel(providerId: string, modelId: string, at: Date): Promise<void> {
     const [existing] = await this.handle
       .select({ source: modelCatalogEntries.source })
       .from(modelCatalogEntries)
       .where(
         and(
-          eq(modelCatalogEntries.connectionId, connectionId),
+          eq(modelCatalogEntries.providerId, providerId),
           eq(modelCatalogEntries.modelId, modelId),
         ),
       )
@@ -932,7 +939,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
 
     if (existing === undefined) {
       await this.handle.insert(modelCatalogEntries).values({
-        connectionId,
+        providerId,
         modelId,
         source: 'owner_added',
         excluded: false,
@@ -949,19 +956,19 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
         .set({ source: 'owner_added', excluded: false, updatedAt: at })
         .where(
           and(
-            eq(modelCatalogEntries.connectionId, connectionId),
+            eq(modelCatalogEntries.providerId, providerId),
             eq(modelCatalogEntries.modelId, modelId),
           ),
         )
     }
   }
 
-  async removeOwnerModel(connectionId: string, modelId: string): Promise<boolean> {
+  async removeOwnerModel(providerId: string, modelId: string): Promise<boolean> {
     const removed = await this.handle
       .delete(modelCatalogEntries)
       .where(
         and(
-          eq(modelCatalogEntries.connectionId, connectionId),
+          eq(modelCatalogEntries.providerId, providerId),
           eq(modelCatalogEntries.modelId, modelId),
           eq(modelCatalogEntries.source, 'owner_added'),
         ),
@@ -970,13 +977,13 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
     return removed.length > 0
   }
 
-  async setExcluded(connectionId: string, modelId: string, excluded: boolean, at: Date): Promise<void> {
+  async setExcluded(providerId: string, modelId: string, excluded: boolean, at: Date): Promise<void> {
     const [existing] = await this.handle
       .select({ source: modelCatalogEntries.source })
       .from(modelCatalogEntries)
       .where(
         and(
-          eq(modelCatalogEntries.connectionId, connectionId),
+          eq(modelCatalogEntries.providerId, providerId),
           eq(modelCatalogEntries.modelId, modelId),
         ),
       )
@@ -985,7 +992,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
     if (excluded) {
       if (existing === undefined) {
         await this.handle.insert(modelCatalogEntries).values({
-          connectionId,
+          providerId,
           modelId,
           source: 'excluded',
           excluded: true,
@@ -999,7 +1006,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
           .set({ excluded: true, updatedAt: at })
           .where(
             and(
-              eq(modelCatalogEntries.connectionId, connectionId),
+              eq(modelCatalogEntries.providerId, providerId),
               eq(modelCatalogEntries.modelId, modelId),
             ),
           )
@@ -1014,7 +1021,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
         .delete(modelCatalogEntries)
         .where(
           and(
-            eq(modelCatalogEntries.connectionId, connectionId),
+            eq(modelCatalogEntries.providerId, providerId),
             eq(modelCatalogEntries.modelId, modelId),
           ),
         )
@@ -1024,7 +1031,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
         .set({ excluded: false, updatedAt: at })
         .where(
           and(
-            eq(modelCatalogEntries.connectionId, connectionId),
+            eq(modelCatalogEntries.providerId, providerId),
             eq(modelCatalogEntries.modelId, modelId),
           ),
         )
@@ -1032,9 +1039,9 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
   }
 
   async updateOverrides(
-    connectionId: string,
+    providerId: string,
     modelId: string,
-    overrides: Readonly<Partial<ConnectionCapabilities>>,
+    overrides: Readonly<Partial<ProviderCapabilities>>,
     at: Date,
   ): Promise<void> {
     const encoded = JSON.stringify(overrides)
@@ -1043,7 +1050,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
       .from(modelCatalogEntries)
       .where(
         and(
-          eq(modelCatalogEntries.connectionId, connectionId),
+          eq(modelCatalogEntries.providerId, providerId),
           eq(modelCatalogEntries.modelId, modelId),
         ),
       )
@@ -1051,7 +1058,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
 
     if (existing === undefined) {
       await this.handle.insert(modelCatalogEntries).values({
-        connectionId,
+        providerId,
         modelId,
         source: 'owner_added',
         excluded: false,
@@ -1065,20 +1072,20 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
         .set({ overrides: encoded, updatedAt: at })
         .where(
           and(
-            eq(modelCatalogEntries.connectionId, connectionId),
+            eq(modelCatalogEntries.providerId, providerId),
             eq(modelCatalogEntries.modelId, modelId),
           ),
         )
     }
   }
 
-  async isExcluded(connectionId: string, modelId: string): Promise<boolean> {
+  async isExcluded(providerId: string, modelId: string): Promise<boolean> {
     const [row] = await this.handle
       .select({ excluded: modelCatalogEntries.excluded })
       .from(modelCatalogEntries)
       .where(
         and(
-          eq(modelCatalogEntries.connectionId, connectionId),
+          eq(modelCatalogEntries.providerId, providerId),
           eq(modelCatalogEntries.modelId, modelId),
         ),
       )
@@ -1086,11 +1093,11 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
     return row?.excluded === true
   }
 
-  async getSync(connectionId: string): Promise<ModelCatalogSyncRecord | null> {
+  async getSync(providerId: string): Promise<ModelCatalogSyncRecord | null> {
     const [row] = await this.handle
       .select()
       .from(modelCatalogSync)
-      .where(eq(modelCatalogSync.connectionId, connectionId))
+      .where(eq(modelCatalogSync.providerId, providerId))
       .limit(1)
     return row ? toSyncRecord(row) : null
   }
@@ -1100,7 +1107,7 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
       .insert(modelCatalogSync)
       .values(record)
       .onConflictDoUpdate({
-        target: modelCatalogSync.connectionId,
+        target: modelCatalogSync.providerId,
         set: {
           syncedAt: record.syncedAt,
           lastSuccessAt: record.lastSuccessAt,
@@ -1116,11 +1123,11 @@ type SyncRow = typeof modelCatalogSync.$inferSelect
 
 function toModelEntry(row: ModelEntryRow): ModelCatalogEntryRecord {
   return {
-    connectionId: row.connectionId,
+    providerId: row.providerId,
     modelId: row.modelId,
     source: row.source as ModelCatalogSource,
     excluded: row.excluded,
-    overrides: row.overrides === null ? null : (JSON.parse(row.overrides) as Partial<ConnectionCapabilities>),
+    overrides: row.overrides === null ? null : (JSON.parse(row.overrides) as Partial<ProviderCapabilities>),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -1128,7 +1135,7 @@ function toModelEntry(row: ModelEntryRow): ModelCatalogEntryRecord {
 
 function toSyncRecord(row: SyncRow): ModelCatalogSyncRecord {
   return {
-    connectionId: row.connectionId,
+    providerId: row.providerId,
     syncedAt: row.syncedAt,
     lastSuccessAt: row.lastSuccessAt,
     lastFailureAt: row.lastFailureAt,
@@ -1139,11 +1146,11 @@ function toSyncRecord(row: SyncRow): ModelCatalogSyncRecord {
 class SqliteUsageRepository implements UsageRepository {
   constructor(private readonly handle: Handle) {}
 
-  async get(connectionId: string): Promise<UsageSnapshotRecord | null> {
+  async get(providerId: string): Promise<UsageSnapshotRecord | null> {
     const [row] = await this.handle
       .select()
       .from(usageSnapshots)
-      .where(eq(usageSnapshots.connectionId, connectionId))
+      .where(eq(usageSnapshots.providerId, providerId))
       .limit(1)
     return row ? toUsageSnapshot(row) : null
   }
@@ -1153,7 +1160,7 @@ class SqliteUsageRepository implements UsageRepository {
       .insert(usageSnapshots)
       .values(encodeUsageSnapshot(record))
       .onConflictDoUpdate({
-        target: usageSnapshots.connectionId,
+        target: usageSnapshots.providerId,
         set: {
           visibility: record.visibility,
           syncedAt: record.syncedAt,
@@ -1171,7 +1178,7 @@ type UsageSnapshotRow = typeof usageSnapshots.$inferSelect
 
 function encodeUsageSnapshot(record: UsageSnapshotRecord): UsageSnapshotRow {
   return {
-    connectionId: record.connectionId,
+    providerId: record.providerId,
     visibility: record.visibility,
     syncedAt: record.syncedAt,
     lastSuccessAt: record.lastSuccessAt,
@@ -1184,7 +1191,7 @@ function encodeUsageSnapshot(record: UsageSnapshotRecord): UsageSnapshotRow {
 
 function toUsageSnapshot(row: UsageSnapshotRow): UsageSnapshotRecord {
   return {
-    connectionId: row.connectionId,
+    providerId: row.providerId,
     visibility: row.visibility === 'authoritative' ? 'authoritative' : 'reactive_only',
     syncedAt: row.syncedAt,
     lastSuccessAt: row.lastSuccessAt,
@@ -1196,8 +1203,8 @@ function toUsageSnapshot(row: UsageSnapshotRow): UsageSnapshotRecord {
 }
 
 /** JSON text -> capabilities. A corrupted row must not silently become defaults. */
-function parseCapabilities(raw: string): ConnectionCapabilities {
-  const value = JSON.parse(raw) as Partial<ConnectionCapabilities>
+function parseCapabilities(raw: string): ProviderCapabilities {
+  const value = JSON.parse(raw) as Partial<ProviderCapabilities>
   return {
     chat: value.chat === true,
     streaming: value.streaming === true,
@@ -1216,7 +1223,7 @@ class SqliteRequestHistoryRepository implements RequestHistoryRepository {
       .values({
         id: event.id,
         occurredAt: event.occurredAt,
-        connectionId: event.connectionId,
+        providerId: event.providerId,
         model: event.model,
         gatewayKeyId: event.gatewayKeyId,
         keyId: event.keyId,
@@ -1233,7 +1240,7 @@ class SqliteRequestHistoryRepository implements RequestHistoryRepository {
         target: requestEvents.id,
         set: {
           occurredAt: event.occurredAt,
-          connectionId: event.connectionId,
+          providerId: event.providerId,
           model: event.model,
           gatewayKeyId: event.gatewayKeyId,
           keyId: event.keyId,
@@ -1400,7 +1407,7 @@ function toEvent(row: RequestEventRow): RequestEventRecord {
   return {
     id: row.id,
     occurredAt: row.occurredAt,
-    connectionId: row.connectionId,
+    providerId: row.providerId,
     model: row.model,
     gatewayKeyId: row.gatewayKeyId,
     keyId: row.keyId,
@@ -1432,8 +1439,8 @@ function toAttempt(row: RequestAttemptRow): RequestAttemptRecord {
 
 function eventFilter(filter: RequestHistoryFilter) {
   const conditions = []
-  if (filter.connectionId !== undefined) {
-    conditions.push(eq(requestEvents.connectionId, filter.connectionId))
+  if (filter.providerId !== undefined) {
+    conditions.push(eq(requestEvents.providerId, filter.providerId))
   }
   if (filter.outcome !== undefined) {
     conditions.push(eq(requestEvents.outcome, filter.outcome))

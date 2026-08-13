@@ -17,11 +17,11 @@ describe('the official OpenAI SDK through the Responses surface', () => {
     upstream = mockUpstreamTransport()
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
-    const connectionId = await createConnection(iroha, csrf)
-    const secret = await createGatewayKey(iroha, csrf, connectionId)
+    const providerId = await createConnection(iroha, csrf)
+    const secret = await createGatewayKey(iroha, csrf, providerId)
     client = new OpenAI({
       apiKey: secret,
-      baseURL: `http://iroha.test/providers/${connectionId}/v1`,
+      baseURL: `http://iroha.test/providers/${providerId}/v1`,
       fetch: appFetch(iroha.app),
       maxRetries: 0,
       dangerouslyAllowBrowser: true,
@@ -210,11 +210,11 @@ async function createConnection(iroha: TestApp, csrf: string): Promise<string> {
   return ((await response.json()) as { id: string }).id
 }
 
-async function createGatewayKey(iroha: TestApp, csrf: string, connectionId: string): Promise<string> {
+async function createGatewayKey(iroha: TestApp, csrf: string, providerId: string): Promise<string> {
   const response = await iroha.fetch('/api/v1/admin/gateway-keys', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'SDK Responses client', scope: [{ connectionId }] }),
+    body: JSON.stringify({ name: 'SDK Responses client', scope: [{ providerId }] }),
     csrf,
   })
   if (response.status !== 201) throw new Error(`Gateway Key create failed: ${await response.text()}`)

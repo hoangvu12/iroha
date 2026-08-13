@@ -2,7 +2,7 @@ import { SecretCipherError, type SecretCipher } from '../crypto/index.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
 import type {
   Database,
-  ProviderConnectionRecord,
+  ProviderRecord,
   UpstreamKeyRecord,
   UsageSnapshotRecord,
 } from '../persistence/index.ts'
@@ -57,7 +57,7 @@ export interface UsageServiceOptions {
   /**
    * The minimum interval between two successful polls of one connection.
    * A failure shortens the interval, never lengthens it. Defaults to 60
-   * seconds — long enough that an idle installation does not hammer a Provider
+   * seconds Ã¢—‚¬—€ long enough that an idle installation does not hammer a Provider
    * and short enough that the Owner sees fresh data without a manual refresh.
    */
   readonly pollIntervalSeconds?: number
@@ -127,12 +127,12 @@ export class UsageService {
   }
 
   /** The view the Owner sees for one connection: reading, freshness, last error. */
-  async view(connectionId: string): Promise<UsageServiceResult<UsageView>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+  async view(providerId: string): Promise<UsageServiceResult<UsageView>> {
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
 
-    const snapshot = await this.#database.usage.get(connectionId)
+    const snapshot = await this.#database.usage.get(providerId)
     const stale = snapshot?.lastFailureAt !== null && snapshot?.lastFailureAt !== undefined
       ? this.#isStale(snapshot)
       : false
@@ -150,8 +150,8 @@ export class UsageService {
    * previously successful reading; it is recorded separately so the Owner can
    * read the latest of each.
    */
-  async refresh(connectionId: string): Promise<UsageServiceResult<UsageView>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+  async refresh(providerId: string): Promise<UsageServiceResult<UsageView>> {
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
     if (!connection.enabled) return failed({ code: 'connection_disabled' })
@@ -167,15 +167,15 @@ export class UsageService {
       signal: null,
     })
 
-    const prior = await this.#database.usage.get(connectionId)
-    const next = await this.#recordOutcome(connectionId, prior, at, poll)
+    const prior = await this.#database.usage.get(providerId)
+    const next = await this.#recordOutcome(providerId, prior, at, poll)
 
     if (poll.ok) {
-      this.#failureStreak.delete(connectionId)
+      this.#failureStreak.delete(providerId)
     } else if (poll.failure.code === 'rate_limited') {
-      this.#bumpFailureStreak(connectionId)
+      this.#bumpFailureStreak(providerId)
     } else {
-      this.#bumpFailureStreak(connectionId)
+      this.#bumpFailureStreak(providerId)
     }
 
     if (next.ok) {
@@ -183,7 +183,7 @@ export class UsageService {
         action: 'usage.refreshed',
         outcome: poll.ok ? 'success' : 'failure',
         detail: {
-          connectionId,
+          providerId,
           ...(poll.ok
             ? {
                 visibility: poll.reading.confidence === 'confirmed' ? 'authoritative' : 'reactive_only',
@@ -206,8 +206,8 @@ export class UsageService {
    * `null` when the adapter is reactive-only, the latest reading is too
    * stale, or the reading does not prove remaining capacity.
    */
-  async recoveryEvidenceFor(connectionId: string): Promise<UsageRecoveryEvidence | null> {
-    const snapshot = await this.#database.usage.get(connectionId)
+  async recoveryEvidenceFor(providerId: string): Promise<UsageRecoveryEvidence | null> {
+    const snapshot = await this.#database.usage.get(providerId)
     if (snapshot === null) return null
     if (snapshot.result === null) return null
     if (snapshot.visibility !== 'authoritative') return null
@@ -225,14 +225,14 @@ export class UsageService {
   }
 
   /** The Capacity Scope the snapshot's reading proves capacity at. */
-  async scopeOf(connectionId: string): Promise<UsageCapacityScope | null> {
-    const snapshot = await this.#database.usage.get(connectionId)
+  async scopeOf(providerId: string): Promise<UsageCapacityScope | null> {
+    const snapshot = await this.#database.usage.get(providerId)
     if (snapshot === null || snapshot.result === null) return null
     return (snapshot.result as UsageReading).scope
   }
 
   async #resolveTarget(
-    connection: ProviderConnectionRecord,
+    connection: ProviderRecord,
   ): Promise<UsageServiceResult<UsagePollTarget>> {
     const keys = await this.#database.providers.listKeys(connection.id)
     const eligible = keys.find((key) => key.health === 'active' || key.health === 'unverified')
@@ -257,7 +257,7 @@ export class UsageService {
   }
 
   async #recordOutcome(
-    connectionId: string,
+    providerId: string,
     prior: UsageSnapshotRecord | null,
     at: Date,
     poll: UsagePollResult,
@@ -267,7 +267,7 @@ export class UsageService {
 
     if (poll.ok) {
       next = {
-        connectionId,
+        providerId,
         visibility,
         syncedAt: at,
         lastSuccessAt: at,
@@ -278,7 +278,7 @@ export class UsageService {
       }
     } else {
       next = {
-        connectionId,
+        providerId,
         visibility,
         syncedAt: at,
         lastSuccessAt: prior?.lastSuccessAt ?? null,
@@ -317,7 +317,7 @@ export class UsageService {
 
   #nextPollAllowedAt(snapshot: UsageSnapshotRecord | null): Date | null {
     if (snapshot === null || snapshot.syncedAt === null) return null
-    const streak = this.#failureStreak.get(snapshot.connectionId) ?? 0
+    const streak = this.#failureStreak.get(snapshot.providerId) ?? 0
     const baseInterval = this.#failureIntervalMs(snapshot, streak)
     return new Date(snapshot.syncedAt.getTime() + baseInterval)
   }
@@ -340,8 +340,8 @@ export class UsageService {
     return Math.min(this.#pollIntervalMs, this.#failureBackoffMs * 2 ** Math.max(0, multiplier - 1))
   }
 
-  #bumpFailureStreak(connectionId: string): void {
-    this.#failureStreak.set(connectionId, (this.#failureStreak.get(connectionId) ?? 0) + 1)
+  #bumpFailureStreak(providerId: string): void {
+    this.#failureStreak.set(providerId, (this.#failureStreak.get(providerId) ?? 0) + 1)
   }
 }
 

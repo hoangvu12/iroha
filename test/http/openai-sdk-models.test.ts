@@ -27,7 +27,7 @@ describe('the official OpenAI SDK through the Models surface', () => {
   let iroha: TestApp
   let csrf: string
   let client: OpenAI
-  let connectionId: string
+  let providerId: string
   let upstream: ReturnType<typeof mockUpstreamTransport>
 
   beforeEach(async () => {
@@ -42,12 +42,12 @@ describe('the official OpenAI SDK through the Models surface', () => {
     )
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
-    connectionId = await createConnection()
+    providerId = await createConnection()
     await refreshCatalog()
-    const secret = await createGatewayKey([{ connectionId }])
+    const secret = await createGatewayKey([{ providerId }])
     client = new OpenAI({
       apiKey: secret,
-      baseURL: `http://iroha.test/providers/${connectionId}/v1`,
+      baseURL: `http://iroha.test/providers/${providerId}/v1`,
       fetch: appFetch(iroha.app),
       maxRetries: 0,
       dangerouslyAllowBrowser: true,
@@ -73,7 +73,7 @@ describe('the official OpenAI SDK through the Models surface', () => {
     const emptyKey = await createGatewayKey([])
     const otherClient = new OpenAI({
       apiKey: emptyKey,
-      baseURL: `http://iroha.test/providers/${connectionId}/v1`,
+      baseURL: `http://iroha.test/providers/${providerId}/v1`,
       fetch: appFetch(iroha.app),
       maxRetries: 0,
       dangerouslyAllowBrowser: true,
@@ -107,7 +107,7 @@ describe('the official OpenAI SDK through the Models surface', () => {
 
   const refreshCatalog = async (): Promise<void> => {
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connectionId}/catalog/refresh`,
+      `/api/v1/admin/provider-connections/${providerId}/catalog/refresh`,
       { method: 'POST', csrf },
     )
     if (response.status !== 200) {

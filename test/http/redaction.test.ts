@@ -51,11 +51,11 @@ describe('secret redaction across the Owner surface', () => {
     return (await response.json()) as { id: string }
   }
 
-  const createKey = async (connectionId: string): Promise<{ secret: string; id: string }> => {
+  const createKey = async (providerId: string): Promise<{ secret: string; id: string }> => {
     const response = await iroha.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'App', scope: [{ connectionId }] }),
+      body: JSON.stringify({ name: 'App', scope: [{ providerId }] }),
       csrf,
     })
     if (response.status !== 201) {

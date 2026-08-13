@@ -93,7 +93,7 @@ describe('the provider-scoped Models API', () => {
 
   test('lists the discovered catalog through an unrestricted Gateway Key', async () => {
     await refreshCatalog()
-    const key = await createKey([{ connectionId: connection.id }])
+    const key = await createKey([{ providerId: connection.id }])
 
     const response = await listModels(key)
     expect(response.status).toBe(200)
@@ -106,7 +106,7 @@ describe('the provider-scoped Models API', () => {
 
   test('an exact-model scope lists exactly those models', async () => {
     await refreshCatalog()
-    const key = await createKey([{ connectionId: connection.id, models: [MODEL] }])
+    const key = await createKey([{ providerId: connection.id, models: [MODEL] }])
 
     const response = await listModels(key)
     const body = (await response.json()) as { data: { id: string }[] }
@@ -115,7 +115,7 @@ describe('the provider-scoped Models API', () => {
 
   test('a scope listing an unknown model still returns it', async () => {
     await refreshCatalog()
-    const key = await createKey([{ connectionId: connection.id, models: ['never-catalogued'] }])
+    const key = await createKey([{ providerId: connection.id, models: ['never-catalogued'] }])
 
     const response = await listModels(key)
     const body = (await response.json()) as { data: { id: string }[] }
@@ -125,7 +125,7 @@ describe('the provider-scoped Models API', () => {
   test('rejects a missing, revoked, or out-of-scope key', async () => {
     await refreshCatalog()
     const other = await createConnection()
-    const key = await createKey([{ connectionId: other.id }])
+    const key = await createKey([{ providerId: other.id }])
 
     const missing = await listModels(null)
     expect(missing.status).toBe(401)
@@ -133,7 +133,7 @@ describe('the provider-scoped Models API', () => {
     const outOfScope = await listModels(key)
     expect(outOfScope.status).toBe(403)
 
-    const revoked = await createKey([{ connectionId: connection.id }])
+    const revoked = await createKey([{ providerId: connection.id }])
     await iroha.fetch(`/api/v1/admin/gateway-keys/${revoked.split('.')[0]}/revoke`, {
       method: 'POST',
       csrf,
@@ -149,7 +149,7 @@ describe('the provider-scoped Models API', () => {
       body: JSON.stringify({ excluded: true }),
       csrf,
     })
-    const key = await createKey([{ connectionId: connection.id }])
+    const key = await createKey([{ providerId: connection.id }])
 
     const response = await listModels(key)
     const body = (await response.json()) as { data: { id: string }[] }
@@ -324,7 +324,7 @@ describe('the Owner model catalog surface', () => {
       body: JSON.stringify({ excluded: true }),
       csrf,
     })
-    const key = await createKey([{ connectionId: connection.id }])
+    const key = await createKey([{ providerId: connection.id }])
     const callsBefore = upstream.calls.length
 
     const response = await iroha.fetch(`/providers/${connection.id}/v1/chat/completions`, {

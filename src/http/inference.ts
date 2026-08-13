@@ -130,10 +130,10 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
 
   return new Elysia({ name: 'iroha/inference', prefix: '/providers' })
     .options(
-      '/:connectionId/*',
+      '/:providerId/*',
       async ({ params, request }) => {
         return handleCors({
-          connectionId: params.connectionId,
+          providerId: params.providerId,
           gatewayKeys,
           database: options.database ?? null,
           transport,
@@ -151,7 +151,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       },
     )
     .get(
-      '/:connectionId/v1/models',
+      '/:providerId/v1/models',
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
@@ -160,7 +160,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
 
         const cors = await buildCorsHeaders({
-          connectionId: params.connectionId,
+          providerId: params.providerId,
           gatewayKeys,
           database: options.database ?? null,
           transport,
@@ -169,13 +169,13 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         const responseHeaders = { ...baseHeaders, ...cors }
 
         const token = bearerToken(request.headers)
-        const authorization = await gatewayKeys.authorizeConnection(params.connectionId, token)
+        const authorization = await gatewayKeys.authorizeConnection(params.providerId, token)
         if (!authorization.ok) {
           const refusal = authorizationRefusal(authorization)
           return error(refusal.status, responseHeaders, refusal, correlationId)
         }
 
-        const result = await modelCatalog.listForScope(params.connectionId, authorization.models)
+        const result = await modelCatalog.listForScope(params.providerId, authorization.models)
         if (!result.ok) {
           const refusal = resolutionRefusal(result.failure)
           return error(refusal.status, responseHeaders, refusal, correlationId)
@@ -202,13 +202,13 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       },
     )
     .post(
-      '/:connectionId/v1/chat/completions',
+      '/:providerId/v1/chat/completions',
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
         return await forwardGeneration({
           request,
-          connectionId: params.connectionId,
+          providerId: params.providerId,
           upstreamPath: '/chat/completions',
           gatewayKeys,
           providers,
@@ -235,13 +235,13 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       },
     )
     .post(
-      '/:connectionId/v1/responses',
+      '/:providerId/v1/responses',
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
         return await forwardGeneration({
           request,
-          connectionId: params.connectionId,
+          providerId: params.providerId,
           upstreamPath: '/responses',
           gatewayKeys,
           providers,
@@ -273,7 +273,7 @@ export type InferenceRoutes = ReturnType<typeof createInferenceRoutes>
 
 async function forwardGeneration(options: {
   request: Request
-  connectionId: string
+  providerId: string
   upstreamPath: '/chat/completions' | '/responses'
   database?: Database | null
   gatewayKeys: GatewayKeyRegistry
@@ -292,7 +292,7 @@ async function forwardGeneration(options: {
 }): Promise<Response> {
   const {
     request,
-    connectionId,
+    providerId,
     upstreamPath,
     gatewayKeys,
     providers,
@@ -313,7 +313,7 @@ async function forwardGeneration(options: {
   try {
   const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
   const cors = await buildCorsHeaders({
-    connectionId,
+    providerId,
     gatewayKeys,
     database: options.database ?? null,
     transport,
@@ -323,7 +323,7 @@ async function forwardGeneration(options: {
 
   const corsPreflight = await maybeCorsDeny({
     request,
-    connectionId,
+    providerId,
     gatewayKeys,
     database: options.database ?? null,
     transport,
@@ -344,13 +344,13 @@ async function forwardGeneration(options: {
   }
 
   const token = bearerToken(request.headers)
-  const authorization = await gatewayKeys.authorizeInference(connectionId, envelope.model, token)
+  const authorization = await gatewayKeys.authorizeInference(providerId, envelope.model, token)
   if (!authorization.ok) {
     const refusal = authorizationRefusal(authorization)
     return error(refusal.status, responseHeaders, refusal, correlationId)
   }
 
-  if (await modelCatalog.isExcluded(connectionId, envelope.model)) {
+  if (await modelCatalog.isExcluded(providerId, envelope.model)) {
     return error(
       403,
       responseHeaders,
@@ -361,7 +361,7 @@ async function forwardGeneration(options: {
 
   const attemptedKeys: string[] = []
   const startedAt = timer.now()
-  const retryPolicy = await providers.get(connectionId)
+  const retryPolicy = await providers.get(providerId)
   const maxAttempts = retryPolicy?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
   const retryAmbiguousNetwork = retryPolicy?.retryAmbiguousNetwork ?? false
   const totalRetryBudgetMs = retryPolicy?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
@@ -380,7 +380,7 @@ async function forwardGeneration(options: {
 
   const history = requestHistory?.beginRequest({
     id: correlationId,
-    connectionId,
+    providerId,
     model: envelope.model,
     gatewayKeyId: authorization.keyId,
   }) ?? null
@@ -393,14 +393,14 @@ async function forwardGeneration(options: {
       retainedTarget = null
     } else {
       const resolution = await providers.resolveInference(
-        connectionId,
+        providerId,
         envelope.model,
         attemptedKeys,
         alternateUsed,
       )
       if (!resolution.ok) {
         const refusal = resolutionRefusal(resolution.failure)
-        const retryAfter = await providers.earliestRetryAfterSeconds(connectionId)
+        const retryAfter = await providers.earliestRetryAfterSeconds(providerId)
         await history?.recordSkip(refusal.code, new Date())
         return error(
           refusal.status,
@@ -662,7 +662,7 @@ await history?.finalize({
   )
 }
   if (lastUpstream.status === 429) {
-    const retryAfter = await providers.earliestRetryAfterSeconds(connectionId)
+    const retryAfter = await providers.earliestRetryAfterSeconds(providerId)
     await history?.finalize({
       status: 503,
       outcome: 'failure',
@@ -1223,7 +1223,7 @@ const CORS_MAX_AGE = '600'
  * null return means "no CORS machinery", not "denied"; the caller decides.
  */
 async function buildCorsHeaders(options: {
-  connectionId: string
+  providerId: string
   gatewayKeys: GatewayKeyRegistry
   database: Database | null
   transport: TransportDefaults
@@ -1255,7 +1255,7 @@ async function buildCorsHeaders(options: {
  */
 async function maybeCorsDeny(options: {
   request: Request
-  connectionId: string
+  providerId: string
   gatewayKeys: GatewayKeyRegistry
   database: Database | null
   transport: TransportDefaults
@@ -1267,7 +1267,7 @@ async function maybeCorsDeny(options: {
   if (isSameOrigin(options.request, origin)) return null
 
   const allow = await resolveAllowList({
-    connectionId: options.connectionId,
+    providerId: options.providerId,
     gatewayKeys: options.gatewayKeys,
     database: options.database,
     transport: options.transport,
@@ -1294,7 +1294,7 @@ async function maybeCorsDeny(options: {
 }
 
 async function resolveAllowList(options: {
-  connectionId: string
+  providerId: string
   gatewayKeys: GatewayKeyRegistry
   database: Database | null
   transport: TransportDefaults
@@ -1339,7 +1339,7 @@ function isSameOrigin(request: Request, origin: string): boolean {
 }
 
 async function handleCors(options: {
-  connectionId: string
+  providerId: string
   gatewayKeys: GatewayKeyRegistry
   database: Database | null
   transport: TransportDefaults
@@ -1355,7 +1355,7 @@ async function handleCors(options: {
   }
 
   const allow = await resolveAllowList({
-    connectionId: options.connectionId,
+    providerId: options.providerId,
     gatewayKeys: options.gatewayKeys,
     database: options.database,
     transport: options.transport,

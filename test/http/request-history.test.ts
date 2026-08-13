@@ -21,7 +21,7 @@ interface ConnectionBody {
 interface RequestEventDto {
   id: string
   occurredAt: string
-  connectionId: string
+  providerId: string
   model: string
   gatewayKeyId: string | null
   keyId: string | null
@@ -63,7 +63,7 @@ describe('private request history and audit', () => {
     const created = await createConnection()
     connection = created
     upstreamKeyId = created.keys[0]!.id
-    const key = await createKey([{ connectionId: created.id }])
+    const key = await createKey([{ providerId: created.id }])
     keySecret = key.secret
     keyId = key.id
   })
@@ -131,7 +131,7 @@ describe('private request history and audit', () => {
       expect(body.total).toBe(1)
       const event = body.events[0]!
       expect(event.id).toBe(requestId!)
-      expect(event.connectionId).toBe(connection.id)
+      expect(event.providerId).toBe(connection.id)
       expect(event.model).toBe(MODEL)
       expect(event.gatewayKeyId).toBe(keyId)
       expect(event.keyId).toBe(upstreamKeyId)
@@ -232,7 +232,7 @@ describe('private request history and audit', () => {
       expect(byModelBody.events.map((event) => event.model)).toEqual(['gpt-4o'])
 
       const byConnection = await iroha.fetch(
-        `/api/v1/admin/requests?connectionId=${connection.id}`,
+        `/api/v1/admin/requests?providerId=${connection.id}`,
       )
       const byConnectionBody = (await byConnection.json()) as { events: RequestEventDto[]; total: number }
       expect(byConnectionBody.events).toHaveLength(2)

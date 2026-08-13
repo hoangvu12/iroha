@@ -71,7 +71,7 @@ async function createConnection(
 async function createKey(
   iroha: TestApp,
   csrf: string,
-  scope: readonly { connectionId: string }[],
+  scope: readonly { providerId: string }[],
 ): Promise<{ id: string; secret: string }> {
   const response = await iroha.fetch('/api/v1/admin/gateway-keys', {
     method: 'POST',
@@ -99,7 +99,7 @@ describe('provider transport security boundaries', () => {
     csrf = (await completeSetup(iroha)).csrf
     connection = await createConnection(iroha, csrf)
     path = `/providers/${connection.id}/v1/chat/completions`
-    const key = await createKey(iroha, csrf, [{ connectionId: connection.id }])
+    const key = await createKey(iroha, csrf, [{ providerId: connection.id }])
     secret = key.secret
   })
 
@@ -170,7 +170,7 @@ describe('provider transport security boundaries', () => {
       throw new Error(`Create failed: ${created.status}: ${await created.text()}`)
     }
     const created2 = (await created.json()) as ConnectionBody
-    const key = await createKey(iroha, csrf, [{ connectionId: created2.id }])
+    const key = await createKey(iroha, csrf, [{ providerId: created2.id }])
     const localSecret = key.secret
 
     await iroha.fetch(`/providers/${created2.id}/v1/chat/completions`, {
@@ -243,7 +243,7 @@ describe('provider transport security boundaries', () => {
     csrf = (await completeSetup(iroha)).csrf
     const created = await createConnection(iroha, csrf, { redirectAllowSameOrigin: true })
     path = `/providers/${created.id}/v1/chat/completions`
-    const key = await createKey(iroha, csrf, [{ connectionId: created.id }])
+    const key = await createKey(iroha, csrf, [{ providerId: created.id }])
     secret = key.secret
 
     await chat()
@@ -306,7 +306,7 @@ describe('CORS behavior for inference', () => {
     csrf = (await completeSetup(iroha)).csrf
     connection = await createConnection(iroha, csrf)
     path = `/providers/${connection.id}/v1/chat/completions`
-    const key = await createKey(iroha, csrf, [{ connectionId: connection.id }])
+    const key = await createKey(iroha, csrf, [{ providerId: connection.id }])
     secret = key.secret
   })
 
@@ -369,7 +369,7 @@ describe('CORS behavior for inference', () => {
     csrf = (await completeSetup(iroha)).csrf
     connection = await createConnection(iroha, csrf)
     path = `/providers/${connection.id}/v1/chat/completions`
-    const key = await createKey(iroha, csrf, [{ connectionId: connection.id }])
+    const key = await createKey(iroha, csrf, [{ providerId: connection.id }])
     secret = key.secret
 
     const response = await iroha.fetch(path, {
@@ -402,7 +402,7 @@ describe('CORS behavior for inference', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: 'Browser app',
-        scope: [{ connectionId: connection.id }],
+        scope: [{ providerId: connection.id }],
         corsOrigins: ['https://browser.example'],
       }),
       csrf,
@@ -470,7 +470,7 @@ describe('CORS behavior for inference', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: 'Wildcard attempt',
-        scope: [{ connectionId: connection.id }],
+        scope: [{ providerId: connection.id }],
         corsOrigins: ['*'],
       }),
       csrf,
@@ -620,7 +620,7 @@ describe('advanced transport configuration validation', () => {
     }
     expect(created2.staticHeaders.map((h) => h.name)).toEqual(['X-Trace-Id'])
 
-    const row = await iroha.database.providers.getConnection(created2.id)
+    const row = await iroha.database.providers.getProvider(created2.id)
     expect(row?.staticHeadersEncrypted).not.toContain('plaintext-secret-value')
   })
 })
@@ -630,7 +630,7 @@ describe('per-connection transport overrides reach the runtime', () => {
   let csrf: string
   let upstream: ReturnType<typeof mockUpstreamTransport>
   let timer: FakeTimer
-  let connectionId: string
+  let providerId: string
   let secret: string
   let path: string
 
@@ -659,18 +659,18 @@ describe('per-connection transport overrides reach the runtime', () => {
     if (created.status !== 201) {
       throw new Error(`Create failed: ${created.status}: ${await created.text()}`)
     }
-    connectionId = ((await created.json()) as ConnectionBody).id
+    providerId = ((await created.json()) as ConnectionBody).id
     const key = await iroha.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'App', scope: [{ connectionId }] }),
+      body: JSON.stringify({ name: 'App', scope: [{ providerId }] }),
       csrf,
     })
     if (key.status !== 201) {
       throw new Error(`Key create failed: ${key.status}: ${await key.text()}`)
     }
     secret = ((await key.json()) as { secret: string }).secret
-    path = `/providers/${connectionId}/v1/chat/completions`
+    path = `/providers/${providerId}/v1/chat/completions`
   })
 
   afterEach(async () => {

@@ -55,7 +55,7 @@ export interface InFlightAttempt {
  */
 export interface InFlightRequest {
   readonly id: string
-  readonly connectionId: string
+  readonly providerId: string
   readonly model: string
   readonly gatewayKeyId: string | null
   readonly startedAt: Date
@@ -116,7 +116,7 @@ export class RequestHistoryService {
  */
   beginRequest(input: {
     readonly id: string
-    readonly connectionId: string
+    readonly providerId: string
     readonly model: string
     readonly gatewayKeyId: string | null
   }): InFlightRequest {
@@ -135,7 +135,7 @@ export class RequestHistoryService {
       const event: RequestEventRecord = {
         id: input.id,
         occurredAt: startedAt,
-        connectionId: input.connectionId,
+        providerId: input.providerId,
         model: input.model,
         gatewayKeyId: input.gatewayKeyId,
         keyId: null,
@@ -160,7 +160,7 @@ export class RequestHistoryService {
 
     return {
       id: input.id,
-      connectionId: input.connectionId,
+      providerId: input.providerId,
       model: input.model,
       gatewayKeyId: input.gatewayKeyId,
       startedAt,
@@ -206,7 +206,7 @@ export class RequestHistoryService {
         const event: RequestEventRecord = {
           id: input.id,
           occurredAt: self.#clock.now(),
-          connectionId: input.connectionId,
+          providerId: input.providerId,
           model: input.model,
           gatewayKeyId: input.gatewayKeyId,
           keyId: outcome.keyId ?? null,
@@ -234,7 +234,7 @@ export class RequestHistoryService {
         const event: RequestEventRecord = {
           id: input.id,
           occurredAt: at,
-          connectionId: input.connectionId,
+          providerId: input.providerId,
           model: input.model,
           gatewayKeyId: input.gatewayKeyId,
           keyId: null,
@@ -364,7 +364,7 @@ export class RequestHistoryService {
 function noopRecorder(id: string): InFlightRequest {
   return {
     id,
-    connectionId: '',
+    providerId: '',
     model: '',
     gatewayKeyId: null,
     startedAt: new Date(0),

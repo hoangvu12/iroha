@@ -9,23 +9,19 @@ The single OpenAI-compatible API exposed by Iroha to its owner's applications.
 _Avoid_: Proxy, aggregator
 
 **Provider**:
-An upstream AI inference service that may be reached through one or more Provider Connections.
-_Avoid_: Vendor, backend, connection
-
-**Provider Connection**:
-One owner-configured account or server through which the Gateway reaches a Provider. It has a stable ID and may hold multiple Upstream Keys.
-_Avoid_: Provider, integration, account
+The owner-managed entity through which the Gateway reaches one upstream AI inference service. It has a stable ID, a base URL, and holds Upstream Keys. Each Upstream Key may declare its own base URL override; when unset, the key uses the Provider's base URL. The Provider owns every transport, authentication, retry, timeout, capability, and idempotency setting the Gateway uses to reach the upstream. It is seeded by a Provider Template that identifies the upstream brand.
+_Avoid_: Vendor, backend, account, integration, provider connection
 
 **Upstream Key**:
-A secret issued by a Provider and attached to one Provider Connection for upstream inference requests.
+A secret issued by a Provider and attached to one Provider for upstream inference requests. It may declare its own base URL; when set, the key sends requests there; when unset, the key uses the Provider's base URL.
 _Avoid_: Gateway Key, token, credential
 
 **Upstream Account**:
 An optional grouping of Upstream Keys that share the same Provider billing account or capacity limits. A limit known to affect the account makes every key in that group temporarily or durably ineligible.
-_Avoid_: Owner, Provider Connection, key pool
+_Avoid_: Owner, key pool
 
 **Capacity Scope**:
-The resource affected by an upstream limit: one key, an Upstream Account, a connection-and-model pair, an entire Provider, or an unknown scope.
+The resource affected by an upstream limit: one key, an Upstream Account, a provider-and-model pair, an entire Provider, or an unknown scope.
 _Avoid_: Rate limit, quota
 
 **Upstream Model**:
@@ -33,7 +29,7 @@ A model offered by a Provider and addressed by its exact Provider-defined model 
 _Avoid_: Alias, virtual model
 
 **Provider Directory**:
-The authenticated list of Provider Connections a Gateway Key is permitted to use, including their exact Upstream Models and supported inference capabilities.
+The authenticated list of Providers a Gateway Key is permitted to use, including their exact Upstream Models and supported inference capabilities.
 _Avoid_: Provider catalog, registry
 
 **Usage Adapter**:
@@ -41,12 +37,12 @@ Provider-specific knowledge that can read authoritative balance or plan usage wh
 _Avoid_: Billing API, quota checker
 
 **Inference Adapter**:
-Typed knowledge for speaking a Provider Connection's inference API, including authentication, endpoint capabilities, and provider-specific failure classification. The generic form preserves the OpenAI-compatible request and response shape.
+Typed knowledge for speaking a Provider's inference API, including authentication, endpoint capabilities, and provider-specific failure classification. The generic form preserves the OpenAI-compatible request and response shape.
 _Avoid_: Plugin, driver, provider
 
 **Provider Template**:
-A built-in setup aid that supplies known defaults for creating a Provider Connection without containing an account or secret.
-_Avoid_: Provider Connection, adapter, preset
+A built-in setup aid that supplies known defaults for creating a Provider without containing an account or secret.
+_Avoid_: Adapter, preset
 
 **Owner**:
 The person operating an Iroha installation and supplying all Provider credentials used by it.
@@ -61,7 +57,7 @@ A secret created by the Owner that authorizes an application to call the Gateway
 _Avoid_: Upstream Key, virtual key, user key
 
 **Key Scope**:
-The Provider Connections and optional Upstream Models that a Gateway Key permits its application to use and discover.
+The Providers and optional Upstream Models that a Gateway Key permits its application to use and discover.
 _Avoid_: Role, permissions
 
 **Key Health**:

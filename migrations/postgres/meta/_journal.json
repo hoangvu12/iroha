@@ -85,6 +85,13 @@
       "when": 1786551896263,
       "tag": "0011_spicy_spot",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786560000000,
+      "tag": "0012_provider_rename",
+      "breakpoints": true
     }
   ]
 }

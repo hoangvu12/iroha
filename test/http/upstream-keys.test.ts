@@ -65,8 +65,8 @@ describe('Upstream Key pools and Upstream Accounts', () => {
     return (await response.json()) as ConnectionBody
   }
 
-  const addKey = async (connectionId: string, upstreamKey: string = UPSTREAM_KEY) => {
-    const response = await iroha.fetch(`${BASE}/${connectionId}/keys`, {
+  const addKey = async (providerId: string, upstreamKey: string = UPSTREAM_KEY) => {
+    const response = await iroha.fetch(`${BASE}/${providerId}/keys`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ upstreamKey }),
@@ -75,8 +75,8 @@ describe('Upstream Key pools and Upstream Accounts', () => {
     return response
   }
 
-  const view = async (connectionId: string): Promise<ConnectionBody> =>
-    (await (await iroha.fetch(`${BASE}/${connectionId}`)).json()) as ConnectionBody
+  const view = async (providerId: string): Promise<ConnectionBody> =>
+    (await (await iroha.fetch(`${BASE}/${providerId}`)).json()) as ConnectionBody
 
   describe('many keys on one connection', () => {
     test('adds several tested keys beside the connection key', async () => {
@@ -236,7 +236,7 @@ describe('Upstream Key pools and Upstream Accounts', () => {
 
       const event = (await iroha.database.audit.list()).find((entry) => entry.action === 'key.configured')
       expect(event?.detail).toEqual({
-        connectionId: created.id,
+        providerId: created.id,
         keyId,
         fields: ['allowedModels', 'deniedModels'],
       })
@@ -244,8 +244,8 @@ describe('Upstream Key pools and Upstream Accounts', () => {
   })
 
   describe('Upstream Accounts', () => {
-    const createAccount = async (connectionId: string, displayName: string) => {
-      const response = await iroha.fetch(`${BASE}/${connectionId}/accounts`, {
+    const createAccount = async (providerId: string, displayName: string) => {
+      const response = await iroha.fetch(`${BASE}/${providerId}/accounts`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ displayName }),

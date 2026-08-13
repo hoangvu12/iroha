@@ -103,7 +103,7 @@ describe('provider-scoped streaming Chat Completions', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: 'Streaming app',
-        scope: [{ connectionId: connectionBody.id }],
+        scope: [{ providerId: connectionBody.id }],
       }),
       csrf,
     })

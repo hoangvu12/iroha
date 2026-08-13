@@ -21,7 +21,7 @@ interface Fixture {
   opened: Awaited<ReturnType<typeof sqliteEngine.open>>
   clock: TestClock
   registry: ProviderConnectionRegistry
-  connectionId: string
+  providerId: string
   keyId: string
   accountId: string
 }
@@ -45,16 +45,16 @@ async function buildFixture(
     upstreamKey: 'sk-upstream-for-usage',
   })
   if (!created.ok) throw new Error(created.failure.code)
-  const connectionId = created.value.id
+  const providerId = created.value.id
   const keyId = created.value.keys[0]!.id
-  const account = await registry.createAccount(connectionId, { displayName: 'Shared plan' })
+  const account = await registry.createAccount(providerId, { displayName: 'Shared plan' })
   if (!account.ok) throw new Error(account.failure.code)
   const accountId = account.value.accounts[0]!.id
-  await registry.updateKeySettings(connectionId, keyId, { accountId })
+  await registry.updateKeySettings(providerId, keyId, { accountId })
 
   const service = new UsageService({ database: opened.database, cipher, adapter, clock })
   return {
-    fixture: { opened, clock, registry, connectionId, keyId, accountId },
+    fixture: { opened, clock, registry, providerId, keyId, accountId },
     service,
     dispose: () => opened.dispose(),
   }
@@ -77,13 +77,13 @@ describe('UsageService generic reactive-only adapter', () => {
   })
 
   test('exposes reactive_only visibility and an Unknown reading on first refresh', async () => {
-    const view = await service.view(fixture.connectionId)
+    const view = await service.view(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
     expect(view.value.visibility).toBe('reactive_only')
     expect(view.value.reading).toBeNull()
 
-    const refreshed = await service.refresh(fixture.connectionId)
+    const refreshed = await service.refresh(fixture.providerId)
     if (!refreshed.ok) throw new Error(refreshed.failure.code)
 
     expect(refreshed.value.visibility).toBe('reactive_only')
@@ -106,12 +106,12 @@ describe('UsageService generic reactive-only adapter', () => {
     })
     await fixture.clock.advance(61)
 
-    await service.refresh(fixture.connectionId)
-    const recovery = await service.recoveryEvidenceFor(fixture.connectionId)
+    await service.refresh(fixture.providerId)
+    const recovery = await service.recoveryEvidenceFor(fixture.providerId)
     expect(recovery).toBeNull()
 
     const result = await fixture.registry.reactivateFromUsage(
-      fixture.connectionId,
+      fixture.providerId,
       {
         authoritative: false,
         hasCapacity: true,
@@ -154,7 +154,7 @@ describe('UsageService authoritative credit adapter', () => {
   })
 
   test('an authoritative credit reading persists with units, balance, and freshness', async () => {
-    const view = await service.refresh(fixture.connectionId)
+    const view = await service.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
     expect(view.value.visibility).toBe('authoritative')
@@ -177,7 +177,7 @@ describe('UsageService authoritative credit adapter', () => {
       successReadingFor({ balance: 0, accountId: fixture.accountId }),
     )
 
-    const view = await service.refresh(fixture.connectionId)
+    const view = await service.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
     const reading = view.value.reading as UsageReading
@@ -188,8 +188,8 @@ describe('UsageService authoritative credit adapter', () => {
   })
 
   test('a failing poll retains the previous successful reading and marks it stale', async () => {
-    await service.refresh(fixture.connectionId)
-    const before = await service.view(fixture.connectionId)
+    await service.refresh(fixture.providerId)
+    const before = await service.view(fixture.providerId)
     if (!before.ok) throw new Error(before.failure.code)
 
     adapter.respondWith({
@@ -198,7 +198,7 @@ describe('UsageService authoritative credit adapter', () => {
     })
 
     fixture.clock.advance(5)
-    const after = await service.refresh(fixture.connectionId)
+    const after = await service.refresh(fixture.providerId)
     if (!after.ok) throw new Error(after.failure.code)
 
     expect(after.value.stale).toBe(true)
@@ -215,7 +215,7 @@ describe('UsageService authoritative credit adapter', () => {
       failure: { code: 'unparseable_response', message: 'the answer did not match the adapter shape' },
     })
 
-    const view = await service.refresh(fixture.connectionId)
+    const view = await service.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
     expect(view.value.lastFailureCode).toBe('unparseable_response')
@@ -226,7 +226,7 @@ describe('UsageService authoritative credit adapter', () => {
   })
 
   test('rate-limited polls back off and remember the last successful reading', async () => {
-    await service.refresh(fixture.connectionId)
+    await service.refresh(fixture.providerId)
 
     adapter.respondWith({
       ok: false,
@@ -234,14 +234,14 @@ describe('UsageService authoritative credit adapter', () => {
     })
 
     fixture.clock.advance(2)
-    const backoff = await service.refresh(fixture.connectionId)
+    const backoff = await service.refresh(fixture.providerId)
     expect(backoff.ok).toBe(false)
     if (backoff.ok) throw new Error('rate-limited poll must surface a failure')
     expect(backoff.failure.code).toBe('rate_limited')
     if (backoff.failure.code !== 'rate_limited') throw new Error('expected rate_limited failure')
     expect(backoff.failure.retryAfterSeconds).toBe(30)
 
-    const view = await service.view(fixture.connectionId)
+    const view = await service.view(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
     expect(view.value.stale).toBe(true)
     expect(view.value.lastSuccessAt).not.toBeNull()
@@ -259,12 +259,12 @@ describe('UsageService authoritative credit adapter', () => {
     })
     fixture.clock.advance(61)
 
-    await service.refresh(fixture.connectionId)
+    await service.refresh(fixture.providerId)
 
-    const evidence = await service.recoveryEvidenceFor(fixture.connectionId)
+    const evidence = await service.recoveryEvidenceFor(fixture.providerId)
     if (evidence === null) throw new Error('expected recovery evidence')
 
-    const result = await fixture.registry.reactivateFromUsage(fixture.connectionId, evidence)
+    const result = await fixture.registry.reactivateFromUsage(fixture.providerId, evidence)
     expect(result.reactivated).toEqual([fixture.keyId])
 
     const stored = await fixture.opened.database.providers.getKey(fixture.keyId)
@@ -273,21 +273,21 @@ describe('UsageService authoritative credit adapter', () => {
   })
 
   test('a stale authoritative reading does not reactive capacity', async () => {
-    await service.refresh(fixture.connectionId)
+    await service.refresh(fixture.providerId)
 
     fixture.clock.advance(60 * 60 * 24)
 
-    const evidence = await service.recoveryEvidenceFor(fixture.connectionId)
+    const evidence = await service.recoveryEvidenceFor(fixture.providerId)
     expect(evidence).toBeNull()
   })
 
   test('account scope reactives every key in the account but not ungrouped ones', async () => {
-    const added = await fixture.registry.addKey(fixture.connectionId, {
+    const added = await fixture.registry.addKey(fixture.providerId, {
       upstreamKey: 'sk-second-upstream',
     })
     if (!added.ok) throw new Error(added.failure.code)
     const secondKeyId = added.value.keys.find((key) => key.id !== fixture.keyId)!.id
-    await fixture.registry.updateKeySettings(fixture.connectionId, secondKeyId, {
+    await fixture.registry.updateKeySettings(fixture.providerId, secondKeyId, {
       accountId: fixture.accountId,
     })
     adapter.respondWith((request) =>
@@ -324,11 +324,11 @@ describe('UsageService authoritative credit adapter', () => {
       adapter: accountAdapter,
       clock: fixture.clock,
     })
-    await accountService.refresh(fixture.connectionId)
-    const evidence = await accountService.recoveryEvidenceFor(fixture.connectionId)
+    await accountService.refresh(fixture.providerId)
+    const evidence = await accountService.recoveryEvidenceFor(fixture.providerId)
     if (evidence === null) throw new Error('expected account-scope evidence')
 
-    const result = await fixture.registry.reactivateFromUsage(fixture.connectionId, evidence)
+    const result = await fixture.registry.reactivateFromUsage(fixture.providerId, evidence)
     expect([...result.reactivated].sort()).toEqual([fixture.keyId, secondKeyId].sort())
     for (const id of result.reactivated) {
       const stored = await fixture.opened.database.providers.getKey(id)
@@ -345,7 +345,7 @@ describe('UsageService authoritative credit adapter', () => {
       reason: 'unknown quota exhausted',
     })
 
-    const result = await fixture.registry.reactivateFromUsage(fixture.connectionId, {
+    const result = await fixture.registry.reactivateFromUsage(fixture.providerId, {
       authoritative: true,
       hasCapacity: true,
       scope: { kind: 'unknown' },
@@ -384,7 +384,7 @@ describe('UsageService authoritative plan adapter', () => {
   })
 
   test('a plan-window reading exposes used, limit, reset, and the model scope', async () => {
-    const view = await service.refresh(fixture.connectionId)
+    const view = await service.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
     const reading = view.value.reading as UsageReading
@@ -398,11 +398,11 @@ describe('UsageService authoritative plan adapter', () => {
   })
 
   test('a later plan window replaces the previous one without losing cadence state', async () => {
-    await service.refresh(fixture.connectionId)
+    await service.refresh(fixture.providerId)
     adapter.setWindow(95, 100)
 
     fixture.clock.advance(7)
-    const view = await service.refresh(fixture.connectionId)
+    const view = await service.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
     const reading = view.value.reading as UsageReading
@@ -412,7 +412,7 @@ describe('UsageService authoritative plan adapter', () => {
   })
 
   test('connection_model scope reactives only the keys that cooled on that model', async () => {
-    const added = await fixture.registry.addKey(fixture.connectionId, {
+    const added = await fixture.registry.addKey(fixture.providerId, {
       upstreamKey: 'sk-second-upstream',
     })
     if (!added.ok) throw new Error(added.failure.code)
@@ -434,11 +434,11 @@ describe('UsageService authoritative plan adapter', () => {
     })
     fixture.clock.advance(31)
 
-    await service.refresh(fixture.connectionId)
-    const evidence = await service.recoveryEvidenceFor(fixture.connectionId)
+    await service.refresh(fixture.providerId)
+    const evidence = await service.recoveryEvidenceFor(fixture.providerId)
     if (evidence === null) throw new Error('expected connection_model evidence')
 
-    const result = await fixture.registry.reactivateFromUsage(fixture.connectionId, evidence)
+    const result = await fixture.registry.reactivateFromUsage(fixture.providerId, evidence)
     expect(result.reactivated).toEqual([fixture.keyId])
 
     const reactivated = await fixture.opened.database.providers.getKey(fixture.keyId)
@@ -448,7 +448,7 @@ describe('UsageService authoritative plan adapter', () => {
   })
 
   test('a provider-wide scope reactives every cooling key', async () => {
-    const added = await fixture.registry.addKey(fixture.connectionId, {
+    const added = await fixture.registry.addKey(fixture.providerId, {
       upstreamKey: 'sk-second-upstream',
     })
     if (!added.ok) throw new Error(added.failure.code)
@@ -481,11 +481,11 @@ describe('UsageService authoritative plan adapter', () => {
       adapter: providerAdapter,
       clock: fixture.clock,
     })
-    await providerService.refresh(fixture.connectionId)
-    const evidence = await providerService.recoveryEvidenceFor(fixture.connectionId)
+    await providerService.refresh(fixture.providerId)
+    const evidence = await providerService.recoveryEvidenceFor(fixture.providerId)
     if (evidence === null) throw new Error('expected provider-scope evidence')
 
-    const result = await fixture.registry.reactivateFromUsage(fixture.connectionId, evidence)
+    const result = await fixture.registry.reactivateFromUsage(fixture.providerId, evidence)
     expect([...result.reactivated].sort()).toEqual([fixture.keyId, secondKeyId].sort())
   })
 
@@ -509,7 +509,7 @@ describe('UsageService authoritative plan adapter', () => {
       adapter: failingAdapter,
       clock: fixture.clock,
     })
-    const view = await fresh.refresh(fixture.connectionId)
+    const view = await fresh.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
     expect(view.value.reading).toBeNull()
@@ -547,28 +547,28 @@ describe('UsageService input validation', () => {
   })
 
   test('refresh returns connection_archived for an archived connection', async () => {
-    await fixture.registry.archive(fixture.connectionId)
+    await fixture.registry.archive(fixture.providerId)
     const service = new UsageService({
       database: fixture.opened.database,
       cipher: createSecretCipher(TEST_MASTER_KEY),
       adapter: createGenericUsageAdapter(),
       clock: fixture.clock,
     })
-    const view = await service.refresh(fixture.connectionId)
+    const view = await service.refresh(fixture.providerId)
     expect(view.ok).toBe(false)
     if (view.ok) throw new Error('expected a failure')
     expect(view.failure.code).toBe('connection_archived')
   })
 
   test('refresh returns connection_disabled for a disabled connection', async () => {
-    await fixture.registry.update(fixture.connectionId, { enabled: false })
+    await fixture.registry.update(fixture.providerId, { enabled: false })
     const service = new UsageService({
       database: fixture.opened.database,
       cipher: createSecretCipher(TEST_MASTER_KEY),
       adapter: createGenericUsageAdapter(),
       clock: fixture.clock,
     })
-    const view = await service.refresh(fixture.connectionId)
+    const view = await service.refresh(fixture.providerId)
     expect(view.ok).toBe(false)
     if (view.ok) throw new Error('expected a failure')
     expect(view.failure.code).toBe('connection_disabled')

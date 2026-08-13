@@ -14,7 +14,7 @@ const DIRECTORY = '/api/v1/directory/providers'
 interface GatewayKeyBody {
   id: string
   name: string
-  scope: { connectionId: string; models: string[] | null }[]
+  scope: { providerId: string; models: string[] | null }[]
   createdAt: string
   lastUsedAt: string | null
   revoked: boolean
@@ -162,7 +162,7 @@ describe('Gateway Key administration', () => {
     })
 
     test('refuses a scope entry that names an unknown connection', async () => {
-      const response = await createKeyRequest({ scope: [{ connectionId: 'pc_absent' }] })
+      const response = await createKeyRequest({ scope: [{ providerId: 'pc_absent' }] })
 
       expect(response.status).toBe(400)
 
@@ -178,7 +178,7 @@ describe('Gateway Key administration', () => {
         csrf,
       })
 
-      const response = await createKeyRequest({ scope: [{ connectionId: connection.id }] })
+      const response = await createKeyRequest({ scope: [{ providerId: connection.id }] })
 
       expect(response.status).toBe(400)
       expect((await errorOf(response)).problems.map((problem) => problem.field)).toEqual(['scope'])
@@ -188,12 +188,12 @@ describe('Gateway Key administration', () => {
       const connection = await createConnection('Model rules')
 
       const notAList = await createKeyRequest({
-        scope: [{ connectionId: connection.id, models: 'gpt-4o' }],
+        scope: [{ providerId: connection.id, models: 'gpt-4o' }],
       })
       expect(notAList.status).toBe(400)
 
       const tooLong = await createKeyRequest({
-        scope: [{ connectionId: connection.id, models: ['x'.repeat(129)] }],
+        scope: [{ providerId: connection.id, models: ['x'.repeat(129)] }],
       })
       expect(tooLong.status).toBe(400)
 
@@ -209,12 +209,12 @@ describe('Gateway Key administration', () => {
 
       const created = await createKey({
         scope: [
-          { connectionId: connection.id, models: ['gpt-4o', 'gpt-4o', 'gpt-4o-mini'] },
-          { connectionId: connection.id },
+          { providerId: connection.id, models: ['gpt-4o', 'gpt-4o', 'gpt-4o-mini'] },
+          { providerId: connection.id },
         ],
       })
 
-      expect(created.scope).toEqual([{ connectionId: connection.id, models: ['gpt-4o', 'gpt-4o-mini'] }])
+      expect(created.scope).toEqual([{ providerId: connection.id, models: ['gpt-4o', 'gpt-4o-mini'] }])
     })
 
     test('accepts a key with no scope, which can discover nothing', async () => {
@@ -320,8 +320,8 @@ describe('Gateway Key administration', () => {
 
       const created = await createKey({
         scope: [
-          { connectionId: alpha.id, models: ['gpt-4o', 'gpt-4o-mini'] },
-          { connectionId: beta.id },
+          { providerId: alpha.id, models: ['gpt-4o', 'gpt-4o-mini'] },
+          { providerId: beta.id },
         ],
       })
 
@@ -357,7 +357,7 @@ describe('Gateway Key administration', () => {
       const beta = await createConnection('Beta')
 
       const created = await createKey({
-        scope: [{ connectionId: alpha.id }, { connectionId: beta.id }],
+        scope: [{ providerId: alpha.id }, { providerId: beta.id }],
       })
 
       await iroha.fetch(`/api/v1/admin/provider-connections/${beta.id}/archive`, {
@@ -385,7 +385,7 @@ describe('Gateway Key administration', () => {
   describe('directory disclosure boundaries', () => {
     test('returns identity, name, scoped URL, models, and capabilities only', async () => {
       const connection = await createConnection('Disclosed name')
-      const created = await createKey({ scope: [{ connectionId: connection.id }] })
+      const created = await createKey({ scope: [{ providerId: connection.id }] })
 
       const response = await discover(created.secret)
       expect(response.status).toBe(200)

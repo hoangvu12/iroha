@@ -153,7 +153,7 @@ describe('readiness and Provider outages', () => {
       const keyResponse = await test.fetch('/api/v1/admin/gateway-keys', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: 'Outage app', scope: [{ connectionId: connection.id }] }),
+        body: JSON.stringify({ name: 'Outage app', scope: [{ providerId: connection.id }] }),
         csrf: signedIn.csrf,
       })
       const key = (await keyResponse.json()) as { secret: string }

@@ -31,7 +31,7 @@ describe('RequestHistoryService', () => {
 
   test('records an event, its attempts, and the terminal finalize', async () => {
     const service = createService()
-    await database.providers.insertConnection({
+    await database.providers.insertProvider({
       id: 'pc_one',
       displayName: 'Example',
       baseUrl: 'https://api.example.com/v1',
@@ -58,7 +58,7 @@ describe('RequestHistoryService', () => {
 
     const recorder = service.beginRequest({
       id: 'req_one',
-      connectionId: 'pc_one',
+      providerId: 'pc_one',
       model: 'gpt-4o-mini',
       gatewayKeyId: 'gk_one',
     })
@@ -104,7 +104,7 @@ describe('RequestHistoryService', () => {
 
     const recorder = service.beginRequest({
       id: 'req_off',
-      connectionId: 'pc_one',
+      providerId: 'pc_one',
       model: 'gpt-4o-mini',
       gatewayKeyId: null,
     })
@@ -127,7 +127,7 @@ describe('RequestHistoryService', () => {
 
   test('prune removes events older than the configured window', async () => {
     const service = createService()
-    await database.providers.insertConnection({
+    await database.providers.insertProvider({
       id: 'pc_one',
       displayName: 'Example',
       baseUrl: 'https://api.example.com/v1',
@@ -157,7 +157,7 @@ describe('RequestHistoryService', () => {
     const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)
     const old = service.beginRequest({
       id: 'req_old',
-      connectionId: 'pc_one',
+      providerId: 'pc_one',
       model: 'gpt-4o-mini',
       gatewayKeyId: null,
     })
@@ -166,7 +166,7 @@ describe('RequestHistoryService', () => {
     const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)
     const recent = service.beginRequest({
       id: 'req_new',
-      connectionId: 'pc_one',
+      providerId: 'pc_one',
       model: 'gpt-4o-mini',
       gatewayKeyId: null,
     })
@@ -179,7 +179,7 @@ describe('RequestHistoryService', () => {
 
   test('recordSkip writes an event row and a single skipped attempt', async () => {
     const service = createService()
-    await database.providers.insertConnection({
+    await database.providers.insertProvider({
       id: 'pc_one',
       displayName: 'Example',
       baseUrl: 'https://api.example.com/v1',
@@ -206,7 +206,7 @@ describe('RequestHistoryService', () => {
 
     const recorder = service.beginRequest({
       id: 'req_skip',
-      connectionId: 'pc_one',
+      providerId: 'pc_one',
       model: 'gpt-4o-mini',
       gatewayKeyId: 'gk_one',
     })

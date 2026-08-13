@@ -236,12 +236,12 @@ function collectOverrideEntries(
   options: { readonly problems?: { field: string; message: string }[] } = {},
 ): Record<string, number> {
   const out: Record<string, number> = {}
-  for (const [connectionId, raw] of Object.entries(record)) {
+  for (const [providerId, raw] of Object.entries(record)) {
     if (typeof raw !== 'number' || !Number.isFinite(raw) || !Number.isInteger(raw)) {
-      options.problems?.push({ field: `${field}.${connectionId}`, message: 'must be an integer' })
+      options.problems?.push({ field: `${field}.${providerId}`, message: 'must be an integer' })
       continue
     }
-    out[connectionId] = clamp(raw)
+    out[providerId] = clamp(raw)
   }
   return out
 }

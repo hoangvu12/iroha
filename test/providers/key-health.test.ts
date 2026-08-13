@@ -12,7 +12,7 @@ describe('durable scoped Key Health', () => {
   let opened: Awaited<ReturnType<typeof sqliteEngine.open>>
   let clock: TestClock
   let registry: ProviderConnectionRegistry
-  let connectionId: string
+  let providerId: string
   let keyIds: string[]
 
   beforeEach(async () => {
@@ -31,8 +31,8 @@ describe('durable scoped Key Health', () => {
       upstreamKey: 'sk-first-health-key',
     })
     if (!created.ok) throw new Error(created.failure.code)
-    connectionId = created.value.id
-    const withSecond = await registry.addKey(connectionId, { upstreamKey: 'sk-second-health-key' })
+    providerId = created.value.id
+    const withSecond = await registry.addKey(providerId, { upstreamKey: 'sk-second-health-key' })
     if (!withSecond.ok) throw new Error(withSecond.failure.code)
     keyIds = withSecond.value.keys.map((key) => key.id)
   })
@@ -56,15 +56,15 @@ describe('durable scoped Key Health', () => {
       healthScopeId: keyIds[0],
       retryAfterAt: null,
     })
-    expect((await registry.resolveInference(connectionId, 'gpt-4o')).ok).toBe(true)
+    expect((await registry.resolveInference(providerId, 'gpt-4o')).ok).toBe(true)
   })
 
   test('a shared-account exhaustion applies to every key in that account', async () => {
-    const account = await registry.createAccount(connectionId, { displayName: 'Shared plan' })
+    const account = await registry.createAccount(providerId, { displayName: 'Shared plan' })
     if (!account.ok) throw new Error(account.failure.code)
     const accountId = account.value.accounts[0]!.id
     for (const keyId of keyIds) {
-      await registry.updateKeySettings(connectionId, keyId, { accountId })
+      await registry.updateKeySettings(providerId, keyId, { accountId })
     }
 
     await registry.recordInferenceFailure({
@@ -75,7 +75,7 @@ describe('durable scoped Key Health', () => {
       reason: 'account quota exhausted',
     })
 
-    const keys = await opened.database.providers.listKeys(connectionId)
+    const keys = await opened.database.providers.listKeys(providerId)
     expect(keys.map((key) => key.health)).toEqual(['exhausted', 'exhausted'])
     expect(keys.every((key) => key.healthScope === 'account' && key.healthScopeId === accountId)).toBe(
       true,
@@ -91,8 +91,8 @@ describe('durable scoped Key Health', () => {
       reason: 'model unavailable',
     })
 
-    expect((await registry.resolveInference(connectionId, 'gpt-4o')).ok).toBe(false)
-    expect((await registry.resolveInference(connectionId, 'gpt-4o-mini')).ok).toBe(true)
+    expect((await registry.resolveInference(providerId, 'gpt-4o')).ok).toBe(false)
+    expect((await registry.resolveInference(providerId, 'gpt-4o-mini')).ok).toBe(true)
   })
 
   test('durable health survives registry restart', async () => {
@@ -110,14 +110,14 @@ describe('durable scoped Key Health', () => {
       clock,
     })
 
-    expect((await restarted.get(connectionId))?.keys[0]?.health).toBe('invalid_authentication')
-    const target = await restarted.resolveInference(connectionId, 'gpt-4o')
+    expect((await restarted.get(providerId))?.keys[0]?.health).toBe('invalid_authentication')
+    const target = await restarted.resolveInference(providerId, 'gpt-4o')
     if (!target.ok) throw new Error(target.failure.code)
     expect(target.value.keyId).toBe(keyIds[1]!)
   })
 
   test('cooldown expiry allows one concurrent controlled trial', async () => {
-    await registry.disableKey(connectionId, keyIds[1]!)
+    await registry.disableKey(providerId, keyIds[1]!)
     await registry.recordInferenceFailure({
       keyId: keyIds[0]!,
       model: 'gpt-4o',
@@ -128,8 +128,8 @@ describe('durable scoped Key Health', () => {
     clock.advance(31)
 
     const [first, second] = await Promise.all([
-      registry.resolveInference(connectionId, 'gpt-4o'),
-      registry.resolveInference(connectionId, 'gpt-4o'),
+      registry.resolveInference(providerId, 'gpt-4o'),
+      registry.resolveInference(providerId, 'gpt-4o'),
     ])
 
     expect([first.ok, second.ok].filter(Boolean)).toHaveLength(1)
@@ -148,7 +148,7 @@ describe('durable scoped Key Health', () => {
       reason: 'quota exhausted',
     })
 
-    await registry.testKey(connectionId, keyIds[0]!)
+    await registry.testKey(providerId, keyIds[0]!)
 
     expect((await opened.database.providers.getKey(keyIds[0]!))?.health).toBe('active')
   })

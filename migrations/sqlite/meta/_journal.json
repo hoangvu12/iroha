@@ -85,6 +85,13 @@
       "when": 1786551891905,
       "tag": "0011_peaceful_shen",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1786560000000,
+      "tag": "0012_provider_rename",
+      "breakpoints": true
     }
   ]
 }

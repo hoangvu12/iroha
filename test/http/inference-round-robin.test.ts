@@ -52,9 +52,9 @@ describe('round-robin key selection on the inference path', () => {
     return (await response.json()) as ConnectionBody
   }
 
-  const addKey = async (connectionId: string, upstreamKey: string) => {
+  const addKey = async (providerId: string, upstreamKey: string) => {
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connectionId}/keys`,
+      `/api/v1/admin/provider-connections/${providerId}/keys`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -68,9 +68,9 @@ describe('round-robin key selection on the inference path', () => {
     return (await response.json()) as ConnectionBody
   }
 
-  const configureKey = async (connectionId: string, keyId: string, patch: Record<string, unknown>) => {
+  const configureKey = async (providerId: string, keyId: string, patch: Record<string, unknown>) => {
     const response = await iroha.fetch(
-      `/api/v1/admin/provider-connections/${connectionId}/keys/${keyId}`,
+      `/api/v1/admin/provider-connections/${providerId}/keys/${keyId}`,
       {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
@@ -101,7 +101,7 @@ describe('round-robin key selection on the inference path', () => {
     const created = await iroha.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'App credential', scope: [{ connectionId: connection.id }] }),
+      body: JSON.stringify({ name: 'App credential', scope: [{ providerId: connection.id }] }),
       csrf,
     })
     secret = ((await created.json()) as { secret: string }).secret

@@ -1,11 +1,11 @@
 import { SecretCipherError, type SecretCipher } from '../crypto/index.ts'
 import type { InferenceAdapter } from '../inference/index.ts'
 import type {
-  ConnectionCapabilities,
+  ProviderCapabilities,
   Database,
   ModelCatalogSource,
   ModelCatalogSyncRecord,
-  ProviderConnectionRecord,
+  ProviderRecord,
 } from '../persistence/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
@@ -35,7 +35,7 @@ export interface CatalogEntryView {
   readonly source: ModelCatalogSource
   readonly excluded: boolean
   /** Per-model capability overrides; null means inherit the connection defaults. */
-  readonly overrides: Readonly<Partial<ConnectionCapabilities>> | null
+  readonly overrides: Readonly<Partial<ProviderCapabilities>> | null
   readonly updatedAt: Date
 }
 
@@ -127,27 +127,27 @@ export class ModelCatalogService {
   }
 
   /** The current catalog and sync state of one connection. Read-only. */
-  async view(connectionId: string): Promise<ModelCatalogResult<CatalogView>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+  async view(providerId: string): Promise<ModelCatalogResult<CatalogView>> {
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
-    return await this.#viewOf(connectionId)
+    return await this.#viewOf(providerId)
   }
 
   /**
    * Re-runs discovery and merges its result. An upstream refusal, an unreadable
-   * answer, or a network failure is recorded on the sync state — the last
-   * successful catalog is retained and merely marked stale — so the Owner sees
+   * answer, or a network failure is recorded on the sync state Ã¢—‚¬—€ the last
+   * successful catalog is retained and merely marked stale Ã¢—‚¬—€ so the Owner sees
    * the truth without inference ever being disabled by it.
    */
-  async refresh(connectionId: string): Promise<ModelCatalogResult<CatalogView>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+  async refresh(providerId: string): Promise<ModelCatalogResult<CatalogView>> {
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
 
-    const target = await this.#discoveryTarget(connectionId)
+    const target = await this.#discoveryTarget(providerId)
     if (!target.ok) return target
 
-    const prior = await this.#database.modelCatalog.getSync(connectionId)
+    const prior = await this.#database.modelCatalog.getSync(providerId)
     const at = this.#clock.now()
 
     let upstream
@@ -175,7 +175,7 @@ export class ModelCatalogService {
       })
     } catch {
       return await this.#recordedFailure(
-        connectionId,
+        providerId,
         prior,
         at,
         'the provider could not be reached for model discovery',
@@ -184,7 +184,7 @@ export class ModelCatalogService {
 
     if (upstream.status < 200 || upstream.status >= 300) {
       return await this.#recordedFailure(
-        connectionId,
+        providerId,
         prior,
         at,
         `the provider refused model discovery (HTTP ${upstream.status})`,
@@ -195,7 +195,7 @@ export class ModelCatalogService {
     // misbehaved; it cannot be parsed as a model list either way.
     if (upstream.kind !== 'buffered') {
       return await this.#recordedFailure(
-        connectionId,
+        providerId,
         prior,
         at,
         'the provider answered model discovery without a usable model list',
@@ -205,17 +205,17 @@ export class ModelCatalogService {
     const discovered = readDiscoveredModels(upstream.body)
     if (discovered === null) {
       return await this.#recordedFailure(
-        connectionId,
+        providerId,
         prior,
         at,
         'the provider answered model discovery without a usable model list',
       )
     }
 
-    await this.#database.modelCatalog.syncDiscovered(connectionId, discovered, at)
-    await this.#syncTemplateKnowledge(connectionId, connection.templateId, at)
+    await this.#database.modelCatalog.syncDiscovered(providerId, discovered, at)
+    await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
     await this.#database.modelCatalog.putSync({
-      connectionId,
+      providerId,
       syncedAt: at,
       lastSuccessAt: at,
       lastFailureAt: null,
@@ -224,98 +224,98 @@ export class ModelCatalogService {
     await this.#database.audit.record({
       action: 'model_catalog.refreshed',
       outcome: 'success',
-      detail: { connectionId },
+      detail: { providerId },
       at,
     })
 
-    return await this.#viewOf(connectionId)
+    return await this.#viewOf(providerId)
   }
 
   /** Names a model the Owner vouches for, even before any discovery reports it. */
-  async addOwnerModel(connectionId: string, modelId: unknown): Promise<ModelCatalogResult<CatalogView>> {
+  async addOwnerModel(providerId: string, modelId: unknown): Promise<ModelCatalogResult<CatalogView>> {
     const name = modelIdProblems(modelId)
     if (name.problems.length > 0) return failed({ code: 'validation_failed', problems: name.problems })
 
-    const connection = await this.#editableConnection(connectionId)
+    const connection = await this.#editableConnection(providerId)
     if (!connection.ok) return connection
 
     const at = this.#clock.now()
     await this.#database.transaction(async (repositories) => {
-      await repositories.modelCatalog.addOwnerModel(connectionId, name.value, at)
+      await repositories.modelCatalog.addOwnerModel(providerId, name.value, at)
       await repositories.audit.record({
         action: 'model_catalog.owner_added',
         outcome: 'success',
-        detail: { connectionId, modelId: name.value },
+        detail: { providerId, modelId: name.value },
         at,
       })
     })
-    return await this.#viewOf(connectionId)
+    return await this.#viewOf(providerId)
   }
 
   /** Removes an Owner addition. Unknown models and non-addition rows change nothing. */
-  async removeOwnerModel(connectionId: string, modelId: string): Promise<ModelCatalogResult<CatalogView>> {
-    const connection = await this.#editableConnection(connectionId)
+  async removeOwnerModel(providerId: string, modelId: string): Promise<ModelCatalogResult<CatalogView>> {
+    const connection = await this.#editableConnection(providerId)
     if (!connection.ok) return connection
 
     const at = this.#clock.now()
     await this.#database.transaction(async (repositories) => {
-      const removed = await repositories.modelCatalog.removeOwnerModel(connectionId, modelId)
+      const removed = await repositories.modelCatalog.removeOwnerModel(providerId, modelId)
       await repositories.audit.record({
         action: 'model_catalog.owner_removed',
         outcome: removed ? 'success' : 'failure',
-        detail: { connectionId, modelId, removed },
+        detail: { providerId, modelId, removed },
         at,
       })
     })
-    return await this.#viewOf(connectionId)
+    return await this.#viewOf(providerId)
   }
 
   /** Blocks or unblocks a model. The block survives future discovery. */
-  async setExcluded(connectionId: string, modelId: string, excluded: boolean): Promise<ModelCatalogResult<CatalogView>> {
-    const connection = await this.#editableConnection(connectionId)
+  async setExcluded(providerId: string, modelId: string, excluded: boolean): Promise<ModelCatalogResult<CatalogView>> {
+    const connection = await this.#editableConnection(providerId)
     if (!connection.ok) return connection
 
     const at = this.#clock.now()
     await this.#database.transaction(async (repositories) => {
-      await repositories.modelCatalog.setExcluded(connectionId, modelId, excluded, at)
+      await repositories.modelCatalog.setExcluded(providerId, modelId, excluded, at)
       await repositories.audit.record({
         action: excluded ? 'model_catalog.excluded' : 'model_catalog.unexcluded',
         outcome: 'success',
-        detail: { connectionId, modelId },
+        detail: { providerId, modelId },
         at,
       })
     })
-    return await this.#viewOf(connectionId)
+    return await this.#viewOf(providerId)
   }
 
   /** Replaces per-model capability overrides; an unknown model becomes `owner_added`. */
   async updateOverrides(
-    connectionId: string,
+    providerId: string,
     modelId: string,
     overrides: unknown,
   ): Promise<ModelCatalogResult<CatalogView>> {
     const read = readOverrides(overrides)
     if (!read.ok) return failed({ code: 'validation_failed', problems: read.problems })
 
-    const connection = await this.#editableConnection(connectionId)
+    const connection = await this.#editableConnection(providerId)
     if (!connection.ok) return connection
 
     const at = this.#clock.now()
     await this.#database.transaction(async (repositories) => {
-      await repositories.modelCatalog.updateOverrides(connectionId, modelId, read.overrides, at)
+      await repositories.modelCatalog.updateOverrides(providerId, modelId, read.overrides, at)
       await repositories.audit.record({
         action: 'model_catalog.overrides_updated',
         outcome: 'success',
-        detail: { connectionId, modelId, fields: Object.keys(read.overrides) },
+        detail: { providerId, modelId, fields: Object.keys(read.overrides) },
         at,
       })
     })
-    return await this.#viewOf(connectionId)
+    return await this.#viewOf(providerId)
   }
 
   /** Whether the Owner has blocked this model on this connection. */
-  async isExcluded(connectionId: string, modelId: string): Promise<boolean> {
-    return await this.#database.modelCatalog.isExcluded(connectionId, modelId)
+  async isExcluded(providerId: string, modelId: string): Promise<boolean> {
+    return await this.#database.modelCatalog.isExcluded(providerId, modelId)
   }
 
   /**
@@ -326,15 +326,15 @@ export class ModelCatalogService {
    * connections refuse the list like they refuse inference.
    */
   async listForScope(
-    connectionId: string,
+    providerId: string,
     allowedModels: readonly string[] | null,
   ): Promise<ModelCatalogResult<readonly ListableModel[]>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
     if (!connection.enabled) return failed({ code: 'connection_disabled' })
 
-    const entries = await this.#database.modelCatalog.listEntries(connectionId)
+    const entries = await this.#database.modelCatalog.listEntries(providerId)
     const byModel = new Map(entries.map((entry) => [entry.modelId, entry]))
     const excluded = new Set(entries.filter((entry) => entry.excluded).map((entry) => entry.modelId))
 
@@ -357,16 +357,16 @@ export class ModelCatalogService {
     }
   }
 
-  async #syncTemplateKnowledge(connectionId: string, templateId: string | null, at: Date): Promise<void> {
+  async #syncTemplateKnowledge(providerId: string, templateId: string | null, at: Date): Promise<void> {
     if (templateId === null) return
     const models = await this.#templateKnowledge(templateId)
     if (models.length === 0) return
-    await this.#database.modelCatalog.syncTemplate(connectionId, models, at)
+    await this.#database.modelCatalog.syncTemplate(providerId, models, at)
   }
 
   /** The base URL and one usable Upstream Key for a read-only discovery GET. */
   async #discoveryTarget(
-    connectionId: string,
+    providerId: string,
   ): Promise<
     ModelCatalogResult<{
       readonly baseUrl: string
@@ -384,11 +384,11 @@ export class ModelCatalogService {
       readonly totalRetryTimeoutMs: number
     }>
   > {
-    const connection = await this.#database.providers.getConnection(connectionId)
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
 
     const key =
-      (await this.#database.providers.listKeys(connectionId)).find(
+      (await this.#database.providers.listKeys(providerId)).find(
         (candidate) => candidate.health !== 'disabled',
       ) ?? null
     if (key === null) return failed({ code: 'no_eligible_key' })
@@ -442,22 +442,22 @@ export class ModelCatalogService {
   }
 
   async #editableConnection(
-    connectionId: string,
-  ): Promise<ModelCatalogResult<ProviderConnectionRecord>> {
-    const connection = await this.#database.providers.getConnection(connectionId)
+    providerId: string,
+  ): Promise<ModelCatalogResult<ProviderRecord>> {
+    const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
     return { ok: true, value: connection }
   }
 
   async #recordedFailure(
-    connectionId: string,
+    providerId: string,
     prior: ModelCatalogSyncRecord | null,
     at: Date,
     message: string,
   ): Promise<ModelCatalogResult<CatalogView>> {
     await this.#database.modelCatalog.putSync({
-      connectionId,
+      providerId,
       syncedAt: at,
       lastSuccessAt: prior?.lastSuccessAt ?? null,
       lastFailureAt: at,
@@ -466,15 +466,15 @@ export class ModelCatalogService {
     await this.#database.audit.record({
       action: 'model_catalog.refreshed',
       outcome: 'failure',
-      detail: { connectionId, message },
+      detail: { providerId, message },
       at,
     })
-    return await this.#viewOf(connectionId)
+    return await this.#viewOf(providerId)
   }
 
-  async #viewOf(connectionId: string): Promise<{ readonly ok: true; readonly value: CatalogView }> {
-    const entries = await this.#database.modelCatalog.listEntries(connectionId)
-    const sync = await this.#database.modelCatalog.getSync(connectionId)
+  async #viewOf(providerId: string): Promise<{ readonly ok: true; readonly value: CatalogView }> {
+    const entries = await this.#database.modelCatalog.listEntries(providerId)
+    const sync = await this.#database.modelCatalog.getSync(providerId)
     return { ok: true, value: { sync: toSyncView(sync), entries } }
   }
 }
@@ -540,7 +540,7 @@ function modelIdProblems(input: unknown): { value: string; problems: readonly Fi
 
 function readOverrides(input: unknown): {
   ok: true
-  overrides: Readonly<Partial<ConnectionCapabilities>>
+  overrides: Readonly<Partial<ProviderCapabilities>>
 } | {
   ok: false
   problems: readonly FieldProblem[]
@@ -565,7 +565,7 @@ function readOverrides(input: unknown): {
   }
 
   if (problems.length > 0) return { ok: false, problems }
-  return { ok: true, overrides: overrides as Partial<ConnectionCapabilities> }
+  return { ok: true, overrides: overrides as Partial<ProviderCapabilities> }
 }
 
 function failed(failure: ModelCatalogFailure): ModelCatalogResult<never> {

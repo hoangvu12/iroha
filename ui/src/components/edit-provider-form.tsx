@@ -4,30 +4,30 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ManagementError, updateConnection, type ConnectionView } from '@/lib/providers'
+import { ManagementError, updateProvider, type ProviderView } from '@/lib/providers'
 
-export function EditConnectionForm({
-  connection,
+export function EditProviderForm({
+  provider,
   csrfToken,
   onDone,
   onCancel,
 }: {
-  readonly connection: ConnectionView
+  readonly provider: ProviderView
   readonly csrfToken: string
   readonly onDone: () => void
   readonly onCancel: () => void
 }) {
-  const [displayName, setDisplayName] = useState(connection.displayName)
-  const [baseUrl, setBaseUrl] = useState(connection.baseUrl)
-  const [allowInsecureHttp, setAllowInsecureHttp] = useState(connection.allowInsecureHttp)
-  const [enabled, setEnabled] = useState(connection.enabled)
-  const [retryMaxAttempts, setRetryMaxAttempts] = useState(String(connection.retryMaxAttempts))
+  const [displayName, setDisplayName] = useState(provider.displayName)
+  const [baseUrl, setBaseUrl] = useState(provider.baseUrl)
+  const [allowInsecureHttp, setAllowInsecureHttp] = useState(provider.allowInsecureHttp)
+  const [enabled, setEnabled] = useState(provider.enabled)
+  const [retryMaxAttempts, setRetryMaxAttempts] = useState(String(provider.retryMaxAttempts))
   const [retryAmbiguousNetwork, setRetryAmbiguousNetwork] = useState(
-    connection.retryAmbiguousNetwork,
+    provider.retryAmbiguousNetwork,
   )
   const form = useSubmission(async () => {
-    await updateConnection(
-      connection.id,
+    await updateProvider(
+      provider.id,
       {
         displayName,
         baseUrl,
@@ -44,15 +44,15 @@ export function EditConnectionForm({
   return (
     <form className="flex flex-col gap-3" onSubmit={form.submit} noValidate>
       <Field
-        id={`edit-${connection.id}-name`}
+        id={`edit-${provider.id}-name`}
         label="Display name"
         value={displayName}
         onChange={setDisplayName}
         problem={form.problemFor('displayName')}
       />
       <Field
-        id={`edit-${connection.id}-url`}
-        label="Base URL"
+        id={`edit-${provider.id}-url`}
+        label="Default base URL"
         value={baseUrl}
         onChange={setBaseUrl}
         problem={form.problemFor('baseUrl')}
@@ -82,7 +82,7 @@ export function EditConnectionForm({
         </label>
       </div>
       <Field
-        id={`edit-${connection.id}-retry-attempts`}
+        id={`edit-${provider.id}-retry-attempts`}
         label="Maximum attempts"
         type="number"
         hint="One to five attempts across retries and alternate credentials."
@@ -167,9 +167,9 @@ export function Failure({ error }: { error: ManagementError | null }) {
 
 export const TITLES: Record<string, string> = {
   validation_failed: 'Check these values',
-  connection_not_found: 'Connection not found',
+  provider_not_found: 'Provider not found',
   key_not_found: 'Key not found',
-  connection_archived: 'Connection archived',
+  provider_archived: 'Provider archived',
   stored_key_unreadable: 'Stored key unreadable',
   authentication_required: 'Signed out',
   unreachable: 'Gateway unreachable',

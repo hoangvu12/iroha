@@ -21,8 +21,8 @@ import {
 import { EmptyState } from '@/components/empty-state'
 import { Dot } from '@/components/dot'
 import {
-  fetchConnections,
-  type ConnectionView,
+  fetchProviders,
+  type ProviderView,
 } from '@/lib/providers'
 import {
   fetchRequestDetail,
@@ -39,7 +39,7 @@ const PAGE_SIZE = 25
 
 /**
  * The Requests area. Shows recent inference metadata, paginates, and lets the
- * Owner filter by connection, outcome, model, or key. Nothing here surfaces
+ * Owner filter by provider, outcome, model, or key. Nothing here surfaces
  * prompts, responses, or Upstream Key material.
  */
 export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void }) {
@@ -47,7 +47,7 @@ export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void
     events: readonly RequestEventView[]
     total: number
   } | null>(null)
-  const [connections, setConnections] = useState<readonly ConnectionView[] | null>(null)
+  const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
   const [error, setError] = useState<RequestHistoryError | null>(null)
   const [filter, setFilter] = useState<RequestFilter>({})
   const [offset, setOffset] = useState(0)
@@ -57,12 +57,12 @@ export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void
   const reload = useCallback(
     async (currentFilter: RequestFilter, currentOffset: number) => {
       try {
-        const [page, conns] = await Promise.all([
+        const [page, list] = await Promise.all([
           fetchRequests(currentFilter, { limit: PAGE_SIZE, offset: currentOffset }),
-          connections === null ? fetchConnections() : Promise.resolve(connections),
+          providers === null ? fetchProviders() : Promise.resolve(providers),
         ])
         setList({ events: page.events, total: page.total })
-        if (connections === null) setConnections(conns)
+        if (providers === null) setProviders(list)
         setError(null)
       } catch (cause) {
         if (cause instanceof RequestHistoryError && cause.code === 'authentication_required') {
@@ -76,7 +76,7 @@ export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void
         )
       }
     },
-    [connections, onSignedOut],
+    [providers, onSignedOut],
   )
 
   useEffect(() => {
@@ -130,7 +130,7 @@ export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void
       )}
 
       <RequestsFilterBar
-        connections={connections}
+        providers={providers}
         filter={filter}
         onChange={applyFilter}
       />
@@ -179,39 +179,39 @@ export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void
 }
 
 function RequestsFilterBar({
-  connections,
+  providers,
   filter,
   onChange,
 }: {
-  readonly connections: readonly ConnectionView[] | null
+  readonly providers: readonly ProviderView[] | null
   readonly filter: RequestFilter
   readonly onChange: (next: RequestFilter) => void
 }) {
   return (
     <div className="grid gap-3 md:grid-cols-4">
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="requests-connection" className="text-muted-foreground text-xs">
-          Connection
+        <label htmlFor="requests-provider" className="text-muted-foreground text-xs">
+          Provider
         </label>
         <Select
-          value={filter.connectionId ?? '__any'}
+          value={filter.providerId ?? '__any'}
           onValueChange={(value) =>
             onChange({
               ...filter,
               ...(value === '__any'
-                ? { connectionId: undefined }
-                : { connectionId: value }),
+                ? { providerId: undefined }
+                : { providerId: value }),
             })
           }
         >
-          <SelectTrigger id="requests-connection" className="w-full">
+          <SelectTrigger id="requests-provider" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__any">Any connection</SelectItem>
-            {(connections ?? []).map((connection) => (
-              <SelectItem key={connection.id} value={connection.id}>
-                {connection.displayName}
+            <SelectItem value="__any">Any provider</SelectItem>
+            {(providers ?? []).map((provider) => (
+              <SelectItem key={provider.id} value={provider.id}>
+                {provider.displayName}
               </SelectItem>
             ))}
           </SelectContent>
@@ -364,7 +364,7 @@ function RequestRow({
             <div className="flex items-center gap-2">
               <span className="truncate font-mono text-sm">{event.model}</span>
               <span className="text-muted-foreground font-mono text-xs">
-                · {event.connectionId}
+                · {event.providerId}
               </span>
             </div>
             <div className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -406,7 +406,7 @@ function RequestDetail({ detail }: { readonly detail: RequestEventDetail }) {
       </DialogHeader>
       <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
         <Detail label="Time">{formatTime(event.occurredAt)}</Detail>
-        <Detail label="Connection">{event.connectionId}</Detail>
+        <Detail label="Provider">{event.providerId}</Detail>
         <Detail label="Model">{event.model}</Detail>
         <Detail label="Status">
           {event.status} ({event.outcome}
@@ -475,7 +475,7 @@ function Detail({
 
 function hasFilter(filter: RequestFilter): boolean {
   return (
-    (filter.connectionId !== undefined && filter.connectionId !== '') ||
+    (filter.providerId !== undefined && filter.providerId !== '') ||
     filter.outcome !== undefined ||
     (filter.model !== undefined && filter.model !== '') ||
     (filter.keyId !== undefined && filter.keyId !== '')

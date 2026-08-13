@@ -8,7 +8,7 @@ import {
 import { AccountSettings } from '@/components/account-settings'
 import { AppShell } from '@/components/app-shell'
 import { AuditArea } from '@/components/audit-area'
-import { ConnectionDetail } from '@/components/connection-detail'
+import { ProviderDetail } from '@/components/provider-detail'
 import { GatewayKeysArea } from '@/components/gateway-keys-area'
 import { Overview } from '@/components/overview'
 import { ProvidersArea } from '@/components/providers-area'
@@ -35,14 +35,14 @@ function ProvidersAreaRoute() {
   return <ProvidersArea csrfToken={csrfToken} onSignedOut={onSignedOut} />
 }
 
-function ConnectionDetailRoute() {
+function ProviderDetailRoute() {
   const { csrfToken } = useCsrf()
-  const { connectionId } = useParams({ strict: false }) as { connectionId?: string }
-  if (connectionId === undefined) {
+  const { providerId } = useParams({ strict: false }) as { providerId?: string }
+  if (providerId === undefined) {
     return (
       <div className="flex flex-col gap-4 p-6">
         <p className="text-muted-foreground text-sm">
-          No connection ID in the URL. Go back to{' '}
+          No provider ID in the URL. Go back to{' '}
           <a href="/providers" className="text-primary underline">
             Providers
           </a>
@@ -52,8 +52,8 @@ function ConnectionDetailRoute() {
     )
   }
   return (
-    <ConnectionDetail
-      connectionId={connectionId}
+    <ProviderDetail
+      providerId={providerId}
       csrfToken={csrfToken}
       onBack={() => void router.navigate({ to: '/providers' })}
       onDeleted={() => void router.navigate({ to: '/providers' })}
@@ -95,8 +95,8 @@ const providersRoute = createRoute({
 
 const providerDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/providers/$connectionId',
-  component: ConnectionDetailRoute,
+  path: '/providers/$providerId',
+  component: ProviderDetailRoute,
 })
 
 const gatewayKeysRoute = createRoute({

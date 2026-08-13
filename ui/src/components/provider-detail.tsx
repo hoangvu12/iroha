@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/select'
 import { MoreHorizontal } from 'lucide-react'
 import { ProviderIcon } from '@/components/provider-icon'
-import { EditConnectionForm } from '@/components/edit-connection-form'
+import { EditProviderForm } from '@/components/edit-provider-form'
 import { ModelListPicker } from '@/components/model-list-picker'
 import {
   HEALTH_LABELS,
@@ -44,31 +44,31 @@ import {
 } from '@/components/key-health'
 import { Dot } from '@/components/dot'
 import { LineChart, Line } from '@/components/charts/line-chart'
-import { describeConnectionStatus } from '@/lib/connection-status'
+import { describeProviderStatus } from '@/lib/provider-status'
 import {
   activateKey,
   addKey,
-  archiveConnection,
+  archiveProvider,
   createUpstreamAccount,
   deleteUpstreamAccount,
   disableKey,
-  duplicateConnection,
-  fetchConnections,
+  duplicateProvider,
+  fetchProviders,
   ManagementError,
-  purgeConnection,
+  purgeProvider,
   removeKey,
   testKey,
   updateKeySettings,
-  type ConnectionView,
   type KeyView,
+  type ProviderView,
 } from '@/lib/providers'
 import { fetchRequests, type RequestEventView } from '@/lib/requests'
 import { refreshCatalog } from '@/lib/catalog'
 import { fetchUsage, type UsageView } from '@/lib/usage'
 import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
-interface ConnectionDetailProps {
-  readonly connectionId: string
+interface ProviderDetailProps {
+  readonly providerId: string
   readonly csrfToken: string
   readonly onBack: () => void
   readonly onDeleted: () => void
@@ -87,13 +87,13 @@ const HOUR_MS = 60 * 60 * 1000
 const ANALYTICS_HOURS = 24
 const FIVE_MIN_MS = 5 * 60 * 1000
 
-export function ConnectionDetail({
-  connectionId,
+export function ProviderDetail({
+  providerId,
   csrfToken,
   onBack,
   onDeleted,
-}: ConnectionDetailProps) {
-  const [connection, setConnection] = useState<ConnectionView | null>(null)
+}: ProviderDetailProps) {
+  const [provider, setProvider] = useState<ProviderView | null>(null)
   const [analytics, setAnalytics] = useState<ConnectionAnalytics | null>(null)
   const [usage, setUsage] = useState<UsageView | null>(null)
   const [usageLoading, setUsageLoading] = useState(true)
@@ -101,14 +101,14 @@ export function ConnectionDetail({
 
   const reload = useCallback(async () => {
     try {
-      const all = await fetchConnections()
-      const match = all.find((c) => c.id === connectionId)
+      const all = await fetchProviders()
+      const match = all.find((c) => c.id === providerId)
       if (match === undefined) {
-        setError(new ManagementError('connection_not_found', 'No such Provider Connection.'))
-        setConnection(null)
+        setError(new ManagementError('provider_not_found', 'No such Provider.'))
+        setProvider(null)
         return
       }
-      setConnection(match)
+      setProvider(match)
       setError(null)
     } catch (cause) {
       if (cause instanceof ManagementError && cause.code === 'authentication_required') {
@@ -119,7 +119,7 @@ export function ConnectionDetail({
         cause instanceof ManagementError ? cause : new ManagementError('request_failed', 'Load failed.'),
       )
     }
-  }, [connectionId, onBack])
+  }, [providerId, onBack])
 
   useEffect(() => {
     void reload()
@@ -127,7 +127,7 @@ export function ConnectionDetail({
 
   useEffect(() => {
     let cancelled = false
-    void fetchRequests({ connectionId }, { limit: 800 })
+    void fetchRequests({ providerId }, { limit: 800 })
       .then((page) => {
         if (cancelled) return
         setAnalytics(buildConnectionAnalytics(page.events))
@@ -139,12 +139,12 @@ export function ConnectionDetail({
     return () => {
       cancelled = true
     }
-  }, [connectionId])
+  }, [providerId])
 
   useEffect(() => {
     let cancelled = false
     setUsageLoading(true)
-    void fetchUsage(connectionId)
+    void fetchUsage(providerId)
       .then((value) => {
         if (cancelled) return
         setUsage(value)
@@ -160,35 +160,35 @@ export function ConnectionDetail({
     return () => {
       cancelled = true
     }
-  }, [connectionId])
+  }, [providerId])
 
-  if (connection === null && error === null) {
+  if (provider === null && error === null) {
     return <Skeleton className="h-48 w-full" />
   }
 
-  if (connection === null && error !== null) {
+  if (provider === null && error !== null) {
     return (
       <div className="flex flex-col gap-4">
         <Button type="button" variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="size-3.5" aria-hidden /> Back to Providers
         </Button>
         <Alert variant="destructive" role="alert">
-          <AlertTitle>Connection unavailable</AlertTitle>
+          <AlertTitle>Provider unavailable</AlertTitle>
           <AlertDescription>{error.message}</AlertDescription>
         </Alert>
       </div>
     )
   }
 
-  if (connection === null) return null
+  if (provider === null) return null
 
-  const status = describeConnectionStatus(connection.keys)
-  const archived = connection.archived
+  const status = describeProviderStatus(provider.keys)
+  const archived = provider.archived
 
   return (
     <div className="flex flex-col gap-6">
       <ConnectionHeader
-        connection={connection}
+        provider={provider}
         status={status}
         archived={archived}
         onBack={onBack}
@@ -197,28 +197,28 @@ export function ConnectionDetail({
       <ConnectionAnalyticsStrip analytics={analytics} />
 
       <ConnectionActions
-        connection={connection}
+        provider={provider}
         csrfToken={csrfToken}
         onChanged={reload}
         onDeleted={onDeleted}
       />
 
       <UpstreamKeysCard
-        connection={connection}
+        provider={provider}
         csrfToken={csrfToken}
         onChanged={reload}
       />
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-        <KeyHealthCard connection={connection} />
+        <KeyHealthCard provider={provider} />
         <SharedAccountsCard
-          connection={connection}
+          provider={provider}
           csrfToken={csrfToken}
           onChanged={reload}
         />
-        <ConnectionDetailsCard connection={connection} />
+        <ConnectionDetailsCard provider={provider} />
         {usage !== null ? (
-          <UsageAdapterCard usage={usage} connectionId={connectionId} />
+          <UsageAdapterCard usage={usage} providerId={providerId} />
         ) : usageLoading ? (
           <UsageAdapterSkeleton />
         ) : null}
@@ -228,13 +228,13 @@ export function ConnectionDetail({
 }
 
 function ConnectionHeader({
-  connection,
+  provider,
   status,
   archived,
   onBack,
 }: {
-  readonly connection: ConnectionView
-  readonly status: ReturnType<typeof describeConnectionStatus>
+  readonly provider: ProviderView
+  readonly status: ReturnType<typeof describeProviderStatus>
   readonly archived: boolean
   readonly onBack: () => void
 }) {
@@ -246,13 +246,13 @@ function ConnectionHeader({
 
       <div className="flex items-center gap-3">
         <ProviderIcon
-          displayName={connection.displayName}
-          baseUrl={connection.baseUrl}
-          {...(connection.templateId === null ? {} : { templateId: connection.templateId })}
+          displayName={provider.displayName}
+          baseUrl={provider.baseUrl}
+          {...(provider.templateId === null ? {} : { templateId: provider.templateId })}
         />
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl font-semibold tracking-tight">{connection.displayName}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{provider.displayName}</h1>
             <span
               className="border-border bg-card text-muted-foreground inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium"
               title={status.label}
@@ -265,13 +265,13 @@ function ConnectionHeader({
                 Archived
               </span>
             )}
-            {!archived && !connection.enabled && (
+            {!archived && !provider.enabled && (
               <span className="border-border bg-muted text-muted-foreground inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium">
                 Disabled
               </span>
             )}
           </div>
-          <span className="text-muted-foreground font-mono text-xs">{connection.id}</span>
+          <span className="text-muted-foreground font-mono text-xs">{provider.id}</span>
         </div>
       </div>
     </div>
@@ -297,7 +297,7 @@ function ConnectionAnalyticsStrip({
   if (analytics.totalRequests === 0) {
     return (
       <div className="bg-card text-muted-foreground rounded-lg border px-4 py-3 text-sm">
-        No traffic recorded for this connection in the last 24 hours.
+        No traffic recorded for this provider in the last 24 hours.
       </div>
     )
   }
@@ -370,12 +370,12 @@ function AnalyticsSparkline({ hourlyCounts }: { readonly hourlyCounts: readonly 
 }
 
 function ConnectionActions({
-  connection,
+  provider,
   csrfToken,
   onChanged,
   onDeleted,
 }: {
-  readonly connection: ConnectionView
+  readonly provider: ProviderView
   readonly csrfToken: string
   readonly onChanged: () => void
   readonly onDeleted: () => void
@@ -385,7 +385,7 @@ function ConnectionActions({
   const [confirmingArchive, setConfirmingArchive] = useState(false)
   const [confirmingPurge, setConfirmingPurge] = useState(false)
   const [rowError, setRowError] = useState<ManagementError | null>(null)
-  const archived = connection.archived
+  const archived = provider.archived
 
   const run = async (label: string, perform: () => Promise<unknown>) => {
     setBusy(label)
@@ -411,13 +411,13 @@ function ConnectionActions({
       <Dialog open={editing} onOpenChange={setEditing}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit {connection.displayName}</DialogTitle>
+            <DialogTitle>Edit {provider.displayName}</DialogTitle>
             <DialogDescription>
-              Editing keeps the connection's ID unchanged, so client URLs stay valid.
+              Editing keeps the provider's ID unchanged, so client URLs stay valid.
             </DialogDescription>
           </DialogHeader>
-          <EditConnectionForm
-            connection={connection}
+          <EditProviderForm
+            provider={provider}
             csrfToken={csrfToken}
             onDone={() => {
               setEditing(false)
@@ -436,7 +436,7 @@ function ConnectionActions({
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => void run('refresh', () => refreshCatalog(connection.id, csrfToken))}
+          onClick={() => void run('refresh', () => refreshCatalog(provider.id, csrfToken))}
           disabled={busy !== null || archived}
         >
           <RefreshCcw className="size-3.5" aria-hidden />
@@ -446,7 +446,7 @@ function ConnectionActions({
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => void run('duplicate', () => duplicateConnection(connection.id, csrfToken))}
+          onClick={() => void run('duplicate', () => duplicateProvider(provider.id, csrfToken))}
           disabled={busy !== null}
         >
           <Copy className="size-3.5" aria-hidden />
@@ -460,7 +460,7 @@ function ConnectionActions({
             size="sm"
             onClick={() => {
               if (confirmingArchive) {
-                void run('archive', () => archiveConnection(connection.id, csrfToken))
+                void run('archive', () => archiveProvider(provider.id, csrfToken))
               } else {
                 setConfirmingArchive(true)
               }
@@ -485,7 +485,7 @@ function ConnectionActions({
             onClick={() => {
               if (confirmingPurge) {
                 void run('purge', async () => {
-                  await purgeConnection(connection.id, csrfToken)
+                  await purgeProvider(provider.id, csrfToken)
                   onDeleted()
                 })
               } else {
@@ -516,11 +516,11 @@ function ConnectionActions({
 }
 
 function UpstreamKeysCard({
-  connection,
+  provider,
   csrfToken,
   onChanged,
 }: {
-  readonly connection: ConnectionView
+  readonly provider: ProviderView
   readonly csrfToken: string
   readonly onChanged: () => void
 }) {
@@ -553,10 +553,10 @@ function UpstreamKeysCard({
           <KeyRound className="text-muted-foreground size-4" aria-hidden />
           <h2 className="text-sm font-semibold tracking-tight">Upstream keys</h2>
           <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 font-mono text-xs">
-            {connection.keys.length}
+            {provider.keys.length}
           </span>
         </div>
-        {!connection.archived && (
+        {!provider.archived && (
           <Button
             type="button"
             variant="outline"
@@ -576,24 +576,24 @@ function UpstreamKeysCard({
         </Alert>
       )}
 
-      {adding && !connection.archived && (
+      {adding && !provider.archived && (
         <AddKeyDialog
-          connectionId={connection.id}
+          providerId={provider.id}
           csrfToken={csrfToken}
-          accounts={connection.accounts}
+          accounts={provider.accounts}
           onAdd={(input) =>
-            run('add-key', () => addKey(connection.id, input, csrfToken))
+            run('add-key', () => addKey(provider.id, input, csrfToken))
           }
           onDone={() => setAdding(false)}
           onCancel={() => setAdding(false)}
         />
       )}
 
-      {configuring !== null && !connection.archived && (
+      {configuring !== null && !provider.archived && (
         <ConfigureKeyDialog
-          connectionId={connection.id}
+          providerId={provider.id}
           keyView={configuring}
-          accounts={connection.accounts}
+          accounts={provider.accounts}
           csrfToken={csrfToken}
           onDone={() => {
             setConfiguring(null)
@@ -603,9 +603,9 @@ function UpstreamKeysCard({
         />
       )}
 
-      {connection.keys.length === 0 ? (
+      {provider.keys.length === 0 ? (
         <p className="text-muted-foreground px-5 py-6 text-sm">
-          No Upstream Keys yet. Add one to give this connection inference capacity.
+          No Upstream Keys yet. Add one to give this provider inference capacity.
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -630,11 +630,11 @@ function UpstreamKeysCard({
               </tr>
             </thead>
             <tbody className="divide-border divide-y">
-              {connection.keys.map((key) => (
+              {provider.keys.map((key) => (
                 <UpstreamKeyRow
                   key={key.id}
-                  connectionId={connection.id}
-                  accounts={connection.accounts}
+                  providerId={provider.id}
+                  accounts={provider.accounts}
                   keyView={key}
                   csrfToken={csrfToken}
                   busy={busy}
@@ -651,16 +651,16 @@ function UpstreamKeysCard({
 }
 
 function AddKeyDialog({
-  connectionId,
+  providerId,
   csrfToken,
   accounts,
   onAdd,
   onDone,
   onCancel,
 }: {
-  readonly connectionId: string
+  readonly providerId: string
   readonly csrfToken: string
-  readonly accounts: ConnectionView['accounts']
+  readonly accounts: ProviderView['accounts']
   readonly onAdd: (input: {
     readonly upstreamKey: string
     readonly accountId: string | null
@@ -764,7 +764,7 @@ function AddKeyDialog({
               everything.
             </p>
             <ModelListPicker
-              connectionId={connectionId}
+              providerId={providerId}
               csrfToken={csrfToken}
               selected={allowedModels}
               onChange={setAllowedModels}
@@ -780,7 +780,7 @@ function AddKeyDialog({
               empty to exclude nothing.
             </p>
             <ModelListPicker
-              connectionId={connectionId}
+              providerId={providerId}
               csrfToken={csrfToken}
               selected={deniedModels}
               onChange={setDeniedModels}
@@ -808,16 +808,16 @@ function AddKeyDialog({
 }
 
 function ConfigureKeyDialog({
-  connectionId,
+  providerId,
   keyView,
   accounts,
   csrfToken,
   onDone,
   onCancel,
 }: {
-  readonly connectionId: string
+  readonly providerId: string
   readonly keyView: KeyView
-  readonly accounts: ConnectionView['accounts']
+  readonly accounts: ProviderView['accounts']
   readonly csrfToken: string
   readonly onDone: () => void
   readonly onCancel: () => void
@@ -834,7 +834,7 @@ function ConfigureKeyDialog({
     setBusy(true)
     setError(null)
     void updateKeySettings(
-      connectionId,
+      providerId,
       keyView.id,
       {
         accountId: accountId === '' ? null : accountId,
@@ -898,7 +898,7 @@ function ConfigureKeyDialog({
               everything.
             </p>
             <ModelListPicker
-              connectionId={connectionId}
+              providerId={providerId}
               csrfToken={csrfToken}
               selected={allowedModels}
               onChange={setAllowedModels}
@@ -914,7 +914,7 @@ function ConfigureKeyDialog({
               empty to exclude nothing.
             </p>
             <ModelListPicker
-              connectionId={connectionId}
+              providerId={providerId}
               csrfToken={csrfToken}
               selected={deniedModels}
               onChange={setDeniedModels}
@@ -943,14 +943,14 @@ function ConfigureKeyDialog({
 
 function KeyActionsMenu({
   keyView,
-  connectionId,
+  providerId,
   csrfToken,
   busy,
   run,
   onConfigure,
 }: {
   readonly keyView: KeyView
-  readonly connectionId: string
+  readonly providerId: string
   readonly csrfToken: string
   readonly busy: string | null
   readonly run: (label: string, perform: () => Promise<unknown>) => Promise<void>
@@ -976,7 +976,7 @@ function KeyActionsMenu({
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() =>
-            void run(`test-${keyView.id}`, () => testKey(connectionId, keyView.id, csrfToken))
+            void run(`test-${keyView.id}`, () => testKey(providerId, keyView.id, csrfToken))
           }
           disabled={busy !== null}
         >
@@ -986,7 +986,7 @@ function KeyActionsMenu({
           <DropdownMenuItem
             onSelect={() =>
               void run(`activate-${keyView.id}`, () =>
-                activateKey(connectionId, keyView.id, csrfToken),
+                activateKey(providerId, keyView.id, csrfToken),
               )
             }
             disabled={busy !== null}
@@ -998,7 +998,7 @@ function KeyActionsMenu({
           <DropdownMenuItem
             onSelect={() =>
               void run(`disable-${keyView.id}`, () =>
-                disableKey(connectionId, keyView.id, csrfToken),
+                disableKey(providerId, keyView.id, csrfToken),
               )
             }
             disabled={busy !== null}
@@ -1011,7 +1011,7 @@ function KeyActionsMenu({
           variant="destructive"
           onSelect={() => {
             if (confirmingRemove) {
-              void run(`remove-${keyView.id}`, () => removeKey(connectionId, keyView.id, csrfToken))
+              void run(`remove-${keyView.id}`, () => removeKey(providerId, keyView.id, csrfToken))
             } else {
               setConfirmingRemove(true)
             }
@@ -1030,7 +1030,7 @@ function KeyActionsMenu({
 }
 
 function UpstreamKeyRow({
-  connectionId,
+  providerId,
   accounts,
   keyView,
   csrfToken,
@@ -1038,8 +1038,8 @@ function UpstreamKeyRow({
   run,
   onConfigure,
 }: {
-  readonly connectionId: string
-  readonly accounts: ConnectionView['accounts']
+  readonly providerId: string
+  readonly accounts: ProviderView['accounts']
   readonly keyView: KeyView
   readonly csrfToken: string
   readonly busy: string | null
@@ -1077,7 +1077,7 @@ function UpstreamKeyRow({
         <div className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           <KeyActionsMenu
             keyView={keyView}
-            connectionId={connectionId}
+            providerId={providerId}
             csrfToken={csrfToken}
             busy={busy}
             run={run}
@@ -1089,9 +1089,9 @@ function UpstreamKeyRow({
   )
 }
 
-function KeyHealthCard({ connection }: { readonly connection: ConnectionView }) {
-  const counts = countByHealth(connection)
-  const total = connection.keys.length
+function KeyHealthCard({ provider }: { readonly provider: ProviderView }) {
+  const counts = countByHealth(provider)
+  const total = provider.keys.length
   const palette: Record<typeof HEALTH_ORDER[number], string> = {
     active: 'bg-status-healthy',
     unverified: 'bg-status-warning',
@@ -1105,7 +1105,7 @@ function KeyHealthCard({ connection }: { readonly connection: ConnectionView }) 
     <section className="bg-card rounded-xl border p-5">
       <h3 className="text-sm font-semibold tracking-tight">Key health</h3>
       <p className="text-muted-foreground mt-1 text-xs">
-        Breakdown for this connection only. {total} keys total.
+        Breakdown for this provider only. {total} keys total.
       </p>
       <div className="bg-muted mt-4 flex h-2 w-full overflow-hidden rounded-full">
         {HEALTH_ORDER.map((key) => {
@@ -1137,11 +1137,11 @@ function KeyHealthCard({ connection }: { readonly connection: ConnectionView }) 
 }
 
 function SharedAccountsCard({
-  connection,
+  provider,
   csrfToken,
   onChanged,
 }: {
-  readonly connection: ConnectionView
+  readonly provider: ProviderView
   readonly csrfToken: string
   readonly onChanged: () => void
 }) {
@@ -1182,12 +1182,12 @@ function SharedAccountsCard({
         </Alert>
       )}
 
-      {connection.accounts.length === 0 ? (
+      {provider.accounts.length === 0 ? (
         <p className="text-muted-foreground mt-4 text-xs">No shared accounts yet.</p>
       ) : (
         <ul className="mt-4 flex flex-col gap-2">
-          {connection.accounts.map((account) => {
-            const memberKeys = connection.keys.filter((key) => key.accountId === account.id)
+          {provider.accounts.map((account) => {
+            const memberKeys = provider.keys.filter((key) => key.accountId === account.id)
             return (
               <li
                 key={account.id}
@@ -1201,14 +1201,14 @@ function SharedAccountsCard({
                   <span className="text-muted-foreground text-xs">
                     {memberKeys.length} {memberKeys.length === 1 ? 'key' : 'keys'}
                   </span>
-                  {!connection.archived && (
+                  {!provider.archived && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="xs"
                       onClick={() =>
                         void run(`delete-account-${account.id}`, () =>
-                          deleteUpstreamAccount(connection.id, account.id, csrfToken),
+                          deleteUpstreamAccount(provider.id, account.id, csrfToken),
                         )
                       }
                       disabled={busy !== null}
@@ -1223,14 +1223,14 @@ function SharedAccountsCard({
         </ul>
       )}
 
-      {!connection.archived && (
+      {!provider.archived && (
         <form
           className="mt-4 flex items-end gap-2"
           onSubmit={(event) => {
             event.preventDefault()
             if (accountName.trim() === '') return
             void run('create-account', async () => {
-              await createUpstreamAccount(connection.id, accountName, csrfToken)
+              await createUpstreamAccount(provider.id, accountName, csrfToken)
               setAccountName('')
             })
           }}
@@ -1259,27 +1259,27 @@ function SharedAccountsCard({
   )
 }
 
-function ConnectionDetailsCard({ connection }: { readonly connection: ConnectionView }) {
+function ConnectionDetailsCard({ provider }: { readonly provider: ProviderView }) {
   return (
     <section className="bg-card rounded-xl border p-5">
-      <h3 className="text-sm font-semibold tracking-tight">Connection details</h3>
+      <h3 className="text-sm font-semibold tracking-tight">Provider details</h3>
       <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
         <DetailRow label="Base URL">
-          <span className="font-mono break-all">{connection.baseUrl}</span>
+          <span className="font-mono break-all">{provider.baseUrl}</span>
         </DetailRow>
         <DetailRow label="Retry policy">
-          {connection.retryMaxAttempts} {connection.retryMaxAttempts === 1 ? 'attempt' : 'attempts'}
-          {connection.retryAmbiguousNetwork ? ' · Ambiguous net on' : ' · Ambiguous net off'}
+          {provider.retryMaxAttempts} {provider.retryMaxAttempts === 1 ? 'attempt' : 'attempts'}
+          {provider.retryAmbiguousNetwork ? ' · Ambiguous net on' : ' · Ambiguous net off'}
         </DetailRow>
         <DetailRow label="Insecure HTTP">
-          {connection.allowInsecureHttp ? (
+          {provider.allowInsecureHttp ? (
             <span className="text-status-danger">Allowed (plain HTTP)</span>
           ) : (
             'Off'
           )}
         </DetailRow>
-        <DetailRow label="Created">{formatTime(connection.createdAt)}</DetailRow>
-        <DetailRow label="Updated">{formatTime(connection.updatedAt)}</DetailRow>
+        <DetailRow label="Created">{formatTime(provider.createdAt)}</DetailRow>
+        <DetailRow label="Updated">{formatTime(provider.updatedAt)}</DetailRow>
       </dl>
     </section>
   )
@@ -1296,10 +1296,10 @@ function DetailRow({ label, children }: { readonly label: string; readonly child
 
 function UsageAdapterCard({
   usage,
-  connectionId,
+  providerId,
 }: {
   readonly usage: UsageView
-  readonly connectionId: string
+  readonly providerId: string
 }) {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<unknown>(null)
@@ -1313,7 +1313,7 @@ function UsageAdapterCard({
     setRefreshing(true)
     setError(null)
     try {
-      const next = await fetchUsage(connectionId)
+      const next = await fetchUsage(providerId)
       setSnapshot(next)
     } catch (cause) {
       setError(cause)
@@ -1387,9 +1387,9 @@ function UsageAdapterSkeleton() {
   )
 }
 
-function countByHealth(connection: ConnectionView): Record<string, number> {
+function countByHealth(provider: ProviderView): Record<string, number> {
   const counts: Record<string, number> = Object.fromEntries(HEALTH_ORDER.map((key) => [key, 0]))
-  for (const key of connection.keys) {
+  for (const key of provider.keys) {
     counts[key.health] = (counts[key.health] ?? 0) + 1
   }
   return counts

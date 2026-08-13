@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils'
 const CHIPS_AREA_MIN_HEIGHT = 'min-h-5'
 
 /**
- * A chip picker for model IDs scoped to a Provider Connection's catalog.
+ * A chip picker for model IDs scoped to a Provider's catalog.
  * Fetches the catalog on mount, shows discovered models as toggleable chips,
  * and lets the Owner add custom IDs that aren't yet in the catalog (these
  * render with an explicit remove button since they can't be re-toggled).
@@ -25,13 +25,13 @@ const CHIPS_AREA_MIN_HEIGHT = 'min-h-5'
  * own API expects.
  */
 export function ModelListPicker({
-  connectionId,
+  providerId,
   csrfToken,
   selected,
   onChange,
   className,
 }: {
-  readonly connectionId: string
+  readonly providerId: string
   readonly csrfToken: string
   readonly selected: readonly string[]
   readonly onChange: (next: readonly string[]) => void
@@ -48,13 +48,13 @@ export function ModelListPicker({
     setLoading(true)
     setError(null)
     try {
-      setCatalog(await fetchCatalog(connectionId))
+      setCatalog(await fetchCatalog(providerId))
     } catch (cause) {
       setError(cause instanceof CatalogError ? cause.message : 'Could not load models.')
     } finally {
       setLoading(false)
     }
-  }, [connectionId])
+  }, [providerId])
 
   useEffect(() => {
     void load()
@@ -64,7 +64,7 @@ export function ModelListPicker({
     setRefreshing(true)
     setError(null)
     try {
-      setCatalog(await refreshCatalog(connectionId, csrfToken))
+      setCatalog(await refreshCatalog(providerId, csrfToken))
     } catch (cause) {
       setError(cause instanceof CatalogError ? cause.message : 'Could not refresh models.')
     } finally {

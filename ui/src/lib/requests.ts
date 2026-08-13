@@ -13,7 +13,7 @@ export interface RequestAttemptView {
 export interface RequestEventView {
   readonly id: string
   readonly occurredAt: string
-  readonly connectionId: string
+  readonly providerId: string
   readonly model: string
   readonly gatewayKeyId: string | null
   readonly keyId: string | null
@@ -38,7 +38,7 @@ export interface RequestEventDetail {
 }
 
 export interface RequestFilter {
-  readonly connectionId?: string
+  readonly providerId?: string
   readonly outcome?: 'success' | 'failure'
   readonly model?: string
   readonly keyId?: string
@@ -66,8 +66,8 @@ export async function fetchRequests(
   options: { limit?: number; offset?: number; signal?: AbortSignal } = {},
 ): Promise<RequestEventList> {
   const query = new URLSearchParams()
-  if (filter.connectionId !== undefined && filter.connectionId !== '') {
-    query.set('connectionId', filter.connectionId)
+  if (filter.providerId !== undefined && filter.providerId !== '') {
+    query.set('providerId', filter.providerId)
   }
   if (filter.outcome !== undefined) {
     query.set('outcome', filter.outcome)

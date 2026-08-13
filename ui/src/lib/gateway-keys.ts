@@ -1,5 +1,5 @@
 export interface GatewayKeyScopeEntry {
-  readonly connectionId: string
+  readonly providerId: string
   readonly models: readonly string[] | null
 }
 

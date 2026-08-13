@@ -47,23 +47,23 @@ export class UsageError extends Error {
 }
 
 export async function fetchUsage(
-  connectionId: string,
+  providerId: string,
   signal?: AbortSignal,
 ): Promise<UsageView> {
   return await request<UsageView>(
     'GET',
-    `/provider-connections/${encodeURIComponent(connectionId)}/usage`,
+    `/providers/${encodeURIComponent(providerId)}/usage`,
     { signal },
   )
 }
 
 export async function refreshUsage(
-  connectionId: string,
+  providerId: string,
   csrfToken: string,
 ): Promise<UsageView> {
   return await request<UsageView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(connectionId)}/usage/refresh`,
+    `/providers/${encodeURIComponent(providerId)}/usage/refresh`,
     { csrfToken },
   )
 }
@@ -106,9 +106,11 @@ async function request<T = unknown>(
 function toError(response: Response, payload: unknown): UsageError {
   const error = (payload as { error?: { code?: unknown; message?: unknown } })?.error
   const retryAfter = Number(response.headers.get('retry-after'))
+  const message =
+    typeof error?.message === 'string' ? error.message : 'That request could not be completed.'
   return new UsageError(
     typeof error?.code === 'string' ? error.code : 'request_failed',
-    typeof error?.message === 'string' ? error.message : 'That request could not be completed.',
+    message,
     Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null,
   )
 }

@@ -38,73 +38,73 @@ export class CatalogError extends Error {
 }
 
 export async function fetchCatalog(
-  connectionId: string,
+  providerId: string,
   signal?: AbortSignal,
 ): Promise<CatalogView> {
   return await request<CatalogView>(
     'GET',
-    `/provider-connections/${encodeURIComponent(connectionId)}/catalog`,
+    `/providers/${encodeURIComponent(providerId)}/catalog`,
     { signal },
   )
 }
 
 export async function refreshCatalog(
-  connectionId: string,
+  providerId: string,
   csrfToken: string,
 ): Promise<CatalogView> {
   return await request<CatalogView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(connectionId)}/catalog/refresh`,
+    `/providers/${encodeURIComponent(providerId)}/catalog/refresh`,
     { csrfToken },
   )
 }
 
 export async function addOwnerModel(
-  connectionId: string,
+  providerId: string,
   modelId: string,
   csrfToken: string,
 ): Promise<CatalogView> {
   return await request<CatalogView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(connectionId)}/catalog/models`,
+    `/providers/${encodeURIComponent(providerId)}/catalog/models`,
     { body: { modelId }, csrfToken },
   )
 }
 
 export async function setModelExcluded(
-  connectionId: string,
+  providerId: string,
   modelId: string,
   excluded: boolean,
   csrfToken: string,
 ): Promise<CatalogView> {
   return await request<CatalogView>(
     'PATCH',
-    `/provider-connections/${encodeURIComponent(connectionId)}/catalog/models/${encodeURIComponent(modelId)}`,
+    `/providers/${encodeURIComponent(providerId)}/catalog/models/${encodeURIComponent(modelId)}`,
     { body: { excluded }, csrfToken },
   )
 }
 
 export async function updateModelOverrides(
-  connectionId: string,
+  providerId: string,
   modelId: string,
   overrides: CatalogOverrides,
   csrfToken: string,
 ): Promise<CatalogView> {
   return await request<CatalogView>(
     'PATCH',
-    `/provider-connections/${encodeURIComponent(connectionId)}/catalog/models/${encodeURIComponent(modelId)}`,
+    `/providers/${encodeURIComponent(providerId)}/catalog/models/${encodeURIComponent(modelId)}`,
     { body: { overrides }, csrfToken },
   )
 }
 
 export async function removeOwnerModel(
-  connectionId: string,
+  providerId: string,
   modelId: string,
   csrfToken: string,
 ): Promise<CatalogView> {
   return await request<CatalogView>(
     'DELETE',
-    `/provider-connections/${encodeURIComponent(connectionId)}/catalog/models/${encodeURIComponent(modelId)}`,
+    `/providers/${encodeURIComponent(providerId)}/catalog/models/${encodeURIComponent(modelId)}`,
     { csrfToken },
   )
 }

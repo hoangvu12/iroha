@@ -40,7 +40,7 @@ import {
   type GatewayKeyScopeEntry,
   type GatewayKeyView,
 } from '@/lib/gateway-keys'
-import { fetchConnections, type ConnectionView } from '@/lib/providers'
+import { fetchProviders, type ProviderView } from '@/lib/providers'
 
 /**
  * The Gateway Keys area. Lists every key with its name, scope, and revocation
@@ -55,16 +55,16 @@ export function GatewayKeysArea({
   readonly onSignedOut: () => void
 }) {
   const [keys, setKeys] = useState<readonly GatewayKeyView[] | null>(null)
-  const [connections, setConnections] = useState<readonly ConnectionView[] | null>(null)
+  const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
   const [error, setError] = useState<GatewayKeyError | null>(null)
   const [creating, setCreating] = useState(false)
   const [issued, setIssued] = useState<CreatedGatewayKey | null>(null)
 
   const reload = useCallback(async () => {
     try {
-      const [loaded, conns] = await Promise.all([fetchGatewayKeys(), fetchConnections()])
+      const [loaded, list] = await Promise.all([fetchGatewayKeys(), fetchProviders()])
       setKeys(loaded)
-      setConnections(conns)
+      setProviders(list)
       setError(null)
     } catch (cause: unknown) {
       if (cause instanceof GatewayKeyError && cause.code === 'authentication_required') {
@@ -81,7 +81,7 @@ export function GatewayKeysArea({
     void reload()
   }, [reload])
 
-  const activeConnections = (connections ?? []).filter((c) => !c.archived)
+  const activeProviders = (providers ?? []).filter((p) => !p.archived)
 
   return (
     <div className="flex flex-col gap-6">
@@ -96,7 +96,7 @@ export function GatewayKeysArea({
               setCreating(true)
               setIssued(null)
             }}
-            disabled={keys === null || connections === null}
+            disabled={keys === null || providers === null}
           >
             <Plus className="size-3.5" aria-hidden />
             New Gateway Key
@@ -117,12 +117,12 @@ export function GatewayKeysArea({
             <DialogTitle>New Gateway Key</DialogTitle>
             <DialogDescription>
               An application credential that authenticates against the Gateway. Scoped to
-              one or more Provider Connections with optional exact model restrictions.
+              one or more Providers with optional exact model restrictions.
             </DialogDescription>
           </DialogHeader>
-          {activeConnections.length > 0 ? (
+          {activeProviders.length > 0 ? (
             <CreateGatewayKeyForm
-              connections={activeConnections}
+              providers={activeProviders}
               csrfToken={csrfToken}
               onCreated={(created) => {
                 setCreating(false)
@@ -133,9 +133,9 @@ export function GatewayKeysArea({
             />
           ) : (
             <Alert role="status">
-              <AlertTitle>Create a Provider Connection first</AlertTitle>
+              <AlertTitle>Create a Provider first</AlertTitle>
               <AlertDescription>
-                Gateway Keys need at least one Provider Connection to scope to. Add one in the
+                Gateway Keys need at least one Provider to scope to. Add one in the
                 Providers area, then return here.
               </AlertDescription>
             </Alert>
@@ -166,7 +166,7 @@ export function GatewayKeysArea({
             <GatewayKeyRow
               key={key.id}
               keyView={key}
-              connections={connections ?? []}
+              providers={providers ?? []}
               csrfToken={csrfToken}
               onChanged={() => void reload()}
             />
@@ -181,12 +181,12 @@ const MAX_SCOPE_ICONS = 4
 
 function GatewayKeyRow({
   keyView,
-  connections,
+  providers,
   csrfToken,
   onChanged,
 }: {
   readonly keyView: GatewayKeyView
-  readonly connections: readonly ConnectionView[]
+  readonly providers: readonly ProviderView[]
   readonly csrfToken: string
   readonly onChanged: () => void
 }) {
@@ -226,7 +226,7 @@ function GatewayKeyRow({
         />
         <ScopeIcons
           scope={keyView.scope}
-          connections={connections}
+          providers={providers}
           hasCorsOrigins={keyView.corsOrigins.length > 0}
           className="ml-auto"
         />
@@ -269,17 +269,17 @@ function GatewayKeyRow({
 
 /**
  * A visual summary of a Gateway Key's scope: one small provider icon per
- * scoped connection (capped at four), a "+N" tile if more, plus a small marker
+ * scoped provider (capped at four), a "+N" tile if more, plus a small marker
  * for model restrictions and one for CORS origins.
  */
 function ScopeIcons({
   scope,
-  connections,
+  providers,
   hasCorsOrigins,
   className,
 }: {
   readonly scope: readonly GatewayKeyScopeEntry[]
-  readonly connections: readonly ConnectionView[]
+  readonly providers: readonly ProviderView[]
   readonly hasCorsOrigins: boolean
   readonly className?: string
 }) {
@@ -308,9 +308,9 @@ function ScopeIcons({
     <div className={cn('flex shrink-0 items-center gap-2', className)}>
       <div className="flex items-center -space-x-1.5">
         {shown.map((entry) => {
-          const conn = connections.find((c) => c.id === entry.connectionId)
-          const label = conn?.displayName ?? entry.connectionId
-          const baseUrl = conn?.baseUrl ?? ''
+          const provider = providers.find((p) => p.id === entry.providerId)
+          const label = provider?.displayName ?? entry.providerId
+          const baseUrl = provider?.baseUrl ?? ''
           const title = entry.models === null
             ? `${label} · all models`
             : entry.models.length === 0
@@ -318,16 +318,16 @@ function ScopeIcons({
               : `${label} · ${entry.models.join(', ')}`
           return (
             <span
-              key={entry.connectionId}
+              key={entry.providerId}
               title={title}
               className="ring-card inline-flex ring-2"
             >
               <ProviderIcon
                 displayName={label}
                 baseUrl={baseUrl}
-                {...(conn?.templateId === undefined || conn.templateId === null
+                {...(provider?.templateId === undefined || provider.templateId === null
                   ? {}
-                  : { templateId: conn.templateId })}
+                  : { templateId: provider.templateId })}
                 size="sm"
               />
             </span>
@@ -335,7 +335,7 @@ function ScopeIcons({
         })}
         {overflow > 0 && (
           <span
-            title={`${overflow} more connection${overflow === 1 ? '' : 's'}`}
+            title={`${overflow} more provider${overflow === 1 ? '' : 's'}`}
             className="border-border bg-muted text-muted-foreground ring-card flex size-6 items-center justify-center rounded-md border text-[10px] font-medium tabular-nums ring-2"
           >
             +{overflow}
@@ -344,7 +344,7 @@ function ScopeIcons({
       </div>
       {hasModelRestrictions && (
         <span
-          title="One or more connections restrict this key to specific model IDs."
+          title="One or more providers restrict this key to specific model IDs."
           className="bg-status-warning/10 text-status-warning border-status-warning/30 inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
         >
           Restricted
@@ -363,12 +363,12 @@ function ScopeIcons({
 }
 
 function CreateGatewayKeyForm({
-  connections,
+  providers,
   csrfToken,
   onCreated,
   onFailure,
 }: {
-  readonly connections: readonly ConnectionView[]
+  readonly providers: readonly ProviderView[]
   readonly csrfToken: string
   readonly onCreated: (created: CreatedGatewayKey) => void
   readonly onFailure: (error: GatewayKeyError) => void
@@ -378,7 +378,7 @@ function CreateGatewayKeyForm({
     Record<string, { enabled: boolean; models: readonly string[] }>
   >(() =>
     Object.fromEntries(
-      connections.map((c) => [c.id, { enabled: false, models: [] as readonly string[] }]),
+      providers.map((p) => [p.id, { enabled: false, models: [] as readonly string[] }]),
     ),
   )
   const [corsOrigins, setCorsOrigins] = useState<readonly string[]>([])
@@ -389,14 +389,14 @@ function CreateGatewayKeyForm({
     event.preventDefault()
     if (busy) return
 
-    const scope: GatewayKeyScopeEntry[] = connections.flatMap((connection) => {
-      const entry = selected[connection.id]
+    const scope: GatewayKeyScopeEntry[] = providers.flatMap((provider) => {
+      const entry = selected[provider.id]
       if (entry === undefined || !entry.enabled) return []
-      return [{ connectionId: connection.id, models: entry.models.length === 0 ? null : entry.models }]
+      return [{ providerId: provider.id, models: entry.models.length === 0 ? null : entry.models }]
     })
 
     if (scope.length === 0) {
-      setError(new GatewayKeyError('validation_failed', 'Choose at least one Provider Connection.'))
+      setError(new GatewayKeyError('validation_failed', 'Choose at least one Provider.'))
       return
     }
 
@@ -437,16 +437,16 @@ function CreateGatewayKeyForm({
         <legend className="flex flex-col gap-0.5">
           <span className="text-sm font-medium">Scope</span>
           <span className="text-muted-foreground text-xs">
-            Tick a Provider Connection to grant this key access. Pick specific models to
+            Tick a Provider to grant this key access. Pick specific models to
             narrow further.
           </span>
         </legend>
         <ul className="border-border overflow-hidden rounded-md border">
-          {connections.map((connection, index) => {
-            const entry = selected[connection.id] ?? { enabled: false, models: [] }
+          {providers.map((provider, index) => {
+            const entry = selected[provider.id] ?? { enabled: false, models: [] }
             return (
               <li
-                key={connection.id}
+                key={provider.id}
                 className={cn(
                   'flex flex-col gap-2 p-3 transition-colors',
                   entry.enabled && 'bg-muted/40',
@@ -459,31 +459,31 @@ function CreateGatewayKeyForm({
                     onCheckedChange={(value) =>
                       setSelected((current) => ({
                         ...current,
-                        [connection.id]: { ...entry, enabled: value === true },
+                        [provider.id]: { ...entry, enabled: value === true },
                       }))
                     }
                   />
                   <ProviderIcon
-                    displayName={connection.displayName}
-                    baseUrl={connection.baseUrl}
-                    {...(connection.templateId === null
+                    displayName={provider.displayName}
+                    baseUrl={provider.baseUrl}
+                    {...(provider.templateId === null
                       ? {}
-                      : { templateId: connection.templateId })}
+                      : { templateId: provider.templateId })}
                     size="sm"
                   />
                   <span className="truncate text-sm font-medium">
-                    {connection.displayName}
+                    {provider.displayName}
                   </span>
                 </div>
                 {entry.enabled && (
                   <ModelListPicker
-                    connectionId={connection.id}
+                    providerId={provider.id}
                     csrfToken={csrfToken}
                     selected={entry.models}
                     onChange={(models) =>
                       setSelected((current) => ({
                         ...current,
-                        [connection.id]: { ...entry, models },
+                        [provider.id]: { ...entry, models },
                       }))
                     }
                     className="ml-7 max-w-md"

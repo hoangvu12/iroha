@@ -37,21 +37,21 @@ import { ProviderIcon } from '@/components/provider-icon'
 import {
   Failure,
   Field,
-  EditConnectionForm,
+  EditProviderForm,
   toManagementError,
   useSubmission,
-} from '@/components/edit-connection-form'
-import { describeConnectionStatus } from '@/lib/connection-status'
+} from '@/components/edit-provider-form'
+import { describeProviderStatus } from '@/lib/provider-status'
 import {
-  archiveConnection,
-  createConnection,
-  duplicateConnection,
-  fetchConnections,
+  archiveProvider,
+  createProvider,
+  duplicateProvider,
+  fetchProviders,
   fetchProviderTemplates,
   ManagementError,
-  purgeConnection,
-  type ConnectionView,
+  purgeProvider,
   type ProviderTemplateView,
+  type ProviderView,
 } from '@/lib/providers'
 import { fetchRequests } from '@/lib/requests'
 
@@ -60,7 +60,7 @@ interface ProvidersAreaProps {
   readonly onSignedOut: () => void
 }
 
-interface ConnectionTraffic {
+interface ProviderTraffic {
   readonly hourlyCounts: readonly number[]
   readonly reqPerMin: number
 }
@@ -69,20 +69,20 @@ const HOUR_MS = 60 * 60 * 1000
 const TRAFFIC_HOURS = 12
 
 export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
-  const [connections, setConnections] = useState<readonly ConnectionView[] | null>(null)
-  const [traffic, setTraffic] = useState<ReadonlyMap<string, ConnectionTraffic>>(new Map())
+  const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
+  const [traffic, setTraffic] = useState<ReadonlyMap<string, ProviderTraffic>>(new Map())
   const [error, setError] = useState<ManagementError | null>(null)
   const [creating, setCreating] = useState(false)
   const navigate = useNavigate()
 
   const reload = useCallback(async () => {
     try {
-      const [conns, page] = await Promise.all([
-        fetchConnections(),
+      const [list, page] = await Promise.all([
+        fetchProviders(),
         fetchRequests({}, { limit: 800 }),
       ])
-      setConnections(conns)
-      setTraffic(buildTrafficByConnection(page.events))
+      setProviders(list)
+      setTraffic(buildTrafficByProvider(page.events))
       setError(null)
     } catch (cause) {
       if (cause instanceof ManagementError && cause.code === 'authentication_required') {
@@ -97,27 +97,27 @@ export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
     void reload()
   }, [reload])
 
-  const active = connections?.filter((c) => !c.archived) ?? null
-  const archived = connections?.filter((c) => c.archived) ?? null
+  const active = providers?.filter((p) => !p.archived) ?? null
+  const archived = providers?.filter((p) => p.archived) ?? null
 
-  const openConnection = (id: string) => {
-    void navigate({ to: '/providers/$connectionId', params: { connectionId: id } })
+  const openProvider = (id: string) => {
+    void navigate({ to: '/providers/$providerId', params: { providerId: id } })
   }
 
   return (
     <div className="flex flex-col gap-6">
       <header className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Provider Connections</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Providers</h1>
         {(active === null || active.length > 0) && (
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() => setCreating(true)}
-            disabled={connections === null}
+            disabled={providers === null}
           >
             <Plus className="size-3.5" aria-hidden />
-            New connection
+            New provider
           </Button>
         )}
       </header>
@@ -132,12 +132,13 @@ export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New Provider Connection</DialogTitle>
+            <DialogTitle>New Provider</DialogTitle>
             <DialogDescription>
-              A name, the provider’s OpenAI-compatible base URL, and one Upstream Key.
+              A name, a default base URL, and one Upstream Key. The base URL is
+              required at creation; you can set per-key URL overrides later.
             </DialogDescription>
           </DialogHeader>
-          <CreateConnectionForm
+          <CreateProviderForm
             csrfToken={csrfToken}
             onCreated={() => {
               setCreating(false)
@@ -159,20 +160,20 @@ export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
         <Card>
           <EmptyState
             icon={Server}
-            title="No Provider Connections yet"
+            title="No Providers yet"
             description="Create the first one to give your applications an upstream to call."
-            action={{ label: 'New connection', onClick: () => setCreating(true) }}
+            action={{ label: 'New provider', onClick: () => setCreating(true) }}
           />
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
-          {active.map((connection) => (
-            <ConnectionRow
-              key={connection.id}
-              connection={connection}
+          {active.map((provider) => (
+            <ProviderRow
+              key={provider.id}
+              provider={provider}
               csrfToken={csrfToken}
-              traffic={traffic.get(connection.id)}
-              onOpen={() => openConnection(connection.id)}
+              traffic={traffic.get(provider.id)}
+              onOpen={() => openProvider(provider.id)}
               onChanged={() => void reload()}
             />
           ))}
@@ -188,13 +189,13 @@ export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
           </p>
           <Separator className="my-4" />
           <ul className="flex flex-col gap-2">
-            {archived.map((connection) => (
-              <ConnectionRow
-                key={connection.id}
-                connection={connection}
+            {archived.map((provider) => (
+              <ProviderRow
+                key={provider.id}
+                provider={provider}
                 csrfToken={csrfToken}
-                traffic={traffic.get(connection.id)}
-                onOpen={() => openConnection(connection.id)}
+                traffic={traffic.get(provider.id)}
+                onOpen={() => openProvider(provider.id)}
                 onChanged={() => void reload()}
                 archived
               />
@@ -206,17 +207,17 @@ export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
   )
 }
 
-function ConnectionRow({
-  connection,
+function ProviderRow({
+  provider,
   csrfToken,
   traffic,
   onOpen,
   onChanged,
   archived = false,
 }: {
-  readonly connection: ConnectionView
+  readonly provider: ProviderView
   readonly csrfToken: string
-  readonly traffic: ConnectionTraffic | undefined
+  readonly traffic: ProviderTraffic | undefined
   readonly onOpen: () => void
   readonly onChanged: () => void
   readonly archived?: boolean
@@ -224,7 +225,7 @@ function ConnectionRow({
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [rowError, setRowError] = useState<ManagementError | null>(null)
-  const status = describeConnectionStatus(connection.keys)
+  const status = describeProviderStatus(provider.keys)
 
   const run = async (action: string, perform: () => Promise<unknown>) => {
     setBusy(action)
@@ -244,13 +245,13 @@ function ConnectionRow({
       <Dialog open={editing} onOpenChange={setEditing}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit {connection.displayName}</DialogTitle>
+            <DialogTitle>Edit {provider.displayName}</DialogTitle>
             <DialogDescription>
-              Editing keeps the connection’s ID unchanged, so client URLs stay valid.
+              Editing keeps the provider’s ID unchanged, so client URLs stay valid.
             </DialogDescription>
           </DialogHeader>
-          <EditConnectionForm
-            connection={connection}
+          <EditProviderForm
+            provider={provider}
             csrfToken={csrfToken}
             onDone={() => {
               setEditing(false)
@@ -264,19 +265,27 @@ function ConnectionRow({
         <button
           type="button"
           onClick={onOpen}
-          aria-label={`Open ${connection.displayName}`}
+          aria-label={`Open ${provider.displayName}`}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
           <ProviderIcon
-            displayName={connection.displayName}
-            baseUrl={connection.baseUrl}
-            {...(connection.templateId === null ? {} : { templateId: connection.templateId })}
+            displayName={provider.displayName}
+            baseUrl={provider.baseUrl}
+            {...(provider.templateId === null ? {} : { templateId: provider.templateId })}
           />
-          <span className="truncate text-sm font-medium tracking-tight">
-            {connection.displayName}
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-sm font-medium tracking-tight">
+              {provider.displayName}
+            </span>
+            <span
+              className="text-muted-foreground truncate font-mono text-xs"
+              title={provider.baseUrl || 'No default base URL set'}
+            >
+              {provider.baseUrl || '—'}
+            </span>
           </span>
           {archived && <StatusBadge tone="neutral" label="Archived" />}
-          {!archived && !connection.enabled && (
+          {!archived && !provider.enabled && (
             <StatusBadge tone="neutral" label="Disabled" />
           )}
           <span className="text-muted-foreground ml-auto hidden items-center gap-1.5 text-xs sm:flex">
@@ -285,19 +294,19 @@ function ConnectionRow({
           </span>
         </button>
 
-        <ConnectionSparkline traffic={traffic} />
+        <ProviderSparkline traffic={traffic} />
 
-        <ConnectionMenu
+        <ProviderMenu
           archived={archived}
           busy={busy}
           onEdit={() => setEditing(true)}
           onArchive={() =>
-            void run('archive', () => archiveConnection(connection.id, csrfToken))
+            void run('archive', () => archiveProvider(provider.id, csrfToken))
           }
           onDuplicate={() =>
-            void run('duplicate', () => duplicateConnection(connection.id, csrfToken))
+            void run('duplicate', () => duplicateProvider(provider.id, csrfToken))
           }
-          onPurge={() => void run('purge', () => purgeConnection(connection.id, csrfToken))}
+          onPurge={() => void run('purge', () => purgeProvider(provider.id, csrfToken))}
         />
       </div>
 
@@ -316,7 +325,7 @@ function ConnectionRow({
   )
 }
 
-function ConnectionMenu({
+function ProviderMenu({
   archived,
   busy,
   onEdit,
@@ -338,7 +347,7 @@ function ConnectionMenu({
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label="Connection actions"
+          aria-label="Provider actions"
           disabled={busy !== null}
           onClick={(event) => event.stopPropagation()}
         >
@@ -346,7 +355,7 @@ function ConnectionMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuItem onSelect={onEdit}>Edit connection</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onEdit}>Edit provider</DropdownMenuItem>
         {!archived && (
           <DropdownMenuItem onSelect={onArchive} disabled={busy === 'archive'}>
             {busy === 'archive' ? 'Archiving…' : 'Archive'}
@@ -372,7 +381,7 @@ function ConnectionMenu({
   )
 }
 
-function CreateConnectionForm({
+function CreateProviderForm({
   csrfToken,
   onCreated,
   onFailure,
@@ -388,7 +397,6 @@ function CreateConnectionForm({
   const [upstreamKey, setUpstreamKey] = useState('')
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(false)
   const [templateId, setTemplateId] = useState<string | null>(null)
-  const [baseUrlDirty, setBaseUrlDirty] = useState(false)
   const [templates, setTemplates] = useState<readonly ProviderTemplateView[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -401,10 +409,7 @@ function CreateConnectionForm({
         setLoadError(null)
         const fallback =
           list.find((template) => template.id === 'generic-openai-compatible') ?? list[0]
-        if (fallback !== undefined) {
-          setTemplateId(fallback.id)
-          if (!baseUrlDirty) setBaseUrl(fallback.baseUrl)
-        }
+        if (fallback !== undefined) setTemplateId(fallback.id)
       })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return
@@ -421,12 +426,6 @@ function CreateConnectionForm({
       ? null
       : (templates?.find((template) => template.id === templateId) ?? null)
 
-  const handleTemplateChange = (next: string) => {
-    setTemplateId(next)
-    const template = templates?.find((candidate) => candidate.id === next)
-    if (template !== undefined && !baseUrlDirty) setBaseUrl(template.baseUrl)
-  }
-
   const templateStatus =
     loadError !== null
       ? 'Could not load templates'
@@ -437,7 +436,7 @@ function CreateConnectionForm({
           : selectedTemplate?.displayName ?? 'Pick a template'
 
   const form = useSubmission(async () => {
-    await createConnection(
+    await createProvider(
       { displayName, baseUrl, upstreamKey, allowInsecureHttp, templateId },
       csrfToken,
     )
@@ -445,11 +444,7 @@ function CreateConnectionForm({
   }, onFailure)
 
   const baseUrlHint =
-    templateId === 'generic-openai-compatible'
-      ? 'Prefilled from the Generic OpenAI-compatible template. Override for a custom endpoint.'
-      : selectedTemplate !== null
-        ? `Prefilled from ${selectedTemplate.displayName}. Override for a self-hosted or proxy URL.`
-        : 'The provider’s OpenAI-compatible base URL, such as https://api.openai.com/v1.'
+    'Optional. Leave blank to set the Provider’s URL later, or fill in your own OpenAI-compatible base URL.'
 
   return (
     <form className="flex flex-col gap-4" onSubmit={form.submit} noValidate>
@@ -465,7 +460,7 @@ function CreateConnectionForm({
         <Label htmlFor="new-provider-template">Provider template</Label>
         <Select
           value={templateId ?? ''}
-          onValueChange={handleTemplateChange}
+          onValueChange={setTemplateId}
           disabled={templates === null || templates.length === 0}
         >
           <SelectTrigger id="new-provider-template" className="w-full" size="sm">
@@ -494,13 +489,10 @@ function CreateConnectionForm({
 
       <Field
         id="new-base-url"
-        label="Base URL"
+        label="Default base URL"
         hint={baseUrlHint}
         value={baseUrl}
-        onChange={(value) => {
-          setBaseUrl(value)
-          setBaseUrlDirty(true)
-        }}
+        onChange={setBaseUrl}
         problem={form.problemFor('baseUrl')}
       />
       <Field
@@ -521,7 +513,7 @@ function CreateConnectionForm({
           className="mt-0.5"
         />
         <span>
-          Allow plain HTTP for this connection. Only for private or local servers — the Upstream
+          Allow plain HTTP for this provider. Only for private or local servers — the Upstream
           Key travels unencrypted.
         </span>
       </label>
@@ -533,17 +525,17 @@ function CreateConnectionForm({
           Cancel
         </Button>
         <Button type="submit" size="sm" disabled={form.busy}>
-          {form.busy ? 'Creating…' : 'Create connection'}
+          {form.busy ? 'Creating…' : 'Create provider'}
         </Button>
       </div>
     </form>
   )
 }
 
-function ConnectionSparkline({
+function ProviderSparkline({
   traffic,
 }: {
-  readonly traffic: ConnectionTraffic | undefined
+  readonly traffic: ProviderTraffic | undefined
 }) {
   const data = useMemo(() => {
     if (traffic === undefined) return []
@@ -574,9 +566,9 @@ function ConnectionSparkline({
   )
 }
 
-function buildTrafficByConnection(
+function buildTrafficByProvider(
   events: readonly import('@/lib/requests').RequestEventView[],
-): ReadonlyMap<string, ConnectionTraffic> {
+): ReadonlyMap<string, ProviderTraffic> {
   const now = Date.now()
   const currentHourStart = Math.floor(now / HOUR_MS) * HOUR_MS
   const firstHourStart = currentHourStart - (TRAFFIC_HOURS - 1) * HOUR_MS
@@ -591,19 +583,19 @@ function buildTrafficByConnection(
     const hourIndex = Math.floor((ts - firstHourStart) / HOUR_MS)
     if (hourIndex < 0 || hourIndex >= TRAFFIC_HOURS) continue
 
-    let arr = buckets.get(event.connectionId)
+    let arr = buckets.get(event.providerId)
     if (arr === undefined) {
       arr = new Array(TRAFFIC_HOURS).fill(0)
-      buckets.set(event.connectionId, arr)
+      buckets.set(event.providerId, arr)
     }
     arr[hourIndex] = (arr[hourIndex] ?? 0) + 1
 
     if (ts >= now - 5 * 60 * 1000) {
-      minuteCounts.set(event.connectionId, (minuteCounts.get(event.connectionId) ?? 0) + 1)
+      minuteCounts.set(event.providerId, (minuteCounts.get(event.providerId) ?? 0) + 1)
     }
   }
 
-  const result = new Map<string, ConnectionTraffic>()
+  const result = new Map<string, ProviderTraffic>()
   for (const [id, arr] of buckets) {
     const last5min = minuteCounts.get(id) ?? 0
     result.set(id, {

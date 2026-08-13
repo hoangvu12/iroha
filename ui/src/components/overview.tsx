@@ -30,7 +30,7 @@ import {
   keyNeedsAttention,
 } from '@/components/key-health'
 import { fetchBackgroundJobs, type BackgroundJobView } from '@/lib/background'
-import { fetchConnections, type ConnectionView } from '@/lib/providers'
+import { fetchProviders, type ProviderView } from '@/lib/providers'
 import { fetchRequests, type RequestEventView } from '@/lib/requests'
 import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
@@ -93,7 +93,7 @@ interface SparklineBundle {
  * (warning), and p50 (healthy) over the same window.
  */
 export function Overview(_props: OverviewProps) {
-  const [connections, setConnections] = useState<readonly ConnectionView[] | null>(null)
+  const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
   const [requests, setRequests] = useState<readonly RequestEventView[] | null>(null)
   const [jobs, setJobs] = useState<readonly BackgroundJobView[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -101,12 +101,12 @@ export function Overview(_props: OverviewProps) {
 
   const reload = useCallback(async () => {
     try {
-      const [conns, page, jobList] = await Promise.all([
-        fetchConnections(),
+      const [list, page, jobList] = await Promise.all([
+        fetchProviders(),
         fetchRequests({}, { limit: 200 }),
         fetchBackgroundJobs(),
       ])
-      setConnections(conns)
+      setProviders(list)
       setRequests(page.events)
       setJobs(jobList)
       setError(null)
@@ -128,11 +128,11 @@ export function Overview(_props: OverviewProps) {
     void reload()
   }, [reload])
 
-  const activeConnections = (connections ?? []).filter((c) => !c.archived)
-  const allKeys = activeConnections.flatMap((c) => c.keys)
+  const activeProviders = (providers ?? []).filter((p) => !p.archived)
+  const allKeys = activeProviders.flatMap((p) => p.keys)
   const attentionCount = allKeys.filter(keyNeedsAttention).length
   const requestCount = requests?.length ?? null
-  const metricsLoading = connections === null || requests === null
+  const metricsLoading = providers === null || requests === null
   const recentFailures = (requests ?? [])
     .filter((event) => event.outcome === 'failure')
     .slice(0, 5)
@@ -157,7 +157,7 @@ export function Overview(_props: OverviewProps) {
       )}
 
       <KpiRow
-        connectionCount={activeConnections.length}
+        providerCount={activeProviders.length}
         totalKeyCount={allKeys.length}
         attentionCount={attentionCount}
         requestCount={requestCount}
@@ -297,7 +297,7 @@ export function Overview(_props: OverviewProps) {
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="truncate font-medium">{event.model}</span>
                     <span className="text-muted-foreground shrink-0 text-xs">
-                      · {event.connectionId}
+                      · {event.providerId}
                     </span>
                   </div>
                   <span className="text-status-danger text-xs font-medium">
@@ -316,20 +316,20 @@ export function Overview(_props: OverviewProps) {
           )}
         </Card>
 
-        <Card title="Upstream keys" loading={connections === null}>
-          {connections === null ? (
+        <Card title="Upstream keys" loading={providers === null}>
+          {providers === null ? (
             <Skeleton className="h-32 w-full" />
           ) : allKeys.length === 0 ? (
             <EmptyState
               icon={KeyRound}
               title="No upstream keys yet"
-              description="Add a Provider Connection and an Upstream Key to start routing traffic."
+              description="Add a Provider and an Upstream Key to start routing traffic."
               compact
             />
           ) : (
             <div className="flex flex-col gap-3">
               <HealthDistribution
-                counts={countByHealth(connections)}
+                counts={countByHealth(providers)}
                 order={HEALTH_ORDER}
                 labels={HEALTH_LABELS}
                 tones={{
@@ -341,7 +341,7 @@ export function Overview(_props: OverviewProps) {
                   disabled: 'neutral',
                 }}
               />
-              <KeyStateList counts={countByHealth(connections)} failedJobsCount={failedJobs.length} />
+              <KeyStateList counts={countByHealth(providers)} failedJobsCount={failedJobs.length} />
             </div>
           )}
         </Card>
@@ -351,7 +351,7 @@ export function Overview(_props: OverviewProps) {
 }
 
 interface KpiRowProps {
-  readonly connectionCount: number
+  readonly providerCount: number
   readonly totalKeyCount: number
   readonly attentionCount: number
   readonly requestCount: number | null
@@ -433,7 +433,7 @@ function Kbd({ children }: { readonly children: React.ReactNode }) {
 }
 
 function KpiRow({
-  connectionCount,
+  providerCount,
   totalKeyCount,
   attentionCount,
   requestCount,
@@ -451,7 +451,7 @@ function KpiRow({
         loading={loading}
         sparkline={sparklines.providers}
         sparklineTone="primary"
-        value={formatCount(connectionCount)}
+        value={formatCount(providerCount)}
       />
       <Kpi
         icon={KeyRound}
@@ -681,11 +681,11 @@ function percentile(values: readonly number[], p: number): number {
 }
 
 function countByHealth(
-  connections: readonly ConnectionView[],
+  providers: readonly ProviderView[],
 ): Record<string, number> {
   const counts: Record<string, number> = Object.fromEntries(HEALTH_ORDER.map((key) => [key, 0]))
-  for (const connection of connections) {
-    for (const key of connection.keys) {
+  for (const provider of providers) {
+    for (const key of provider.keys) {
       counts[key.health] = (counts[key.health] ?? 0) + 1
     }
   }

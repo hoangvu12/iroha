@@ -187,7 +187,7 @@ function AuditFilterBar({
                 : { actionPrefix: event.target.value }),
             })
           }
-          placeholder="connection, gateway_key, audit, settings…"
+          placeholder="provider, gateway_key, audit, settings…"
         />
       </div>
       <div className="flex flex-col gap-1.5">

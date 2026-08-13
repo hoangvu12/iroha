@@ -7,6 +7,10 @@ export interface KeyView {
     | 'invalid_authentication'
     | 'exhausted'
     | 'disabled'
+  /** The Key's own base URL override; null means inherit the Provider's default. */
+  readonly baseUrl: string | null
+  /** The base URL one upstream call should hit. The Key's override wins when set. */
+  readonly effectiveBaseUrl: string
   readonly lastProbe: {
     readonly at: string
     readonly verdict: 'usable' | 'rejected' | 'inconclusive'
@@ -32,7 +36,7 @@ export interface UpstreamAccountView {
   readonly updatedAt: string
 }
 
-export interface ConnectionView {
+export interface ProviderView {
   readonly id: string
   readonly displayName: string
   readonly baseUrl: string
@@ -42,6 +46,17 @@ export interface ConnectionView {
   readonly retryAmbiguousNetwork: boolean
   readonly archived: boolean
   readonly templateId: string | null
+  readonly authHeader: string
+  readonly authPrefix: string
+  readonly staticHeaders: readonly { readonly name: string }[]
+  readonly redirectAllowSameOrigin: boolean
+  readonly connectionTimeoutMs: number
+  readonly firstByteTimeoutMs: number
+  readonly nonStreamingTotalTimeoutMs: number
+  readonly streamingIdleTimeoutMs: number
+  readonly totalRetryTimeoutMs: number
+  readonly idempotencyHeader: string
+  readonly warnings: readonly string[]
   readonly createdAt: string
   readonly updatedAt: string
   readonly keys: readonly KeyView[]
@@ -89,13 +104,9 @@ export interface ProviderTemplateView {
   readonly usageAdapterId: string | null
 }
 
-export async function fetchConnections(signal?: AbortSignal): Promise<readonly ConnectionView[]> {
-  const body = await request<{ connections: readonly ConnectionView[] }>(
-    'GET',
-    '/provider-connections',
-    { signal },
-  )
-  return body.connections
+export async function fetchProviders(signal?: AbortSignal): Promise<readonly ProviderView[]> {
+  const body = await request<{ providers: readonly ProviderView[] }>('GET', '/providers', { signal })
+  return body.providers
 }
 
 export async function fetchProviderTemplates(
@@ -109,7 +120,7 @@ export async function fetchProviderTemplates(
   return body.templates
 }
 
-export async function createConnection(
+export async function createProvider(
   input: {
     displayName: string
     baseUrl: string
@@ -118,7 +129,7 @@ export async function createConnection(
     templateId: string | null
   },
   csrfToken: string,
-): Promise<ConnectionView> {
+): Promise<ProviderView> {
   const body: Record<string, unknown> = {
     displayName: input.displayName,
     baseUrl: input.baseUrl,
@@ -126,13 +137,13 @@ export async function createConnection(
     allowInsecureHttp: input.allowInsecureHttp,
   }
   if (input.templateId !== null) body.templateId = input.templateId
-  return await request<ConnectionView>('POST', '/provider-connections', {
+  return await request<ProviderView>('POST', '/providers', {
     body,
     csrfToken,
   })
 }
 
-export async function updateConnection(
+export async function updateProvider(
   id: string,
   patch: {
     displayName?: string
@@ -143,139 +154,163 @@ export async function updateConnection(
     retryAmbiguousNetwork?: boolean
   },
   csrfToken: string,
-): Promise<ConnectionView> {
-  return await request<ConnectionView>('PATCH', `/provider-connections/${encodeURIComponent(id)}`, {
+): Promise<ProviderView> {
+  return await request<ProviderView>('PATCH', `/providers/${encodeURIComponent(id)}`, {
     body: patch,
     csrfToken,
   })
 }
 
-export async function archiveConnection(id: string, csrfToken: string): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+export async function archiveProvider(id: string, csrfToken: string): Promise<ProviderView> {
+  return await request<ProviderView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(id)}/archive`,
+    `/providers/${encodeURIComponent(id)}/archive`,
     { csrfToken },
   )
 }
 
-export async function duplicateConnection(id: string, csrfToken: string): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+export async function duplicateProvider(id: string, csrfToken: string): Promise<ProviderView> {
+  return await request<ProviderView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(id)}/duplicate`,
+    `/providers/${encodeURIComponent(id)}/duplicate`,
     { csrfToken },
   )
 }
 
-export async function purgeConnection(id: string, csrfToken: string): Promise<void> {
-  await request(
-    'POST',
-    `/provider-connections/${encodeURIComponent(id)}/purge`,
-    { csrfToken },
-  )
+export async function purgeProvider(id: string, csrfToken: string): Promise<void> {
+  await request('POST', `/providers/${encodeURIComponent(id)}/purge`, { csrfToken })
 }
 
 export async function testKey(
-  connectionId: string,
+  providerId: string,
   keyId: string,
   csrfToken: string,
-): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+): Promise<ProviderView> {
+  return await request<ProviderView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(connectionId)}/keys/${encodeURIComponent(keyId)}/test`,
+    `/providers/${encodeURIComponent(providerId)}/keys/${encodeURIComponent(keyId)}/test`,
     { csrfToken },
   )
 }
 
 export async function activateKey(
-  connectionId: string,
+  providerId: string,
   keyId: string,
   csrfToken: string,
-): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+): Promise<ProviderView> {
+  return await request<ProviderView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(connectionId)}/keys/${encodeURIComponent(keyId)}/activate`,
+    `/providers/${encodeURIComponent(providerId)}/keys/${encodeURIComponent(keyId)}/activate`,
     { csrfToken },
   )
 }
 
 export async function disableKey(
-  connectionId: string,
+  providerId: string,
   keyId: string,
   csrfToken: string,
-): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+): Promise<ProviderView> {
+  return await request<ProviderView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(connectionId)}/keys/${encodeURIComponent(keyId)}/disable`,
+    `/providers/${encodeURIComponent(providerId)}/keys/${encodeURIComponent(keyId)}/disable`,
     { csrfToken },
   )
 }
 
 export async function addKey(
-  connectionId: string,
+  providerId: string,
   input: {
     readonly upstreamKey: string
+    readonly baseUrl?: string | null
     readonly accountId: string | null
     readonly allowedModels: readonly string[] | null
     readonly deniedModels: readonly string[] | null
   },
   csrfToken: string,
-): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+): Promise<ProviderView> {
+  const body: Record<string, unknown> = {
+    upstreamKey: input.upstreamKey,
+    ...(input.baseUrl !== undefined && input.baseUrl !== null ? { baseUrl: input.baseUrl } : {}),
+    ...(input.accountId !== null ? { accountId: input.accountId } : {}),
+    ...(input.allowedModels !== null ? { allowedModels: input.allowedModels } : {}),
+    ...(input.deniedModels !== null ? { deniedModels: input.deniedModels } : {}),
+  }
+  return await request<ProviderView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(connectionId)}/keys`,
-    { body: input, csrfToken },
+    `/providers/${encodeURIComponent(providerId)}/keys`,
+    { body, csrfToken },
   )
 }
 
 export async function updateKeySettings(
-  connectionId: string,
+  providerId: string,
   keyId: string,
   settings: {
     accountId: string | null
     allowedModels: readonly string[] | null
     deniedModels: readonly string[] | null
+    baseUrl?: string | null
   },
   csrfToken: string,
-): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+): Promise<ProviderView> {
+  const body: Record<string, unknown> = {
+    ...(settings.accountId !== null ? { accountId: settings.accountId } : {}),
+    ...(settings.allowedModels !== null ? { allowedModels: settings.allowedModels } : {}),
+    ...(settings.deniedModels !== null ? { deniedModels: settings.deniedModels } : {}),
+    ...(settings.baseUrl !== undefined ? { baseUrl: settings.baseUrl } : {}),
+  }
+  return await request<ProviderView>(
     'PATCH',
-    `/provider-connections/${encodeURIComponent(connectionId)}/keys/${encodeURIComponent(keyId)}`,
-    { body: settings, csrfToken },
+    `/providers/${encodeURIComponent(providerId)}/keys/${encodeURIComponent(keyId)}`,
+    { body, csrfToken },
   )
 }
 
 export async function removeKey(
-  connectionId: string,
+  providerId: string,
   keyId: string,
   csrfToken: string,
-): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+): Promise<ProviderView> {
+  return await request<ProviderView>(
     'DELETE',
-    `/provider-connections/${encodeURIComponent(connectionId)}/keys/${encodeURIComponent(keyId)}`,
+    `/providers/${encodeURIComponent(providerId)}/keys/${encodeURIComponent(keyId)}`,
     { csrfToken },
   )
 }
 
 export async function createUpstreamAccount(
-  connectionId: string,
+  providerId: string,
   displayName: string,
   csrfToken: string,
-): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+): Promise<ProviderView> {
+  return await request<ProviderView>(
     'POST',
-    `/provider-connections/${encodeURIComponent(connectionId)}/accounts`,
+    `/providers/${encodeURIComponent(providerId)}/accounts`,
+    { body: { displayName }, csrfToken },
+  )
+}
+
+export async function updateUpstreamAccount(
+  providerId: string,
+  accountId: string,
+  displayName: string,
+  csrfToken: string,
+): Promise<ProviderView> {
+  return await request<ProviderView>(
+    'PATCH',
+    `/providers/${encodeURIComponent(providerId)}/accounts/${encodeURIComponent(accountId)}`,
     { body: { displayName }, csrfToken },
   )
 }
 
 export async function deleteUpstreamAccount(
-  connectionId: string,
+  providerId: string,
   accountId: string,
   csrfToken: string,
-): Promise<ConnectionView> {
-  return await request<ConnectionView>(
+): Promise<ProviderView> {
+  return await request<ProviderView>(
     'DELETE',
-    `/provider-connections/${encodeURIComponent(connectionId)}/accounts/${encodeURIComponent(accountId)}`,
+    `/providers/${encodeURIComponent(providerId)}/accounts/${encodeURIComponent(accountId)}`,
     { csrfToken },
   )
 }

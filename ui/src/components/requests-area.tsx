@@ -5,6 +5,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/empty-state'
@@ -174,47 +181,53 @@ function RequestsFilterBar({
     <div className="bg-card mb-4 grid gap-3 rounded-lg border p-3 md:grid-cols-4">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="requests-connection">Connection</Label>
-        <select
-          id="requests-connection"
-          className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-          value={filter.connectionId ?? ''}
-          onChange={(event) =>
+        <Select
+          value={filter.connectionId ?? '__any'}
+          onValueChange={(value) =>
             onChange({
               ...filter,
-              ...(event.target.value === ''
+              ...(value === '__any'
                 ? { connectionId: undefined }
-                : { connectionId: event.target.value }),
+                : { connectionId: value }),
             })
           }
         >
-          <option value="">Any connection</option>
-          {(connections ?? []).map((connection) => (
-            <option key={connection.id} value={connection.id}>
-              {connection.displayName}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id="requests-connection" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__any">Any connection</SelectItem>
+            {(connections ?? []).map((connection) => (
+              <SelectItem key={connection.id} value={connection.id}>
+                {connection.displayName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="requests-outcome">Outcome</Label>
-        <select
-          id="requests-outcome"
-          className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-          value={filter.outcome ?? ''}
-          onChange={(event) =>
+        <Select
+          value={filter.outcome ?? '__any'}
+          onValueChange={(value) =>
             onChange({
               ...filter,
-              ...(event.target.value === ''
+              ...(value === '__any'
                 ? { outcome: undefined }
-                : { outcome: event.target.value as 'success' | 'failure' }),
+                : { outcome: value as 'success' | 'failure' }),
             })
           }
         >
-          <option value="">Any outcome</option>
-          <option value="success">Success</option>
-          <option value="failure">Failure</option>
-        </select>
+          <SelectTrigger id="requests-outcome" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__any">Any outcome</SelectItem>
+            <SelectItem value="success">Success</SelectItem>
+            <SelectItem value="failure">Failure</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="flex flex-col gap-1.5">

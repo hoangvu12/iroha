@@ -171,13 +171,18 @@ export async function disableKey(
 
 export async function addKey(
   connectionId: string,
-  upstreamKey: string,
+  input: {
+    readonly upstreamKey: string
+    readonly accountId: string | null
+    readonly allowedModels: readonly string[] | null
+    readonly deniedModels: readonly string[] | null
+  },
   csrfToken: string,
 ): Promise<ConnectionView> {
   return await request<ConnectionView>(
     'POST',
     `/provider-connections/${encodeURIComponent(connectionId)}/keys`,
-    { body: { upstreamKey }, csrfToken },
+    { body: input, csrfToken },
   )
 }
 

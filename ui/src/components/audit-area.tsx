@@ -5,6 +5,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/empty-state'
@@ -131,23 +138,26 @@ export function AuditArea({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="audit-outcome">Outcome</Label>
-            <select
-              id="audit-outcome"
-              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-              value={filter.outcome ?? ''}
-              onChange={(event) =>
+            <Select
+              value={filter.outcome ?? '__any'}
+              onValueChange={(value) =>
                 applyFilter({
                   ...filter,
-                  ...(event.target.value === ''
+                  ...(value === '__any'
                     ? { outcome: undefined }
-                    : { outcome: event.target.value as 'success' | 'failure' }),
+                    : { outcome: value as 'success' | 'failure' }),
                 })
               }
             >
-              <option value="">Any outcome</option>
-              <option value="success">Success</option>
-              <option value="failure">Failure</option>
-            </select>
+              <SelectTrigger id="audit-outcome" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__any">Any outcome</SelectItem>
+                <SelectItem value="success">Success</SelectItem>
+                <SelectItem value="failure">Failure</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

@@ -25,9 +25,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { MoreHorizontal } from 'lucide-react'
 import { ProviderIcon } from '@/components/provider-icon'
 import { EditConnectionForm } from '@/components/edit-connection-form'
+import { ModelListPicker } from '@/components/model-list-picker'
 import {
   HEALTH_LABELS,
   HEALTH_ORDER,
@@ -569,10 +577,12 @@ function UpstreamKeysCard({
 
       {adding && !connection.archived && (
         <AddKeyDialog
+          connectionId={connection.id}
           csrfToken={csrfToken}
-          onAdd={async (value) => {
-            await run('add-key', () => addKey(connection.id, value, csrfToken))
-          }}
+          accounts={connection.accounts}
+          onAdd={(input) =>
+            run('add-key', () => addKey(connection.id, input, csrfToken))
+          }
           onDone={() => setAdding(false)}
           onCancel={() => setAdding(false)}
         />
@@ -640,16 +650,29 @@ function UpstreamKeysCard({
 }
 
 function AddKeyDialog({
+  connectionId,
+  csrfToken,
+  accounts,
   onAdd,
   onDone,
   onCancel,
 }: {
+  readonly connectionId: string
   readonly csrfToken: string
-  readonly onAdd: (value: string) => Promise<void>
+  readonly accounts: ConnectionView['accounts']
+  readonly onAdd: (input: {
+    readonly upstreamKey: string
+    readonly accountId: string | null
+    readonly allowedModels: readonly string[] | null
+    readonly deniedModels: readonly string[] | null
+  }) => Promise<void>
   readonly onDone: () => void
   readonly onCancel: () => void
 }) {
   const [value, setValue] = useState('')
+  const [accountId, setAccountId] = useState<string>('')
+  const [allowedModels, setAllowedModels] = useState<readonly string[]>([])
+  const [deniedModels, setDeniedModels] = useState<readonly string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ManagementError | null>(null)
 
@@ -658,7 +681,12 @@ function AddKeyDialog({
     if (busy || value === '') return
     setBusy(true)
     setError(null)
-    void onAdd(value)
+    void onAdd({
+      upstreamKey: value,
+      accountId: accountId === '' ? null : accountId,
+      allowedModels: allowedModels.length === 0 ? null : allowedModels,
+      deniedModels: deniedModels.length === 0 ? null : deniedModels,
+    })
       .then(() => {
         setValue('')
         onDone()
@@ -679,16 +707,17 @@ function AddKeyDialog({
         <DialogHeader>
           <DialogTitle>Add upstream key</DialogTitle>
           <DialogDescription>
-            Encrypted with the installation master key and never shown again.
+            Encrypted with the installation master key and never shown again. Settings below
+            are optional and can be reconfigured later.
           </DialogDescription>
         </DialogHeader>
-        <form className="flex flex-col gap-3" onSubmit={submit} noValidate>
+        <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="upstream-add-key"
-              className="text-muted-foreground text-xs tracking-wide uppercase"
+              className="text-foreground text-sm font-medium"
             >
-              New upstream key
+              Upstream key
             </label>
             <input
               id="upstream-add-key"
@@ -699,6 +728,64 @@ function AddKeyDialog({
               className="border-input bg-background h-9 rounded-md border px-2 text-sm"
             />
           </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="add-key-account"
+              className="text-foreground text-sm font-medium"
+            >
+              Shared account
+            </label>
+            <Select
+              value={accountId === '' ? '__independent' : accountId}
+              onValueChange={(value) => setAccountId(value === '__independent' ? '' : value)}
+            >
+              <SelectTrigger id="add-key-account" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__independent">Independent</SelectItem>
+                {accounts.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-foreground text-sm font-medium">
+              Only allow models
+            </label>
+            <p className="text-muted-foreground text-xs">
+              Restrict this upstream key to a subset of the catalog. Leave empty to allow
+              everything.
+            </p>
+            <ModelListPicker
+              connectionId={connectionId}
+              csrfToken={csrfToken}
+              selected={allowedModels}
+              onChange={setAllowedModels}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-foreground text-sm font-medium">
+              Exclude models
+            </label>
+            <p className="text-muted-foreground text-xs">
+              Block specific model IDs even when the key would otherwise reach them. Leave
+              empty to exclude nothing.
+            </p>
+            <ModelListPicker
+              connectionId={connectionId}
+              csrfToken={csrfToken}
+              selected={deniedModels}
+              onChange={setDeniedModels}
+            />
+          </div>
+
           {error !== null && (
             <Alert variant="destructive" role="alert">
               <AlertTitle>Could not save</AlertTitle>
@@ -735,8 +822,8 @@ function ConfigureKeyDialog({
   readonly onCancel: () => void
 }) {
   const [accountId, setAccountId] = useState(keyView.accountId ?? '')
-  const [allowedModels, setAllowedModels] = useState(keyView.allowedModels?.join(', ') ?? '')
-  const [deniedModels, setDeniedModels] = useState(keyView.deniedModels?.join(', ') ?? '')
+  const [allowedModels, setAllowedModels] = useState<readonly string[]>(keyView.allowedModels ?? [])
+  const [deniedModels, setDeniedModels] = useState<readonly string[]>(keyView.deniedModels ?? [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ManagementError | null>(null)
 
@@ -750,8 +837,8 @@ function ConfigureKeyDialog({
       keyView.id,
       {
         accountId: accountId === '' ? null : accountId,
-        allowedModels: parseModelList(allowedModels),
-        deniedModels: parseModelList(deniedModels),
+        allowedModels: allowedModels.length === 0 ? null : [...allowedModels],
+        deniedModels: deniedModels.length === 0 ? null : [...deniedModels],
       },
       csrfToken,
     )
@@ -775,7 +862,7 @@ function ConfigureKeyDialog({
             <span className="font-mono">{keyView.id}</span>
           </DialogDescription>
         </DialogHeader>
-        <form className="flex flex-col gap-3" onSubmit={submit} noValidate>
+        <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor={`key-${keyView.id}-account`}
@@ -783,52 +870,56 @@ function ConfigureKeyDialog({
             >
               Shared account
             </label>
-            <select
-              id={`key-${keyView.id}-account`}
-              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-              value={accountId}
-              onChange={(event) => setAccountId(event.target.value)}
+            <Select
+              value={accountId === '' ? '__independent' : accountId}
+              onValueChange={(value) => setAccountId(value === '__independent' ? '' : value)}
             >
-              <option value="">Independent</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.displayName}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id={`key-${keyView.id}-account`} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__independent">Independent</SelectItem>
+                {accounts.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor={`key-${keyView.id}-allowed`}
-              className="text-muted-foreground text-xs tracking-wide uppercase"
-            >
+
+          <div className="flex flex-col gap-2">
+            <label className="text-foreground text-sm font-medium">
               Only allow models
             </label>
-            <input
-              id={`key-${keyView.id}-allowed`}
-              type="text"
-              value={allowedModels}
-              onChange={(event) => setAllowedModels(event.target.value)}
-              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-              placeholder="Comma-separated exact model IDs"
+            <p className="text-muted-foreground text-xs">
+              Restrict this upstream key to a subset of the catalog. Leave empty to allow
+              everything.
+            </p>
+            <ModelListPicker
+              connectionId={connectionId}
+              csrfToken={csrfToken}
+              selected={allowedModels}
+              onChange={setAllowedModels}
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor={`key-${keyView.id}-denied`}
-              className="text-muted-foreground text-xs tracking-wide uppercase"
-            >
+
+          <div className="flex flex-col gap-2">
+            <label className="text-foreground text-sm font-medium">
               Exclude models
             </label>
-            <input
-              id={`key-${keyView.id}-denied`}
-              type="text"
-              value={deniedModels}
-              onChange={(event) => setDeniedModels(event.target.value)}
-              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-              placeholder="Comma-separated exact model IDs"
+            <p className="text-muted-foreground text-xs">
+              Block specific model IDs even when the key would otherwise reach them. Leave
+              empty to exclude nothing.
+            </p>
+            <ModelListPicker
+              connectionId={connectionId}
+              csrfToken={csrfToken}
+              selected={deniedModels}
+              onChange={setDeniedModels}
             />
           </div>
+
           {error !== null && (
             <Alert variant="destructive" role="alert">
               <AlertTitle>Could not save</AlertTitle>
@@ -1301,14 +1392,6 @@ function countByHealth(connection: ConnectionView): Record<string, number> {
     counts[key.health] = (counts[key.health] ?? 0) + 1
   }
   return counts
-}
-
-function parseModelList(value: string): readonly string[] | null {
-  const models = value
-    .split(',')
-    .map((model) => model.trim())
-    .filter((model) => model !== '')
-  return models.length === 0 ? null : models
 }
 
 function formatTime(iso: string): string {

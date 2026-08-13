@@ -443,7 +443,12 @@ export function createAdminRoutes({
         }
 
         const input = asObject(body)
-        const result = await providers.addKey(params.id, { upstreamKey: input.upstreamKey })
+        const result = await providers.addKey(params.id, {
+          upstreamKey: input.upstreamKey,
+          ...('accountId' in input ? { accountId: input.accountId } : {}),
+          ...('allowedModels' in input ? { allowedModels: input.allowedModels } : {}),
+          ...('deniedModels' in input ? { deniedModels: input.deniedModels } : {}),
+        })
         if (!result.ok) {
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
@@ -454,7 +459,7 @@ export function createAdminRoutes({
         detail: {
           summary: 'Add an Upstream Key',
           description:
-            'Adds another Upstream Key to a connection. It is encrypted, saved Unverified, and tested once with the low-cost probe like the first key. Existing keys are untouched.',
+            'Adds another Upstream Key to a connection. It is encrypted, saved Unverified, and tested once with the low-cost probe like the first key. Existing keys are untouched. accountId, allowedModels and deniedModels follow the same shape as PATCH /provider-connections/:id/keys/:keyId so the Owner can scope a new key in one round trip.',
         },
         response: { 201: connectionResponse, ...errorResponses },
       },

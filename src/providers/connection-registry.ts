@@ -5,6 +5,7 @@ import type {
   Database,
   KeyProbeVerdict,
   ProviderConnectionRecord,
+  ProviderRepository,
   ProviderStaticHeader,
   UpstreamAccountRecord,
   UpstreamKeyHealth,
@@ -790,13 +791,20 @@ export class ProviderConnectionRegistry {
    */
   async addKey(
     connectionId: string,
-    input: { upstreamKey: unknown },
+    input: {
+      upstreamKey: unknown
+      accountId?: unknown
+      allowedModels?: unknown
+      deniedModels?: unknown
+    },
   ): Promise<ProviderResult<ConnectionView>> {
     const connection = await this.#database.providers.getConnection(connectionId)
     if (connection === null) return failed({ code: 'connection_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'connection_archived' })
 
-    const problems = upstreamKeyProblems(input.upstreamKey)
+    const upstreamProblems = upstreamKeyProblems(input.upstreamKey)
+    const problems: FieldProblem[] = [...upstreamProblems]
+    const settings = await readKeySettings(this.#database.providers, connectionId, input, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
     const at = this.#clock.now()
@@ -805,7 +813,7 @@ export class ProviderConnectionRegistry {
       await repositories.providers.insertKey({
         id: keyId,
         connectionId,
-        accountId: null,
+        accountId: settings.accountId === undefined ? null : settings.accountId,
         encryptedKey: await this.#cipher.encrypt((input.upstreamKey as string).trim()),
         health: 'unverified',
         lastProbeAt: null,
@@ -817,15 +825,19 @@ export class ProviderConnectionRegistry {
         healthScope: 'key',
         healthScopeId: null,
         healthModel: null,
-        allowedModels: null,
-        deniedModels: null,
+        allowedModels: settings.allowedModels === undefined ? null : settings.allowedModels,
+        deniedModels: settings.deniedModels === undefined ? null : settings.deniedModels,
         createdAt: at,
         updatedAt: at,
       })
       await repositories.audit.record({
         action: 'key.created',
         outcome: 'success',
-        detail: { connectionId, keyId },
+        detail: {
+          connectionId,
+          keyId,
+          ...(Object.keys(settings).length > 0 ? { configuredFields: Object.keys(settings) } : {}),
+        },
         at,
       })
     })
@@ -871,28 +883,7 @@ export class ProviderConnectionRegistry {
     if (!located.ok) return located
 
     const problems: FieldProblem[] = []
-    let accountId: string | null | undefined
-    if (patch.accountId !== undefined) {
-      if (patch.accountId === null) {
-        accountId = null
-      } else if (typeof patch.accountId === 'string' && patch.accountId.trim() !== '') {
-        const account = await this.#database.providers.getAccount(patch.accountId.trim())
-        if (account === null || account.connectionId !== connectionId) {
-          problems.push({
-            field: 'accountId',
-            message: 'names an Upstream Account this connection does not own',
-          })
-        } else {
-          accountId = account.id
-        }
-      } else {
-        problems.push({ field: 'accountId', message: 'must be an Upstream Account id or null' })
-      }
-    }
-
-    const allowedModels = readModelList(patch.allowedModels, 'allowedModels', problems)
-    const deniedModels = readModelList(patch.deniedModels, 'deniedModels', problems)
-
+    const settings = await readKeySettings(this.#database.providers, connectionId, patch, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
     const changes: {
@@ -900,9 +891,9 @@ export class ProviderConnectionRegistry {
       allowedModels?: readonly string[] | null
       deniedModels?: readonly string[] | null
     } = {}
-    if (accountId !== undefined) changes.accountId = accountId
-    if (allowedModels !== undefined) changes.allowedModels = allowedModels
-    if (deniedModels !== undefined) changes.deniedModels = deniedModels
+    if (settings.accountId !== undefined) changes.accountId = settings.accountId
+    if (settings.allowedModels !== undefined) changes.allowedModels = settings.allowedModels
+    if (settings.deniedModels !== undefined) changes.deniedModels = settings.deniedModels
 
     if (Object.keys(changes).length > 0) {
       const at = this.#clock.now()
@@ -1802,6 +1793,62 @@ function readModelList(
   }
 
   return models
+}
+
+/**
+ * Reads the Owner-editable settings for an Upstream Key — which account it
+ * shares billing or capacity with, and which exact model IDs it may or may
+ * not serve. Each field is optional on the input: `undefined` means "leave
+ * it alone" (PATCH) or "use the default" (POST). `null` clears the field.
+ *
+ * Used by both `addKey` (POST) and `updateKeySettings` (PATCH) so the two
+ * flows surface identical validation.
+ */
+async function readKeySettings(
+  providers: ProviderRepository,
+  connectionId: string,
+  input: { accountId?: unknown; allowedModels?: unknown; deniedModels?: unknown },
+  problems: FieldProblem[],
+): Promise<{
+  accountId?: string | null
+  allowedModels?: readonly string[] | null
+  deniedModels?: readonly string[] | null
+}> {
+  const result: {
+    accountId?: string | null
+    allowedModels?: readonly string[] | null
+    deniedModels?: readonly string[] | null
+  } = {}
+
+  if (input.accountId !== undefined) {
+    if (input.accountId === null) {
+      result.accountId = null
+    } else if (typeof input.accountId === 'string' && input.accountId.trim() !== '') {
+      const account = await providers.getAccount(input.accountId.trim())
+      if (account === null || account.connectionId !== connectionId) {
+        problems.push({
+          field: 'accountId',
+          message: 'names an Upstream Account this connection does not own',
+        })
+      } else {
+        result.accountId = account.id
+      }
+    } else {
+      problems.push({ field: 'accountId', message: 'must be an Upstream Account id or null' })
+    }
+  }
+
+  if (input.allowedModels !== undefined) {
+    const parsed = readModelList(input.allowedModels, 'allowedModels', problems)
+    if (parsed !== undefined) result.allowedModels = parsed
+  }
+
+  if (input.deniedModels !== undefined) {
+    const parsed = readModelList(input.deniedModels, 'deniedModels', problems)
+    if (parsed !== undefined) result.deniedModels = parsed
+  }
+
+  return result
 }
 
 /** A duplicate gets a recognisably related name without colliding silently. */

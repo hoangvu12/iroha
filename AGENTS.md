@@ -9,3 +9,7 @@ Issues and specs are tracked as Local Markdown under `.scratch/<feature>/`. See 
 ### Domain docs
 
 This is a single-context repository. See `docs/agents/domain.md`.
+
+### UI testing
+
+UI changes ship without a JS-DOM test harness. Coverage lives at the HTTP seam. See `docs/agents/ui-testing.md`.

@@ -185,13 +185,20 @@ function buildSeededBaseline(
           await exec(statement)
         }
       }
+      // Drizzle tracks applied migrations in `drizzle.__drizzle_migrations`.
+      // The test fixture dropped that schema to mirror the freshly-bootstrapped
+      // state, so we recreate it before declaring the bookkeeping entries
+      // that the migrator would have written for a clean apply. The column
+      // types match drizzle's own bookkeeping table so the schema fingerprint
+      // is byte-for-byte identical to a clean apply.
+      await exec('CREATE SCHEMA IF NOT EXISTS "drizzle"')
       await exec(
-        'CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)',
+        'CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)',
       )
       for (const migration of applied) {
         await exec(
           `INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ('${migration.hash}', ${migration.when})`,
-        )
+        );
       }
     },
   }
@@ -421,33 +428,58 @@ if (POSTGRES_URL) {
 }
 
 /**
- * Returns the tables a fresh apply of every migration up to and including
- * `baseline` must create. Used so the seeded baseline must reflect the
- * schema the migrator expects to find, even if Drizzle's `INSERT INTO` of
- * the tracking row precedes the table creation in the rolled-back case.
+ * Returns the tables a fresh apply of every shipped migration produces.
+ * Used so the seeded baseline must reflect the schema the migrator
+ * expects to find, even if Drizzle's `INSERT INTO` of the tracking row
+ * precedes the table creation in the rolled-back case.
+ *
+ * `ALTER TABLE ... RENAME TO ...` (introduced by the Provider-rename
+ * migration) is tracked the same way Drizzle tracks it: the old name is
+ * dropped from the fingerprint set and the new name replaces it. The
+ * `baseline` parameter is retained so each call site reads as "the table
+ * set this baseline must end up producing" but is intentionally unused:
+ * a forward migration always ends at the latest schema, so the expected
+ * table set is "everything a clean apply produces" regardless of which
+ * baseline was seeded. Skipping the per-baseline filter for `CREATE TABLE`
+ * would let a regression that drops a table in any migration slip
+ * through, because no baseline assertion would catch it.
+ *
+ * PostgreSQL double-quotes identifiers and uses `public.` by default;
+ * SQLite uses backticks. Both dialects use unqualified table names in
+ * CREATE / RENAME statements, so a single regex captures them.
  */
 function appliedTables(
   migrations: readonly SqlMigration[],
-  baseline: number,
+  _baseline: number,
   dialect: 'sqlite' | 'postgres' = 'sqlite',
 ): readonly string[] {
-  const SCHEMA_TOKEN = /CREATE TABLE(?:\s+IF NOT EXISTS)?\s+("?)(?:(public|drizzle)\.)?([A-Za-z_][\w]*)\1/i
+  const CREATE_TOKEN =
+    /CREATE TABLE(?:\s+IF NOT EXISTS)?\s+("?|`)(?:(public|drizzle)\.)?([A-Za-z_][\w]*)\1/i
+  const RENAME_TOKEN =
+    /ALTER TABLE\s+("?|`)(?:(public|drizzle)\.)?([A-Za-z_][\w]*)\1\s+RENAME\s+TO\s+("?|`)([A-Za-z_][\w]*)\4/i
   const tables = new Set<string>()
+  const qualify = (table: string, schemaPrefix: string): string => {
+    if (dialect !== 'postgres') return table
+    if (schemaPrefix.length > 0) return `${schemaPrefix}.${table}`
+    return `public.${table}`
+  }
   for (const migration of migrations) {
-    if (migration.idx > baseline) break
     for (const statement of statementsOf(migration.sql)) {
-      const match = SCHEMA_TOKEN.exec(statement)
+      const rename = RENAME_TOKEN.exec(statement)
+      if (rename !== null) {
+        const oldSchema = rename[2] ?? ''
+        const oldTable = rename[3] ?? ''
+        const newTable = rename[5] ?? ''
+        if (oldTable.length > 0) tables.delete(qualify(oldTable, oldSchema))
+        if (newTable.length > 0) tables.add(qualify(newTable, oldSchema))
+        continue
+      }
+      const match = CREATE_TOKEN.exec(statement)
       if (match === null) continue
       const schemaPrefix = match[2] ?? ''
       const table = match[3] ?? ''
       if (table.length === 0) continue
-      const qualified =
-        dialect === 'postgres' && schemaPrefix.length > 0
-          ? `${schemaPrefix}.${table}`
-          : dialect === 'postgres'
-            ? `public.${table}`
-            : table
-      tables.add(qualified)
+      tables.add(qualify(table, schemaPrefix))
     }
   }
   return [...tables]

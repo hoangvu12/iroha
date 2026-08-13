@@ -23,13 +23,13 @@ BEGIN
   SET scope = (
     SELECT jsonb_agg(
       CASE
-        WHEN entry ? 'connectionId'
+        WHEN entry ? 'connectionId'::text
           AND entry->>'connectionId' LIKE 'pc_%'
           AND EXISTS (SELECT 1 FROM provider_connections pc WHERE pc.id = entry->>'connectionId')
-        THEN jsonb_set(entry - 'connectionId', '{providerId}', to_jsonb('pr_' || substring(entry->>'connectionId' FROM 4)))
-        WHEN entry ? 'connectionId'
+        THEN jsonb_set(entry - 'connectionId', '{providerId}', to_jsonb('pr_'::text || substring(entry->>'connectionId' FROM 4)))
+        WHEN entry ? 'connectionId'::text
           AND entry->>'connectionId' LIKE 'pc_%'
-        THEN jsonb_set(entry - 'connectionId', '{providerId}', to_jsonb('__UNRESOLVED__'))
+        THEN jsonb_set(entry - 'connectionId', '{providerId}', to_jsonb('__UNRESOLVED__'::text))
         ELSE entry
       END
     )

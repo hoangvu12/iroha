@@ -203,9 +203,28 @@ async function seedPostgresFixture(url: string): Promise<AppliedFixture> {
         await pool.query(stmt)
       }
     }
+    // Drizzle tracks applied migrations in `drizzle.__drizzle_migrations`.
+    // The fixture dropped that schema to mirror the freshly-bootstrapped
+    // state, so we recreate it and declare the bookkeeping entries the
+    // migrator would have written for a clean apply. Without this, the
+    // migrator re-applies every migration against tables the fixture has
+    // already created, and the second CREATE TABLE trips a "relation
+    // already exists" error before the rename migration gets a chance to
+    // run. The conformance contract under test is "does the rename work
+    // against a real populated fixture", not "does drizzle cope with
+    // duplicate migrations".
+    await pool.query('CREATE SCHEMA IF NOT EXISTS "drizzle"')
     await pool.query(
-      'CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)',
+      'CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)',
     )
+    for (const entry of journal.entries.filter((e) => e.tag !== '0012_provider_rename')) {
+      const sql = fs.readFileSync(join(POSTGRES_DIR, `${entry.tag}.sql`), 'utf8')
+      const hash = (await import('node:crypto')).createHash('sha256').update(sql).digest('hex')
+      await pool.query(
+        'INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ($1, $2)',
+        [hash, entry.when],
+      )
+    }
 
     const providerA = 'pc_alpha'
     const providerB = 'pc_beta'

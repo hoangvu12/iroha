@@ -4,9 +4,9 @@
 
 **Blocked by:** 02 — Renamed ProviderRegistry with per-key base URL behavior and audit vocabulary update.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The Provider Directory response lists Providers (renamed from Provider Connections).
-- [ ] Gateway Key scope accepts and validates Provider IDs in place of Connection IDs.
-- [ ] The directory response and `/v1/models` agree on Provider IDs.
-- [ ] Gateway Key tests pass on both dialects, including scope validation that rejects unknown IDs.
+- [x] The Provider Directory response lists Providers (renamed from Provider Connections).
+- [x] Gateway Key scope accepts and validates Provider IDs in place of Connection IDs.
+- [x] The directory response and `/v1/models` agree on Provider IDs.
+- [x] Gateway Key tests pass on both dialects, including scope validation that rejects unknown IDs.

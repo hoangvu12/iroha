@@ -34,6 +34,12 @@ interface ProviderBody {
     createdAt: string
     updatedAt: string
   }[]
+  accounts: {
+    id: string
+    displayName: string
+    createdAt: string
+    updatedAt: string
+  }[]
 }
 
 describe('Provider administration', () => {
@@ -906,6 +912,139 @@ describe('Provider administration', () => {
 
       const paths = Object.keys(document.paths ?? {})
       expect(paths.some((path) => path.includes('/admin/provider-connections'))).toBe(false)
+    })
+  })
+
+  describe('audit vocabulary after the Provider rename', () => {
+    // The Owner-facing rename from "Provider Connection" to "Provider" must
+    // touch the audit vocabulary the same way it touches every other layer:
+    // no new code is allowed to write a `connection.*` action. Pre-rename
+    // rows in the audit table are append-only history and keep their old
+    // action names, but every action written from now on lives under the
+    // `provider.*`, `key.*`, or `account.*` prefixes. A regression that
+    // reintroduces a `connection.*` action would silently show up in the
+    // Owner's audit feed years after the rename, so this pins the contract.
+    //
+    // The exercise walks every action name the spec enumerates so a code
+    // path that drifts back to a `connection.*` prefix trips the assertion
+    // here rather than at one of the narrower single-action tests.
+    test('the full Owner lifecycle writes only provider.*, key.*, and account.* actions', async () => {
+      const created = await createProvider()
+      const providerId = created.id
+      const [firstKey] = created.keys
+
+      // provider.created (the createProvider above) and provider.updated.
+      await iroha.fetch(`${BASE}/${providerId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: body({ displayName: 'Renamed for audit' }),
+        csrf,
+      })
+
+      // key.created (a freshly-added Upstream Key), key.tested,
+      // key.disabled, key.activated, key.configured.
+      const secondKeyResponse = await iroha.fetch(`${BASE}/${providerId}/keys`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ upstreamKey: 'sk-second-upstream-key-for-tests' }),
+        csrf,
+      })
+      expect(secondKeyResponse.status).toBe(201)
+      const afterAdd = (await secondKeyResponse.json()) as ProviderBody
+      const secondKey = afterAdd.keys[afterAdd.keys.length - 1]!
+      await iroha.fetch(`${BASE}/${providerId}/keys/${secondKey.id}/test`, {
+        method: 'POST',
+        csrf,
+      })
+      await iroha.fetch(`${BASE}/${providerId}/keys/${firstKey!.id}/disable`, {
+        method: 'POST',
+        csrf,
+      })
+      await iroha.fetch(`${BASE}/${providerId}/keys/${firstKey!.id}/activate`, {
+        method: 'POST',
+        csrf,
+      })
+      await iroha.fetch(`${BASE}/${providerId}/keys/${firstKey!.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: body({ allowedModels: ['gpt-4o-mini'] }),
+        csrf,
+      })
+
+      // account.created and account.removed.
+      const accountResponse = await iroha.fetch(`${BASE}/${providerId}/accounts`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ displayName: 'Shared billing' }),
+        csrf,
+      })
+      expect(accountResponse.status).toBe(201)
+      const accountBody = (await accountResponse.json()) as ProviderBody
+      const accountId = accountBody.accounts[0]!.id
+      const deleteAccountResponse = await iroha.fetch(
+        `${BASE}/${providerId}/accounts/${accountId}`,
+        { method: 'DELETE', csrf },
+      )
+      expect(deleteAccountResponse.status).toBe(200)
+
+      // provider.duplicated. The duplicate's first key writes key.created.
+      const duplicateResponse = await iroha.fetch(`${BASE}/${providerId}/duplicate`, {
+        method: 'POST',
+        csrf,
+      })
+      expect(duplicateResponse.status).toBe(201)
+      const duplicateBody = (await duplicateResponse.json()) as ProviderBody
+      const duplicateId = duplicateBody.id
+
+      // provider.archived.
+      await iroha.fetch(`${BASE}/${providerId}/archive`, { method: 'POST', csrf })
+
+      // provider.purged. Purging an archived Provider is allowed and
+      // emits the terminal audit action; the duplicate stays in the
+      // schema so its lifetime is visible.
+      await iroha.fetch(`${BASE}/${providerId}/purge`, { method: 'POST', csrf })
+
+      // key.removed. Removing the duplicate's only key tests that path.
+      const [duplicateKey] = duplicateBody.keys
+      await iroha.fetch(`${BASE}/${duplicateId}/keys/${duplicateKey!.id}`, {
+        method: 'DELETE',
+        csrf,
+      })
+
+      const actions = (await iroha.database.audit.list()).map((event) => event.action)
+      const connectionActions = actions.filter((action) => action.startsWith('connection.'))
+
+      expect(connectionActions).toEqual([])
+
+      // The exercise above must produce each prefix, so a future refactor
+      // that drops the action-name contract entirely trips an assertion
+      // here rather than producing an empty audit feed.
+      const providerActions = actions.filter((action) => action.startsWith('provider.'))
+      const keyActions = actions.filter((action) => action.startsWith('key.'))
+      const accountActions = actions.filter((action) => action.startsWith('account.'))
+      expect(providerActions.length).toBeGreaterThan(0)
+      expect(keyActions.length).toBeGreaterThan(0)
+      expect(accountActions.length).toBeGreaterThan(0)
+
+      // The exercise covers every action the spec calls out: a regression
+      // that drops any one of them would otherwise pass a narrower test.
+      for (const required of [
+        'provider.created',
+        'provider.updated',
+        'provider.archived',
+        'provider.duplicated',
+        'provider.purged',
+        'key.created',
+        'key.tested',
+        'key.disabled',
+        'key.activated',
+        'key.configured',
+        'key.removed',
+        'account.created',
+        'account.removed',
+      ]) {
+        expect(actions).toContain(required)
+      }
     })
   })
 })

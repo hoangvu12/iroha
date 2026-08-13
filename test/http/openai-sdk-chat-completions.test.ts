@@ -129,7 +129,7 @@ describe('the official OpenAI SDK through the Chat Completions surface', () => {
       body: JSON.stringify({
         displayName: 'SDK example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })

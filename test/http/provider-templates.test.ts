@@ -121,7 +121,7 @@ describe('creating a Provider Connection from a template', () => {
       body: JSON.stringify({
         displayName: 'Hand-configured',
         baseUrl: 'https://api.example.com/v1',
-        upstreamKey: 'sk-test-hand-key',
+        keys: [{ upstreamKey: 'sk-test-hand-key' }],
       }),
       csrf,
     })
@@ -138,7 +138,7 @@ describe('creating a Provider Connection from a template', () => {
       body: JSON.stringify({
         displayName: 'OpenAI via template',
         baseUrl: 'https://api.openai.com/v1',
-        upstreamKey: 'sk-test-template-openai',
+        keys: [{ upstreamKey: 'sk-test-template-openai' }],
         templateId: 'openai',
       }),
       csrf,
@@ -165,7 +165,7 @@ describe('creating a Provider Connection from a template', () => {
       body: JSON.stringify({
         displayName: 'Unknown template',
         baseUrl: 'https://api.example.com/v1',
-        upstreamKey: 'sk-test-unknown-template',
+        keys: [{ upstreamKey: 'sk-test-unknown-template' }],
         templateId: 'mystery-template',
       }),
       csrf,
@@ -182,7 +182,7 @@ describe('creating a Provider Connection from a template', () => {
       body: JSON.stringify({
         displayName: 'Templated',
         baseUrl: 'https://api.openai.com/v1',
-        upstreamKey: 'sk-test-list-template',
+        keys: [{ upstreamKey: 'sk-test-list-template' }],
         templateId: 'openai',
       }),
       csrf,

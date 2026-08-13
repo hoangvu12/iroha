@@ -41,7 +41,7 @@ describe('secret redaction across the Owner surface', () => {
       body: JSON.stringify({
         displayName: 'Example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })
@@ -183,7 +183,7 @@ describe('secret redaction across the Owner surface', () => {
       body: JSON.stringify({
         displayName: 'Example',
         baseUrl: 'not-a-url',
-        upstreamKey: maliciousKey,
+        keys: [{ upstreamKey: maliciousKey }],
       }),
       csrf,
     })

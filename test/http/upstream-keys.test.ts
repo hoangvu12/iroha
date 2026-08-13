@@ -56,7 +56,11 @@ describe('Upstream Key pools and Upstream Accounts', () => {
     const response = await iroha.fetch(BASE, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Example', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),
+      body: JSON.stringify({
+        displayName: 'Example',
+        baseUrl: BASE_URL,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
+      }),
       csrf,
     })
     if (response.status !== 201) {
@@ -361,7 +365,7 @@ describe('Upstream Key pools and Upstream Accounts', () => {
         body: JSON.stringify({
           displayName: 'Second',
           baseUrl: BASE_URL,
-          upstreamKey: UPSTREAM_KEY,
+          keys: [{ upstreamKey: UPSTREAM_KEY }],
         }),
         csrf,
       })

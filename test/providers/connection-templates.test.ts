@@ -68,7 +68,7 @@ describe('Provider Connection templates', () => {
     const created = await registry.create({
       displayName: 'Hand-configured',
       baseUrl: 'https://api.example.com/v1',
-      upstreamKey: 'sk-test-hand-key',
+      keys: [{ upstreamKey: 'sk-test-hand-key' }],
     })
     if (!created.ok) throw new Error(created.failure.code)
 
@@ -80,7 +80,7 @@ describe('Provider Connection templates', () => {
     const created = await registry.create({
       displayName: 'OpenAI connection',
       baseUrl: OPENAI_BASE_URL,
-      upstreamKey: 'sk-test-openai-key',
+      keys: [{ upstreamKey: 'sk-test-openai-key' }],
       templateId: 'openai',
     })
     if (!created.ok) throw new Error(created.failure.code)
@@ -93,7 +93,7 @@ describe('Provider Connection templates', () => {
     const created = await registry.create({
       displayName: 'OpenAI on a private deployment',
       baseUrl: 'https://proxy.example.internal/openai',
-      upstreamKey: 'sk-test-internal-key',
+      keys: [{ upstreamKey: 'sk-test-internal-key' }],
       templateId: 'openai',
       authHeader: 'X-Api-Key',
       authPrefix: '',
@@ -110,7 +110,7 @@ describe('Provider Connection templates', () => {
     const result = await registry.create({
       displayName: 'Wrong template',
       baseUrl: OPENAI_BASE_URL,
-      upstreamKey: 'sk-test-missing-template',
+      keys: [{ upstreamKey: 'sk-test-missing-template' }],
       templateId: 'not-a-real-template',
     })
 
@@ -125,7 +125,7 @@ describe('Provider Connection templates', () => {
     const result = await registry.create({
       displayName: 'Blank template',
       baseUrl: OPENAI_BASE_URL,
-      upstreamKey: 'sk-test-blank-template',
+      keys: [{ upstreamKey: 'sk-test-blank-template' }],
       templateId: '   ',
     })
 
@@ -138,7 +138,7 @@ describe('Provider Connection templates', () => {
     const result = await registry.create({
       displayName: 'Number template',
       baseUrl: OPENAI_BASE_URL,
-      upstreamKey: 'sk-test-numeric-template',
+      keys: [{ upstreamKey: 'sk-test-numeric-template' }],
       templateId: 42,
     })
 
@@ -151,7 +151,7 @@ describe('Provider Connection templates', () => {
     const created = await registry.create({
       displayName: 'Explicit null template',
       baseUrl: OPENAI_BASE_URL,
-      upstreamKey: 'sk-test-null-template',
+      keys: [{ upstreamKey: 'sk-test-null-template' }],
       templateId: null,
     })
     if (!created.ok) throw new Error(created.failure.code)
@@ -192,7 +192,7 @@ describe('Provider Connection templates', () => {
       const created = await customRegistry.create({
         displayName: 'Experimental',
         baseUrl: OPENAI_BASE_URL,
-        upstreamKey: 'sk-test-experimental',
+        keys: [{ upstreamKey: 'sk-test-experimental' }],
         templateId: 'experimental',
       })
       if (!created.ok) throw new Error(created.failure.code)
@@ -209,7 +209,7 @@ describe('Provider Connection templates', () => {
     const created = await registry.create({
       displayName: 'OpenAI original',
       baseUrl: OPENAI_BASE_URL,
-      upstreamKey: 'sk-test-dup-original',
+      keys: [{ upstreamKey: 'sk-test-dup-original' }],
       templateId: 'openai',
     })
     if (!created.ok) throw new Error(created.failure.code)
@@ -226,7 +226,7 @@ describe('Provider Connection templates', () => {
     const created = await registry.create({
       displayName: 'Template safety',
       baseUrl: OPENAI_BASE_URL,
-      upstreamKey: 'sk-test-template-safety-key',
+      keys: [{ upstreamKey: 'sk-test-template-safety-key' }],
       templateId: 'openai',
     })
     if (!created.ok) throw new Error(created.failure.code)

@@ -48,7 +48,7 @@ describe('provider-scoped Chat Completions', () => {
       body: JSON.stringify({
         displayName: 'Example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         ...fields,
       }),
       csrf,
@@ -540,7 +540,7 @@ describe('provider-scoped Chat Completions', () => {
           body: JSON.stringify({
             displayName: 'Untested',
             baseUrl: BASE_URL,
-            upstreamKey: UPSTREAM_KEY,
+            keys: [{ upstreamKey: UPSTREAM_KEY }],
           }),
           csrf: signedIn.csrf,
         })

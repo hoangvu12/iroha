@@ -156,7 +156,7 @@ describe('the official OpenAI SDK streaming through the Chat Completions surface
       body: JSON.stringify({
         displayName: 'SDK streaming example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })

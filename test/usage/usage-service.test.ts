@@ -42,7 +42,7 @@ async function buildFixture(
   const created = await registry.create({
     displayName: 'Usage test',
     baseUrl: 'https://api.example.com/v1',
-    upstreamKey: 'sk-upstream-for-usage',
+    keys: [{ upstreamKey: 'sk-upstream-for-usage' }],
   })
   if (!created.ok) throw new Error(created.failure.code)
   const providerId = created.value.id

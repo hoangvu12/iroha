@@ -28,7 +28,7 @@ describe('durable scoped Key Health', () => {
     const created = await registry.create({
       displayName: 'Health test',
       baseUrl: 'https://api.example.com/v1',
-      upstreamKey: 'sk-first-health-key',
+      keys: [{ upstreamKey: 'sk-first-health-key' }],
     })
     if (!created.ok) throw new Error(created.failure.code)
     providerId = created.value.id

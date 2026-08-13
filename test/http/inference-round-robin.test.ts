@@ -43,7 +43,7 @@ describe('round-robin key selection on the inference path', () => {
       body: JSON.stringify({
         displayName: 'Example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })

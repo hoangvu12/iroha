@@ -49,7 +49,7 @@ describe('Gateway Key administration', () => {
       body: JSON.stringify({
         displayName,
         baseUrl: 'https://api.example.com/v1',
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })

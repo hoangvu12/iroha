@@ -51,7 +51,7 @@ describe('Provider Template contribution to the model catalog', () => {
       body: JSON.stringify({
         displayName,
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         templateId,
       }),
       csrf,

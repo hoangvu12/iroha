@@ -21,7 +21,7 @@ describe('scoped inference retries', () => {
     const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Retry', baseUrl: BASE_URL, upstreamKey: FIRST_KEY }),
+      body: JSON.stringify({ displayName: 'Retry', baseUrl: BASE_URL, keys: [{ upstreamKey: FIRST_KEY }] }),
       csrf,
     })
     providerId = ((await created.json()) as { id: string }).id
@@ -106,7 +106,7 @@ describe('scoped inference retries', () => {
     const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Retry delay', baseUrl: BASE_URL, upstreamKey: FIRST_KEY }),
+      body: JSON.stringify({ displayName: 'Retry delay', baseUrl: BASE_URL, keys: [{ upstreamKey: FIRST_KEY }] }),
       csrf,
     })
     providerId = ((await created.json()) as { id: string }).id

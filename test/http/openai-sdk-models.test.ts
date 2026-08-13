@@ -95,7 +95,7 @@ describe('the official OpenAI SDK through the Models surface', () => {
       body: JSON.stringify({
         displayName: 'SDK models example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })

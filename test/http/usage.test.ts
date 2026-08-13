@@ -63,7 +63,7 @@ describe('the Owner usage surface', () => {
       body: JSON.stringify({
         displayName: 'Usage example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })
@@ -117,7 +117,7 @@ describe('the Owner usage surface', () => {
       body: JSON.stringify({
         displayName: 'Usage example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })
@@ -152,7 +152,7 @@ describe('the Owner usage surface', () => {
       body: JSON.stringify({
         displayName: 'Usage example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })
@@ -197,7 +197,7 @@ describe('the Owner usage surface', () => {
       body: JSON.stringify({
         displayName: 'Usage example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })
@@ -230,7 +230,7 @@ describe('the Owner usage surface', () => {
       body: JSON.stringify({
         displayName: 'Usage example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })
@@ -263,7 +263,7 @@ describe('the Owner usage surface', () => {
       body: JSON.stringify({
         displayName: 'Usage example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })
@@ -344,9 +344,9 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        displayName: 'End-to-end usage',
+        displayName: 'Usage example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })

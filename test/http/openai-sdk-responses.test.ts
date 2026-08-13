@@ -203,7 +203,7 @@ async function createConnection(iroha: TestApp, csrf: string): Promise<string> {
   const response = await iroha.fetch('/api/v1/admin/providers', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ displayName: 'SDK Responses', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),
+    body: JSON.stringify({ displayName: 'SDK Responses', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
     csrf,
   })
   if (response.status !== 201) throw new Error(`Connection create failed: ${await response.text()}`)

@@ -90,7 +90,7 @@ describe('provider-scoped streaming Chat Completions', () => {
       body: JSON.stringify({
         displayName: 'Streaming example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })

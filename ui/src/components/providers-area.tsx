@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { MoreHorizontal, Plus, Server } from 'lucide-react'
+import { MoreHorizontal, Plus, Server, Trash2 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -381,6 +381,13 @@ function ProviderMenu({
   )
 }
 
+interface CreateProviderKeyRow {
+  /** Local row id so React keys stay stable across value edits. */
+  readonly rowId: string
+  readonly upstreamKey: string
+  readonly baseUrl: string
+}
+
 function CreateProviderForm({
   csrfToken,
   onCreated,
@@ -394,7 +401,9 @@ function CreateProviderForm({
 }) {
   const [displayName, setDisplayName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
-  const [upstreamKey, setUpstreamKey] = useState('')
+  const [keys, setKeys] = useState<readonly CreateProviderKeyRow[]>(() => [
+    { rowId: makeRowId(), upstreamKey: '', baseUrl: '' },
+  ])
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(false)
   const [templateId, setTemplateId] = useState<string | null>(null)
   const [templates, setTemplates] = useState<readonly ProviderTemplateView[] | null>(null)
@@ -435,9 +444,57 @@ function CreateProviderForm({
           ? 'No templates available'
           : selectedTemplate?.displayName ?? 'Pick a template'
 
+  // Auto-fill the default base URL when the Owner picks a template, but
+  // never clobber a URL the Owner has typed by hand. The previous template's
+  // base URL lives in a ref so the comparison can decide whether the field
+  // is still "untouched" (matches what we last seeded) or already carries a
+  // custom value. After each template change the ref advances so the next
+  // change has the right "last seeded" baseline to compare against.
+  const lastAutofilledBaseUrl = useRef<string | null>(null)
+  useEffect(() => {
+    if (selectedTemplate === null) return
+    const seeded = selectedTemplate.baseUrl
+    if (baseUrl === '' || baseUrl === lastAutofilledBaseUrl.current) {
+      setBaseUrl(seeded)
+    }
+    lastAutofilledBaseUrl.current = seeded
+  }, [selectedTemplate])
+
+  const updateKeyRow = useCallback(
+    (rowId: string, patch: Partial<CreateProviderKeyRow>) => {
+      setKeys((current) =>
+        current.map((row) => (row.rowId === rowId ? { ...row, ...patch } : row)),
+      )
+    },
+    [],
+  )
+
+  const addKeyRow = useCallback(() => {
+    setKeys((current) => [
+      ...current,
+      { rowId: makeRowId(), upstreamKey: '', baseUrl: '' },
+    ])
+  }, [])
+
+  const removeKeyRow = useCallback((rowId: string) => {
+    setKeys((current) => {
+      // Always leave at least one row so the form keeps an obvious place for
+      // the Owner to type a key. Removing the last row would force the
+      // Owner to click "Add another key" before they could submit again.
+      if (current.length <= 1) return current
+      return current.filter((row) => row.rowId !== rowId)
+    })
+  }, [])
+
   const form = useSubmission(async () => {
     await createProvider(
-      { displayName, baseUrl, upstreamKey, allowInsecureHttp, templateId },
+      {
+        displayName,
+        baseUrl,
+        keys: keys.map((row) => ({ upstreamKey: row.upstreamKey, baseUrl: row.baseUrl })),
+        allowInsecureHttp,
+        templateId,
+      },
       csrfToken,
     )
     onCreated()
@@ -445,6 +502,17 @@ function CreateProviderForm({
 
   const baseUrlHint =
     'Optional. Leave blank to set the Provider’s URL later, or fill in your own OpenAI-compatible base URL.'
+
+  const keysHint = (
+    <>
+      Add one Upstream Key now, or several if the upstream brand serves you
+      from multiple endpoints. Each key is encrypted with the installation
+      master key and never shown again. Add more keys later from the
+      Provider detail page.
+    </>
+  )
+
+  const topLevelKeysProblem = form.problemFor('keys')
 
   return (
     <form className="flex flex-col gap-4" onSubmit={form.submit} noValidate>
@@ -495,16 +563,39 @@ function CreateProviderForm({
         onChange={setBaseUrl}
         problem={form.problemFor('baseUrl')}
       />
-      <Field
-        id="new-upstream-key"
-        label="Upstream key"
-        type="password"
-        autoComplete="off"
-        hint="Encrypted with the installation master key and never shown again."
-        value={upstreamKey}
-        onChange={setUpstreamKey}
-        problem={form.problemFor('upstreamKey')}
-      />
+
+      <div className="flex flex-col gap-2">
+        <Label>Upstream keys</Label>
+        <p className="text-muted-foreground text-xs">{keysHint}</p>
+        <ul className="flex flex-col gap-3">
+          {keys.map((row, index) => (
+            <CreateProviderKeyRowFields
+              key={row.rowId}
+              index={index}
+              row={row}
+              defaultBaseUrl={baseUrl}
+              canRemove={keys.length > 1}
+              onChange={(patch) => updateKeyRow(row.rowId, patch)}
+              onRemove={() => removeKeyRow(row.rowId)}
+              upstreamKeyProblem={form.problemFor(`keys[${index}].upstreamKey`)}
+              baseUrlProblem={form.problemFor(`keys[${index}].baseUrl`)}
+            />
+          ))}
+        </ul>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addKeyRow}
+          className="self-start"
+        >
+          <Plus className="size-3.5" aria-hidden />
+          Add another key
+        </Button>
+        {topLevelKeysProblem !== undefined && (
+          <p className="text-status-danger text-xs">{topLevelKeysProblem}</p>
+        )}
+      </div>
 
       <label className="text-muted-foreground flex items-start gap-2 text-xs">
         <Checkbox
@@ -530,6 +621,82 @@ function CreateProviderForm({
       </div>
     </form>
   )
+}
+
+function CreateProviderKeyRowFields({
+  index,
+  row,
+  defaultBaseUrl,
+  canRemove,
+  onChange,
+  onRemove,
+  upstreamKeyProblem,
+  baseUrlProblem,
+}: {
+  readonly index: number
+  readonly row: CreateProviderKeyRow
+  readonly defaultBaseUrl: string
+  readonly canRemove: boolean
+  readonly onChange: (patch: Partial<CreateProviderKeyRow>) => void
+  readonly onRemove: () => void
+  readonly upstreamKeyProblem: string | undefined
+  readonly baseUrlProblem: string | undefined
+}) {
+  const upstreamKeyId = `new-upstream-key-${row.rowId}`
+  const baseUrlId = `new-key-base-url-${row.rowId}`
+
+  return (
+    <li className="border-border bg-muted/30 flex flex-col gap-3 rounded-lg border p-3">
+      <div className="flex items-center justify-between">
+        <Label htmlFor={upstreamKeyId} className="text-muted-foreground text-xs tracking-wide uppercase">
+          Key {index + 1}
+        </Label>
+        {canRemove && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={onRemove}
+            aria-label={`Remove key ${index + 1}`}
+          >
+            <Trash2 className="size-3.5" aria-hidden />
+            Remove
+          </Button>
+        )}
+      </div>
+
+      <Field
+        id={upstreamKeyId}
+        label="Upstream key"
+        type="password"
+        autoComplete="off"
+        value={row.upstreamKey}
+        onChange={(value) => onChange({ upstreamKey: value })}
+        problem={upstreamKeyProblem}
+      />
+
+      <Field
+        id={baseUrlId}
+        label="Base URL override"
+        type="url"
+        autoComplete="off"
+        value={row.baseUrl}
+        onChange={(value) => onChange({ baseUrl: value })}
+        hint={
+          defaultBaseUrl.trim() === ''
+            ? 'Optional. Leave blank to inherit the Provider default (once set).'
+            : `Optional. Leave blank to inherit the Provider default: ${defaultBaseUrl}`
+        }
+        problem={baseUrlProblem}
+      />
+    </li>
+  )
+}
+
+let createProviderRowCounter = 0
+function makeRowId(): string {
+  createProviderRowCounter += 1
+  return `${Date.now().toString(36)}-${createProviderRowCounter.toString(36)}`
 }
 
 function ProviderSparkline({

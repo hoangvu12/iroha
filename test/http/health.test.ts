@@ -146,7 +146,7 @@ describe('readiness and Provider outages', () => {
       const connectionResponse = await test.fetch('/api/v1/admin/providers', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ displayName: 'Outage example', baseUrl: 'https://api.example.com/v1', upstreamKey: 'upstream-secret' }),
+        body: JSON.stringify({ displayName: 'Outage example', baseUrl: 'https://api.example.com/v1', keys: [{ upstreamKey: 'upstream-secret' }] }),
         csrf: signedIn.csrf,
       })
       const connection = (await connectionResponse.json()) as { id: string }

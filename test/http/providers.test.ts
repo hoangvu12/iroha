@@ -61,7 +61,12 @@ describe('Provider administration', () => {
     iroha.fetch(BASE, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Example', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY, ...fields }),
+      body: JSON.stringify({
+        displayName: 'Example',
+        baseUrl: BASE_URL,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
+        ...fields,
+      }),
       csrf,
     })
 
@@ -88,7 +93,7 @@ describe('Provider administration', () => {
       const response = await iroha.fetch(OLD_BASE, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: body({ displayName: 'Example', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),
+        body: body({ displayName: 'Example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
       })
       expect(response.status).toBe(404)
     })
@@ -122,7 +127,7 @@ describe('Provider administration', () => {
       const response = await iroha.fetch(BASE, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: body({ displayName: 'Example', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),
+        body: body({ displayName: 'Example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
       })
 
       expect(response.status).toBe(403)
@@ -164,6 +169,58 @@ describe('Provider administration', () => {
       await createProvider()
 
       expect(probe.calls).toEqual([{ baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }])
+    })
+
+    test('creates a Provider with two keys, each tested against its own base URL', async () => {
+      const created = await createProvider({
+        keys: [
+          { upstreamKey: UPSTREAM_KEY },
+          { upstreamKey: 'sk-second-upstream-key-for-tests', baseUrl: KEY_BASE_URL },
+        ],
+      })
+
+      expect(created.keys).toHaveLength(2)
+      const probeCalls = probe.calls.map((call) => ({ ...call }))
+      expect(probeCalls).toEqual(
+        expect.arrayContaining([
+          { baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY },
+          { baseUrl: KEY_BASE_URL, upstreamKey: 'sk-second-upstream-key-for-tests' },
+        ]),
+      )
+
+      const overrideKey = created.keys.find((key) => key.baseUrl === KEY_BASE_URL)
+      expect(overrideKey?.effectiveBaseUrl).toBe(KEY_BASE_URL)
+    })
+
+    test('writes a key.created audit event for each key supplied at creation', async () => {
+      await createProvider({
+        keys: [
+          { upstreamKey: UPSTREAM_KEY },
+          { upstreamKey: 'sk-second-upstream-key-for-tests', baseUrl: KEY_BASE_URL },
+        ],
+      })
+
+      const events = await iroha.database.audit.list()
+      const createEvents = events.filter((event) => event.action === 'key.created')
+      expect(createEvents).toHaveLength(2)
+      expect(
+        createEvents.every(
+          (event) =>
+            Array.isArray(event.detail) === false &&
+            typeof event.detail === 'object' &&
+            event.detail !== null &&
+            'providerId' in event.detail,
+        ),
+      ).toBe(true)
+    })
+
+    test('a blank per-key baseUrl at creation inherits the Provider default', async () => {
+      const created = await createProvider({
+        keys: [{ upstreamKey: UPSTREAM_KEY, baseUrl: '   ' }],
+      })
+
+      expect(created.keys[0]?.baseUrl).toBeNull()
+      expect(created.keys[0]?.effectiveBaseUrl).toBe(BASE_URL)
     })
 
     test('keeps a usable probe result and activates the key on creation', async () => {
@@ -213,7 +270,7 @@ describe('Provider administration', () => {
         const response = await app.fetch(BASE, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: body({ displayName: 'Example', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),
+          body: body({ displayName: 'Example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
           csrf: signedIn.csrf,
         })
 
@@ -266,7 +323,7 @@ describe('Provider administration', () => {
       const response = await iroha.fetch(BASE, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: body({ displayName: '', baseUrl: 'not a url', upstreamKey: '' }),
+        body: body({ displayName: '', baseUrl: 'not a url', keys: [{ upstreamKey: '' }] }),
         csrf,
       })
 
@@ -276,7 +333,7 @@ describe('Provider administration', () => {
       expect(problems.map((problem) => problem.field).sort()).toEqual([
         'baseUrl',
         'displayName',
-        'upstreamKey',
+        'keys[0].upstreamKey',
       ])
       expect(problems.map((problem) => problem.message).join(' ')).not.toContain(UPSTREAM_KEY)
     })
@@ -292,13 +349,53 @@ describe('Provider administration', () => {
     })
 
     test('refuses an over-long key', async () => {
-      const response = await createRequest({ upstreamKey: 'k'.repeat(2049) })
+      const response = await createRequest({ keys: [{ upstreamKey: 'k'.repeat(2049) }] })
 
       expect(response.status).toBe(400)
 
       const failure = await errorOf(response)
       expect(failure.code).toBe('validation_failed')
-      expect(failure.problems.map((problem) => problem.field)).toEqual(['upstreamKey'])
+      expect(failure.problems.map((problem) => problem.field)).toEqual(['keys[0].upstreamKey'])
+    })
+
+    test('refuses an empty keys array', async () => {
+      const response = await createRequest({ keys: [] })
+
+      expect(response.status).toBe(400)
+
+      const failure = await errorOf(response)
+      expect(failure.code).toBe('validation_failed')
+      expect(failure.problems.map((problem) => problem.field)).toEqual(['keys'])
+    })
+
+    test('refuses a non-array keys value', async () => {
+      const response = await createRequest({ keys: 'not an array' })
+
+      expect(response.status).toBe(400)
+
+      const failure = await errorOf(response)
+      expect(failure.code).toBe('validation_failed')
+      expect(failure.problems.map((problem) => problem.field)).toEqual(['keys'])
+    })
+
+    test('refuses an entry that is not an object', async () => {
+      const response = await createRequest({ keys: ['sk-bad'] })
+
+      expect(response.status).toBe(400)
+
+      const failure = await errorOf(response)
+      expect(failure.code).toBe('validation_failed')
+      expect(failure.problems.map((problem) => problem.field)).toEqual(['keys[0]'])
+    })
+
+    test('refuses an invalid per-key baseUrl, tagging the offending row', async () => {
+      const response = await createRequest({ keys: [{ upstreamKey: UPSTREAM_KEY, baseUrl: 'not a url' }] })
+
+      expect(response.status).toBe(400)
+
+      const failure = await errorOf(response)
+      expect(failure.code).toBe('validation_failed')
+      expect(failure.problems.map((problem) => problem.field)).toEqual(['keys[0].baseUrl'])
     })
 
     test('refuses an unreadable request body rather than echoing it', async () => {

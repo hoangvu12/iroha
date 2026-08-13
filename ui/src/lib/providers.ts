@@ -124,7 +124,7 @@ export async function createProvider(
   input: {
     displayName: string
     baseUrl: string
-    upstreamKey: string
+    keys: readonly { readonly upstreamKey: string; readonly baseUrl?: string }[]
     allowInsecureHttp: boolean
     templateId: string | null
   },
@@ -133,7 +133,18 @@ export async function createProvider(
   const body: Record<string, unknown> = {
     displayName: input.displayName,
     baseUrl: input.baseUrl,
-    upstreamKey: input.upstreamKey,
+    keys: input.keys.map((entry) => {
+      const trimmedBaseUrl = entry.baseUrl?.trim() ?? ''
+      const keyBody: { upstreamKey: string; baseUrl?: string } = {
+        upstreamKey: entry.upstreamKey,
+      }
+      // A blank per-key URL means "inherit the Provider default" — the
+      // server stores `null` in that case, so we omit the field rather
+      // than send an empty string and let the server's `readKeyBaseUrl`
+      // do the inheritance.
+      if (trimmedBaseUrl !== '') keyBody.baseUrl = trimmedBaseUrl
+      return keyBody
+    }),
     allowInsecureHttp: input.allowInsecureHttp,
   }
   if (input.templateId !== null) body.templateId = input.templateId

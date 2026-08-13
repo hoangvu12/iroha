@@ -34,19 +34,19 @@ describe('ProviderRegistry: per-Upstream-Key base URL override', () => {
     const created = await registry.create({
       displayName: 'Multi-endpoint Provider',
       baseUrl: DEFAULT_URL,
-      upstreamKey: DEFAULT_KEY,
+      keys: [{ upstreamKey: DEFAULT_KEY }, { upstreamKey: OVERRIDE_KEY, baseUrl: OVERRIDE_URL }],
     })
     if (!created.ok) throw new Error(created.failure.code)
     providerId = created.value.id
-    defaultKeyId = created.value.keys[0]!.id
-
-    const withOverride = await registry.addKey(providerId, {
-      upstreamKey: OVERRIDE_KEY,
-      baseUrl: OVERRIDE_URL,
-    })
-    if (!withOverride.ok) throw new Error(withOverride.failure.code)
-    const overrideKey = withOverride.value.keys.find((key) => key.id !== defaultKeyId)
-    if (overrideKey === undefined) throw new Error('the override key was not added')
+    // The storage layer orders by (createdAt, id), so two keys inserted in
+    // the same transaction can come back in either order. Locate each by its
+    // base URL instead of relying on position.
+    const defaultKey = created.value.keys.find((key) => key.baseUrl === null)
+    const overrideKey = created.value.keys.find((key) => key.baseUrl === OVERRIDE_URL)
+    if (defaultKey === undefined || overrideKey === undefined) {
+      throw new Error('the create did not return both the default and override keys')
+    }
+    defaultKeyId = defaultKey.id
     overrideKeyId = overrideKey.id
   })
 

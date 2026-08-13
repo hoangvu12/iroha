@@ -165,7 +165,7 @@ describe('the official OpenAI SDK streaming through the Responses surface', () =
       body: JSON.stringify({
         displayName: 'SDK Responses stream example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })

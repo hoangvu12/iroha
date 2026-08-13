@@ -238,9 +238,12 @@ export class ProviderRegistry {
   }
 
   /**
-   * Creates a connection with one Upstream Key. The key is stored encrypted
-   * and Unverified first, then tested; a usable test activates it, anything
-   * else keeps the key and records why.
+   * Creates a connection with one or more Upstream Keys. Each key is stored
+   * encrypted and Unverified first, then tested; a usable test activates it,
+   * anything else keeps the key and records why. The keys may each carry an
+   * optional per-key base URL override; when omitted the key inherits the
+   * Provider's default URL. Round-robin then naturally spreads across the
+   * Provider's keys, and each key uses the URL it was bound to.
    *
    * When `templateId` is supplied, the Adapter Registry looks it up and
    * prefills safe endpoint, authentication, and capability defaults. The
@@ -252,7 +255,7 @@ export class ProviderRegistry {
   async create(input: {
     displayName: unknown
     baseUrl: unknown
-    upstreamKey: unknown
+    keys: unknown
     /** Provider Template id, or null when the Owner is configuring by hand. */
     templateId?: unknown
     allowInsecureHttp?: unknown
@@ -273,13 +276,20 @@ export class ProviderRegistry {
     const authPrefix = input.authPrefix === undefined ? 'Bearer ' : input.authPrefix
     const idempotencyHeader = input.idempotencyHeader === undefined
       ? 'Idempotency-Key'
-      : input.idempotencyHeader
+      : (input.idempotencyHeader as string)
     const redirectAllowSameOrigin = input.redirectAllowSameOrigin === true
 
     const problems: FieldProblem[] = []
     problems.push(...displayNameProblems(input.displayName))
     problems.push(...baseUrlProblems(input.baseUrl, allowInsecureHttp))
-    problems.push(...upstreamKeyProblems(input.upstreamKey))
+    // Per-Key URL overrides need the Provider's base URL for http-vs-https
+    // inheritance; only thread it through when the Provider URL itself was
+    // parseable so a malformed Provider URL does not produce cascading
+    // per-key errors before the early-return below catches it.
+    const providerBaseUrlForKeyInheritance = typeof input.baseUrl === 'string'
+      ? input.baseUrl.trim()
+      : ''
+    const keyInputs = readCreateKeys(input.keys, providerBaseUrlForKeyInheritance, problems)
     problems.push(...authHeaderProblems(authHeader))
     problems.push(...authPrefixProblems(authPrefix))
     problems.push(...idempotencyHeaderProblems(idempotencyHeader))
@@ -307,7 +317,6 @@ export class ProviderRegistry {
 
     const displayName = (input.displayName as string).trim()
     const baseUrl = (input.baseUrl as string).trim()
-    const upstreamKey = (input.upstreamKey as string).trim()
     const authHeaderName = (input.authHeader === undefined && template !== null
       ? template.authHeader
       : (authHeader as string).trim())
@@ -323,13 +332,38 @@ export class ProviderRegistry {
     const streamingIdleTimeoutMs = numericDefault(input.streamingIdleTimeoutMs, 30_000)
     const totalRetryTimeoutMs = numericDefault(input.totalRetryTimeoutMs, 30_000)
 
-    const encryptedKey = await this.#cipher.encrypt(upstreamKey)
     const staticHeadersEncrypted = await this.#encryptStaticHeaders(staticHeadersResult)
     const at = this.#clock.now()
     const providerId = newId('pr')
     const capabilities: ProviderCapabilities = template !== null
       ? { ...template.capabilities }
       : defaultCapabilities()
+
+    // Encrypt every key up front so the database transaction only performs
+    // plain inserts and the row state stays consistent on a probe failure.
+    const preparedKeys = await Promise.all(
+      keyInputs.map(async (key) => ({
+        id: newId('uk'),
+        providerId,
+        baseUrl: key.baseUrl,
+        accountId: null,
+        encryptedKey: await this.#cipher.encrypt(key.upstreamKey),
+        health: 'unverified' as const,
+        lastProbeAt: null,
+        lastProbeVerdict: null,
+        lastProbeReason: null,
+        healthReason: null,
+        healthChangedAt: at,
+        retryAfterAt: null,
+        healthScope: 'key' as const,
+        healthScopeId: null,
+        healthModel: null,
+        allowedModels: null,
+        deniedModels: null,
+        createdAt: at,
+        updatedAt: at,
+      })),
+    )
 
     await this.#database.transaction(async (repositories) => {
       await repositories.providers.insertProvider({
@@ -356,33 +390,27 @@ export class ProviderRegistry {
         createdAt: at,
         updatedAt: at,
       })
-      await repositories.providers.insertKey({
-        id: newId('uk'),
-        providerId,
-        baseUrl: null,
-        accountId: null,
-        encryptedKey,
-        health: 'unverified',
-        lastProbeAt: null,
-        lastProbeVerdict: null,
-        lastProbeReason: null,
-        healthReason: null,
-        healthChangedAt: at,
-        retryAfterAt: null,
-        healthScope: 'key',
-        healthScopeId: null,
-        healthModel: null,
-        allowedModels: null,
-        deniedModels: null,
-        createdAt: at,
-        updatedAt: at,
-      })
+      for (const key of preparedKeys) {
+        await repositories.providers.insertKey(key)
+      }
       await repositories.audit.record({
         action: 'provider.created',
         outcome: 'success',
-        detail: { providerId, displayName },
+        detail: { providerId, displayName, keyCount: preparedKeys.length },
         at,
       })
+      for (const key of preparedKeys) {
+        await repositories.audit.record({
+          action: 'key.created',
+          outcome: 'success',
+          detail: {
+            providerId,
+            keyId: key.id,
+            ...(key.baseUrl !== null ? { baseUrlInherited: false } : {}),
+          },
+          at,
+        })
+      }
     })
 
     await this.#probeConnectionKeys(providerId)
@@ -1289,7 +1317,12 @@ export class ProviderRegistry {
     for (const key of await this.#database.providers.listKeys(providerId)) {
       if (key.health !== 'unverified') continue
 
-      const probe = await this.#runProbe(connection.baseUrl, key.encryptedKey)
+      // The probe must hit the URL the key will actually use at inference
+      // time, not always the Provider's default — a key with its own
+      // override URL is meaningless if its health verdict was earned against
+      // a different endpoint.
+      const probeBaseUrl = key.baseUrl ?? connection.baseUrl
+      const probe = await this.#runProbe(probeBaseUrl, key.encryptedKey)
       if (!probe.readable) continue
 
       const at = this.#clock.now()
@@ -1830,6 +1863,98 @@ function readModelList(
   }
 
   return models
+}
+
+/**
+ * Reads and validates the `keys` array passed to `create`. Each entry must
+ * carry a non-empty `upstreamKey`; each may carry an optional `baseUrl`
+ * override that follows the same per-Key inheritance rules as `addKey`.
+ *
+ * Empty arrays are rejected so a Provider always lands with at least one
+ * usable Upstream Key. Non-array input, missing fields, or any per-key
+ * validation failure is reported as a field problem tagged `keys` (or the
+ * specific sub-field) so the Owner-facing form can highlight the right row.
+ */
+function readCreateKeys(
+  input: unknown,
+  providerBaseUrl: string,
+  problems: FieldProblem[],
+): readonly { readonly upstreamKey: string; readonly baseUrl: string | null }[] {
+  if (!Array.isArray(input)) {
+    problems.push({ field: 'keys', message: 'must be a non-empty list of Upstream Keys' })
+    return []
+  }
+
+  if (input.length === 0) {
+    problems.push({ field: 'keys', message: 'must contain at least one Upstream Key' })
+    return []
+  }
+
+  // Per-key base URL overrides inherit the Provider's http allowance: a
+  // Provider on plain HTTP lets its keys point at any plain-HTTP endpoint.
+  // Mirrors the rule `addKey` enforces so the two flows feel identical.
+  const allowInsecureHttp = (() => {
+    try {
+      return new URL(providerBaseUrl).protocol === 'http:'
+    } catch {
+      return false
+    }
+  })()
+
+  const out: { upstreamKey: string; baseUrl: string | null }[] = []
+
+  input.forEach((entry, index) => {
+    if (entry === null || typeof entry !== 'object') {
+      problems.push({ field: `keys[${index}]`, message: 'must be an Upstream Key object' })
+      return
+    }
+
+    const candidate = entry as { upstreamKey?: unknown; baseUrl?: unknown }
+    const keyProblems = upstreamKeyProblems(candidate.upstreamKey)
+    for (const problem of keyProblems) {
+      problems.push({ field: `keys[${index}].${problem.field}`, message: problem.message })
+    }
+    if (keyProblems.length > 0) return
+
+    // Per-Key base URL override is optional; the same inheritance rules as
+    // `addKey` apply (blank string -> inherit Provider default -> null).
+    const baseUrl = readCreateKeyBaseUrl(candidate.baseUrl, providerBaseUrl, allowInsecureHttp, index, problems)
+    if (baseUrl === undefined) return
+
+    out.push({ upstreamKey: (candidate.upstreamKey as string).trim(), baseUrl })
+  })
+
+  return out
+}
+
+/**
+ * Per-Key base URL override for the `create` flow. Returns `null` when the
+ * key inherits the Provider default, the trimmed URL string when one is set,
+ * or `undefined` when validation failed and a problem was already reported.
+ *
+ * Split from `readKeyBaseUrl` so the field name can be tagged with the
+ * offending row index (`keys[i].baseUrl`) rather than the bare `baseUrl`
+ * that single-key paths use.
+ */
+function readCreateKeyBaseUrl(
+  input: unknown,
+  providerBaseUrl: string,
+  allowInsecureHttp: boolean,
+  index: number,
+  problems: FieldProblem[],
+): string | null | undefined {
+  if (input === undefined || input === null) return null
+  if (typeof input !== 'string') {
+    problems.push({ field: `keys[${index}].baseUrl`, message: 'must be a base URL string or null' })
+    return undefined
+  }
+  const trimmed = input.trim()
+  if (trimmed === '') return null
+  const fieldProblems = baseUrlProblems(trimmed, allowInsecureHttp)
+  for (const problem of fieldProblems) {
+    problems.push({ field: `keys[${index}].baseUrl`, message: problem.message })
+  }
+  return fieldProblems.length === 0 ? trimmed : undefined
 }
 
 /**

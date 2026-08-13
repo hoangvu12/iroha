@@ -48,7 +48,7 @@ describe('the provider-scoped Models API', () => {
       body: JSON.stringify({
         displayName: 'Catalog example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })
@@ -181,7 +181,7 @@ describe('the Owner model catalog surface', () => {
       body: JSON.stringify({
         displayName: 'Catalog example',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })

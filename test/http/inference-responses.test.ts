@@ -158,7 +158,7 @@ async function createConnection(iroha: TestApp, csrf: string): Promise<{ id: str
     body: JSON.stringify({
       displayName: 'Responses example',
       baseUrl: BASE_URL,
-      upstreamKey: UPSTREAM_KEY,
+      keys: [{ upstreamKey: UPSTREAM_KEY }],
     }),
     csrf,
   })

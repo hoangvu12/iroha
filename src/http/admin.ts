@@ -119,7 +119,7 @@ export function createAdminRoutes({
         const result = await providers.create({
           displayName: input.displayName,
           baseUrl: input.baseUrl,
-          upstreamKey: input.upstreamKey,
+          keys: input.keys,
           ...('templateId' in input ? { templateId: input.templateId } : {}),
           allowInsecureHttp: input.allowInsecureHttp,
           ...('authHeader' in input ? { authHeader: input.authHeader } : {}),
@@ -153,7 +153,7 @@ export function createAdminRoutes({
           tags: ['Providers'],
           summary: 'Create a Provider',
           description:
-            'Creates one OpenAI-compatible Provider with an immutable ID and one Upstream Key. The key is encrypted with the installation master key, saved as Unverified, and tested once with a low-cost probe; a usable test activates it, any other outcome keeps it with the reason. Supplying a templateId prefills safe defaults; the Owner may override every field.',
+            "Creates one OpenAI-compatible Provider with an immutable ID and one or more Upstream Keys. Each key is encrypted with the installation master key, saved as Unverified, and tested once with a low-cost probe; a usable test activates it, any other outcome keeps the key with the reason. Each key may carry an optional `baseUrl` override; when omitted the key inherits the Provider's default. Supplying a templateId prefills safe defaults; the Owner may override every field.",
         },
         response: { 201: providerResponse, ...errorResponses },
       },

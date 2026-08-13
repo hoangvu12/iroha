@@ -34,7 +34,7 @@ describe('HTTP shutdown lifecycle', () => {
     const connectionResponse = await test.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Shutdown example', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),
+      body: JSON.stringify({ displayName: 'Shutdown example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
       csrf: signedIn.csrf,
     })
     const connection = (await connectionResponse.json()) as { id: string }
@@ -99,7 +99,7 @@ describe('HTTP shutdown lifecycle', () => {
     const connectionResponse = await test.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Streaming shutdown example', baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }),
+      body: JSON.stringify({ displayName: 'Streaming shutdown example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
       csrf: signedIn.csrf,
     })
     const connection = (await connectionResponse.json()) as { id: string }

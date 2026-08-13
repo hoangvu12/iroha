@@ -57,7 +57,7 @@ async function createConnection(
     body: JSON.stringify({
       displayName: 'Security example',
       baseUrl: BASE_URL,
-      upstreamKey: UPSTREAM_KEY,
+      keys: [{ upstreamKey: UPSTREAM_KEY }],
       ...fields,
     }),
     csrf,
@@ -161,7 +161,7 @@ describe('provider transport security boundaries', () => {
       body: JSON.stringify({
         displayName: 'Static headers',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         staticHeaders: [{ name: 'X-Provider-Flag', value: 'enabled-by-owner' }],
       }),
       csrf,
@@ -503,7 +503,7 @@ describe('advanced transport configuration validation', () => {
       body: JSON.stringify({
         displayName: 'Bad auth header',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         authHeader: 'Authorization\r\nX-Evil-Header: pwned',
       }),
       csrf,
@@ -521,7 +521,7 @@ describe('advanced transport configuration validation', () => {
       body: JSON.stringify({
         displayName: 'Custom auth header',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         authHeader: 'X-Custom-Auth',
         authPrefix: 'Token ',
       }),
@@ -538,7 +538,7 @@ describe('advanced transport configuration validation', () => {
       body: JSON.stringify({
         displayName: 'Bad auth prefix',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         authPrefix: 'Bearer \r\nX-Evil: yes',
       }),
       csrf,
@@ -556,7 +556,7 @@ describe('advanced transport configuration validation', () => {
       body: JSON.stringify({
         displayName: 'Tiny timeout',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         connectionTimeoutMs: 10,
       }),
       csrf,
@@ -574,7 +574,7 @@ describe('advanced transport configuration validation', () => {
       body: JSON.stringify({
         displayName: 'Plain HTTP',
         baseUrl: 'http://api.example.com/v1',
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
       csrf,
     })
@@ -591,7 +591,7 @@ describe('advanced transport configuration validation', () => {
       body: JSON.stringify({
         displayName: 'Local vLLM',
         baseUrl: 'http://localhost:8000/v1',
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         allowInsecureHttp: true,
       }),
       csrf,
@@ -609,7 +609,7 @@ describe('advanced transport configuration validation', () => {
       body: JSON.stringify({
         displayName: 'Static headers',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         staticHeaders: [{ name: 'X-Trace-Id', value: 'plaintext-secret-value' }],
       }),
       csrf,
@@ -651,7 +651,7 @@ describe('per-connection transport overrides reach the runtime', () => {
       body: JSON.stringify({
         displayName: 'Streaming override',
         baseUrl: BASE_URL,
-        upstreamKey: UPSTREAM_KEY,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
         streamingIdleTimeoutMs: 1_500,
       }),
       csrf,

@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Activity, SearchX } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -12,9 +10,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { EmptyState } from '@/components/empty-state'
+import { Dot } from '@/components/dot'
 import {
   fetchConnections,
   type ConnectionView,
@@ -28,7 +33,7 @@ import {
   type RequestEventView,
   type RequestFilter,
 } from '@/lib/requests'
-import { formatTime as formatTimeWithUtc } from '@/lib/time'
+import { formatTime } from '@/lib/time'
 
 const PAGE_SIZE = 25
 
@@ -104,66 +109,71 @@ export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void
     }
   }
 
+  const total = list?.total ?? null
+
   return (
     <div className="flex flex-col gap-6">
-      <section>
-        <div>
-          <h2 className="text-base font-semibold tracking-tight">Request history</h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Recent inference metadata — the connection, model, key identity, status, and
-            Provider-supplied usage. Prompts and responses are never stored.
-          </p>
+      <header className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Requests</h1>
+        {total !== null && (
+          <span className="text-muted-foreground text-xs">
+            {total.toLocaleString('en-US')} total
+          </span>
+        )}
+      </header>
+
+      {error && (
+        <Alert variant="destructive" role="alert">
+          <AlertTitle>Request history unavailable</AlertTitle>
+          <AlertDescription>{error.message}</AlertDescription>
+        </Alert>
+      )}
+
+      <RequestsFilterBar
+        connections={connections}
+        filter={filter}
+        onChange={applyFilter}
+      />
+
+      {list === null ? (
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-14 w-full rounded-lg" />
+          <Skeleton className="h-14 w-full rounded-lg" />
+          <Skeleton className="h-14 w-full rounded-lg" />
         </div>
-
-        <Separator className="my-4" />
-
-        <RequestsFilterBar
-          connections={connections}
-          filter={filter}
-          onChange={applyFilter}
-        />
-
-        {error && (
-          <Alert variant="destructive" role="alert" className="my-4">
-            <AlertTitle>Request history unavailable</AlertTitle>
-            <AlertDescription>{error.message}</AlertDescription>
-          </Alert>
-        )}
-
-        {list === null ? (
-          <Skeleton className="h-32 w-full" />
-        ) : list.events.length === 0 ? (
-          hasFilter(filter) ? (
-            <EmptyState
-              icon={SearchX}
-              title="No requests match this filter"
-              description="Loosen the filter or clear it to see more inference activity."
-              compact
-            />
-          ) : (
-            <EmptyState
-              icon={Activity}
-              title="No requests recorded yet"
-              description="Inference calls against the Gateway will surface here as they happen."
-              compact
-            />
-          )
-        ) : (
-          <RequestsTable
-            events={list.events}
-            total={list.total}
-            offset={offset}
-            onPage={(next) => {
-              setOffset(next)
-              void reload(filter, next)
-            }}
-            onOpen={open}
-            loadingId={loadingDetail}
+      ) : list.events.length === 0 ? (
+        hasFilter(filter) ? (
+          <EmptyState
+            icon={SearchX}
+            title="No requests match this filter"
+            description="Loosen the filter or clear it to see more inference activity."
+            compact
           />
-        )}
+        ) : (
+          <EmptyState
+            icon={Activity}
+            title="No requests recorded yet"
+            description="Inference calls against the Gateway will surface here as they happen."
+            compact
+          />
+        )
+      ) : (
+        <RequestsList
+          events={list.events}
+          total={list.total}
+          offset={offset}
+          loadingId={loadingDetail}
+          onPage={(next) => {
+            setOffset(next)
+            void reload(filter, next)
+          }}
+          onOpen={open}
+        />
+      )}
 
-        {selected && <RequestDetail detail={selected} onClose={() => setSelected(null)} />}
-      </section>
+      <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
+        {selected && <RequestDetail detail={selected} />}
+      </Dialog>
     </div>
   )
 }
@@ -178,9 +188,11 @@ function RequestsFilterBar({
   readonly onChange: (next: RequestFilter) => void
 }) {
   return (
-    <div className="bg-card mb-4 grid gap-3 rounded-lg border p-3 md:grid-cols-4">
+    <div className="grid gap-3 md:grid-cols-4">
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="requests-connection">Connection</Label>
+        <label htmlFor="requests-connection" className="text-muted-foreground text-xs">
+          Connection
+        </label>
         <Select
           value={filter.connectionId ?? '__any'}
           onValueChange={(value) =>
@@ -207,7 +219,9 @@ function RequestsFilterBar({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="requests-outcome">Outcome</Label>
+        <label htmlFor="requests-outcome" className="text-muted-foreground text-xs">
+          Outcome
+        </label>
         <Select
           value={filter.outcome ?? '__any'}
           onValueChange={(value) =>
@@ -231,7 +245,9 @@ function RequestsFilterBar({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="requests-model">Model</Label>
+        <label htmlFor="requests-model" className="text-muted-foreground text-xs">
+          Model
+        </label>
         <Input
           id="requests-model"
           value={filter.model ?? ''}
@@ -246,7 +262,9 @@ function RequestsFilterBar({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="requests-key">Key</Label>
+        <label htmlFor="requests-key" className="text-muted-foreground text-xs">
+          Key
+        </label>
         <Input
           id="requests-key"
           value={filter.keyId ?? ''}
@@ -263,74 +281,41 @@ function RequestsFilterBar({
   )
 }
 
-function RequestsTable({
+function RequestsList({
   events,
   total,
   offset,
+  loadingId,
   onPage,
   onOpen,
-  loadingId,
 }: {
   readonly events: readonly RequestEventView[]
   readonly total: number
   readonly offset: number
+  readonly loadingId: string | null
   readonly onPage: (next: number) => void
   readonly onOpen: (id: string) => Promise<void> | void
-  readonly loadingId: string | null
 }) {
   const hasPrev = offset > 0
   const hasNext = offset + events.length < total
 
   return (
-    <div className="border-border bg-card rounded-lg border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-muted-foreground border-b text-left text-xs tracking-wide uppercase">
-            <th className="px-3 py-2 font-medium">Time</th>
-            <th className="px-3 py-2 font-medium">Connection</th>
-            <th className="px-3 py-2 font-medium">Model</th>
-            <th className="px-3 py-2 font-medium">Status</th>
-            <th className="px-3 py-2 font-medium">Latency</th>
-            <th className="px-3 py-2 font-medium">Key</th>
-            <th className="px-3 py-2 font-medium" aria-label="Open" />
-          </tr>
-        </thead>
-        <tbody>
-          {events.map((event) => (
-            <tr key={event.id} className="border-b last:border-b-0">
-              <td className="px-3 py-2 align-top">{formatTime(event.occurredAt)}</td>
-              <td className="px-3 py-2 align-top font-mono text-xs">
-                {event.connectionId}
-              </td>
-              <td className="px-3 py-2 align-top font-mono text-xs">{event.model}</td>
-              <td className="px-3 py-2 align-top">
-                <StatusFor event={event} />
-              </td>
-              <td className="px-3 py-2 align-top tabular-nums">{event.latencyMs} ms</td>
-              <td className="px-3 py-2 align-top font-mono text-xs">
-                {event.keyId ?? '—'}
-              </td>
-              <td className="px-3 py-2 text-right align-top">
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => void onOpen(event.id)}
-                  disabled={loadingId === event.id}
-                  aria-label={`Inspect request ${event.id}`}
-                >
-                  {loadingId === event.id ? '…' : 'Inspect'}
-                </Button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="text-muted-foreground flex items-center justify-between border-t px-3 py-2 text-xs">
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2">
+        {events.map((event) => (
+          <RequestRow
+            key={event.id}
+            event={event}
+            busy={loadingId === event.id}
+            onOpen={() => void onOpen(event.id)}
+          />
+        ))}
+      </ul>
+      <div className="text-muted-foreground flex items-center justify-between px-1 py-1 text-xs">
         <span>
           {offset + 1}–{offset + events.length} of {total}
         </span>
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-1">
           <Button
             type="button"
             size="xs"
@@ -355,64 +340,95 @@ function RequestsTable({
   )
 }
 
-function StatusFor({ event }: { readonly event: RequestEventView }) {
-  if (event.outcome === 'success') {
-    return <Badge variant="default">Success · {event.status}</Badge>
-  }
+function RequestRow({
+  event,
+  busy,
+  onOpen,
+}: {
+  readonly event: RequestEventView
+  readonly busy: boolean
+  readonly onOpen: () => void
+}) {
+  const tone = event.outcome === 'success' ? 'healthy' : 'danger'
   return (
-    <Badge variant="destructive">
-      Failure · {event.status}
-      {event.errorCode === null ? '' : ` · ${event.errorCode}`}
-    </Badge>
+    <li>
+      <div className="bg-card hover:bg-muted/40 flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors">
+        <Dot tone={tone} />
+        <button
+          type="button"
+          onClick={onOpen}
+          disabled={busy}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate font-mono text-sm">{event.model}</span>
+              <span className="text-muted-foreground font-mono text-xs">
+                · {event.connectionId}
+              </span>
+            </div>
+            <div className="text-muted-foreground flex items-center gap-2 text-xs">
+              <span className="font-mono tabular-nums">{event.latencyMs} ms</span>
+              <span>·</span>
+              <span className="font-mono">Key {event.keyId ?? '—'}</span>
+              <span>·</span>
+              <span className="truncate">{formatTime(event.occurredAt)}</span>
+              {event.errorCode !== null && (
+                <>
+                  <span>·</span>
+                  <span className="text-status-danger truncate">{event.errorCode}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </button>
+        <span
+          className="text-muted-foreground font-mono tabular-nums shrink-0 text-xs"
+          title={`HTTP ${event.status}`}
+        >
+          {event.status}
+        </span>
+      </div>
+    </li>
   )
 }
 
-function RequestDetail({
-  detail,
-  onClose,
-}: {
-  readonly detail: RequestEventDetail
-  readonly onClose: () => void
-}) {
+function RequestDetail({ detail }: { readonly detail: RequestEventDetail }) {
   const { event, attempts } = detail
 
   return (
-    <Alert role="dialog" className="mt-4">
-      <AlertTitle className="flex items-center justify-between gap-2">
-        <span className="truncate font-mono text-xs">Request {event.id}</span>
-        <Button type="button" size="xs" variant="ghost" onClick={onClose}>
-          Close
-        </Button>
-      </AlertTitle>
-      <AlertDescription>
-        <dl className="grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
-          <Detail label="Time">{formatTime(event.occurredAt)}</Detail>
-          <Detail label="Connection">{event.connectionId}</Detail>
-          <Detail label="Model">{event.model}</Detail>
-          <Detail label="Status">
-            {event.status} ({event.outcome}
-            {event.errorCode === null ? '' : ` · ${event.errorCode}`})
-          </Detail>
-          <Detail label="Latency">{event.latencyMs} ms</Detail>
-          <Detail label="Streaming">{event.isStreaming ? 'Yes' : 'No'}</Detail>
-          <Detail label="Prompt tokens">{event.promptTokens ?? '—'}</Detail>
-          <Detail label="Completion tokens">{event.completionTokens ?? '—'}</Detail>
-          <Detail label="Total tokens">{event.totalTokens ?? '—'}</Detail>
-          <Detail label="Upstream Key">{event.keyId ?? '—'}</Detail>
-        </dl>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Request</DialogTitle>
+        <DialogDescription className="font-mono text-xs">
+          {event.id}
+        </DialogDescription>
+      </DialogHeader>
+      <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+        <Detail label="Time">{formatTime(event.occurredAt)}</Detail>
+        <Detail label="Connection">{event.connectionId}</Detail>
+        <Detail label="Model">{event.model}</Detail>
+        <Detail label="Status">
+          {event.status} ({event.outcome}
+          {event.errorCode === null ? '' : ` · ${event.errorCode}`})
+        </Detail>
+        <Detail label="Latency">{event.latencyMs} ms</Detail>
+        <Detail label="Streaming">{event.isStreaming ? 'Yes' : 'No'}</Detail>
+        <Detail label="Prompt tokens">{event.promptTokens ?? '—'}</Detail>
+        <Detail label="Completion tokens">{event.completionTokens ?? '—'}</Detail>
+        <Detail label="Total tokens">{event.totalTokens ?? '—'}</Detail>
+        <Detail label="Upstream Key">{event.keyId ?? '—'}</Detail>
+      </dl>
 
-        <Separator className="my-3" />
-
-        <p className="text-muted-foreground mb-2 text-xs">
-          Attempts (oldest first):
-        </p>
-        <ol className="space-y-1 text-xs">
+      <div className="flex flex-col gap-2">
+        <span className="text-muted-foreground text-xs">Attempts</span>
+        <ol className="flex flex-col gap-1 text-xs">
           {attempts.map((attempt) => (
             <AttemptLine key={attempt.id} attempt={attempt} />
           ))}
         </ol>
-      </AlertDescription>
-    </Alert>
+      </div>
+    </DialogContent>
   )
 }
 
@@ -425,7 +441,7 @@ function AttemptLine({ attempt }: { readonly attempt: RequestAttemptView }) {
         : 'text-status-danger'
 
   return (
-    <li className="flex flex-wrap items-baseline gap-x-2">
+    <li className="bg-muted/40 flex flex-wrap items-baseline gap-x-2 rounded-md px-2 py-1.5">
       <span className="font-mono">#{attempt.attemptNumber}</span>
       <span className={tone}>{attempt.outcome}</span>
       {attempt.status !== null && <span className="font-mono">{attempt.status}</span>}
@@ -442,11 +458,17 @@ function AttemptLine({ attempt }: { readonly attempt: RequestAttemptView }) {
   )
 }
 
-function Detail({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
+function Detail({
+  label,
+  children,
+}: {
+  readonly label: string
+  readonly children: React.ReactNode
+}) {
   return (
     <div className="flex flex-col gap-0.5">
       <dt className="text-muted-foreground text-[10px] tracking-wide uppercase">{label}</dt>
-      <dd>{children}</dd>
+      <dd className="font-mono text-xs">{children}</dd>
     </div>
   )
 }
@@ -458,8 +480,4 @@ function hasFilter(filter: RequestFilter): boolean {
     (filter.model !== undefined && filter.model !== '') ||
     (filter.keyId !== undefined && filter.keyId !== '')
   )
-}
-
-function formatTime(iso: string): string {
-  return formatTimeWithUtc(iso, { dateStyle: 'short', timeStyle: 'medium' })
 }

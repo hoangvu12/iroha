@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { KeyRound } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/empty-state'
 import {
   AuthError,
   fetchSessions,
@@ -14,7 +15,7 @@ import {
   type SessionSummary,
 } from '@/lib/auth'
 import { fetchRetention, updateRetention, SettingsError, type RetentionView } from '@/lib/settings'
-import { formatTime as formatTimeWithUtc } from '@/lib/time'
+import { formatTime } from '@/lib/time'
 
 interface AccountSettingsProps {
   readonly state: AuthState
@@ -123,26 +124,28 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
 
   return (
     <div className="flex flex-col gap-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+      </header>
+
       <section>
-        <h2 className="text-base font-semibold tracking-tight">Owner</h2>
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 className="text-sm font-semibold tracking-tight">Owner</h2>
+        </div>
         <p className="text-muted-foreground mt-1 text-sm">
           This installation has one Owner account. Setup is closed and cannot create another.
         </p>
-
         <Separator className="my-4" />
-
-        <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1">
-            <dt className="text-muted-foreground text-xs tracking-wide uppercase">Signed in as</dt>
-            <dd className="text-sm">{state.owner?.username ?? '—'}</dd>
-          </div>
-        </dl>
+        <div className="flex flex-col gap-1">
+          <span className="text-muted-foreground text-xs">Signed in as</span>
+          <span className="text-sm font-medium">{state.owner?.username ?? '—'}</span>
+        </div>
       </section>
 
       <section>
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold tracking-tight">Sessions</h2>
+            <h2 className="text-sm font-semibold tracking-tight">Sessions</h2>
             <p className="text-muted-foreground mt-1 text-sm">
               Every browser currently signed in as the Owner.
             </p>
@@ -168,46 +171,40 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
         )}
 
         {sessions === null ? (
-          <Skeleton className="h-16 w-full" />
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-12 w-full rounded-lg" />
+            <Skeleton className="h-12 w-full rounded-lg" />
+          </div>
+        ) : sessions.length === 0 ? (
+          <EmptyState
+            icon={KeyRound}
+            title="No sessions"
+            description="There are no active sessions for this account."
+            compact
+          />
         ) : (
-          <ul className="divide-border divide-y">
+          <ul className="flex flex-col gap-2">
             {sessions.map((session) => (
-              <li key={session.id} className="flex items-center justify-between gap-4 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm">
-                    {session.userAgent ?? 'Unidentified client'}
-                    {session.current && (
-                      <span className="text-active ml-2 text-xs font-medium">This browser</span>
-                    )}
-                  </p>
-                  <p className="text-muted-foreground text-xs">
-                    Signed in {formatTime(session.createdAt)} · last used{' '}
-                    {formatTime(session.lastSeenAt)}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void revokeOne(session)}
-                  disabled={busyId !== null}
-                  aria-label={`Revoke session ${session.id}`}
-                >
-                  {session.current ? 'Sign out' : 'Revoke'}
-                </Button>
-              </li>
+              <SessionRow
+                key={session.id}
+                session={session}
+                busy={busyId !== null}
+                onRevoke={() => void revokeOne(session)}
+              />
             ))}
           </ul>
         )}
       </section>
 
       <section>
-        <h2 className="text-base font-semibold tracking-tight">Request history</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          How long Iroha keeps inference metadata. Zero disables storage entirely — useful when
-          storage is unwanted and a fresh install needs to drop history before any inference has
-          happened.
-        </p>
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight">Request history</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            How long Iroha keeps inference metadata. Zero disables storage entirely — useful
+            when storage is unwanted and a fresh install needs to drop history before any
+            inference has happened.
+          </p>
+        </div>
 
         <Separator className="my-4" />
 
@@ -221,9 +218,11 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
         {retention === null ? (
           <Skeleton className="h-12 w-full" />
         ) : (
-          <form className="bg-card flex flex-col gap-2 rounded-lg border p-3" onSubmit={saveRetention}>
-            <Label htmlFor="retention-days">Retention (days)</Label>
-            <div className="flex items-center gap-2">
+          <form className="flex flex-wrap items-end gap-3" onSubmit={saveRetention}>
+            <div className="flex w-40 flex-col gap-1.5">
+              <label htmlFor="retention-days" className="text-muted-foreground text-xs">
+                Retention (days)
+              </label>
               <Input
                 id="retention-days"
                 type="number"
@@ -231,15 +230,18 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
                 max={3650}
                 value={retentionDraft}
                 onChange={(event) => setRetentionDraft(event.target.value)}
-                aria-describedby="retention-hint"
               />
-              <Button type="submit" size="sm" disabled={retentionBusy}>
-                {retentionBusy ? 'Saving…' : 'Save'}
-              </Button>
             </div>
-            <p id="retention-hint" className="text-muted-foreground text-xs">
-              Currently {retention.enabled ? `${retention.days} day${retention.days === 1 ? '' : 's'}` : 'disabled'}.
-            </p>
+            <div className="text-muted-foreground flex flex-1 items-center pb-2 text-xs">
+              Currently{' '}
+              {retention.enabled
+                ? `${retention.days} day${retention.days === 1 ? '' : 's'}`
+                : 'disabled'}
+              .
+            </div>
+            <Button type="submit" size="sm" disabled={retentionBusy}>
+              {retentionBusy ? 'Saving…' : 'Save'}
+            </Button>
           </form>
         )}
       </section>
@@ -247,6 +249,41 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
   )
 }
 
-function formatTime(iso: string): string {
-  return formatTimeWithUtc(iso, { dateStyle: 'medium', timeStyle: 'short' })
+function SessionRow({
+  session,
+  busy,
+  onRevoke,
+}: {
+  readonly session: SessionSummary
+  readonly busy: boolean
+  readonly onRevoke: () => void
+}) {
+  return (
+    <li>
+      <div className="bg-card hover:bg-muted/40 flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="truncate text-sm">
+            {session.userAgent ?? 'Unidentified client'}
+            {session.current && (
+              <span className="text-active ml-2 text-xs font-medium">This browser</span>
+            )}
+          </span>
+          <span className="text-muted-foreground text-xs">
+            Signed in {formatTime(session.createdAt)} · last used{' '}
+            {formatTime(session.lastSeenAt)}
+          </span>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onRevoke}
+          disabled={busy}
+          aria-label={`Revoke session ${session.id}`}
+        >
+          {session.current ? 'Sign out' : 'Revoke'}
+        </Button>
+      </div>
+    </li>
+  )
 }

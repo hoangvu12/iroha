@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ClipboardList, SearchX } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -12,9 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/empty-state'
+import { Dot } from '@/components/dot'
 import {
   AuditError,
   clearAudit,
@@ -22,7 +20,7 @@ import {
   type AuditEventView,
   type AuditFilter,
 } from '@/lib/audit'
-import { formatTime as formatTimeWithUtc } from '@/lib/time'
+import { formatTime } from '@/lib/time'
 
 const PAGE_SIZE = 25
 
@@ -95,20 +93,21 @@ export function AuditArea({
     }
   }
 
+  const total = list?.total ?? null
+
   return (
     <div className="flex flex-col gap-6">
-      <section>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold tracking-tight">Audit history</h2>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Every administrative change is recorded here. The Owner clears the feed
-              explicitly; clearings are themselves audited.
-            </p>
-          </div>
+      <header className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
+        <div className="flex items-center gap-2">
+          {total !== null && (
+            <span className="text-muted-foreground text-xs">
+              {total.toLocaleString('en-US')} total
+            </span>
+          )}
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={() => void doClear()}
             disabled={busy || list === null || list.total === 0}
@@ -116,93 +115,111 @@ export function AuditArea({
             {busy ? 'Clearing…' : 'Clear feed'}
           </Button>
         </div>
+      </header>
 
-        <Separator className="my-4" />
+      {error && (
+        <Alert variant="destructive" role="alert">
+          <AlertTitle>Audit feed unavailable</AlertTitle>
+          <AlertDescription>{error.message}</AlertDescription>
+        </Alert>
+      )}
 
-        <div className="bg-card mb-4 grid gap-3 rounded-lg border p-3 md:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="audit-action">Action starts with</Label>
-            <Input
-              id="audit-action"
-              value={filter.actionPrefix ?? ''}
-              onChange={(event) =>
-                applyFilter({
-                  ...filter,
-                  ...(event.target.value === ''
-                    ? { actionPrefix: undefined }
-                    : { actionPrefix: event.target.value }),
-                })
-              }
-              placeholder="connection, gateway_key, audit, settings…"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="audit-outcome">Outcome</Label>
-            <Select
-              value={filter.outcome ?? '__any'}
-              onValueChange={(value) =>
-                applyFilter({
-                  ...filter,
-                  ...(value === '__any'
-                    ? { outcome: undefined }
-                    : { outcome: value as 'success' | 'failure' }),
-                })
-              }
-            >
-              <SelectTrigger id="audit-outcome" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__any">Any outcome</SelectItem>
-                <SelectItem value="success">Success</SelectItem>
-                <SelectItem value="failure">Failure</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+      <AuditFilterBar filter={filter} onChange={applyFilter} />
+
+      {list === null ? (
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-14 w-full rounded-lg" />
+          <Skeleton className="h-14 w-full rounded-lg" />
+          <Skeleton className="h-14 w-full rounded-lg" />
         </div>
-
-        {error && (
-          <Alert variant="destructive" role="alert" className="mb-4">
-            <AlertTitle>Audit feed unavailable</AlertTitle>
-            <AlertDescription>{error.message}</AlertDescription>
-          </Alert>
-        )}
-
-        {list === null ? (
-          <Skeleton className="h-32 w-full" />
-        ) : list.events.length === 0 ? (
-          filter.actionPrefix !== undefined || filter.outcome !== undefined ? (
-            <EmptyState
-              icon={SearchX}
-              title="No audit events match this filter"
-              description="Widen the filter or clear it to see the full audit trail."
-              compact
-            />
-          ) : (
-            <EmptyState
-              icon={ClipboardList}
-              title="No audit events yet"
-              description="Owner actions and management events will appear here."
-              compact
-            />
-          )
-        ) : (
-          <AuditTable
-            events={list.events}
-            total={list.total}
-            offset={offset}
-            onPage={(next) => {
-              setOffset(next)
-              void reload(filter, next)
-            }}
+      ) : list.events.length === 0 ? (
+        filter.actionPrefix !== undefined || filter.outcome !== undefined ? (
+          <EmptyState
+            icon={SearchX}
+            title="No audit events match this filter"
+            description="Widen the filter or clear it to see the full audit trail."
+            compact
           />
-        )}
-      </section>
+        ) : (
+          <EmptyState
+            icon={ClipboardList}
+            title="No audit events yet"
+            description="Owner actions and management events will appear here."
+            compact
+          />
+        )
+      ) : (
+        <AuditList
+          events={list.events}
+          total={list.total}
+          offset={offset}
+          onPage={(next) => {
+            setOffset(next)
+            void reload(filter, next)
+          }}
+        />
+      )}
     </div>
   )
 }
 
-function AuditTable({
+function AuditFilterBar({
+  filter,
+  onChange,
+}: {
+  readonly filter: AuditFilter
+  readonly onChange: (next: AuditFilter) => void
+}) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="audit-action" className="text-muted-foreground text-xs">
+          Action starts with
+        </label>
+        <Input
+          id="audit-action"
+          value={filter.actionPrefix ?? ''}
+          onChange={(event) =>
+            onChange({
+              ...filter,
+              ...(event.target.value === ''
+                ? { actionPrefix: undefined }
+                : { actionPrefix: event.target.value }),
+            })
+          }
+          placeholder="connection, gateway_key, audit, settings…"
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="audit-outcome" className="text-muted-foreground text-xs">
+          Outcome
+        </label>
+        <Select
+          value={filter.outcome ?? '__any'}
+          onValueChange={(value) =>
+            onChange({
+              ...filter,
+              ...(value === '__any'
+                ? { outcome: undefined }
+                : { outcome: value as 'success' | 'failure' }),
+            })
+          }
+        >
+          <SelectTrigger id="audit-outcome" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__any">Any outcome</SelectItem>
+            <SelectItem value="success">Success</SelectItem>
+            <SelectItem value="failure">Failure</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+}
+
+function AuditList({
   events,
   total,
   offset,
@@ -217,40 +234,17 @@ function AuditTable({
   const hasNext = offset + events.length < total
 
   return (
-    <div className="border-border bg-card rounded-lg border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-muted-foreground border-b text-left text-xs tracking-wide uppercase">
-            <th className="px-3 py-2 font-medium">Time</th>
-            <th className="px-3 py-2 font-medium">Action</th>
-            <th className="px-3 py-2 font-medium">Outcome</th>
-            <th className="px-3 py-2 font-medium">Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {events.map((event) => (
-            <tr key={event.id} className="border-b last:border-b-0 align-top">
-              <td className="px-3 py-2">{formatTime(event.occurredAt)}</td>
-              <td className="px-3 py-2 font-mono text-xs">{event.action}</td>
-              <td className="px-3 py-2">
-                <Badge variant={event.outcome === 'success' ? 'default' : 'destructive'}>
-                  {event.outcome}
-                </Badge>
-              </td>
-              <td className="text-muted-foreground px-3 py-2 font-mono text-[10px] break-all">
-                {event.detail === null || event.detail === undefined
-                  ? '—'
-                  : JSON.stringify(event.detail)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="text-muted-foreground flex items-center justify-between border-t px-3 py-2 text-xs">
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2">
+        {events.map((event) => (
+          <AuditRow key={event.id} event={event} />
+        ))}
+      </ul>
+      <div className="text-muted-foreground flex items-center justify-between px-1 py-1 text-xs">
         <span>
           {offset + 1}–{offset + events.length} of {total}
         </span>
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-1">
           <Button
             type="button"
             size="xs"
@@ -275,6 +269,33 @@ function AuditTable({
   )
 }
 
-function formatTime(iso: string): string {
-  return formatTimeWithUtc(iso, { dateStyle: 'short', timeStyle: 'medium' })
+function AuditRow({ event }: { readonly event: AuditEventView }) {
+  const tone = event.outcome === 'success' ? 'healthy' : 'danger'
+  return (
+    <li>
+      <div className="bg-card hover:bg-muted/40 flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors">
+        <Dot tone={tone} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-mono text-sm">{event.action}</span>
+          </div>
+          <div className="text-muted-foreground flex items-center gap-2 text-xs">
+            <span className="font-mono truncate">{summariseDetail(event.detail)}</span>
+            <span>·</span>
+            <span className="shrink-0">{formatTime(event.occurredAt)}</span>
+          </div>
+        </div>
+      </div>
+    </li>
+  )
+}
+
+function summariseDetail(detail: unknown): string {
+  if (detail === null || detail === undefined) return '—'
+  if (typeof detail === 'string') return detail
+  try {
+    return JSON.stringify(detail)
+  } catch {
+    return '—'
+  }
 }

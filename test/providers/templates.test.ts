@@ -12,7 +12,6 @@ const REQUIRED_TEMPLATE_IDS = [
   'openai',
   'openrouter',
   'MiniMax',
-  'data-only-compatible',
 ] as const
 
 describe('the built-in Provider Templates', () => {

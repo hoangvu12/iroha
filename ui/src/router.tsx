@@ -79,8 +79,8 @@ const providersRoute = createRoute({
 })
 
 const providerDetailRoute = createRoute({
-  getParentRoute: () => providersRoute,
-  path: '$connectionId',
+  getParentRoute: () => rootRoute,
+  path: '/providers/$connectionId',
   component: ConnectionDetailRoute,
 })
 
@@ -110,7 +110,8 @@ const settingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   overviewRoute,
-  providersRoute.addChildren([providerDetailRoute]),
+  providersRoute,
+  providerDetailRoute,
   gatewayKeysRoute,
   requestsRoute,
   auditRoute,

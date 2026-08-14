@@ -112,6 +112,8 @@ const usageReading = t.Object({
   balance: t.Union([t.Null(), t.Number()]),
   used: t.Union([t.Null(), t.Number()]),
   limit: t.Union([t.Null(), t.Number()]),
+  remainingPercent: t.Union([t.Null(), t.Number()]),
+  plan: t.Union([t.Null(), t.String()]),
   resetAt: t.Union([t.Null(), t.String()]),
   scope: usageScope,
   confidence: t.Union([t.Literal('confirmed'), t.Literal('unknown')]),
@@ -120,7 +122,7 @@ const usageReading = t.Object({
 
 const usageResponse = t.Object({
   visibility: t.Union([t.Literal('reactive_only'), t.Literal('authoritative')]),
-  reading: t.Union([t.Null(), usageReading]),
+  readings: t.Array(usageReading),
   syncedAt: t.Union([t.Null(), t.String()]),
   lastSuccessAt: t.Union([t.Null(), t.String()]),
   lastFailureAt: t.Union([t.Null(), t.String()]),
@@ -163,18 +165,18 @@ type UsageDto = typeof usageResponse.static
 function toUsageDto(view: UsageView, recovery: UsageRecoveryEvidence | null): UsageDto {
   return {
     visibility: view.visibility,
-    reading: view.reading === null
-      ? null
-      : {
-          unit: view.reading.unit,
-          balance: view.reading.balance,
-          used: view.reading.used,
-          limit: view.reading.limit,
-          resetAt: view.reading.resetAt?.toISOString() ?? null,
-          scope: toScopeDto(view.reading.scope),
-          confidence: view.reading.confidence,
-          diagnostics: { ...view.reading.diagnostics },
-        },
+    readings: view.readings.map((reading) => ({
+      unit: reading.unit,
+      balance: reading.balance,
+      used: reading.used,
+      limit: reading.limit,
+      remainingPercent: reading.remainingPercent,
+      plan: reading.plan,
+      resetAt: reading.resetAt?.toISOString() ?? null,
+      scope: toScopeDto(reading.scope),
+      confidence: reading.confidence,
+      diagnostics: { ...reading.diagnostics },
+    })),
     syncedAt: view.syncedAt?.toISOString() ?? null,
     lastSuccessAt: view.lastSuccessAt?.toISOString() ?? null,
     lastFailureAt: view.lastFailureAt?.toISOString() ?? null,

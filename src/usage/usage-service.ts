@@ -1,4 +1,5 @@
 import { SecretCipherError, type SecretCipher } from '../crypto/index.ts'
+import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
 import type {
   Database,
@@ -47,12 +48,21 @@ export interface UsageServiceOptions {
   readonly database: Database
   readonly cipher: SecretCipher
   /**
-   * The configured Usage Adapter. The service resolves a per-connection adapter
-   * by calling this factory; the same factory is used for every connection so a
-   * single adapter owns its state (for example an HTTP client, a cache, or a
-   * mock).
+   * The default Usage Adapter. Used when no `adapterRegistry` is supplied, or
+   * when a Provider has no template or its template names an unknown adapter.
+   * The single adapter is the whole story in tests and in builds that ship
+   * without typed adapters; production runs that ship typed adapters supply
+   * an `adapterRegistry` and the default is only the fallback.
    */
   readonly adapter: UsageAdapter
+  /**
+   * Optional. When supplied, the service resolves each Provider's adapter
+   * from its template's `usageAdapterId` at poll time. The default `adapter`
+   * is still used as the fallback for Providers with no template, a null
+   * `usageAdapterId`, or an unknown id — so a misconfigured runtime never
+   * blocks a poll, it just falls back to the reactive-only reading.
+   */
+  readonly adapterRegistry?: AdapterRegistry
   readonly clock?: Clock
   /**
    * The minimum interval between two successful polls of one connection.
@@ -75,15 +85,17 @@ const DEFAULT_FAILURE_BACKOFF_SECONDS = 5
 const MAX_BACKOFF_MULTIPLIER = 6
 
 /**
- * The view the Owner reads: the last successful normalized reading, the
- * latest polling failure (when one happened), and freshness for each. Stale
- * stays distinct from unknown: a long-ago success is still authoritative
- * until a fresher failure or success arrives.
+ * The view the Owner reads: the last successful normalized readings (one per
+ * model for per-model adapters, one for per-account adapters), the latest
+ * polling failure (when one happened), and freshness for each. Stale stays
+ * distinct from unknown: a long-ago success is still authoritative until a
+ * fresher failure or success arrives. The list is empty when no poll ever
+ * succeeded.
  */
 export interface UsageView {
   readonly visibility: UsageVisibility
-  /** The last successful normalized reading, or null when no poll ever succeeded. */
-  readonly reading: UsageReading | null
+  /** The last successful normalized readings, empty when no poll ever succeeded. */
+  readonly readings: readonly UsageReading[]
   readonly syncedAt: Date | null
   readonly lastSuccessAt: Date | null
   readonly lastFailureAt: Date | null
@@ -111,6 +123,7 @@ export class UsageService {
   readonly #database: Database
   readonly #cipher: SecretCipher
   readonly #adapter: UsageAdapter
+  readonly #adapterRegistry: AdapterRegistry | null
   readonly #clock: Clock
   readonly #pollIntervalMs: number
   readonly #failureBackoffMs: number
@@ -121,9 +134,26 @@ export class UsageService {
     this.#database = options.database
     this.#cipher = options.cipher
     this.#adapter = options.adapter
+    this.#adapterRegistry = options.adapterRegistry ?? null
     this.#clock = options.clock ?? systemClock
     this.#pollIntervalMs = (options.pollIntervalSeconds ?? DEFAULT_POLL_INTERVAL_SECONDS) * 1000
     this.#failureBackoffMs = (options.failureBackoffSeconds ?? DEFAULT_FAILURE_BACKOFF_SECONDS) * 1000
+  }
+
+  /**
+   * Resolves the Usage Adapter for one Provider. When an `adapterRegistry`
+   * is configured and the Provider's template names a registered adapter,
+   * that adapter is returned. Otherwise the default `adapter` is returned
+   * — the reactive-only reading stays honest about its lack of authority.
+   */
+  #adapterFor(provider: ProviderRecord): UsageAdapter {
+    if (this.#adapterRegistry === null) return this.#adapter
+    if (provider.templateId === null) return this.#adapter
+    const template = this.#adapterRegistry.providerTemplate(provider.templateId)
+    if (template === null) return this.#adapter
+    if (template.usageAdapterId === null) return this.#adapter
+    const typed = this.#adapterRegistry.usageAdapter(template.usageAdapterId)
+    return typed ?? this.#adapter
   }
 
   /** The view the Owner sees for one connection: reading, freshness, last error. */
@@ -160,7 +190,9 @@ export class UsageService {
     if (!target.ok) return target
 
     const at = this.#clock.now()
-    const poll = await this.#adapter.read({
+    const adapter = this.#adapterFor(connection)
+    const visibility = adapter.visibility
+    const poll = await adapter.read({
       baseUrl: target.value.baseUrl,
       allowInsecureHttp: target.value.allowInsecureHttp,
       upstreamKey: target.value.upstreamKey,
@@ -168,7 +200,7 @@ export class UsageService {
     })
 
     const prior = await this.#database.usage.get(providerId)
-    const next = await this.#recordOutcome(providerId, prior, at, poll)
+    const next = await this.#recordOutcome(providerId, prior, at, poll, visibility)
 
     if (poll.ok) {
       this.#failureStreak.delete(providerId)
@@ -186,9 +218,9 @@ export class UsageService {
           providerId,
           ...(poll.ok
             ? {
-                visibility: poll.reading.confidence === 'confirmed' ? 'authoritative' : 'reactive_only',
-                scope: poll.reading.scope.kind,
-                balance: poll.reading.balance,
+                visibility,
+                readings: poll.readings.length,
+                scope: poll.readings[0]?.scope.kind ?? 'unknown',
               }
             : {
                 code: poll.failure.code,
@@ -204,18 +236,28 @@ export class UsageService {
   /**
    * Resolves authoritative recovery evidence from the latest snapshot. Returns
    * `null` when the adapter is reactive-only, the latest reading is too
-   * stale, or the reading does not prove remaining capacity.
+   * stale, or no reading proves remaining capacity.
    */
   async recoveryEvidenceFor(providerId: string): Promise<UsageRecoveryEvidence | null> {
     const snapshot = await this.#database.usage.get(providerId)
     if (snapshot === null) return null
-    if (snapshot.result === null) return null
     if (snapshot.visibility !== 'authoritative') return null
     if (snapshot.lastSuccessAt === null) return null
+    const readings = normalizeReadings(snapshot.result)
+    if (readings.length === 0) return null
 
-    const reading = snapshot.result as UsageReading
     const at = snapshot.lastSuccessAt
-    const evidence = recoveryEvidenceOf(reading, at)
+    // Capacity is the strongest of any reading: any positive balance reactivates.
+    const best = readings.reduce<UsageReading | null>((acc, reading) => {
+      if (acc === null) return reading
+      if (acc.balance === null) return reading
+      if (reading.balance === null) return acc
+      return reading.balance > acc.balance ? reading : acc
+    }, null)
+
+    const evidence = best === null ? null : recoveryEvidenceOf(best, at)
+
+    if (evidence === null) return null
 
     // Stale readings never reactive capacity; freshness matters.
     const ageMs = this.#clock.now().getTime() - at.getTime()
@@ -224,11 +266,13 @@ export class UsageService {
     return evidence
   }
 
-  /** The Capacity Scope the snapshot's reading proves capacity at. */
+  /** The Capacity Scope the snapshot's readings share at the provider level. */
   async scopeOf(providerId: string): Promise<UsageCapacityScope | null> {
     const snapshot = await this.#database.usage.get(providerId)
-    if (snapshot === null || snapshot.result === null) return null
-    return (snapshot.result as UsageReading).scope
+    if (snapshot === null) return null
+    const readings = normalizeReadings(snapshot.result)
+    if (readings.length === 0) return null
+    return readings[0]?.scope ?? null
   }
 
   async #resolveTarget(
@@ -261,8 +305,8 @@ export class UsageService {
     prior: UsageSnapshotRecord | null,
     at: Date,
     poll: UsagePollResult,
+    visibility: UsageVisibility,
   ): Promise<UsageServiceResult<UsageView>> {
-    const visibility = this.#adapter.visibility
     let next: UsageSnapshotRecord
 
     if (poll.ok) {
@@ -274,7 +318,7 @@ export class UsageService {
         lastFailureAt: prior?.lastFailureAt ?? null,
         lastFailureCode: prior?.lastFailureCode ?? null,
         lastFailureMessage: prior?.lastFailureMessage ?? null,
-        result: poll.reading,
+        result: poll.readings,
       }
     } else {
       next = {
@@ -352,7 +396,7 @@ function toView(
 ): UsageView {
   return {
     visibility: snapshot?.visibility ?? 'reactive_only',
-    reading: (snapshot?.result as UsageReading | null) ?? null,
+    readings: normalizeReadings(snapshot?.result),
     syncedAt: snapshot?.syncedAt ?? null,
     lastSuccessAt: snapshot?.lastSuccessAt ?? null,
     lastFailureAt: snapshot?.lastFailureAt ?? null,
@@ -361,6 +405,45 @@ function toView(
     stale,
     nextPollAllowedAt,
   }
+}
+
+/**
+ * The Usage Snapshot's `result` is persisted via JSON.stringify and recovered
+ * via JSON.parse, which round-trips Dates as ISO strings — not Date instances.
+ * The TypeScript interface claims `UsageReading.resetAt: Date | null`, which
+ * is the value as the adapter produced it; after a storage roundtrip the value
+ * is a string. Normalise here so the rest of the service can rely on the
+ * declared shape and the HTTP DTO's `toISOString()` calls never blow up.
+ *
+ * Accepts either the current `UsageReading[]` shape or the legacy single
+ * `UsageReading` shape that pre-dates the multi-reading contract — old rows
+ * are read back as a one-element list so the UI does not have to fork.
+ */
+function normalizeReadings(raw: unknown): readonly UsageReading[] {
+  if (raw === null) return []
+  if (Array.isArray(raw)) {
+    const out: UsageReading[] = []
+    for (const entry of raw) {
+      const reading = normalizeReading(entry)
+      if (reading !== null) out.push(reading)
+    }
+    return out
+  }
+  const legacy = normalizeReading(raw)
+  return legacy === null ? [] : [legacy]
+}
+
+function normalizeReading(raw: unknown): UsageReading | null {
+  if (raw === null) return null
+  if (typeof raw !== 'object') return null
+  const r = raw as Partial<UsageReading> & { resetAt?: unknown }
+  const resetAt =
+    typeof r.resetAt === 'string'
+      ? new Date(r.resetAt)
+      : r.resetAt instanceof Date
+        ? r.resetAt
+        : null
+  return { ...(r as UsageReading), resetAt }
 }
 
 function messageFor(failure: UsageFailure): string {

@@ -36,6 +36,15 @@ export const GENERIC_INFERENCE_ADAPTER_ID = 'generic-inference-adapter'
 export const REACTIVE_ONLY_USAGE_ADAPTER_ID = 'reactive-only-usage-adapter'
 
 /**
+ * The well-known Usage Adapter id the MiniMax typed Usage Adapter is
+ * registered under. The MiniMax Provider Template points at it because
+ * MiniMax exposes a documented entitlement API at
+ * `/v1/api/openplatform/coding_plan/remains` and `/account/query_balance`
+ * reachable with the same bearer key as inference.
+ */
+export const MINIMAX_USAGE_ADAPTER_ID = 'minimax-usage-adapter'
+
+/**
  * The fields a template may prefill on a new Provider Connection. The Owner
  * may override every one of them; the template only seeds sensible defaults.
  *
@@ -156,7 +165,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     id: 'MiniMax',
     displayName: 'MiniMax',
     description:
-      'MiniMax\u2019s OpenAI-compatible endpoint. Bearer authentication; supports chat completions, streaming, tools, and the OpenAI Responses API.',
+      'MiniMax\u2019s OpenAI-compatible endpoint. Bearer authentication; supports chat completions, streaming, tools, and the OpenAI Responses API. Entitlement polls chain the MiniMax coding-plan and credit endpoints.',
     baseUrl: 'https://api.minimax.io/v1',
     authHeader: 'authorization',
     authPrefix: 'Bearer ',
@@ -178,7 +187,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
       'MiniMax-M2',
     ],
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
-    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
+    usageAdapterId: MINIMAX_USAGE_ADAPTER_ID,
   },
 ]
 

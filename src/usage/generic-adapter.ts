@@ -28,16 +28,20 @@ export function createGenericUsageAdapter(): UsageAdapter {
       }
       return {
         ok: true,
-        reading: {
-          unit: 'unknown',
-          balance: null,
-          used: null,
-          limit: null,
-          resetAt: null,
-          scope: { kind: 'unknown' },
-          confidence: 'unknown',
-          diagnostics: { reason: 'no entitlement API is exposed by the generic adapter' },
-        },
+        readings: [
+          {
+            unit: 'unknown',
+            balance: null,
+            used: null,
+            limit: null,
+            remainingPercent: null,
+            plan: null,
+            resetAt: null,
+            scope: { kind: 'unknown' },
+            confidence: 'unknown',
+            diagnostics: { reason: 'no entitlement API is exposed by the generic adapter' },
+          },
+        ],
       }
     },
   }

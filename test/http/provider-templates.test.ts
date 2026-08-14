@@ -67,11 +67,19 @@ describe('the Provider Templates admin endpoint', () => {
     }
   })
 
-  test('built-in templates point at the generic and reactive-only adapters', async () => {
+  test('built-in templates point at the generic inference adapter and at an adapter that exists in the registry', async () => {
     const response = await iroha.fetch(BASE)
     const body = (await response.json()) as TemplateListBody
     for (const template of body.templates) {
       expect(template.inferenceAdapterId).toBe('generic-inference-adapter')
+      expect(template.usageAdapterId).not.toBe('')
+    }
+    // MiniMax is the only built-in template that ships a typed Usage Adapter
+    // because MiniMax exposes a documented entitlement API.
+    const minimax = body.templates.find((template) => template.id === 'MiniMax')
+    expect(minimax?.usageAdapterId).toBe('minimax-usage-adapter')
+    const other = body.templates.filter((template) => template.id !== 'MiniMax')
+    for (const template of other) {
       expect(template.usageAdapterId).toBe('reactive-only-usage-adapter')
     }
   })

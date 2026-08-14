@@ -20,18 +20,18 @@ interface ConnectionBody {
 
 interface UsageBody {
   visibility: 'reactive_only' | 'authoritative'
-  reading:
-    | {
-        unit: string
-        balance: number | null
-        used: number | null
-        limit: number | null
-        resetAt: string | null
-        scope: { kind: string; [key: string]: unknown }
-        confidence: 'confirmed' | 'unknown'
-        diagnostics: Record<string, unknown>
-      }
-    | null
+  readings: {
+    unit: string
+    balance: number | null
+    used: number | null
+    limit: number | null
+    remainingPercent: number | null
+    plan: string | null
+    resetAt: string | null
+    scope: { kind: string; [key: string]: unknown }
+    confidence: 'confirmed' | 'unknown'
+    diagnostics: Record<string, unknown>
+  }[]
   syncedAt: string | null
   lastSuccessAt: string | null
   lastFailureAt: string | null
@@ -89,15 +89,16 @@ describe('the Owner usage surface', () => {
   test('the default reactive-only adapter reports Unknown until first refresh', async () => {
     const initial = (await (await viewUsage()).json()) as UsageBody
     expect(initial.visibility).toBe('reactive_only')
-    expect(initial.reading).toBeNull()
+    expect(initial.readings).toEqual([])
     expect(initial.stale).toBe(false)
 
     const refreshed = (await (await refreshUsage()).json()) as UsageBody
     expect(refreshed.visibility).toBe('reactive_only')
-    expect(refreshed.reading).not.toBeNull()
-    expect(refreshed.reading?.balance).toBeNull()
-    expect(refreshed.reading?.confidence).toBe('unknown')
-    expect(refreshed.reading?.scope.kind).toBe('unknown')
+    expect(refreshed.readings).toHaveLength(1)
+    const reading = refreshed.readings[0]
+    expect(reading?.balance).toBeNull()
+    expect(reading?.confidence).toBe('unknown')
+    expect(reading?.scope.kind).toBe('unknown')
     expect(refreshed.lastSuccessAt).not.toBeNull()
     expect(refreshed.stale).toBe(false)
     expect(refreshed.recovery).toBeNull()
@@ -130,11 +131,13 @@ describe('the Owner usage surface', () => {
     expect(response.status).toBe(200)
     const body = (await response.json()) as UsageBody
     expect(body.visibility).toBe('authoritative')
-    expect(body.reading).not.toBeNull()
-    expect(body.reading?.unit).toBe('usd')
-    expect(body.reading?.balance).toBe(42)
-    expect(body.reading?.confidence).toBe('confirmed')
-    expect(body.reading?.scope).toEqual({ kind: 'account', accountId: 'mock-account-id' })
+    expect(body.readings).toHaveLength(1)
+    const reading = body.readings[0]
+    expect(reading).not.toBeUndefined()
+    expect(reading?.unit).toBe('usd')
+    expect(reading?.balance).toBe(42)
+    expect(reading?.confidence).toBe('confirmed')
+    expect(reading?.scope).toEqual({ kind: 'account', accountId: 'mock-account-id' })
     expect(body.stale).toBe(false)
   })
 
@@ -179,8 +182,8 @@ describe('the Owner usage surface', () => {
     expect(body.stale).toBe(true)
     expect(body.lastFailureCode).toBe('upstream_refused')
     expect(body.lastFailureMessage).toContain('HTTP 503')
-    expect(body.reading).not.toBeNull()
-    expect(body.reading?.balance).toBe(42)
+    expect(body.readings).toHaveLength(1)
+    expect(body.readings[0]?.balance).toBe(42)
   })
 
   test('a confirmed zero is reported as zero, distinct from an Unknown reading', async () => {
@@ -208,8 +211,8 @@ describe('the Owner usage surface', () => {
       { method: 'POST', csrf },
     )
     const body = (await response.json()) as UsageBody
-    expect(body.reading?.balance).toBe(0)
-    expect(body.reading?.confidence).toBe('confirmed')
+    expect(body.readings[0]?.balance).toBe(0)
+    expect(body.readings[0]?.confidence).toBe('confirmed')
   })
 
   test('a plan-window reading exposes used, limit, and reset time', async () => {
@@ -241,12 +244,14 @@ describe('the Owner usage surface', () => {
       { method: 'POST', csrf },
     )
     const body = (await response.json()) as UsageBody
-    expect(body.reading?.unit).toBe('requests')
-    expect(body.reading?.used).toBe(30)
-    expect(body.reading?.limit).toBe(100)
-    expect(body.reading?.balance).toBe(70)
-    expect(body.reading?.resetAt).toBe(resetAt.toISOString())
-    expect(body.reading?.scope).toEqual({ kind: 'connection_model', model: 'gpt-4o' })
+    expect(body.readings[0]?.unit).toBe('requests')
+    expect(body.readings[0]?.remainingPercent).toBe(70)
+    expect(body.readings[0]?.plan).toBe('gpt-4o')
+    expect(body.readings[0]?.used).toBeNull()
+    expect(body.readings[0]?.limit).toBeNull()
+    expect(body.readings[0]?.balance).toBeNull()
+    expect(body.readings[0]?.resetAt).toBe(resetAt.toISOString())
+    expect(body.readings[0]?.scope).toEqual({ kind: 'connection_model', model: 'gpt-4o' })
   })
 
   test('authoritative recovery evidence appears in the view when capacity is available', async () => {
@@ -371,8 +376,8 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
       { method: 'POST', csrf },
     )
     const body = (await response.json()) as UsageBody
-    expect(body.reading?.balance).toBe(12)
-    expect(body.reading?.scope).toEqual({ kind: 'account', accountId: 'account-from-mock' })
+    expect(body.readings[0]?.balance).toBe(12)
+    expect(body.readings[0]?.scope).toEqual({ kind: 'account', accountId: 'account-from-mock' })
   })
 
   test('a plan adapter reports windowed usage with a reset time and connection_model scope', async () => {
@@ -391,11 +396,13 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
       { method: 'POST', csrf },
     )
     const body = (await response.json()) as UsageBody
-    expect(body.reading?.used).toBe(80)
-    expect(body.reading?.limit).toBe(100)
-    expect(body.reading?.balance).toBe(20)
-    expect(body.reading?.resetAt).toBe(resetAt.toISOString())
-    expect(body.reading?.scope).toEqual({ kind: 'connection_model', model: 'claude-sonnet' })
+    expect(body.readings[0]?.remainingPercent).toBe(20)
+    expect(body.readings[0]?.plan).toBe('claude-sonnet')
+    expect(body.readings[0]?.used).toBeNull()
+    expect(body.readings[0]?.limit).toBeNull()
+    expect(body.readings[0]?.balance).toBeNull()
+    expect(body.readings[0]?.resetAt).toBe(resetAt.toISOString())
+    expect(body.readings[0]?.scope).toEqual({ kind: 'connection_model', model: 'claude-sonnet' })
   })
 
   test('a rate-limited adapter returns 429 with a structural code and keeps the prior reading', async () => {
@@ -430,7 +437,7 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
     )
     const body = (await view.json()) as UsageBody
     expect(body.stale).toBe(true)
-    expect(body.reading?.balance).toBe(88)
+    expect(body.readings[0]?.balance).toBe(88)
     expect(body.lastFailureCode).toBe('rate_limited')
   })
 })

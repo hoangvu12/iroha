@@ -6,6 +6,10 @@
  */
 export { createGenericUsageAdapter } from './generic-adapter.ts'
 export {
+  createMinimaxUsageAdapter,
+  type MinimaxUsageAdapterOptions,
+} from './minimax-usage-adapter.ts'
+export {
   createMockCreditUsageAdapter,
   type MockCreditUsageAdapter,
   type MockCreditUsageAdapterOptions,

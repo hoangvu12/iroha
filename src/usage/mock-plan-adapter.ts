@@ -78,21 +78,26 @@ function planReading(input: {
   model: string | null
 }): UsagePollResult {
   const remaining = Math.max(0, input.limit - input.used)
+  const remainingPercent = input.limit === 0 ? 0 : Math.round((remaining * 100) / input.limit)
   const scope =
     input.scopeKind === 'connection_model'
       ? ({ kind: 'connection_model', model: input.model ?? 'unknown-model' } as const)
       : ({ kind: 'provider' } as const)
   return {
     ok: true,
-    reading: {
-      unit: 'requests',
-      balance: remaining,
-      used: input.used,
-      limit: input.limit,
-      resetAt: input.resetAt,
-      scope,
-      confidence: 'confirmed',
-      diagnostics: { source: 'mock-plan-adapter' },
-    },
+    readings: [
+      {
+        unit: 'requests',
+        balance: null,
+        used: null,
+        limit: null,
+        remainingPercent,
+        plan: input.scopeKind === 'connection_model' ? input.model ?? null : null,
+        resetAt: input.resetAt,
+        scope,
+        confidence: 'confirmed',
+        diagnostics: { source: 'mock-plan-adapter' },
+      },
+    ],
   }
 }

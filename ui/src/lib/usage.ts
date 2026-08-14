@@ -10,6 +10,8 @@ export interface UsageReadingView {
   readonly balance: number | null
   readonly used: number | null
   readonly limit: number | null
+  readonly remainingPercent: number | null
+  readonly plan: string | null
   readonly resetAt: string | null
   readonly scope: UsageScope
   readonly confidence: 'confirmed' | 'unknown'
@@ -18,7 +20,8 @@ export interface UsageReadingView {
 
 export interface UsageView {
   readonly visibility: 'reactive_only' | 'authoritative'
-  readonly reading: UsageReadingView | null
+  /** Every successful reading since the last refresh; empty when nothing has succeeded. */
+  readonly readings: readonly UsageReadingView[]
   readonly syncedAt: string | null
   readonly lastSuccessAt: string | null
   readonly lastFailureAt: string | null

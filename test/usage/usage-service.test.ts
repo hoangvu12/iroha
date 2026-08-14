@@ -81,16 +81,18 @@ describe('UsageService generic reactive-only adapter', () => {
     if (!view.ok) throw new Error(view.failure.code)
 
     expect(view.value.visibility).toBe('reactive_only')
-    expect(view.value.reading).toBeNull()
+    expect(view.value.readings).toEqual([])
 
     const refreshed = await service.refresh(fixture.providerId)
     if (!refreshed.ok) throw new Error(refreshed.failure.code)
 
     expect(refreshed.value.visibility).toBe('reactive_only')
-    expect(refreshed.value.reading?.confidence).toBe('unknown')
-    expect(refreshed.value.reading?.balance).toBeNull()
-    expect(refreshed.value.reading?.unit).toBe('unknown')
-    expect(refreshed.value.reading?.scope.kind).toBe('unknown')
+    expect(refreshed.value.readings).toHaveLength(1)
+    const reading = refreshed.value.readings[0] as NonNullable<typeof refreshed.value.readings[number]>
+    expect(reading.confidence).toBe('unknown')
+    expect(reading.balance).toBeNull()
+    expect(reading.unit).toBe('unknown')
+    expect(reading.scope.kind).toBe('unknown')
     expect(refreshed.value.lastFailureAt).toBeNull()
     expect(refreshed.value.stale).toBe(false)
     expect(refreshed.value.lastSuccessAt).not.toBeNull()
@@ -158,8 +160,8 @@ describe('UsageService authoritative credit adapter', () => {
     if (!view.ok) throw new Error(view.failure.code)
 
     expect(view.value.visibility).toBe('authoritative')
-    expect(view.value.reading).not.toBeNull()
-    const reading = view.value.reading as UsageReading
+    expect(view.value.readings).toHaveLength(1)
+    const reading = view.value.readings[0] as UsageReading
     expect(reading.unit).toBe('usd')
     expect(reading.balance).toBe(42)
     expect(reading.used).toBe(58)
@@ -180,7 +182,7 @@ describe('UsageService authoritative credit adapter', () => {
     const view = await service.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
-    const reading = view.value.reading as UsageReading
+    const reading = view.value.readings[0] as UsageReading
     expect(reading.balance).toBe(0)
     expect(reading.confidence).toBe('confirmed')
     expect(reading.used).toBe(100)
@@ -205,8 +207,8 @@ describe('UsageService authoritative credit adapter', () => {
     expect(after.value.lastFailureAt).not.toBeNull()
     expect(after.value.lastFailureCode).toBe('upstream_refused')
     expect(after.value.lastFailureMessage).toContain('HTTP 503')
-    expect(after.value.reading).not.toBeNull()
-    expect((after.value.reading as UsageReading).balance).toBe(42)
+    expect(after.value.readings).toHaveLength(1)
+    expect((after.value.readings[0] as UsageReading).balance).toBe(42)
   })
 
   test('an unparseable response is recorded with a structural code and no secret text', async () => {
@@ -245,7 +247,7 @@ describe('UsageService authoritative credit adapter', () => {
     if (!view.ok) throw new Error(view.failure.code)
     expect(view.value.stale).toBe(true)
     expect(view.value.lastSuccessAt).not.toBeNull()
-    expect((view.value.reading as UsageReading).balance).toBe(42)
+    expect((view.value.readings[0] as UsageReading).balance).toBe(42)
     expect(view.value.nextPollAllowedAt).not.toBeNull()
   })
 
@@ -387,11 +389,13 @@ describe('UsageService authoritative plan adapter', () => {
     const view = await service.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
-    const reading = view.value.reading as UsageReading
+    const reading = view.value.readings[0] as UsageReading
     expect(reading.unit).toBe('requests')
-    expect(reading.used).toBe(30)
-    expect(reading.limit).toBe(100)
-    expect(reading.balance).toBe(70)
+    expect(reading.remainingPercent).toBe(70)
+    expect(reading.plan).toBe('gpt-4o')
+    expect(reading.balance).toBeNull()
+    expect(reading.used).toBeNull()
+    expect(reading.limit).toBeNull()
     expect(reading.resetAt).toEqual(new Date('2026-01-15T00:00:00.000Z'))
     expect(reading.scope).toEqual({ kind: 'connection_model', model: 'gpt-4o' })
     expect(reading.confidence).toBe('confirmed')
@@ -405,9 +409,9 @@ describe('UsageService authoritative plan adapter', () => {
     const view = await service.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
-    const reading = view.value.reading as UsageReading
-    expect(reading.used).toBe(95)
-    expect(reading.balance).toBe(5)
+    const reading = view.value.readings[0] as UsageReading
+    expect(reading.remainingPercent).toBe(5)
+    expect(reading.plan).toBe('gpt-4o')
     expect(view.value.lastSuccessAt).not.toBeNull()
   })
 
@@ -512,7 +516,7 @@ describe('UsageService authoritative plan adapter', () => {
     const view = await fresh.refresh(fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
 
-    expect(view.value.reading).toBeNull()
+    expect(view.value.readings).toEqual([])
     expect(view.value.stale).toBe(false)
     expect(view.value.lastSuccessAt).toBeNull()
     expect(view.value.lastFailureAt).not.toBeNull()
@@ -575,6 +579,65 @@ describe('UsageService input validation', () => {
   })
 })
 
+describe('UsageService snapshot JSON roundtrip', () => {
+  test('recovers a Date resetAt from the persisted JSON string', async () => {
+    const adapter = createMockPlanUsageAdapter({
+      used: 30,
+      limit: 100,
+      resetAt: new Date('2026-01-15T00:00:00.000Z'),
+      scope: 'connection_model',
+      model: 'gpt-4o',
+    })
+    const built = await buildFixture(adapter)
+    const service = built.service
+
+    const refreshed = await service.refresh(built.fixture.providerId)
+    if (!refreshed.ok) throw new Error(refreshed.failure.code)
+    expect(refreshed.value.readings).toHaveLength(1)
+    expect(refreshed.value.readings[0]?.resetAt).toBeInstanceOf(Date)
+
+    const viewed = await service.view(built.fixture.providerId)
+    if (!viewed.ok) throw new Error(viewed.failure.code)
+    // The snapshot's `result` is stored via JSON.stringify and read back via
+    // JSON.parse, which round-trips Date as an ISO string. Without the
+    // normalizeReadings rehydration, the second view would crash toISOString
+    // in the HTTP DTO with a TypeError.
+    expect(viewed.value.readings).toHaveLength(1)
+    expect(viewed.value.readings[0]?.resetAt).toBeInstanceOf(Date)
+    expect(viewed.value.readings[0]?.resetAt?.toISOString()).toBe('2026-01-15T00:00:00.000Z')
+
+    await built.dispose()
+  })
+
+  test('reads the legacy single-reading snapshot as a one-element list', async () => {
+    const adapter = createMockCreditUsageAdapter({
+      initialBalances: { 'sk-upstream-for-usage': 7 },
+      accountId: 'legacy-account',
+    })
+    const built = await buildFixture(adapter)
+    const service = built.service
+    await service.refresh(built.fixture.providerId)
+
+    // Simulate a snapshot persisted before the multi-reading contract: write
+    // a single UsageReading object into `result` rather than an array.
+    const opened = built.fixture.opened
+    const prior = await opened.database.usage.get(built.fixture.providerId)
+    if (prior === null) throw new Error('expected a snapshot')
+    const firstReading = prior.result
+    if (!Array.isArray(firstReading)) throw new Error('expected an array snapshot')
+    const legacy = firstReading[0]
+    if (legacy === undefined) throw new Error('expected at least one reading')
+    await opened.database.usage.put({ ...prior, result: legacy })
+
+    const viewed = await service.view(built.fixture.providerId)
+    if (!viewed.ok) throw new Error(viewed.failure.code)
+    expect(viewed.value.readings).toHaveLength(1)
+    expect(viewed.value.readings[0]?.balance).toBe(7)
+
+    await built.dispose()
+  })
+})
+
 /** The default balance the mock credit adapter returns for an upstream key. */
 function adapterBalanceFor(upstreamKey: string): number | null {
   if (upstreamKey === 'sk-upstream-for-usage') return 42
@@ -589,15 +652,19 @@ function successReadingFor(input: {
 }): UsagePollResult {
   return {
     ok: true,
-    reading: {
-      unit: 'usd',
-      balance: input.balance,
-      used: input.balance === null ? null : Math.max(0, 100 - input.balance),
-      limit: 100,
-      resetAt: null,
-      scope: { kind: 'account', accountId: input.accountId },
-      confidence: 'confirmed',
-      diagnostics: { source: 'mock-credit-adapter' },
-    },
+    readings: [
+      {
+        unit: 'usd',
+        balance: input.balance,
+        used: input.balance === null ? null : Math.max(0, 100 - input.balance),
+        limit: 100,
+        remainingPercent: input.balance,
+        plan: null,
+        resetAt: null,
+        scope: { kind: 'account', accountId: input.accountId },
+        confidence: 'confirmed',
+        diagnostics: { source: 'mock-credit-adapter' },
+      },
+    ],
   }
 }

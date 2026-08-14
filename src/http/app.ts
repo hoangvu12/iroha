@@ -129,6 +129,7 @@ export function createApp(options: AppOptions) {
         database,
         cipher: options.secretCipher,
         adapter: options.usageAdapter ?? createGenericUsageAdapter(),
+        adapterRegistry,
       })
     })()
 

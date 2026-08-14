@@ -148,6 +148,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     database,
     cipher: secretCipher,
     adapter: options.usageAdapter ?? createGenericUsageAdapter(),
+    adapterRegistry,
     ...(options.clock ? { clock: options.clock } : {}),
   })
 

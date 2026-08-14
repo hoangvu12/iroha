@@ -131,15 +131,19 @@ function successReading(input: {
         : ({ kind: 'key', keyId: input.key } as const)
   return {
     ok: true,
-    reading: {
-      unit: 'usd',
-      balance: input.balance,
-      used: input.balance === null ? null : Math.max(0, 100 - input.balance),
-      limit: 100,
-      resetAt: input.resetAt,
-      scope,
-      confidence: 'confirmed',
-      diagnostics: { source: 'mock-credit-adapter' },
-    },
+    readings: [
+      {
+        unit: 'usd',
+        balance: input.balance,
+        used: input.balance === null ? null : Math.max(0, 100 - input.balance),
+        limit: 100,
+        remainingPercent: input.balance,
+        plan: null,
+        resetAt: input.resetAt,
+        scope,
+        confidence: 'confirmed',
+        diagnostics: { source: 'mock-credit-adapter' },
+      },
+    ],
   }
 }

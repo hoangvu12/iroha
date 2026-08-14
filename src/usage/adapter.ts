@@ -47,6 +47,19 @@ export interface UsageReading {
   readonly used: number | null
   /** Total allowance for the current window, when known. */
   readonly limit: number | null
+  /**
+   * Percent remaining in the current window (0–100). Set by adapters whose
+   * upstream reports the window as a percentage; `null` otherwise. The UI
+   * uses this for the subscription "X% left" headline rather than the absolute
+   * `used / limit` fraction.
+   */
+  readonly remainingPercent: number | null
+  /**
+   * A short plan label the adapter wants the UI to render alongside the
+   * percent, e.g. the model name from `model_remains[0].model` or a hard-coded
+   * `"Coding Plan"`. `null` when the adapter has nothing meaningful to surface.
+   */
+  readonly plan: string | null
   /** When the current window resets. `null` when the adapter cannot read it. */
   readonly resetAt: Date | null
   /** Where this reading applies; `unknown` is honest, never a guess. */
@@ -63,10 +76,13 @@ export interface UsageReading {
 
 /**
  * What a single poll returns. The service persists the success and records the
- * failure independently.
+ * failure independently. A successful poll returns a list of normalized
+ * readings — per-account adapters emit one, per-model adapters (e.g. MiniMax)
+ * emit one per model the upstream names. The list is empty when the adapter
+ * could not produce a structured reading.
  */
 export type UsagePollResult =
-  | { readonly ok: true; readonly reading: UsageReading }
+  | { readonly ok: true; readonly readings: readonly UsageReading[] }
   | { readonly ok: false; readonly failure: UsageFailure }
 
 /**
@@ -153,6 +169,19 @@ export function recoveryEvidenceOf(reading: UsageReading, at: Date): UsageRecove
     authoritative: reading.confidence === 'confirmed',
     scope: reading.scope,
     at,
-    hasCapacity: reading.balance === null ? false : reading.balance > 0,
+    hasCapacity: hasRemainingCapacity(reading),
   }
+}
+
+/**
+ * A reading proves remaining capacity when it has either an absolute
+ * `balance` over zero (credit) or a non-null `remainingPercent` over zero
+ * (subscription windows the upstream reports as a percentage). An unknown
+ * `balance` and a null `remainingPercent` is the absence of proof, never a
+ * silent zero.
+ */
+function hasRemainingCapacity(reading: UsageReading): boolean {
+  if (reading.balance !== null) return reading.balance > 0
+  if (reading.remainingPercent !== null) return reading.remainingPercent > 0
+  return false
 }

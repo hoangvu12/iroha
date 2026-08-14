@@ -33,6 +33,7 @@ export {
   BUILT_IN_PROVIDER_TEMPLATES,
   findBuiltInTemplate,
   GENERIC_INFERENCE_ADAPTER_ID,
+  MINIMAX_USAGE_ADAPTER_ID,
   REACTIVE_ONLY_USAGE_ADAPTER_ID,
   type ProviderTemplate,
 } from './templates.ts'

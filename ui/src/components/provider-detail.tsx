@@ -70,7 +70,13 @@ import {
 } from '@/lib/providers'
 import { fetchRequests, type RequestEventView } from '@/lib/requests'
 import { refreshCatalog } from '@/lib/catalog'
-import { fetchUsage, type UsageView } from '@/lib/usage'
+import {
+  fetchUsage,
+  refreshUsage,
+  type UsageReadingView,
+  type UsageScope,
+  type UsageView,
+} from '@/lib/usage'
 import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 interface ProviderDetailProps {
@@ -102,7 +108,7 @@ export function ProviderDetail({
   const [provider, setProvider] = useState<ProviderView | null>(null)
   const [analytics, setAnalytics] = useState<ProviderAnalytics | null>(null)
   const [usage, setUsage] = useState<UsageView | null>(null)
-  const [usageLoading, setUsageLoading] = useState(true)
+  const [usageDialogReadings, setUsageDialogReadings] = useState<readonly UsageReadingView[] | null>(null)
   const [error, setError] = useState<ManagementError | null>(null)
 
   const reload = useCallback(async () => {
@@ -147,26 +153,28 @@ export function ProviderDetail({
     }
   }, [providerId])
 
-  useEffect(() => {
-    let cancelled = false
-    setUsageLoading(true)
-    void fetchUsage(providerId)
-      .then((value) => {
-        if (cancelled) return
-        setUsage(value)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setUsage(null)
-      })
-      .finally(() => {
-        if (cancelled) return
-        setUsageLoading(false)
-      })
-    return () => {
-      cancelled = true
+  const reloadUsage = useCallback(async () => {
+    try {
+      const value = await fetchUsage(providerId)
+      setUsage(value)
+    } catch {
+      // The reading was already shown as '—' before this call; keep it.
     }
   }, [providerId])
+
+  useEffect(() => {
+    void reloadUsage()
+  }, [reloadUsage])
+
+  /**
+   * Triggered by the per-key Refresh action: actually polls the configured
+   * Usage Adapter (POST .../usage/refresh) and re-reads the snapshot so the
+   * Usage column on every row reflects the new reading.
+   */
+  const refreshUsageNow = useCallback(async () => {
+    await refreshUsage(providerId, csrfToken)
+    await reloadUsage()
+  }, [providerId, csrfToken, reloadUsage])
 
   if (provider === null && error === null) {
     return <Skeleton className="h-48 w-full" />
@@ -212,7 +220,15 @@ export function ProviderDetail({
       <UpstreamKeysCard
         provider={provider}
         csrfToken={csrfToken}
+        usage={usage}
         onChanged={reload}
+        onUsageChanged={() => void refreshUsageNow()}
+        onOpenUsageDialog={setUsageDialogReadings}
+      />
+
+      <UsageDialog
+        readings={usageDialogReadings}
+        onOpenChange={(open) => !open && setUsageDialogReadings(null)}
       />
 
       <CodeSnippetCard provider={provider} />
@@ -220,11 +236,6 @@ export function ProviderDetail({
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <KeyHealthCard provider={provider} />
         <ProviderDetailsCard provider={provider} />
-        {usage !== null ? (
-          <UsageAdapterCard usage={usage} providerId={providerId} />
-        ) : usageLoading ? (
-          <UsageAdapterSkeleton />
-        ) : null}
       </div>
     </div>
   )
@@ -521,11 +532,17 @@ function ProviderActions({
 function UpstreamKeysCard({
   provider,
   csrfToken,
+  usage,
   onChanged,
+  onUsageChanged,
+  onOpenUsageDialog,
 }: {
   readonly provider: ProviderView
   readonly csrfToken: string
+  readonly usage: UsageView | null
   readonly onChanged: () => void
+  readonly onUsageChanged: () => void
+  readonly onOpenUsageDialog: (readings: readonly UsageReadingView[]) => void
 }) {
   const [adding, setAdding] = useState(false)
   const [configuring, setConfiguring] = useState<KeyView | null>(null)
@@ -618,27 +635,33 @@ function UpstreamKeysCard({
                 <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
                   Status
                 </th>
-                <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
-                  base url
-                </th>
-                <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
-                  Model access
-                </th>
+<th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
+                base url
+              </th>
+              <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
+                Usage
+              </th>
+              <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
+                Model access
+              </th>
                 <th className="text-muted-foreground border-border border-b px-5 py-3 text-right text-xs font-medium tracking-wide uppercase">
                   Actions
                 </th>
               </tr>
             </thead>
             <tbody className="divide-border divide-y">
-              {provider.keys.map((key) => (
+{provider.keys.map((key) => (
                 <UpstreamKeyRow
                   key={key.id}
                   providerId={provider.id}
                   keyView={key}
                   csrfToken={csrfToken}
+                  usage={usage}
                   busy={busy}
                   run={run}
                   onConfigure={() => setConfiguring(key)}
+                  onUsageChanged={onUsageChanged}
+                  onOpenUsageDialog={onOpenUsageDialog}
                 />
               ))}
             </tbody>
@@ -969,6 +992,7 @@ function KeyActionsMenu({
   onReveal,
   revealing,
   revealed,
+  onUsageChanged,
 }: {
   readonly keyView: KeyView
   readonly providerId: string
@@ -979,6 +1003,7 @@ function KeyActionsMenu({
   readonly onReveal: () => void
   readonly revealing: boolean
   readonly revealed: boolean
+  readonly onUsageChanged: () => void
 }) {
   const [removing, setRemoving] = useState(false)
   const onConfirmRemove = () => {
@@ -1011,11 +1036,15 @@ function KeyActionsMenu({
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={() =>
-              void run(`test-${keyView.id}`, () => testKey(providerId, keyView.id, csrfToken))
+              void run(`refresh-${keyView.id}`, async () => {
+                await testKey(providerId, keyView.id, csrfToken)
+                await refreshUsage(providerId, csrfToken)
+                onUsageChanged()
+              })
             }
             disabled={busy !== null}
           >
-            {busy === `test-${keyView.id}` ? 'Testing…' : 'Test'}
+            {busy === `refresh-${keyView.id}` ? 'Refreshing…' : 'Refresh'}
           </DropdownMenuItem>
           {keyView.health !== 'active' && (
             <DropdownMenuItem
@@ -1084,16 +1113,22 @@ function UpstreamKeyRow({
   providerId,
   keyView,
   csrfToken,
+  usage,
   busy,
   run,
   onConfigure,
+  onUsageChanged,
+  onOpenUsageDialog,
 }: {
   readonly providerId: string
   readonly keyView: KeyView
   readonly csrfToken: string
+  readonly usage: UsageView | null
   readonly busy: string | null
   readonly run: (label: string, perform: () => Promise<unknown>) => Promise<void>
   readonly onConfigure: () => void
+  readonly onUsageChanged: () => void
+  readonly onOpenUsageDialog: (readings: readonly UsageReadingView[]) => void
 }) {
   const [reveal, setReveal] = useState<{
     readonly value: string
@@ -1154,13 +1189,20 @@ function UpstreamKeyRow({
           health={keyView.health}
           lastProbe={keyView.lastProbe}
           healthReason={keyView.healthReason}
-          pending={busy === `test-${keyView.id}`}
+          pending={busy === `refresh-${keyView.id}`}
         />
       </td>
       <td className="px-5 py-3.5 align-top">
         <span className="font-mono text-xs" title={keyView.effectiveBaseUrl}>
           {keyView.effectiveBaseUrl}
         </span>
+      </td>
+      <td className="px-5 py-3.5 align-middle">
+        <UsageCell
+          usage={usage}
+          keyId={keyView.id}
+          onOpenDialog={onOpenUsageDialog}
+        />
       </td>
       <td className="px-5 py-3.5 align-top text-xs">
         {keyView.allowedModels !== null
@@ -1182,6 +1224,7 @@ function UpstreamKeyRow({
               onReveal={() => void onReveal()}
               revealing={revealing}
               revealed={reveal !== null}
+              onUsageChanged={onUsageChanged}
             />
           </div>
           {revealError !== null && (
@@ -1405,97 +1448,394 @@ function DetailRow({ label, children }: { readonly label: string; readonly child
   )
 }
 
-function UsageAdapterCard({
-  usage,
-  providerId,
-}: {
-  readonly usage: UsageView
-  readonly providerId: string
-}) {
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<unknown>(null)
-  const [snapshot, setSnapshot] = useState<UsageView>(usage)
+const CURRENCY_UNITS = new Set([
+  'usd',
+  'eur',
+  'gbp',
+  'jpy',
+  'aud',
+  'cad',
+  'chf',
+  'cny',
+  'inr',
+  'krw',
+  'mxn',
+  'brl',
+  'rub',
+  'try',
+  'zar',
+  'credits',
+  'credit',
+])
 
-  useEffect(() => {
-    setSnapshot(usage)
-  }, [usage])
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  usd: '$',
+  cny: '¥',
+  eur: '€',
+  gbp: '£',
+}
 
-  const refresh = async () => {
-    setRefreshing(true)
-    setError(null)
-    try {
-      const next = await fetchUsage(providerId)
-      setSnapshot(next)
-    } catch (cause) {
-      setError(cause)
-    } finally {
-      setRefreshing(false)
+function isCreditUnit(unit: string): boolean {
+  return CURRENCY_UNITS.has(unit.toLowerCase())
+}
+
+function isCreditReading(reading: UsageReadingView): boolean {
+  return isCreditUnit(reading.unit)
+}
+
+function currencySymbolFor(unit: string): string | null {
+  return CURRENCY_SYMBOLS[unit.toLowerCase()] ?? null
+}
+
+/**
+ * The cell's headline for one reading: subscription windows read as "% left"
+ * (no plan label), credit balances read with their currency symbol. An
+ * unknown reading renders as the muted em-dash the rest of the table uses
+ * for absence.
+ */
+function usageTopLine(reading: UsageReadingView): string {
+  if (!isCreditReading(reading)) {
+    if (reading.remainingPercent !== null) {
+      return `${Math.round(reading.remainingPercent)}% left`
     }
+    return '—'
+  }
+  if (reading.balance === null) return '—'
+  const symbol = currencySymbolFor(reading.unit)
+  return symbol === null ? `${reading.balance} ${reading.unit}` : `${symbol}${reading.balance}`
+}
+
+function usageResetTooltip(reading: UsageReadingView): string | null {
+  if (reading.resetAt === null) return null
+  return `Resets ${formatTime(reading.resetAt)}`
+}
+
+function usageTextTone(reading: UsageReadingView): 'danger' | 'muted' | 'default' {
+  if (!isCreditReading(reading)) {
+    if (reading.remainingPercent === null) return 'muted'
+    return 'default'
+  }
+  if (reading.balance === null) return 'muted'
+  return reading.balance < 1 ? 'danger' : 'default'
+}
+
+const USAGE_TONE_CLASS: Record<'danger' | 'muted' | 'default', string> = {
+  danger: 'text-status-danger',
+  muted: 'text-muted-foreground',
+  default: '',
+}
+
+function scopeMatchesKey(scope: UsageScope, keyId: string): boolean {
+  if (scope.kind !== 'key') return true
+  return scope.keyId === keyId
+}
+
+/**
+ * Reads the snapshot's `readings` and keeps only those that apply to this
+ * row. Per-account and per-model scopes pass through; per-key scopes only
+ * pass when this row is the named key. Returns `null` when nothing applies.
+ */
+function readingsForRow(
+  usage: UsageView | null,
+  keyId: string,
+): readonly UsageReadingView[] | null {
+  if (usage === null) return null
+  const filtered = usage.readings.filter((reading) => scopeMatchesKey(reading.scope, keyId))
+  return filtered.length === 0 ? null : filtered
+}
+
+function UsageCell({
+  usage,
+  keyId,
+  onOpenDialog,
+}: {
+  readonly usage: UsageView | null
+  readonly keyId: string
+  readonly onOpenDialog: (readings: readonly UsageReadingView[]) => void
+}) {
+  const readings = readingsForRow(usage, keyId)
+  if (readings === null) {
+    return <span className="text-muted-foreground text-xs">—</span>
   }
 
-  const visibility =
-    snapshot.visibility === 'authoritative' ? 'Authoritative' : 'Reactive-only'
+  const subscriptions = readings.filter((reading) => !isCreditReading(reading))
+  const credits = readings.filter((reading) => isCreditReading(reading))
+  const primarySub = subscriptions.length > 0 ? primaryForCell(subscriptions) : null
+  const primaryCredit = credits[0]
+  const hasDialog = readings.length > 1
 
   return (
-    <section className="bg-card rounded-xl border p-5">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold tracking-tight">Usage adapter</h3>
-        <span className="border-border bg-muted text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-medium">
-          {visibility}
-        </span>
-      </div>
-      {error !== null && (
-        <Alert variant="destructive" role="alert" className="mt-3">
-          <AlertTitle>Usage refresh failed</AlertTitle>
-          <AlertDescription>
-            {error instanceof Error ? error.message : 'Try again.'}
-          </AlertDescription>
-        </Alert>
+    <div className="flex flex-col gap-0.5">
+      {primarySub !== null && (
+        <ReadingLine
+          reading={primarySub}
+          onOpenDialog={hasDialog ? () => onOpenDialog(readings) : null}
+        />
       )}
-      <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-        <DetailRow label="Last successful poll">
-          {snapshot.lastSuccessAt === null ? 'Never' : formatTime(snapshot.lastSuccessAt)}
-        </DetailRow>
-        <DetailRow label="Last failure">
-          {snapshot.lastFailureAt === null
-            ? 'None'
-            : `${formatTime(snapshot.lastFailureAt)}${snapshot.lastFailureCode === null ? '' : ` · ${snapshot.lastFailureCode}`}`}
-        </DetailRow>
-        <DetailRow label="Catalog stale">{snapshot.stale ? 'Yes' : 'No'}</DetailRow>
-        {snapshot.reading !== null && (
-          <>
-            <DetailRow label="Unit">{snapshot.reading.unit}</DetailRow>
-            <DetailRow label="Balance">{snapshot.reading.balance ?? 'Unknown'}</DetailRow>
-            <DetailRow label="Used">{snapshot.reading.used ?? '—'}</DetailRow>
-            <DetailRow label="Limit">{snapshot.reading.limit ?? '—'}</DetailRow>
-            <DetailRow label="Reset at">
-              {snapshot.reading.resetAt === null ? '—' : formatTime(snapshot.reading.resetAt)}
-            </DetailRow>
-          </>
+      {primaryCredit !== undefined && (
+        <ReadingLine reading={primaryCredit} onOpenDialog={null} />
+      )}
+    </div>
+  )
+}
+
+function ReadingLine({
+  reading,
+  onOpenDialog,
+}: {
+  readonly reading: UsageReadingView
+  readonly onOpenDialog: (() => void) | null
+}) {
+  const resetTip = usageResetTooltip(reading)
+  const tone = USAGE_TONE_CLASS[usageTextTone(reading)]
+  const interactive = onOpenDialog !== null
+  return (
+    <div
+      className={`flex items-center gap-1 font-mono text-xs ${tone} ${interactive ? 'hover:text-foreground cursor-pointer' : ''}`}
+      onClick={interactive ? onOpenDialog : undefined}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={
+        interactive
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onOpenDialog()
+              }
+            }
+          : undefined
+      }
+      aria-label={interactive ? 'Show usage breakdown' : undefined}
+    >
+      <span>{usageTopLine(reading)}</span>
+      {resetTip !== null && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground inline-flex size-4 cursor-help items-center justify-center rounded"
+              aria-label={resetTip}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <Info className="size-3" aria-hidden />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{resetTip}</TooltipContent>
+        </Tooltip>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The cell's primary reading: subscription windows use the mean remaining
+ * percent so the cell answers "is this provider usable?" with one number;
+ * credit-only readings pass through unchanged.
+ */
+function primaryForCell(readings: readonly UsageReadingView[]): UsageReadingView {
+  const subscription = readings.filter((r) => !isCreditReading(r))
+  if (subscription.length === 0) {
+    const first = readings[0]
+    if (first === undefined) {
+      return {
+        unit: 'unknown',
+        balance: null,
+        used: null,
+        limit: null,
+        remainingPercent: null,
+        plan: null,
+        resetAt: null,
+        scope: { kind: 'unknown' },
+        confidence: 'unknown',
+        diagnostics: {},
+      }
+    }
+    return first
+  }
+  const withPercent = subscription.filter((r) => r.remainingPercent !== null)
+  if (withPercent.length === 0) {
+    return subscription[0] as UsageReadingView
+  }
+  const sum = withPercent.reduce((acc, r) => acc + (r.remainingPercent as number), 0)
+  const avg = sum / withPercent.length
+  const first = withPercent[0] as UsageReadingView
+  return { ...first, remainingPercent: avg }
+}
+
+function UsageDialog({
+  readings,
+  onOpenChange,
+}: {
+  readonly readings: readonly UsageReadingView[] | null
+  readonly onOpenChange: (open: boolean) => void
+}) {
+  const open = readings !== null && readings.length > 0
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Usage breakdown</DialogTitle>
+          <DialogDescription>
+            One row per reading the upstream reports. The aggregate at the top uses
+            the mean of every subscription-window reading the adapter returned.
+          </DialogDescription>
+        </DialogHeader>
+        {readings !== null && readings.length > 0 && <UsageDialogBody readings={readings} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function UsageDialogBody({ readings }: { readonly readings: readonly UsageReadingView[] }) {
+  const subscriptions = readings.filter((reading) => !isCreditReading(reading))
+  const credits = readings.filter((reading) => isCreditReading(reading))
+  const hasAggregate = subscriptions.length > 1
+  const aggregateReading = hasAggregate ? primaryForCell(subscriptions) : null
+  return (
+    <div className="flex flex-col gap-5">
+      {hasAggregate && aggregateReading !== null && (
+        <UsageDialogSection title="All models" subtitle="Mean remaining percent across the subscription readings.">
+          <UsageReadingRow
+            reading={aggregateReading}
+            showBar
+            showSubtitle={false}
+            percentSuffix="used"
+          />
+        </UsageDialogSection>
+      )}
+      {subscriptions.length > 0 && (
+        <UsageDialogSection title="Models">
+          {subscriptions.map((reading, index) => (
+            <UsageReadingRow
+              key={`${reading.plan ?? reading.unit}-${index}`}
+              reading={reading}
+              showBar
+              showSubtitle
+              percentSuffix="used"
+            />
+          ))}
+        </UsageDialogSection>
+      )}
+      {credits.length > 0 && (
+        <UsageDialogSection title="Credit">
+          {credits.map((reading, index) => (
+            <UsageReadingRow
+              key={`${reading.unit}-${index}`}
+              reading={reading}
+              showBar={false}
+              showSubtitle={false}
+              percentSuffix="left"
+            />
+          ))}
+        </UsageDialogSection>
+      )}
+    </div>
+  )
+}
+
+function UsageDialogSection({
+  title,
+  subtitle,
+  children,
+}: {
+  readonly title: string
+  readonly subtitle?: string
+  readonly children: React.ReactNode
+}) {
+  return (
+    <section className="flex flex-col gap-2">
+      <header className="flex flex-col gap-0.5">
+        <h3 className="text-xs font-semibold tracking-tight">{title}</h3>
+        {subtitle !== undefined && (
+          <p className="text-muted-foreground text-xs">{subtitle}</p>
         )}
-      </dl>
-      <div className="mt-4 flex items-center justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => void refresh()}
-          disabled={refreshing}
-        >
-          {refreshing ? 'Refreshing…' : 'Refresh'}
-        </Button>
-      </div>
+      </header>
+      <div className="flex flex-col divide-y">{children}</div>
     </section>
   )
 }
 
-function UsageAdapterSkeleton() {
+function UsageReadingRow({
+  reading,
+  showBar,
+  showSubtitle,
+  percentSuffix,
+}: {
+  readonly reading: UsageReadingView
+  readonly showBar: boolean
+  readonly showSubtitle: boolean
+  readonly percentSuffix: 'used' | 'left'
+}) {
+  const title = isCreditReading(reading)
+    ? reading.plan ?? 'Credit'
+    : reading.plan ?? 'Model'
+  const headline = usageTopLine(reading)
+  const tone = USAGE_TONE_CLASS[usageTextTone(reading)]
+  const subtitle = showSubtitle ? subtitleFor(reading, percentSuffix) : null
+  const fillPct = barFillPercent(reading, percentSuffix)
+  const fillColor = barFillColor(reading, percentSuffix)
   return (
-    <section className="bg-card rounded-xl border p-5">
-      <Skeleton className="h-4 w-32" />
-      <Skeleton className="mt-4 h-12 w-full" />
-    </section>
+    <div className="flex items-center gap-3 py-2">
+      <div className="flex flex-1 flex-col gap-1">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-medium">{title}</span>
+          <span className={`font-mono text-xs ${tone}`}>{headline}</span>
+        </div>
+        {subtitle !== null && (
+          <span className="text-muted-foreground text-xs">{subtitle}</span>
+        )}
+      </div>
+      {showBar && (
+        <div
+          className="bg-muted relative h-2 w-32 overflow-hidden rounded-full"
+          role="img"
+          aria-label={`${title} ${headline}`}
+        >
+          <div
+            className={`h-full ${fillColor}`}
+            style={{ width: `${fillPct}%` }}
+            aria-hidden
+          />
+        </div>
+      )}
+    </div>
   )
+}
+
+/** "All models" rows show used (filled) so the operator reads the bar as
+ *  consumption; subscription rows read the same way for visual consistency. */
+function barFillPercent(reading: UsageReadingView, suffix: 'used' | 'left'): number {
+  if (reading.remainingPercent === null) return 0
+  return suffix === 'used'
+    ? Math.max(0, Math.min(100, 100 - reading.remainingPercent))
+    : Math.max(0, Math.min(100, reading.remainingPercent))
+}
+
+function barFillColor(reading: UsageReadingView, suffix: 'used' | 'left'): string {
+  const remaining = reading.remainingPercent ?? 0
+  if (suffix === 'left' && remaining >= 100) return 'bg-muted-foreground/40'
+  if (suffix === 'left' && remaining >= 50) return 'bg-status-healthy'
+  if (suffix === 'left' && remaining >= 20) return 'bg-status-warning'
+  if (suffix === 'left') return 'bg-status-danger'
+  // "used" suffix: invert the thresholds (more used = more concerning).
+  const used = 100 - remaining
+  if (used < 50) return 'bg-status-healthy'
+  if (used < 80) return 'bg-status-warning'
+  return 'bg-status-danger'
+}
+
+function subtitleFor(reading: UsageReadingView, suffix: 'used' | 'left'): string {
+  const remaining = reading.remainingPercent ?? 0
+  const used = 100 - remaining
+  if (suffix === 'used' && used <= 0) {
+    return reading.plan === null ? 'You haven’t used this yet' : `You haven’t used ${reading.plan} yet`
+  }
+  if (suffix === 'left' && remaining >= 100) {
+    return reading.plan === null ? 'You haven’t used this yet' : `You haven’t used ${reading.plan} yet`
+  }
+  if (reading.resetAt === null) return '—'
+  return `Resets ${formatTime(reading.resetAt)}`
 }
 
 function countByHealth(provider: ProviderView): Record<string, number> {

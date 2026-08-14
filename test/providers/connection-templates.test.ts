@@ -166,16 +166,20 @@ describe('Provider Connection templates', () => {
       usageAdapters: [[REACTIVE_ONLY_USAGE_ADAPTER_ID, { visibility: 'reactive_only' as const, async read() {
         return {
           ok: true,
-          reading: {
-            unit: 'unknown',
-            balance: null,
-            used: null,
-            limit: null,
-            resetAt: null,
-            scope: { kind: 'unknown' as const },
-            confidence: 'unknown' as const,
-            diagnostics: { source: 'mock' },
-          },
+          readings: [
+            {
+              unit: 'unknown',
+              balance: null,
+              used: null,
+              limit: null,
+              remainingPercent: null,
+              plan: null,
+              resetAt: null,
+              scope: { kind: 'unknown' as const },
+              confidence: 'unknown' as const,
+              diagnostics: { source: 'mock' },
+            },
+          ],
         }
       } }]],
       providerTemplates: [safeTemplate('experimental')],

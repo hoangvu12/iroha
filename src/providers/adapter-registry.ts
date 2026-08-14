@@ -1,8 +1,13 @@
 import { createGenericInferenceAdapter, type InferenceAdapter } from '../inference/index.ts'
-import { createGenericUsageAdapter, type UsageAdapter } from '../usage/index.ts'
+import {
+  createGenericUsageAdapter,
+  createMinimaxUsageAdapter,
+  type UsageAdapter,
+} from '../usage/index.ts'
 import {
   BUILT_IN_PROVIDER_TEMPLATES,
   GENERIC_INFERENCE_ADAPTER_ID,
+  MINIMAX_USAGE_ADAPTER_ID,
   REACTIVE_ONLY_USAGE_ADAPTER_ID,
   type ProviderTemplate,
 } from './templates.ts'
@@ -216,6 +221,7 @@ export function createBuiltInAdapterRegistry(): AdapterRegistry {
     }),
     usageAdapters: usageAdapters({
       [REACTIVE_ONLY_USAGE_ADAPTER_ID]: createGenericUsageAdapter(),
+      [MINIMAX_USAGE_ADAPTER_ID]: createMinimaxUsageAdapter(),
     }),
   })
 }

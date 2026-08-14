@@ -3,6 +3,7 @@ import {
   BUILT_IN_PROVIDER_TEMPLATES,
   findBuiltInTemplate,
   GENERIC_INFERENCE_ADAPTER_ID,
+  MINIMAX_USAGE_ADAPTER_ID,
   REACTIVE_ONLY_USAGE_ADAPTER_ID,
   type ProviderTemplate,
 } from '../../src/providers/templates.ts'
@@ -49,9 +50,16 @@ describe('the built-in Provider Templates', () => {
     }
   })
 
-  test('every built-in template declares the reactive-only Usage Adapter honestly', () => {
+  test('every built-in template that has no documented entitlement API declares the reactive-only Usage Adapter honestly', () => {
     for (const template of BUILT_IN_PROVIDER_TEMPLATES) {
-      expect(template.usageAdapterId).toBe(REACTIVE_ONLY_USAGE_ADAPTER_ID)
+      // MiniMax exposes a documented entitlement API; every other built-in
+      // template is honest about having no authority and points at the
+      // reactive-only adapter.
+      if (template.id === 'MiniMax') {
+        expect(template.usageAdapterId).toBe(MINIMAX_USAGE_ADAPTER_ID)
+      } else {
+        expect(template.usageAdapterId).toBe(REACTIVE_ONLY_USAGE_ADAPTER_ID)
+      }
     }
   })
 

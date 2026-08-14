@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, Copy, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -9,7 +9,18 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { fetchCatalog, type CatalogView } from '@/lib/catalog'
-import { type ProviderView } from '@/lib/providers'
+import { type KeyView, type ProviderView } from '@/lib/providers'
+
+/**
+ * The Vite dev server injects this constant via `define` in
+ * `ui/vite.config.ts`. In production the constant is undefined, so the
+ * snippet falls back to `window.location.origin` (the gateway that serves
+ * the UI). In dev the Vite dev server serves the UI on a different
+ * origin than the gateway, so the snippet URL must point at the gateway
+ * directly — otherwise the Owner's curl would 404 against the Vite
+ * origin, since inference routes are intentionally not proxied.
+ */
+declare const __IROHA_DEV_GATEWAY_URL__: string | undefined
 
 type SnippetLanguage = 'curl' | 'openai-js' | 'openai-py'
 
@@ -25,10 +36,29 @@ interface CodeSnippetCardProps {
   readonly provider: ProviderView
 }
 
+/**
+ * Mirrors the server-side `keyServesModel` rule
+ * (`src/providers/provider-registry.ts`): an Upstream Key rejects a model
+ * when it sets an `allowedModels` allow-list the model is not on, or a
+ * `deniedModels` deny-list the model is on. A key with both lists null
+ * accepts any model. The Owner-excluded catalog rows are already filtered
+ * before this check runs.
+ */
+function keyServesModel(key: KeyView, model: string): boolean {
+  if (key.allowedModels !== null && !key.allowedModels.includes(model)) return false
+  if (key.deniedModels !== null && key.deniedModels.includes(model)) return false
+  return true
+}
+
+function hasKeyRestriction(key: KeyView): boolean {
+  return key.allowedModels !== null || key.deniedModels !== null
+}
+
 export function CodeSnippetCard({ provider }: CodeSnippetCardProps) {
   const [catalog, setCatalog] = useState<CatalogView | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [modelId, setModelId] = useState<string | null>(null)
+  const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null)
   const [language, setLanguage] = useState<SnippetLanguage>('curl')
 
   useEffect(() => {
@@ -50,59 +80,135 @@ export function CodeSnippetCard({ provider }: CodeSnippetCardProps) {
     return () => controller.abort()
   }, [provider.id])
 
-  const availableModels =
-    catalog === null
-      ? ([] as readonly string[])
-      : catalog.entries.filter((entry) => !entry.excluded).map((entry) => entry.modelId)
+  // Keep the key selection in sync with the provider's keys: a removed key
+  // falls back to the first remaining key, an added key does not steal the
+  // Owner's current selection. A provider with no keys clears the
+  // selection so the model list reverts to the unfiltered catalog.
+  useEffect(() => {
+    if (provider.keys.length === 0) {
+      if (selectedKeyId !== null) setSelectedKeyId(null)
+      return
+    }
+    const stillPresent = provider.keys.some((key) => key.id === selectedKeyId)
+    if (!stillPresent) {
+      setSelectedKeyId(provider.keys[0]?.id ?? null)
+    }
+  }, [provider.keys, selectedKeyId])
+
+  const selectedKey =
+    selectedKeyId === null
+      ? null
+      : (provider.keys.find((key) => key.id === selectedKeyId) ?? null)
+
+  // The list the model picker offers: the catalog minus owner exclusions,
+  // then restricted by the selected Upstream Key's allow- / deny-list.
+  const filteredModels = useMemo<readonly string[]>(() => {
+    if (catalog === null) return []
+    const base = catalog.entries
+      .filter((entry) => !entry.excluded)
+      .map((entry) => entry.modelId)
+    if (selectedKey === null) return base
+    return base.filter((id) => keyServesModel(selectedKey, id))
+  }, [catalog, selectedKey])
+
+  // If the current modelId is no longer in the filtered list (the Owner
+  // switched to a more restrictive key, or the catalog refreshed), snap
+  // to the first filtered model. Empty filtered list → null, which the
+  // dropdown renders as a disabled placeholder.
+  useEffect(() => {
+    if (catalog === null) return
+    if (modelId !== null && !filteredModels.includes(modelId)) {
+      setModelId(filteredModels[0] ?? null)
+    }
+  }, [catalog, filteredModels, modelId])
+
   const snippet = buildSnippet({
     language,
-    origin: window.location.origin,
+    origin: snippetOrigin(),
     providerId: provider.id,
     model: modelId ?? '',
   })
 
+  const modelPlaceholder = (() => {
+    if (catalog === null) return loadFailed ? 'No models yet' : 'Loading models…'
+    if (filteredModels.length > 0) return modelId ?? 'Pick a model'
+    if (selectedKey !== null && hasKeyRestriction(selectedKey)) return 'No models for this key'
+    return 'No models yet'
+  })()
+
   return (
     <section className="bg-card rounded-xl border overflow-hidden">
-      <div className="border-border flex items-center justify-between border-b px-5 py-4">
+      <div className="border-border flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
         <div className="flex items-center gap-2">
           <Terminal className="text-muted-foreground size-4" aria-hidden />
           <h2 className="text-sm font-semibold tracking-tight">Code snippet</h2>
         </div>
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="code-snippet-model"
-            className="text-muted-foreground text-xs tracking-wide uppercase"
-          >
-            Model
-          </label>
-          <Select
-            value={modelId ?? '__none__'}
-            onValueChange={(value) => setModelId(value === '__none__' ? null : value)}
-            disabled={availableModels.length === 0}
-          >
-            <SelectTrigger id="code-snippet-model" className="h-8 w-56" size="sm">
-              <SelectValue>
-                {availableModels.length === 0
-                  ? loadFailed
-                    ? 'No models yet'
-                    : 'Loading models…'
-                  : modelId ?? 'Pick a model'}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent align="end">
-              {availableModels.length === 0 ? (
-                <SelectItem value="__none__" disabled>
-                  {loadFailed ? 'No models yet' : 'Loading models…'}
-                </SelectItem>
-              ) : (
-                availableModels.map((id) => (
-                  <SelectItem key={id} value={id}>
-                    {id}
+        <div className="flex flex-wrap items-center gap-3">
+          {provider.keys.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="code-snippet-key"
+                className="text-muted-foreground text-xs tracking-wide uppercase"
+              >
+                Key
+              </label>
+              <Select
+                value={selectedKeyId ?? '__none__'}
+                onValueChange={(value) => setSelectedKeyId(value === '__none__' ? null : value)}
+              >
+                <SelectTrigger id="code-snippet-key" className="h-8 w-44" size="sm">
+                  <SelectValue placeholder="Pick a key">
+                    {selectedKey === null ? 'Pick a key' : selectedKey.id}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {provider.keys.map((key) => (
+                    <SelectItem key={key.id} value={key.id}>
+                      <span className="flex flex-col gap-0.5">
+                        <span className="font-mono text-xs">{key.id}</span>
+                        <span
+                          aria-hidden="true"
+                          className="text-muted-foreground text-[10px] break-all"
+                        >
+                          Reaches {key.effectiveBaseUrl}
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="code-snippet-model"
+              className="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              Model
+            </label>
+            <Select
+              value={modelId ?? '__none__'}
+              onValueChange={(value) => setModelId(value === '__none__' ? null : value)}
+              disabled={filteredModels.length === 0}
+            >
+              <SelectTrigger id="code-snippet-model" className="h-8 w-56" size="sm">
+                <SelectValue placeholder={modelPlaceholder}>{modelPlaceholder}</SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end">
+                {filteredModels.length === 0 ? (
+                  <SelectItem value="__none__" disabled>
+                    {modelPlaceholder}
                   </SelectItem>
-                ))
-              )}
-            </SelectContent>
-          </Select>
+                ) : (
+                  filteredModels.map((id) => (
+                    <SelectItem key={id} value={id}>
+                      {id}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -195,6 +301,21 @@ function CopyButton({ text }: { readonly text: string }) {
       )}
     </Button>
   )
+}
+
+/**
+ * The base URL the Code Snippet should target. In production the UI is
+ * served by the gateway itself, so `window.location.origin` is the right
+ * answer. In dev the UI is served by Vite on its own origin and the
+ * gateway is elsewhere; the Vite config injects `__IROHA_DEV_GATEWAY_URL__`
+ * with the gateway's URL so the Owner can paste a snippet URL that
+ * actually reaches inference.
+ */
+function snippetOrigin(): string {
+  if (typeof __IROHA_DEV_GATEWAY_URL__ === 'string' && __IROHA_DEV_GATEWAY_URL__ !== '') {
+    return __IROHA_DEV_GATEWAY_URL__
+  }
+  return window.location.origin
 }
 
 interface BuildSnippetInput {

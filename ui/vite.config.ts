@@ -27,7 +27,7 @@ const proxyToIroha: ProxyOptions = {
   },
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
@@ -36,6 +36,18 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
   },
+  // The dev gateway URL is injected into the client bundle so the UI can
+  // hand the Owner a runnable snippet (e.g. the Code Snippet card). In dev
+  // the UI is served by Vite on a different origin than the gateway, so
+  // `window.location.origin` would point at Vite and the resulting curl
+  // would 404 — inference is intentionally not in the Vite proxy list
+  // because real applications should hit the gateway directly. In
+  // production Vite does not exist, the gateway serves the UI itself, and
+  // `window.location.origin` is already the right answer, so the
+  // constant is only defined when Vite is running the dev server.
+  define: command === 'serve'
+    ? { __IROHA_DEV_GATEWAY_URL__: JSON.stringify(IROHA_ORIGIN) }
+    : {},
   server: {
     proxy: {
       '/api': proxyToIroha,
@@ -45,4 +57,4 @@ export default defineConfig({
       '/docs': proxyToIroha,
     },
   },
-})
+}))

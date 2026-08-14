@@ -45,6 +45,14 @@ export const REACTIVE_ONLY_USAGE_ADAPTER_ID = 'reactive-only-usage-adapter'
 export const MINIMAX_USAGE_ADAPTER_ID = 'minimax-usage-adapter'
 
 /**
+ * The id of the Generic OpenAI-compatible Provider Template, the default Iroha
+ * seeds a new Provider Connection with when the Owner names no template. It
+ * carries no brand and no inferred capability defaults, so a bare create stays
+ * honest: safe OpenAI-shaped defaults, nothing assumed.
+ */
+export const GENERIC_PROVIDER_TEMPLATE_ID = 'generic-openai-compatible'
+
+/**
  * The brand identity of a Provider Template: the upstream domain logo.dev
  * resolves for the tile, and the accent colour the management UI tints the
  * tile with. Both fields belong on the template because every brand decision
@@ -118,7 +126,7 @@ export interface ProviderTemplate {
  */
 export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
   {
-    id: 'generic-openai-compatible',
+    id: GENERIC_PROVIDER_TEMPLATE_ID,
     displayName: 'Generic OpenAI-compatible',
     description:
       'A safe default for any OpenAI-shaped service Iroha does not know by brand. Bearer authentication, no inferred capability defaults, and reactive-only entitlement visibility.',

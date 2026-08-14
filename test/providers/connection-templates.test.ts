@@ -65,7 +65,7 @@ describe('Provider Connection templates', () => {
     await dispose()
   })
 
-  test('omitting templateId produces a null templateId and unknown-off capabilities', async () => {
+  test('omitting templateId seeds the Generic OpenAI-compatible default', async () => {
     const created = await registry.create({
       displayName: 'Hand-configured',
       baseUrl: 'https://api.example.com/v1',
@@ -73,7 +73,7 @@ describe('Provider Connection templates', () => {
     })
     if (!created.ok) throw new Error(created.failure.code)
 
-    expect(created.value.templateId).toBeNull()
+    expect(created.value.templateId).toBe('generic-openai-compatible')
     expect(created.value.baseUrl).toBe('https://api.example.com/v1')
   })
 
@@ -156,7 +156,7 @@ describe('Provider Connection templates', () => {
       templateId: null,
     })
     if (!created.ok) throw new Error(created.failure.code)
-    expect(created.value.templateId).toBeNull()
+    expect(created.value.templateId).toBe('generic-openai-compatible')
   })
 
   test('templates from the registry are honored on the durable connection row', async () => {

@@ -17,7 +17,7 @@ import type { UsageRecoveryEvidence } from '../usage/adapter.ts'
 import type { AdapterRegistry } from './adapter-registry.ts'
 import type { UpstreamKeyProbe } from './key-probe.ts'
 import { RoundRobinSelector } from './round-robin.ts'
-import type { ProviderTemplate } from './templates.ts'
+import { GENERIC_PROVIDER_TEMPLATE_ID, type ProviderTemplate } from './templates.ts'
 
 export interface FieldProblem {
   readonly field: string
@@ -250,13 +250,19 @@ export class ProviderRegistry {
    * Owner may override every field; the template only seeds defaults and is
    * recorded on the connection so the UI can show where the defaults came
    * from. An unknown template id is a validation error, never a silent
-   * fallback.
+   * fallback. When `templateId` is omitted (or null), the Generic
+   * OpenAI-compatible template is used, so a bare create still records the
+   * safe defaults it seeded; a registry that lacks that template falls back
+   * to the hand-configured defaults.
    */
   async create(input: {
     displayName: unknown
     baseUrl: unknown
     keys: unknown
-    /** Provider Template id, or null when the Owner is configuring by hand. */
+    /**
+     * Provider Template id, or null/omitted to seed the Generic
+     * OpenAI-compatible default.
+     */
     templateId?: unknown
     allowInsecureHttp?: unknown
     authHeader?: unknown
@@ -302,14 +308,21 @@ export class ProviderRegistry {
     const staticHeadersResult = readStaticHeaders(input.staticHeaders, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
-    let template: ProviderTemplate | null = null
+    // No template named seeds the Generic OpenAI-compatible default so a bare
+    // create still records where its safe defaults came from. A registry that
+    // omits the generic template (a custom/embedded build) falls back to
+    // hand-configured defaults below.
+    let template: ProviderTemplate | null =
+      this.#adapterRegistry.providerTemplate(GENERIC_PROVIDER_TEMPLATE_ID)
     if (input.templateId !== undefined && input.templateId !== null) {
       if (typeof input.templateId !== 'string' || input.templateId.trim() === '') {
         problems.push({ field: 'templateId', message: 'must be a known Provider Template id or null' })
       } else {
-        template = this.#adapterRegistry.providerTemplate(input.templateId.trim())
-        if (template === null) {
+        const chosen = this.#adapterRegistry.providerTemplate(input.templateId.trim())
+        if (chosen === null) {
           problems.push({ field: 'templateId', message: 'must be a known Provider Template id or null' })
+        } else {
+          template = chosen
         }
       }
     }
@@ -2172,9 +2185,9 @@ function eligibleForUsageRecovery(
 
 /**
  * The honest default capability claim for a connection created without a
- * Provider Template: unknown-off, never assumed. Template and catalog work can
- * enrich these claims later without Iroha silently assuming a Provider behaves
- * like a different one.
+ * Provider Template in the registry: unknown-off, never assumed. Template and
+ * catalog work can enrich these claims later without Iroha silently assuming a
+ * Provider behaves like a different one.
  */
 function defaultCapabilities(): ProviderCapabilities {
   return {

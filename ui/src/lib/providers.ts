@@ -98,6 +98,47 @@ export interface ProviderTemplateBrand {
   readonly accentColor: string
 }
 
+/**
+ * The id of the Generic OpenAI-compatible Provider Template, the default the
+ * management UI seeds a new Provider Connection with. Mirrors the server's
+ * GENERIC_PROVIDER_TEMPLATE_ID so the create form can default to it before the
+ * template list has loaded.
+ */
+export const GENERIC_PROVIDER_TEMPLATE_ID = 'generic-openai-compatible'
+
+/**
+ * The base URL the Generic OpenAI-compatible template seeds. Mirrors the
+ * server's built-in template so the create form can prefill it synchronously.
+ */
+export const GENERIC_PROVIDER_TEMPLATE_BASE_URL = 'https://api.example.com/v1'
+
+/**
+ * The Generic OpenAI-compatible template, mirrored from the server's built-in
+ * template so the create form is usable before the template list fetch
+ * resolves: the selector is populated, the default base URL is prefilled, and
+ * there is no loading state to wait on. The fetched list replaces it on
+ * arrival.
+ */
+export const GENERIC_PROVIDER_TEMPLATE: ProviderTemplateView = {
+  id: GENERIC_PROVIDER_TEMPLATE_ID,
+  displayName: 'Generic OpenAI-compatible',
+  description: '',
+  baseUrl: GENERIC_PROVIDER_TEMPLATE_BASE_URL,
+  authHeader: 'authorization',
+  authPrefix: 'Bearer ',
+  capabilities: {
+    chat: false,
+    streaming: false,
+    tools: false,
+    structuredOutput: false,
+    responses: false,
+  },
+  knownModels: [],
+  inferenceAdapterId: '',
+  usageAdapterId: null,
+  brand: null,
+}
+
 export interface ProviderTemplateView {
   readonly id: string
   readonly displayName: string

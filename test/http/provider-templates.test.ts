@@ -138,7 +138,7 @@ describe('creating a Provider Connection from a template', () => {
     await iroha.dispose()
   })
 
-  test('creating without templateId stores null and uses the unknown-off defaults', async () => {
+  test('creating without templateId seeds the Generic OpenAI-compatible default', async () => {
     const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -152,7 +152,7 @@ describe('creating a Provider Connection from a template', () => {
 
     expect(response.status).toBe(201)
     const body = (await response.json()) as { templateId: string | null }
-    expect(body.templateId).toBeNull()
+    expect(body.templateId).toBe('generic-openai-compatible')
   })
 
   test('creating with a templateId stores the templateId on the connection', async () => {

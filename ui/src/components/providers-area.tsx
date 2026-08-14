@@ -48,6 +48,9 @@ import {
   duplicateProvider,
   fetchProviders,
   fetchProviderTemplates,
+  GENERIC_PROVIDER_TEMPLATE,
+  GENERIC_PROVIDER_TEMPLATE_BASE_URL,
+  GENERIC_PROVIDER_TEMPLATE_ID,
   ManagementError,
   purgeProvider,
   type ProviderTemplateView,
@@ -413,13 +416,18 @@ function CreateProviderForm({
   readonly onCancel: () => void
 }) {
   const [displayName, setDisplayName] = useState('')
-  const [baseUrl, setBaseUrl] = useState('')
   const [keys, setKeys] = useState<readonly CreateProviderKeyRow[]>(() => [
     { rowId: makeRowId(), upstreamKey: '', baseUrl: '' },
   ])
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(false)
-  const [templateId, setTemplateId] = useState<string | null>(null)
-  const [templates, setTemplates] = useState<readonly ProviderTemplateView[] | null>(null)
+  // Default to the Generic OpenAI-compatible template up front so the Owner
+  // never faces a blank selector or a loading state: the template list fetch
+  // only widens the dropdown, it does not gate the default.
+  const [templateId, setTemplateId] = useState<string | null>(GENERIC_PROVIDER_TEMPLATE_ID)
+  const [baseUrl, setBaseUrl] = useState(GENERIC_PROVIDER_TEMPLATE_BASE_URL)
+  const [templates, setTemplates] = useState<readonly ProviderTemplateView[]>([
+    GENERIC_PROVIDER_TEMPLATE,
+  ])
   const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -429,9 +437,13 @@ function CreateProviderForm({
         if (controller.signal.aborted) return
         setTemplates(list)
         setLoadError(null)
-        const fallback =
-          list.find((template) => template.id === 'generic-openai-compatible') ?? list[0]
-        if (fallback !== undefined) setTemplateId(fallback.id)
+        // Re-point the selection when the defaulted template is not part of
+        // the served list (a custom registry); otherwise it stays put.
+        const stillValid = list.some((template) => template.id === templateId)
+        if (!stillValid) {
+          const first = list[0]
+          if (first !== undefined) setTemplateId(first.id)
+        }
       })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return
@@ -446,16 +458,14 @@ function CreateProviderForm({
   const selectedTemplate =
     templateId === null
       ? null
-      : (templates?.find((template) => template.id === templateId) ?? null)
+      : (templates.find((template) => template.id === templateId) ?? null)
 
   const templateStatus =
     loadError !== null
       ? 'Could not load templates'
-      : templates === null
-        ? 'Loading templates…'
-        : templates.length === 0
-          ? 'No templates available'
-          : selectedTemplate?.displayName ?? 'Pick a template'
+      : templates.length === 0
+        ? 'No templates available'
+        : selectedTemplate?.displayName ?? 'Pick a template'
 
   // Auto-fill the default base URL when the Owner picks a template, but
   // never clobber a URL the Owner has typed by hand. The previous template's
@@ -463,7 +473,7 @@ function CreateProviderForm({
   // is still "untouched" (matches what we last seeded) or already carries a
   // custom value. After each template change the ref advances so the next
   // change has the right "last seeded" baseline to compare against.
-  const lastAutofilledBaseUrl = useRef<string | null>(null)
+  const lastAutofilledBaseUrl = useRef<string | null>(GENERIC_PROVIDER_TEMPLATE_BASE_URL)
   useEffect(() => {
     if (selectedTemplate === null) return
     const seeded = selectedTemplate.baseUrl
@@ -542,10 +552,10 @@ function CreateProviderForm({
         <Select
           value={templateId ?? ''}
           onValueChange={setTemplateId}
-          disabled={templates === null || templates.length === 0}
+          disabled={templates.length === 0}
         >
           <SelectTrigger id="new-provider-template" className="w-full" size="sm">
-            <SelectValue>
+            <SelectValue placeholder={templateStatus}>
               {selectedTemplate !== null ? (
                 <span className="flex items-center gap-2">
                   <ProviderIcon

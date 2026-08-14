@@ -17,6 +17,19 @@ const BRAND_FILL: Record<Exclude<ProviderBrand, 'unknown'>, string> = {
   mistral: '#EA580C',
 }
 
+/**
+ * A 12% brand-tinted background reads as the brand in both light and dark mode
+ * without the harsh "white tile" glare. We pick the bg via inline style so it
+ * tracks the same brand color the mark is filled with.
+ */
+const TILE_BG: Record<Exclude<ProviderBrand, 'unknown'>, string> = {
+  openai: 'color-mix(in oklab, #10A37F 14%, transparent)',
+  openrouter: 'color-mix(in oklab, #3D55E6 14%, transparent)',
+  MiniMax: 'color-mix(in oklab, #F43F5E 14%, transparent)',
+  anthropic: 'color-mix(in oklab, #3F3F3F 14%, transparent)',
+  mistral: 'color-mix(in oklab, #EA580C 14%, transparent)',
+}
+
 export function ProviderIcon({
   displayName,
   baseUrl,
@@ -50,10 +63,10 @@ export function ProviderIcon({
     return (
       <span
         className={cn(
-          'flex shrink-0 items-center justify-center rounded-full border border-[#E5E1D8] bg-white',
+          'flex shrink-0 items-center justify-center rounded-full border border-foreground/10',
           tileSize,
         )}
-        style={{ color: BRAND_FILL.anthropic }}
+        style={{ color: BRAND_FILL.anthropic, backgroundColor: TILE_BG.anthropic }}
         aria-hidden
       >
         <span
@@ -72,10 +85,10 @@ export function ProviderIcon({
     return (
       <span
         className={cn(
-          'flex shrink-0 items-center justify-center rounded-full border border-[#FED7AA] bg-white',
+          'flex shrink-0 items-center justify-center rounded-full border border-foreground/10',
           tileSize,
         )}
-        style={{ color: BRAND_FILL.mistral }}
+        style={{ color: BRAND_FILL.mistral, backgroundColor: TILE_BG.mistral }}
         aria-hidden
       >
         <Wind className={svgSize} strokeWidth={1.75} />
@@ -86,10 +99,10 @@ export function ProviderIcon({
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center rounded-full border border-black/5 bg-white',
+        'flex shrink-0 items-center justify-center rounded-full border border-foreground/10',
         tileSize,
       )}
-      style={{ color: BRAND_FILL[brand] }}
+      style={{ color: BRAND_FILL[brand], backgroundColor: TILE_BG[brand] }}
       aria-hidden
     >
       {brand === 'openai' && <OpenAIMark svgSize={svgSize} />}

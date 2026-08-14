@@ -544,7 +544,21 @@ function CreateProviderForm({
           disabled={templates === null || templates.length === 0}
         >
           <SelectTrigger id="new-provider-template" className="w-full" size="sm">
-            <SelectValue>{templateStatus}</SelectValue>
+            <SelectValue>
+              {selectedTemplate !== null ? (
+                <span className="flex items-center gap-2">
+                  <ProviderIcon
+                    displayName={selectedTemplate.displayName}
+                    baseUrl={selectedTemplate.baseUrl}
+                    templateId={selectedTemplate.id}
+                    size="sm"
+                  />
+                  <span>{selectedTemplate.displayName}</span>
+                </span>
+              ) : (
+                templateStatus
+              )}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent align="start">
             {templates?.map((template) => (

@@ -26,8 +26,8 @@ const notFoundResponse = t.Object({
 export function createBrandLogoRoutes({ brandLogos }: BrandLogoRoutesOptions) {
   return new Elysia({ name: 'iroha/brand-logos', prefix: '/api/v1/brand-logos' }).get(
     '/:templateId',
-    async ({ params, status, set }) => {
-      const logo = await brandLogos.getLogo(params.templateId)
+    async ({ params, query, status, set }) => {
+      const logo = await brandLogos.getLogo(params.templateId, query.theme ?? 'auto')
       if (logo === null) {
         set.headers['cache-control'] = 'public, max-age=60'
         return status(404, { error: { code: 'brand_logo_unavailable', message: 'No brand logo for this template.' } })
@@ -37,11 +37,16 @@ export function createBrandLogoRoutes({ brandLogos }: BrandLogoRoutesOptions) {
       return logo.bytes
     },
     {
+      query: t.Optional(
+        t.Object({
+          theme: t.Optional(t.Union([t.Literal('light'), t.Literal('dark'), t.Literal('auto')])),
+        }),
+      ),
       detail: {
         tags: ['Brand Logos'],
         summary: 'Fetch a Provider Template brand logo',
         description:
-          'Streams the cached logo.dev image for one built-in Provider Template. Returns 404 when the template has no brand, the deployment has no logo.dev token, or the upstream refused. The bytes are served as image/webp (or whatever logo.dev returned) and may be cached by the browser for a day.',
+          'Streams the cached logo.dev image for one built-in Provider Template. The optional `theme` query selects a variant adjusted for a light or dark background. Returns 404 when the template has no brand, the deployment has no logo.dev token, or the upstream refused. The bytes are served as image/webp (or whatever logo.dev returned) and may be cached by the browser for a day.',
       },
       response: {
         200: t.Uint8Array(),

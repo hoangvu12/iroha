@@ -21,6 +21,11 @@ import type { ProviderTemplate } from '../providers/index.ts'
  * template must exist, the template must declare a brand, and at least one
  * upstream must answer 200 — any miss returns null so the route answers 404
  * and the UI falls back to the generic icon.
+ *
+ * A caller may request a specific logo theme (`light` or `dark`) so the mark
+ * stays visible on its background; logo.dev adjusts dominant-colour logos to
+ * suit. Light and dark variants are cached under separate keys so both can
+ * coexist, and `auto` (the default) skips the adjustment entirely.
  */
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
@@ -40,6 +45,14 @@ interface CacheEntry {
   readonly contentType: string
   readonly expiresAt: number
 }
+
+/**
+ * Which background the logo will sit on. `auto` asks logo.dev for no colour
+ * adjustment (its default); `light` and `dark` flip dominant-colour logos so
+ * they stay visible on that background. Only the logo.dev upstream honours
+ * it; Google's favicon service has no such option.
+ */
+export type BrandLogoTheme = 'auto' | 'light' | 'dark'
 
 export interface BrandLogoServiceOptions {
   /**
@@ -90,53 +103,63 @@ export class BrandLogoService {
    * Returns the logo bytes and content type for one template, or null when
    * the template has no brand or every upstream refused. The route answers
    * 404 in every null case so the UI's `<img onerror>` fallback fires.
+   *
+   * The theme selects a logo adjusted for a light or dark background; each
+   * theme is cached under its own key so both variants can be served.
    */
-  async getLogo(templateId: string): Promise<CachedBrandLogo | null> {
+  async getLogo(templateId: string, theme: BrandLogoTheme = 'auto'): Promise<CachedBrandLogo | null> {
     const template = this.#templates.get(templateId)
     if (template === undefined || template.brand === null) return null
 
-    const cached = this.#readFromMemory(templateId)
+    const cacheKey = this.#cacheKey(templateId, theme)
+
+    const cached = this.#readFromMemory(cacheKey)
     if (cached !== null) return cached
 
-    const onDisk = await this.#readFromDisk(templateId)
+    const onDisk = await this.#readFromDisk(cacheKey)
     if (onDisk !== null) {
-      this.#writeToMemory(templateId, onDisk.contentType, onDisk.bytes)
+      this.#writeToMemory(cacheKey, onDisk.contentType, onDisk.bytes)
       return onDisk
     }
 
-    const fetched = await this.#fetchFromUpstream(template.brand.domain)
+    const fetched = await this.#fetchFromUpstream(template.brand.domain, theme)
     if (fetched === null) return null
 
-    await this.#writeToDisk(templateId, fetched)
-    this.#writeToMemory(templateId, fetched.contentType, fetched.bytes)
+    await this.#writeToDisk(cacheKey, fetched)
+    this.#writeToMemory(cacheKey, fetched.contentType, fetched.bytes)
     return fetched
   }
 
-  #readFromMemory(templateId: string): CachedBrandLogo | null {
-    const entry = this.#cache.get(templateId)
+  /** A theme shares the plain template id; themed variants get a suffix. */
+  #cacheKey(templateId: string, theme: BrandLogoTheme): string {
+    return theme === 'auto' ? templateId : `${templateId}.${theme}`
+  }
+
+  #readFromMemory(cacheKey: string): CachedBrandLogo | null {
+    const entry = this.#cache.get(cacheKey)
     if (entry === undefined) return null
     if (entry.expiresAt <= Date.now()) {
-      this.#cache.delete(templateId)
+      this.#cache.delete(cacheKey)
       return null
     }
     return { bytes: entry.bytes, contentType: entry.contentType }
   }
 
-  #writeToMemory(templateId: string, contentType: string, bytes: Uint8Array): void {
+  #writeToMemory(cacheKey: string, contentType: string, bytes: Uint8Array): void {
     if (this.#cache.size >= CACHE_MAX_ENTRIES) {
       const oldest = this.#cache.keys().next().value
       if (oldest !== undefined) this.#cache.delete(oldest)
     }
-    this.#cache.set(templateId, {
+    this.#cache.set(cacheKey, {
       bytes,
       contentType,
       expiresAt: Date.now() + CACHE_TTL_MS,
     })
   }
 
-  async #readFromDisk(templateId: string): Promise<CachedBrandLogo | null> {
-    const bodyPath = join(this.#cacheDirectory, `${templateId}.bin`)
-    const metaPath = join(this.#cacheDirectory, `${templateId}.meta.json`)
+  async #readFromDisk(cacheKey: string): Promise<CachedBrandLogo | null> {
+    const bodyPath = join(this.#cacheDirectory, `${cacheKey}.bin`)
+    const metaPath = join(this.#cacheDirectory, `${cacheKey}.meta.json`)
     try {
       const [body, metaRaw] = await Promise.all([
         readFile(bodyPath),
@@ -150,35 +173,36 @@ export class BrandLogoService {
     }
   }
 
-  async #writeToDisk(templateId: string, logo: CachedBrandLogo): Promise<void> {
+  async #writeToDisk(cacheKey: string, logo: CachedBrandLogo): Promise<void> {
     await mkdir(this.#cacheDirectory, { recursive: true })
-    const bodyPath = join(this.#cacheDirectory, `${templateId}.bin`)
-    const metaPath = join(this.#cacheDirectory, `${templateId}.meta.json`)
+    const bodyPath = join(this.#cacheDirectory, `${cacheKey}.bin`)
+    const metaPath = join(this.#cacheDirectory, `${cacheKey}.meta.json`)
     await Promise.all([
       writeFile(bodyPath, logo.bytes),
       writeFile(metaPath, JSON.stringify({ contentType: logo.contentType })),
     ])
   }
 
-  async #fetchFromUpstream(domain: string): Promise<CachedBrandLogo | null> {
+  async #fetchFromUpstream(domain: string, theme: BrandLogoTheme): Promise<CachedBrandLogo | null> {
     // Try logo.dev first when a token is configured, then fall back to
     // Google's favicon service. Both upstreams can fail for benign reasons
     // (rate limit, transient outage, no cached favicon for an obscure
     // domain); the route collapses every failure into a single 404 so the
     // UI's `<img onerror>` fallback is the only consumer-side branch.
     if (this.#token !== undefined) {
-      const logoDev = await this.#fetchFromLogoDev(domain)
+      const logoDev = await this.#fetchFromLogoDev(domain, theme)
       if (logoDev !== null) return logoDev
     }
     return await this.#fetchFromGoogleFavicon(domain)
   }
 
-  async #fetchFromLogoDev(domain: string): Promise<CachedBrandLogo | null> {
+  async #fetchFromLogoDev(domain: string, theme: BrandLogoTheme): Promise<CachedBrandLogo | null> {
     const url = new URL(`${LOGO_DEV_UPSTREAM}/${domain}`)
     url.searchParams.set('token', this.#token as string)
     url.searchParams.set('size', '64')
     url.searchParams.set('retina', 'true')
     url.searchParams.set('format', 'webp')
+    if (theme !== 'auto') url.searchParams.set('theme', theme)
 
     return await this.#fetchImage(url.toString(), 'image/webp')
   }

@@ -164,6 +164,48 @@ describe('BrandLogoService', () => {
     expect(calls).toHaveLength(1)
   })
 
+  test('requests a theme-specific variant and caches it under its own key', async () => {
+    const darkBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xde, 0xad])
+    const darkUrl =
+      'https://img.logo.dev/openai.com?token=tok&size=64&retina=true&format=webp&theme=dark'
+    const plainUrl = 'https://img.logo.dev/openai.com?token=tok&size=64&retina=true&format=webp'
+    const { fetch, calls } = stubbedFetch(
+      new Map([
+        [darkUrl, new Response(darkBytes, { status: 200, headers: { 'content-type': 'image/webp' } })],
+        [plainUrl, new Response(PNG_BYTES, { status: 200, headers: { 'content-type': 'image/webp' } })],
+      ]),
+    )
+    const service = new BrandLogoService({
+      token: 'tok',
+      cacheDirectory: cacheDir,
+      templates: [TEMPLATE_WITH_BRAND],
+      fetch,
+    })
+
+    const dark = await service.getLogo('openai', 'dark')
+    expect(dark?.contentType).toBe('image/webp')
+    expect(Array.from(dark?.bytes ?? [])).toEqual(Array.from(darkBytes))
+
+    const plain = await service.getLogo('openai')
+    expect(plain?.contentType).toBe('image/webp')
+    expect(Array.from(plain?.bytes ?? [])).toEqual(Array.from(PNG_BYTES))
+
+    expect(calls.map((call) => call.url)).toEqual([darkUrl, plainUrl])
+
+    // Both variants survive in the disk cache under separate keys; a fresh
+    // service can read the dark variant back without re-contacting logo.dev.
+    const readerFetch = stubbedFetch(new Map())
+    const reader = new BrandLogoService({
+      token: 'tok',
+      cacheDirectory: cacheDir,
+      templates: [TEMPLATE_WITH_BRAND],
+      fetch: readerFetch.fetch,
+    })
+    const cachedDark = await reader.getLogo('openai', 'dark')
+    expect(Array.from(cachedDark?.bytes ?? [])).toEqual(Array.from(darkBytes))
+    expect(readerFetch.calls).toHaveLength(0)
+  })
+
   test('reads from the disk cache on a fresh service without contacting logo.dev', async () => {
     // Seed the disk cache by running one service, then construct a second
     // service that shares the same cache directory but has its own empty

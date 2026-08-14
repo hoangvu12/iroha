@@ -142,6 +142,71 @@ describe('GET /api/v1/brand-logos/:templateId', () => {
     expect(fetchStub.calls).toHaveLength(1)
   })
 
+  test('passes the theme query through and serves each variant from its own cache', async () => {
+    const darkBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xde, 0xad])
+    const darkUrl =
+      'https://img.logo.dev/openai.com?token=tok&size=64&retina=true&format=webp&theme=dark'
+    const lightUrl =
+      'https://img.logo.dev/openai.com?token=tok&size=64&retina=true&format=webp&theme=light'
+    fetchStub = stubbedFetch(
+      new Map([
+        [darkUrl, new Response(darkBytes, { status: 200, headers: { 'content-type': 'image/webp' } })],
+        [lightUrl, openaiLogo()],
+      ]),
+    )
+    brandLogos = new BrandLogoService({
+      token: 'tok',
+      cacheDirectory: './data/test-brand-logos-' + crypto.randomUUID(),
+      templates: [
+        {
+          id: 'openai',
+          displayName: 'OpenAI',
+          description: 'OpenAI-compatible endpoint.',
+          baseUrl: 'https://api.openai.com/v1',
+          authHeader: 'authorization',
+          authPrefix: 'Bearer ',
+          capabilities: {
+            chat: true,
+            streaming: true,
+            tools: true,
+            structuredOutput: true,
+            responses: true,
+          },
+          knownModels: [],
+          inferenceAdapterId: 'generic-inference-adapter',
+          usageAdapterId: 'reactive-only-usage-adapter',
+          brand: { domain: 'openai.com', accentColor: '#10A37F' },
+        },
+      ],
+      fetch: fetchStub.fetch,
+    })
+    await iroha.dispose()
+    iroha = await createTestApp({ brandLogos })
+
+    const dark = await iroha.fetch('/api/v1/brand-logos/openai?theme=dark')
+    expect(dark.status).toBe(200)
+    const darkBody = new Uint8Array(await dark.arrayBuffer())
+    expect(Array.from(darkBody)).toEqual(Array.from(darkBytes))
+
+    const light = await iroha.fetch('/api/v1/brand-logos/openai?theme=light')
+    expect(light.status).toBe(200)
+
+    expect(fetchStub.calls.map((call) => call.url)).toEqual([darkUrl, lightUrl])
+
+    // A repeat of the dark variant is served from cache, not fetched again.
+    const darkAgain = await iroha.fetch('/api/v1/brand-logos/openai?theme=dark')
+    expect(darkAgain.status).toBe(200)
+    expect(fetchStub.calls.map((call) => call.url)).toEqual([darkUrl, lightUrl])
+  })
+
+  test('rejects a theme outside light, dark, and auto', async () => {
+    const response = await iroha.fetch('/api/v1/brand-logos/openai?theme=banana')
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { error: { code: string } }
+    expect(body.error.code).toBe('invalid_request')
+    expect(fetchStub.calls).toHaveLength(0)
+  })
+
   test('returns 404 when both upstreams respond with a non-OK status', async () => {
     fetchStub = stubbedFetch(
       new Map([

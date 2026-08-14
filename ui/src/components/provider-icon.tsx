@@ -1,5 +1,6 @@
 import { Server } from 'lucide-react'
 import type { CSSProperties } from 'react'
+import { useIsDarkMode } from '@/hooks/use-dark-mode'
 import { cn } from '@/lib/utils'
 import type { ProviderTemplateBrand } from '@/lib/providers'
 
@@ -8,10 +9,12 @@ import type { ProviderTemplateBrand } from '@/lib/providers'
  *
  * Renders a circular `<img>` sourced from the cached logo.dev bytes (or the
  * Google favicon fallback when no logo.dev token is configured) at
- * `/api/v1/brand-logos/:templateId`. Falls back to a generic server icon when
- * the template has no brand, the template id is missing, or the upstream
- * refuses to answer. The `<img onerror>` handler swaps to the icon sibling so
- * every consumer renders the component branchlessly.
+ * `/api/v1/brand-logos/:templateId`. The `?theme=` query requests a logo
+ * variant adjusted for the current app theme so dominant-colour marks stay
+ * visible on the tile. Falls back to a generic server icon when the template
+ * has no brand, the template id is missing, or the upstream refuses to
+ * answer. The `<img onerror>` handler swaps to the icon sibling so every
+ * consumer renders the component branchlessly.
  */
 
 const HIDDEN_STYLE: CSSProperties = { display: 'none' }
@@ -33,6 +36,8 @@ export function ProviderIcon({
   readonly templateId?: string | undefined
   readonly size?: 'sm' | 'md'
 }) {
+  const isDark = useIsDarkMode()
+  const theme = isDark ? 'dark' : 'light'
   const tileSize = size === 'sm' ? 'size-6' : 'size-8'
 
   if (brand === null || templateId === undefined || templateId === '') {
@@ -59,7 +64,7 @@ export function ProviderIcon({
       aria-hidden
     >
       <img
-        src={`/api/v1/brand-logos/${encodeURIComponent(templateId)}`}
+        src={`/api/v1/brand-logos/${encodeURIComponent(templateId)}?theme=${theme}`}
         alt=""
         className={cn('size-full object-cover')}
         loading="lazy"

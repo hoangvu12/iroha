@@ -152,4 +152,28 @@ describe('durable scoped Key Health', () => {
 
     expect((await opened.database.providers.getKey(keyIds[0]!))?.health).toBe('active')
   })
+
+  test('manual test probes a key with a base URL override against its own URL', async () => {
+    const probe = fakeKeyProbe()
+    const local = new ProviderRegistry({
+      database: opened.database,
+      cipher: createSecretCipher(TEST_MASTER_KEY),
+      keyProbe: probe,
+      adapterRegistry: createBuiltInAdapterRegistry(),
+      clock,
+    })
+    const created = await local.create({
+      displayName: 'Override probe',
+      baseUrl: 'https://api.example.com/v1',
+      keys: [{ upstreamKey: 'sk-override-key', baseUrl: 'https://override.example.com/v1' }],
+    })
+    if (!created.ok) throw new Error(created.failure.code)
+    const overrideKeyId = created.value.keys[0]!.id
+
+    await local.testKey(created.value.id, overrideKeyId)
+
+    // create() already probed the key once; the manual test is the last call.
+    expect(probe.calls).toHaveLength(2)
+    expect(probe.calls[1]?.baseUrl).toBe('https://override.example.com/v1')
+  })
 })

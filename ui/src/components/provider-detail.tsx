@@ -626,15 +626,12 @@ function UpstreamKeysCard({
                 <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
                   Status
                 </th>
-<th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
-                base url
-              </th>
-              <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
-                Usage
-              </th>
-              <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
-                Model access
-              </th>
+                <th className="text-muted-foreground border-border border-b px-5 py-3 text-xs font-medium tracking-wide uppercase">
+                  Key
+                </th>
+                <th className="text-muted-foreground border-border border-b px-5 py-3 text-center text-xs font-medium tracking-wide uppercase">
+                  Usage
+                </th>
                 <th className="text-muted-foreground border-border border-b px-5 py-3 text-right text-xs font-medium tracking-wide uppercase">
                   Actions
                 </th>
@@ -1307,8 +1304,8 @@ function UpstreamKeyRow({
         />
       </td>
       <td className="px-5 py-3.5 align-top">
-        <span className="font-mono text-xs" title={keyView.effectiveBaseUrl}>
-          {keyView.effectiveBaseUrl}
+        <span className="font-mono text-xs" title={keyView.id}>
+          {keyView.id}
         </span>
       </td>
       <td className="px-5 py-3.5 align-middle">
@@ -1317,13 +1314,6 @@ function UpstreamKeyRow({
           keyId={keyView.id}
           onOpenDialog={onOpenUsageDialog}
         />
-      </td>
-      <td className="px-5 py-3.5 align-top text-xs">
-        {keyView.allowedModels !== null
-          ? `Only ${keyView.allowedModels.join(', ')}`
-          : keyView.deniedModels !== null
-            ? `All except ${keyView.deniedModels.join(', ')}`
-            : 'All models'}
       </td>
       <td className="px-5 py-3.5 text-right align-top">
         <div className="flex items-center justify-end gap-1">
@@ -1630,7 +1620,7 @@ function usageTextTone(reading: UsageReadingView): 'danger' | 'muted' | 'default
     return 'default'
   }
   if (reading.balance === null) return 'muted'
-  return reading.balance < 1 ? 'danger' : 'default'
+  return reading.balance < 0 ? 'danger' : 'default'
 }
 
 const USAGE_TONE_CLASS: Record<'danger' | 'muted' | 'default', string> = {
@@ -1705,9 +1695,11 @@ function ReadingLine({
   const resetTip = usageResetTooltip(reading)
   const tone = USAGE_TONE_CLASS[usageTextTone(reading)]
   const interactive = onOpenDialog !== null
+  const isCredit = isCreditReading(reading)
+  const percent = !isCredit ? reading.remainingPercent : null
   return (
     <div
-      className={`flex items-center gap-1 font-mono text-xs ${tone} ${interactive ? 'hover:text-foreground cursor-pointer' : ''}`}
+      className={`flex items-center gap-2 font-mono text-xs ${tone} ${isCredit ? 'justify-center' : ''} ${interactive ? 'hover:text-foreground cursor-pointer' : ''}`}
       onClick={interactive ? onOpenDialog : undefined}
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : undefined}
@@ -1723,7 +1715,8 @@ function ReadingLine({
       }
       aria-label={interactive ? 'Show usage breakdown' : undefined}
     >
-      <span>{usageTopLine(reading)}</span>
+      <span className={`shrink-0 font-mono text-xs ${isCredit ? '' : 'w-20 text-right'}`}>{usageTopLine(reading)}</span>
+      {percent !== null && <ProgressBar reading={reading} />}
       {resetTip !== null && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1740,6 +1733,27 @@ function ReadingLine({
           <TooltipContent side="top">{resetTip}</TooltipContent>
         </Tooltip>
       )}
+    </div>
+  )
+}
+
+/** A mini progress bar showing remaining percent, coloured by how much is left. */
+function ProgressBar({ reading }: { readonly reading: UsageReadingView }) {
+  const remaining = reading.remainingPercent ?? 0
+  const clamped = Math.max(0, Math.min(100, remaining))
+  const fillColor =
+    remaining >= 60 ? 'bg-status-healthy' : remaining >= 30 ? 'bg-status-warning' : 'bg-status-danger'
+  return (
+    <div
+      className="bg-muted relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full"
+      role="img"
+      aria-label={`${Math.round(remaining)}% remaining`}
+    >
+      <div
+        className={`h-full ${fillColor}`}
+        style={{ width: `${clamped}%` }}
+        aria-hidden
+      />
     </div>
   )
 }

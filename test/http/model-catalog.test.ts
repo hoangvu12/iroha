@@ -104,6 +104,36 @@ describe('the provider-scoped Models API', () => {
     expect(body.data.every((model) => model.object === 'model')).toBe(true)
   })
 
+  test('catalog discovery hits a key\'s own base URL override', async () => {
+    upstream.calls.length = 0
+    const overrideUrl = 'https://override.example.com/v1'
+    const response = await iroha.fetch('/api/v1/admin/providers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Catalog override',
+        baseUrl: BASE_URL,
+        keys: [{ upstreamKey: 'sk-override-discovery-key', baseUrl: overrideUrl }],
+      }),
+      csrf,
+    })
+    if (response.status !== 201) {
+      throw new Error(`Connection create failed with ${response.status}: ${await response.text()}`)
+    }
+    const overrideConnection = (await response.json()) as ConnectionBody
+
+    const refresh = await iroha.fetch(
+      `/api/v1/admin/providers/${overrideConnection.id}/catalog/refresh`,
+      { method: 'POST', csrf },
+    )
+    expect(refresh.status).toBe(200)
+
+    const discoveryCall = upstream.calls.find((call) => call.url.startsWith(overrideUrl))
+    expect(discoveryCall).toBeDefined()
+    expect(discoveryCall?.url).toBe(`${overrideUrl}/models`)
+    expect(upstream.calls.every((call) => call.url.startsWith(BASE_URL))).toBe(false)
+  })
+
   test('an exact-model scope lists exactly those models', async () => {
     await refreshCatalog()
     const key = await createKey([{ providerId: connection.id, models: [MODEL] }])

@@ -760,7 +760,11 @@ export class ProviderRegistry {
     if (!located.ok) return located
 
     const { connection, key } = located.value
-    const probe = await this.#runProbe(connection.baseUrl, key.encryptedKey)
+    // The manual test must hit the URL the key will actually use at inference
+    // time — a key with its own override URL is meaningless if its health
+    // verdict was earned against a different endpoint. Mirrors the inheritance
+    // the probe pass and inference resolution both use.
+    const probe = await this.#runProbe(key.baseUrl ?? connection.baseUrl, key.encryptedKey)
     if (!probe.readable) return failed({ code: 'stored_key_unreadable' })
 
     const at = this.#clock.now()

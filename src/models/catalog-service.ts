@@ -364,7 +364,12 @@ export class ModelCatalogService {
     await this.#database.modelCatalog.syncTemplate(providerId, models, at)
   }
 
-  /** The base URL and one usable Upstream Key for a read-only discovery GET. */
+  /**
+   * The base URL and one usable Upstream Key for a read-only discovery GET.
+   * A key with its own override URL is discovered against that URL; otherwise
+   * the connection base URL is used — the same inheritance inference and the
+   * usage poller both follow.
+   */
   async #discoveryTarget(
     providerId: string,
   ): Promise<
@@ -424,7 +429,7 @@ export class ModelCatalogService {
     return {
       ok: true,
       value: {
-        baseUrl: connection.baseUrl,
+        baseUrl: key.baseUrl ?? connection.baseUrl,
         allowInsecureHttp: connection.allowInsecureHttp,
         upstreamKey,
         authHeader: connection.authHeader,

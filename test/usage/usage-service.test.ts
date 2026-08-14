@@ -833,6 +833,45 @@ describe('UsageService snapshot JSON roundtrip', () => {
 
     await built.dispose()
   })
+
+  test('usage polls use a key\'s base URL override when one is set', async () => {
+    const adapter = createMockPlanUsageAdapter()
+    const opened = await sqliteEngine.open()
+    const clock = testClock()
+    const cipher = createSecretCipher(TEST_MASTER_KEY)
+    const registry = new ProviderRegistry({
+      database: opened.database,
+      cipher,
+      keyProbe: { async test() { return { verdict: 'usable', reason: null } } },
+      adapterRegistry: createBuiltInAdapterRegistry(),
+      clock,
+    })
+    const created = await registry.create({
+      displayName: 'Usage override',
+      baseUrl: 'https://api.example.com/v1',
+      keys: [
+        { upstreamKey: 'sk-default-url-key' },
+        { upstreamKey: 'sk-override-url-key', baseUrl: 'https://override.example.com/v1' },
+      ],
+    })
+    if (!created.ok) throw new Error(created.failure.code)
+    const providerId = created.value.id
+    const overrideKeyId = created.value.keys.find((key) => key.baseUrl !== null)!.id
+
+    const service = new UsageService({ database: opened.database, cipher, adapter, clock })
+    const refreshed = await service.refresh(providerId)
+    if (!refreshed.ok) throw new Error(refreshed.failure.code)
+
+    const byKey = new Map(adapter.calls.map((call) => [call.upstreamKey, call.baseUrl]))
+    expect(byKey.get('sk-default-url-key')).toBe('https://api.example.com/v1')
+    expect(byKey.get('sk-override-url-key')).toBe('https://override.example.com/v1')
+    // The override key's reading is stored under its own id, proving the
+    // per-key URL override also reached the poll target.
+    const stored = await opened.database.usage.get(providerId)
+    expect(Object.keys(stored?.result ?? {})).toContain(overrideKeyId)
+
+    await opened.dispose()
+  })
 })
 
 /** The default balance the mock credit adapter returns for an upstream key. */

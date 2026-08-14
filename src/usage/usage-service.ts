@@ -300,6 +300,11 @@ export class UsageService {
     return readings[0]?.scope ?? null
   }
 
+  /**
+   * Every pollable key becomes one target polled against the URL the key
+   * actually routes through at inference time: the key's own override when it
+   * has one, the connection base URL otherwise.
+   */
   async #resolveTargets(
     connection: ProviderRecord,
   ): Promise<UsageServiceResult<readonly UsagePollTarget[]>> {
@@ -320,7 +325,7 @@ export class UsageService {
         throw cause
       }
       targets.push({
-        baseUrl: connection.baseUrl,
+        baseUrl: key.baseUrl ?? connection.baseUrl,
         allowInsecureHttp: connection.allowInsecureHttp,
         upstreamKey: plaintext,
         candidate: key,

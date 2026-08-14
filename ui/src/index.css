@@ -286,3 +286,15 @@
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * ProviderIcon publishes `--tile-bg-light` and `--tile-bg-dark` per brand on
+ * each tile; this swap picks the right one for the current theme so dark mode
+ * keeps the tiles visibly lifted off the canvas.
+ */
+:root {
+  --tile-bg: var(--tile-bg-light, transparent);
+}
+.dark {
+  --tile-bg: var(--tile-bg-dark, transparent);
+}

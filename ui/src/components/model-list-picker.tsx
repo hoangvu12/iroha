@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type KeyboardEvent } from 'react'
 import { Loader2, Plus, RefreshCcw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { StatefulButton } from '@/components/ui/stateful-button'
 import { Input } from '@/components/ui/input'
 import {
   fetchCatalog,
@@ -40,7 +41,6 @@ export function ModelListPicker({
   const [catalog, setCatalog] = useState<CatalogView | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
   const [draft, setDraft] = useState('')
   const [draftError, setDraftError] = useState<string | null>(null)
 
@@ -61,15 +61,7 @@ export function ModelListPicker({
   }, [load])
 
   const refresh = async () => {
-    setRefreshing(true)
-    setError(null)
-    try {
-      setCatalog(await refreshCatalog(providerId, csrfToken))
-    } catch (cause) {
-      setError(cause instanceof CatalogError ? cause.message : 'Could not refresh models.')
-    } finally {
-      setRefreshing(false)
-    }
+    setCatalog(await refreshCatalog(providerId, csrfToken))
   }
 
   const toggle = (modelId: string) => {
@@ -116,9 +108,20 @@ export function ModelListPicker({
         ) : error ? (
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="text-status-danger">{error}</span>
-            <Button type="button" variant="ghost" size="xs" onClick={() => void load()}>
+            <StatefulButton
+              variant="ghost"
+              size="xs"
+              successLabel="Retried"
+              onClick={async () => {
+                try {
+                  await load()
+                } catch (cause) {
+                  throw cause instanceof CatalogError ? cause : new Error('Could not load models.')
+                }
+              }}
+            >
               Retry
-            </Button>
+            </StatefulButton>
           </div>
         ) : hasChips ? (
           <div className="flex flex-col gap-1.5">
@@ -173,19 +176,20 @@ export function ModelListPicker({
         ) : (
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="text-muted-foreground">No models discovered yet.</span>
-            <Button
-              type="button"
+            <StatefulButton
               variant="ghost"
               size="xs"
-              onClick={() => void refresh()}
-              disabled={refreshing}
+              successLabel="Refreshed"
+              onClick={async () => {
+                try {
+                  await refresh()
+                } catch (cause) {
+                  throw cause instanceof CatalogError ? cause : new Error('Could not refresh models.')
+                }
+              }}
             >
-              <RefreshCcw
-                className={cn('size-3', refreshing && 'animate-spin')}
-                aria-hidden
-              />
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-            </Button>
+              <RefreshCcw className="size-3" aria-hidden /> Refresh
+            </StatefulButton>
           </div>
         )}
       </div>

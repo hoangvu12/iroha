@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react'
 import { Server, Wind } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -19,36 +18,23 @@ const BRAND_FILL: Record<Exclude<ProviderBrand, 'unknown'>, string> = {
 }
 
 /**
- * Brand-tinted tile backgrounds. Light mode tints the surrounding card
- * white; dark mode mixes the brand into the slightly-lifted popover surface
- * so the tile stands off the canvas. The element publishes both fills as
- * `--tile-bg-light` / `--tile-bg-dark` custom properties and consumes them
- * via the `--tile-bg` variable defined in `index.css`, which swaps with the
- * `.dark` class.
+ * Brand-tinted tile backgrounds. Light mode tints white; dark mode mixes the
+ * brand into the slightly-lifted popover surface so the tile stands off the
+ * canvas. Pinned via Tailwind's `dark:` variant because an inline `var()` swap
+ * can't reach a per-element custom property from `:root` (the inner lookup
+ * happens at the rule's definition point, not the element).
  */
-const TILE_BG_LIGHT: Record<Exclude<ProviderBrand, 'unknown'>, string> = {
-  openai: 'color-mix(in oklab, #10A37F 14%, white)',
-  openrouter: 'color-mix(in oklab, #3D55E6 14%, white)',
-  MiniMax: 'color-mix(in oklab, #F43F5E 14%, white)',
-  anthropic: 'color-mix(in oklab, #3F3F3F 14%, white)',
-  mistral: 'color-mix(in oklab, #EA580C 14%, white)',
-}
-
-const TILE_BG_DARK: Record<Exclude<ProviderBrand, 'unknown'>, string> = {
-  openai: 'color-mix(in oklab, #10A37F 32%, var(--popover))',
-  openrouter: 'color-mix(in oklab, #3D55E6 32%, var(--popover))',
-  MiniMax: 'color-mix(in oklab, #F43F5E 32%, var(--popover))',
-  anthropic: 'color-mix(in oklab, #3F3F3F 32%, var(--popover))',
-  mistral: 'color-mix(in oklab, #EA580C 32%, var(--popover))',
-}
-
-function tileStyle(brand: Exclude<ProviderBrand, 'unknown'>): CSSProperties {
-  return {
-    color: BRAND_FILL[brand],
-    backgroundColor: 'var(--tile-bg)',
-    ['--tile-bg-light' as string]: TILE_BG_LIGHT[brand],
-    ['--tile-bg-dark' as string]: TILE_BG_DARK[brand],
-  }
+const TILE_BG: Record<Exclude<ProviderBrand, 'unknown'>, string> = {
+  openai:
+    'bg-[color-mix(in_oklab,#10A37F_14%,white)] dark:bg-[color-mix(in_oklab,#10A37F_32%,var(--popover))]',
+  openrouter:
+    'bg-[color-mix(in_oklab,#3D55E6_14%,white)] dark:bg-[color-mix(in_oklab,#3D55E6_32%,var(--popover))]',
+  MiniMax:
+    'bg-[color-mix(in_oklab,#F43F5E_14%,white)] dark:bg-[color-mix(in_oklab,#F43F5E_32%,var(--popover))]',
+  anthropic:
+    'bg-[color-mix(in_oklab,#3F3F3F_14%,white)] dark:bg-[color-mix(in_oklab,#3F3F3F_32%,var(--popover))]',
+  mistral:
+    'bg-[color-mix(in_oklab,#EA580C_14%,white)] dark:bg-[color-mix(in_oklab,#EA580C_32%,var(--popover))]',
 }
 
 export function ProviderIcon({
@@ -86,8 +72,9 @@ export function ProviderIcon({
         className={cn(
           'flex shrink-0 items-center justify-center rounded-full border border-foreground/10',
           tileSize,
+          TILE_BG.anthropic,
         )}
-        style={tileStyle('anthropic')}
+        style={{ color: BRAND_FILL.anthropic }}
         aria-hidden
       >
         <span
@@ -108,8 +95,9 @@ export function ProviderIcon({
         className={cn(
           'flex shrink-0 items-center justify-center rounded-full border border-foreground/10',
           tileSize,
+          TILE_BG.mistral,
         )}
-        style={tileStyle('mistral')}
+        style={{ color: BRAND_FILL.mistral }}
         aria-hidden
       >
         <Wind className={svgSize} strokeWidth={1.75} />
@@ -122,8 +110,9 @@ export function ProviderIcon({
       className={cn(
         'flex shrink-0 items-center justify-center rounded-full border border-foreground/10',
         tileSize,
+        TILE_BG[brand],
       )}
-      style={tileStyle(brand)}
+      style={{ color: BRAND_FILL[brand] }}
       aria-hidden
     >
       {brand === 'openai' && <OpenAIMark svgSize={svgSize} />}

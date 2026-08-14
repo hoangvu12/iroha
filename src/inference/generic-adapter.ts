@@ -110,14 +110,117 @@ export function createGenericInferenceAdapter(
         }
       }
 
+      const rawBody = await response.text()
       return {
         kind: 'buffered',
         status: response.status,
         headers: Object.fromEntries(response.headers.entries()),
-        body: await response.text(),
+        body: normalizeOpenAiResponseBody(rawBody),
       }
     },
   }
+}
+
+/**
+ * Reasoning-content conventions used by OpenAI-compatible upstreams that
+ * embed chain-of-thought as a leading XML block inside the visible `content`
+ * rather than as a separate field. `liteLLM` recognises the same three tag
+ * names (`common_utils._parse_content_for_reasoning`); mirroring them keeps
+ * clients that already handle one upstream's shape working against another
+ * without bespoke adapters.
+ */
+const REASONING_TAG_PATTERN =
+  /<(?:think|thinking|budget:thinking)>([\s\S]*?)<\/(?:think|thinking|budget:thinking)>/
+
+/**
+ * Reconciles an upstream's answer body with what an OpenAI Chat Completions
+ * client expects. Three normalisations are applied to every choice's
+ * `message`:
+ *
+ *   - if the upstream already exposes a separate `reasoning_content` (or
+ *     `reasoning`) field, it is left untouched and nothing is moved;
+ *   - if the visible `content` carries an inline `<think>…</think>` (or the
+ *     `thinking` / `budget:thinking` variants DeepSeek and Qwen emit), the
+ *     reasoning is lifted into `reasoning_content` and the visible text is
+ *     trimmed;
+ *   - upstream-specific extras (`audio_content`, a `name` that the model
+ *     filled with its own brand) are dropped, since the OpenAI spec does
+ *     not define them and strict clients reject unknown keys.
+ *
+ * The body is returned unchanged when it is not valid JSON, when there are
+ * no choices to walk, or when nothing in the body needs touching — that
+ * keeps passthrough performance on the hot path free and avoids corrupting
+ * the error envelopes `upstreamRefusal` already recognises.
+ */
+export function normalizeOpenAiResponseBody(body: string): string {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return body
+  }
+  if (parsed === null || typeof parsed !== 'object') return body
+  const root = parsed as Record<string, unknown>
+  const choices = root.choices
+  if (!Array.isArray(choices) || choices.length === 0) return body
+
+  let touched = false
+  for (const choice of choices) {
+    if (choice === null || typeof choice !== 'object') continue
+    const message = (choice as Record<string, unknown>).message
+    if (message === null || typeof message !== 'object') continue
+    const normalised = normalizeAssistantMessage(message as Record<string, unknown>)
+    if (normalised !== null) {
+      ;(choice as Record<string, unknown>).message = normalised
+      touched = true
+    }
+  }
+  if (!touched) return body
+  return JSON.stringify(parsed)
+}
+
+function normalizeAssistantMessage(message: Record<string, unknown>): Record<string, unknown> | null {
+  let mutated = false
+  const next: Record<string, unknown> = { ...message }
+
+  const existingReasoning = pickReasoningField(next)
+  const content = next.content
+
+  if (existingReasoning === undefined && typeof content === 'string') {
+    const match = REASONING_TAG_PATTERN.exec(content)
+    if (match !== null) {
+      const reasoning = match[1] ?? ''
+      const trailing = content.slice((match.index ?? 0) + match[0].length).replace(/^\s+/, '')
+      next.reasoning_content = reasoning
+      next.content = trailing
+      mutated = true
+    }
+  }
+
+  if ('audio_content' in next) {
+    delete next.audio_content
+    mutated = true
+  }
+  const rawName = next.name
+  if (typeof rawName === 'string' && rawName.length > 0 && rawName !== message.role) {
+    delete next.name
+    mutated = true
+  }
+
+  return mutated ? next : null
+}
+
+/**
+ * Returns the value of the upstream's reasoning field when one is already
+ * present, regardless of which name the upstream chose. OpenRouter publishes
+ * `reasoning`; Kimi, GLM, and LiteLLM-normalised providers publish
+ * `reasoning_content`; anything else is treated as absent so the inline
+ * extractor runs.
+ */
+function pickReasoningField(message: Record<string, unknown>): unknown {
+  if ('reasoning_content' in message) return message.reasoning_content
+  if ('reasoning' in message) return message.reasoning
+  return undefined
 }
 
 /** Joins a base URL and a provider path once, tolerating a trailing slash. */

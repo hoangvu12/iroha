@@ -27,7 +27,13 @@ interface ProviderBody {
   updatedAt: string
   keys: {
     id: string
-    health: 'unverified' | 'active' | 'disabled'
+    health:
+      | 'unverified'
+      | 'active'
+      | 'cooling_down'
+      | 'invalid_authentication'
+      | 'exhausted'
+      | 'disabled'
     baseUrl: string | null
     effectiveBaseUrl: string
     lastProbe: { at: string; verdict: string; reason: string | null } | null
@@ -231,7 +237,7 @@ describe('Provider administration', () => {
       expect(created.keys[0]?.health).toBe('active')
     })
 
-    test('keeps the key Unverified with its reason after an inconclusive test', async () => {
+    test('demotes the key to cooling_down with its reason after an inconclusive test', async () => {
       probe.respondWith({
         verdict: 'inconclusive',
         reason: 'the provider rate-limited the test (HTTP 429)',
@@ -239,23 +245,23 @@ describe('Provider administration', () => {
 
       const created = await createProvider()
 
-      expect(created.keys[0]?.health).toBe('unverified')
+      expect(created.keys[0]?.health).toBe('cooling_down')
       expect(created.keys[0]?.lastProbe).toMatchObject({
         verdict: 'inconclusive',
         reason: 'the provider rate-limited the test (HTTP 429)',
       })
     })
 
-    test('keeps the key Unverified after the provider rejects it', async () => {
+    test('demotes the key to invalid_authentication after the provider rejects it', async () => {
       probe.respondWith({ verdict: 'rejected', reason: 'the provider rejected the key (HTTP 401)' })
 
       const created = await createProvider()
 
-      expect(created.keys[0]?.health).toBe('unverified')
+      expect(created.keys[0]?.health).toBe('invalid_authentication')
       expect(created.keys[0]?.lastProbe?.verdict).toBe('rejected')
     })
 
-    test('survives a probe that throws', async () => {
+    test('survives a probe that throws and demotes the key to cooling_down', async () => {
       const throwing = {
         calls: [],
         respondWith: () => undefined,
@@ -276,7 +282,7 @@ describe('Provider administration', () => {
 
         const created = (await response.json()) as ProviderBody
         expect(response.status).toBe(201)
-        expect(created.keys[0]?.health).toBe('unverified')
+        expect(created.keys[0]?.health).toBe('cooling_down')
         expect(created.keys[0]?.lastProbe?.reason).toBe('the key test did not complete')
       } finally {
         await app.dispose()
@@ -563,7 +569,7 @@ describe('Provider administration', () => {
       expect(updated.keys[0]?.lastProbe?.reason).toBe('the provider could not be reached')
     })
 
-    test('a usable retest activates an Unverified key', async () => {
+    test('a usable retest activates a key that an inconclusive probe demoted to cooling_down', async () => {
       probe.respondWith({ verdict: 'inconclusive', reason: 'the provider could not be reached' })
       const created = await createProvider()
 
@@ -878,7 +884,7 @@ describe('Provider administration', () => {
       }
     })
 
-    test('tests the copied key, and keeps it Unverified when the test is inconclusive', async () => {
+    test('tests the copied key, and demotes it to cooling_down when the test is inconclusive', async () => {
       const created = await createProvider()
       probe.respondWith({ verdict: 'inconclusive', reason: 'the provider could not be reached' })
 
@@ -888,7 +894,7 @@ describe('Provider administration', () => {
       })
 
       const copy = (await response.json()) as ProviderBody
-      expect(copy.keys[0]?.health).toBe('unverified')
+      expect(copy.keys[0]?.health).toBe('cooling_down')
       expect(copy.keys[0]?.lastProbe?.verdict).toBe('inconclusive')
     })
 

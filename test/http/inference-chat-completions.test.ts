@@ -545,7 +545,7 @@ describe('provider-scoped Chat Completions', () => {
           csrf: signedIn.csrf,
         })
         const untested = (await response.json()) as ConnectionBody
-        expect(untested.keys[0]?.health).toBe('unverified')
+        expect(untested.keys[0]?.health).toBe('cooling_down')
 
         const key = await app.fetch('/api/v1/admin/gateway-keys', {
           method: 'POST',

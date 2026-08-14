@@ -261,53 +261,65 @@ function ProviderRow({
           />
         </DialogContent>
       </Dialog>
-      <div className="bg-card hover:bg-muted/40 group flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors">
-        <button
-          type="button"
-          onClick={onOpen}
-          aria-label={`Open ${provider.displayName}`}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        >
-          <ProviderIcon
-            displayName={provider.displayName}
-            baseUrl={provider.baseUrl}
-            {...(provider.templateId === null ? {} : { templateId: provider.templateId })}
-          />
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate text-sm font-medium tracking-tight">
-              {provider.displayName}
-            </span>
-            <span
-              className="text-muted-foreground truncate font-mono text-xs"
-              title={provider.baseUrl || 'No default base URL set'}
-            >
-              {provider.baseUrl || '—'}
-            </span>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`Open ${provider.displayName}`}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onOpen()
+          }
+        }}
+        className="bg-card hover:bg-muted/40 group flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 transition-colors"
+      >
+        <ProviderIcon
+          displayName={provider.displayName}
+          baseUrl={provider.baseUrl}
+          {...(provider.templateId === null ? {} : { templateId: provider.templateId })}
+        />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm font-medium tracking-tight">
+            {provider.displayName}
           </span>
-          {archived && <StatusBadge tone="neutral" label="Archived" />}
-          {!archived && !provider.enabled && (
-            <StatusBadge tone="neutral" label="Disabled" />
-          )}
-          <span className="text-muted-foreground ml-auto hidden items-center gap-1.5 text-xs sm:flex">
-            <Dot tone={status.tone} />
-            <span className="text-foreground">{status.label}</span>
+          <span
+            className="text-muted-foreground truncate font-mono text-xs"
+            title={provider.baseUrl || 'No default base URL set'}
+          >
+            {provider.baseUrl || '—'}
           </span>
-        </button>
+        </span>
+        {archived && <StatusBadge tone="neutral" label="Archived" />}
+        {!archived && !provider.enabled && (
+          <StatusBadge tone="neutral" label="Disabled" />
+        )}
+        <span className="text-muted-foreground ml-auto hidden items-center gap-1.5 text-xs sm:flex">
+          <Dot tone={status.tone} />
+          <span className="text-foreground">{status.label}</span>
+        </span>
 
         <ProviderSparkline traffic={traffic} />
 
-        <ProviderMenu
-          archived={archived}
-          busy={busy}
-          onEdit={() => setEditing(true)}
-          onArchive={() =>
-            void run('archive', () => archiveProvider(provider.id, csrfToken))
-          }
-          onDuplicate={() =>
-            void run('duplicate', () => duplicateProvider(provider.id, csrfToken))
-          }
-          onPurge={() => void run('purge', () => purgeProvider(provider.id, csrfToken))}
-        />
+        <div
+          role="presentation"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <ProviderMenu
+            archived={archived}
+            busy={busy}
+            onEdit={() => setEditing(true)}
+            onArchive={() =>
+              void run('archive', () => archiveProvider(provider.id, csrfToken))
+            }
+            onDuplicate={() =>
+              void run('duplicate', () => duplicateProvider(provider.id, csrfToken))
+            }
+            onPurge={() => void run('purge', () => purgeProvider(provider.id, csrfToken))}
+          />
+        </div>
       </div>
 
       <div className="text-muted-foreground mt-1 flex items-center gap-2 px-4 text-xs sm:hidden">

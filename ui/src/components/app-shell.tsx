@@ -153,17 +153,6 @@ function NavigationButton({
     >
       <Icon className="size-4 shrink-0" aria-hidden strokeWidth={active ? 2 : 1.5} />
       <span className="truncate">{item.label}</span>
-      <span
-        aria-hidden
-        className={cn(
-          'ml-auto flex h-5 w-5 items-center justify-center rounded border text-[10px] font-semibold shadow-sm transition-colors',
-          active
-            ? 'border-active/20 bg-white/60 text-active'
-            : 'border-sidebar-border bg-background text-muted-foreground group-hover:border-sidebar-foreground/30',
-        )}
-      >
-        {item.hint}
-      </span>
     </Link>
   )
 }

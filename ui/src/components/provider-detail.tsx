@@ -39,6 +39,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { StatefulButton } from '@/components/ui/stateful-button'
 import { MoreHorizontal } from 'lucide-react'
 import { ProviderIcon } from '@/components/provider-icon'
 import { EditProviderForm } from '@/components/edit-provider-form'
@@ -394,30 +395,8 @@ function ProviderActions({
   readonly onDeleted: () => void
 }) {
   const [editing, setEditing] = useState(false)
-  const [busy, setBusy] = useState<string | null>(null)
-  const [confirmingArchive, setConfirmingArchive] = useState(false)
-  const [confirmingPurge, setConfirmingPurge] = useState(false)
-  const [rowError, setRowError] = useState<ManagementError | null>(null)
+  const [confirming, setConfirming] = useState<'archive' | 'purge' | null>(null)
   const archived = provider.archived
-
-  const run = async (label: string, perform: () => Promise<unknown>) => {
-    setBusy(label)
-    setRowError(null)
-    try {
-      await perform()
-      onChanged()
-    } catch (cause) {
-      setRowError(
-        cause instanceof ManagementError
-          ? cause
-          : new ManagementError('request_failed', 'That did not work.'),
-      )
-    } finally {
-      setBusy(null)
-      setConfirmingArchive(false)
-      setConfirmingPurge(false)
-    }
-  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -445,85 +424,93 @@ function ProviderActions({
         <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}>
           <Settings className="size-3.5" aria-hidden /> Edit settings
         </Button>
-        <Button
-          type="button"
+        <StatefulButton
           variant="outline"
           size="sm"
-          onClick={() => void run('refresh', () => refreshCatalog(provider.id, csrfToken))}
-          disabled={busy !== null || archived}
+          disabled={archived}
+          successLabel="Refreshed"
+          onClick={async () => {
+            await refreshCatalog(provider.id, csrfToken)
+            onChanged()
+          }}
         >
-          <RefreshCcw className="size-3.5" aria-hidden />
-          {busy === 'refresh' ? 'Refreshing…' : 'Refresh catalog'}
-        </Button>
-        <Button
-          type="button"
+          <RefreshCcw className="size-3.5" aria-hidden /> Refresh catalog
+        </StatefulButton>
+        <StatefulButton
           variant="outline"
           size="sm"
-          onClick={() => void run('duplicate', () => duplicateProvider(provider.id, csrfToken))}
-          disabled={busy !== null}
+          successLabel="Duplicated"
+          onClick={async () => {
+            await duplicateProvider(provider.id, csrfToken)
+            onChanged()
+          }}
         >
-          <Copy className="size-3.5" aria-hidden />
-          {busy === 'duplicate' ? 'Duplicating…' : 'Duplicate'}
-        </Button>
+          <Copy className="size-3.5" aria-hidden /> Duplicate
+        </StatefulButton>
         <span className="bg-border mx-1 h-4 w-px" aria-hidden />
         {!archived && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              if (confirmingArchive) {
-                void run('archive', () => archiveProvider(provider.id, csrfToken))
-              } else {
-                setConfirmingArchive(true)
-              }
-            }}
-            onBlur={() => setConfirmingArchive(false)}
-            disabled={busy !== null}
-            className="text-status-danger hover:border-status-danger/40 hover:bg-status-danger/5"
-          >
-            <Archive className="size-3.5" aria-hidden />
-            {busy === 'archive'
-              ? 'Archiving…'
-              : confirmingArchive
-                ? 'Confirm archive'
-                : 'Archive'}
-          </Button>
+          <>
+            {confirming === 'archive' ? (
+              <StatefulButton
+                variant="outline"
+                size="sm"
+                successLabel="Archived"
+                errorLabel="Try again"
+                className="border-status-danger/40 text-status-danger hover:bg-status-danger/5"
+                onClick={async () => {
+                  await archiveProvider(provider.id, csrfToken)
+                  setConfirming(null)
+                  onChanged()
+                }}
+                onBlur={() => setConfirming(null)}
+              >
+                <Archive className="size-3.5" aria-hidden /> Confirm archive
+              </StatefulButton>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirming('archive')}
+                className="text-status-danger hover:border-status-danger/40 hover:bg-status-danger/5"
+              >
+                <Archive className="size-3.5" aria-hidden /> Archive
+              </Button>
+            )}
+          </>
         )}
         {archived && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              if (confirmingPurge) {
-                void run('purge', async () => {
+          <>
+            {confirming === 'purge' ? (
+              <StatefulButton
+                variant="outline"
+                size="sm"
+                successLabel="Purged"
+                errorLabel="Try again"
+                className="border-status-danger/40 text-status-danger hover:bg-status-danger/5"
+                onClick={async () => {
                   await purgeProvider(provider.id, csrfToken)
+                  setConfirming(null)
                   onDeleted()
-                })
-              } else {
-                setConfirmingPurge(true)
-              }
-            }}
-            onBlur={() => setConfirmingPurge(false)}
-            disabled={busy !== null}
-            className="text-status-danger hover:border-status-danger/40 hover:bg-status-danger/5"
-          >
-            {busy === 'purge'
-              ? 'Purging…'
-              : confirmingPurge
-                ? 'Confirm purge'
-                : 'Purge permanently'}
-          </Button>
+                }}
+                onBlur={() => setConfirming(null)}
+              >
+                Confirm purge
+              </StatefulButton>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirming('purge')}
+                className="text-status-danger hover:border-status-danger/40 hover:bg-status-danger/5"
+              >
+                Purge permanently
+              </Button>
+            )}
+          </>
         )}
       </div>
-
-      {rowError && (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>That did not work</AlertTitle>
-          <AlertDescription>{rowError.message}</AlertDescription>
-        </Alert>
-      )}
     </div>
   )
 }

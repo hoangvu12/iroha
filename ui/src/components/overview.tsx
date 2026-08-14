@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { StatefulButton } from '@/components/ui/stateful-button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AreaChart, Area } from '@/components/charts/area-chart'
 import { LineChart, Line } from '@/components/charts/line-chart'
@@ -97,8 +98,6 @@ export function Overview(_props: OverviewProps) {
   const [requests, setRequests] = useState<readonly RequestEventView[] | null>(null)
   const [jobs, setJobs] = useState<readonly BackgroundJobView[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
   const reload = useCallback(async () => {
     try {
       const [list, page, jobList] = await Promise.all([
@@ -114,15 +113,6 @@ export function Overview(_props: OverviewProps) {
       setError(cause instanceof Error ? cause.message : 'Overview could not be loaded.')
     }
   }, [])
-
-  const manualReload = async () => {
-    setBusy(true)
-    try {
-      await reload()
-    } finally {
-      setBusy(false)
-    }
-  }
 
   useEffect(() => {
     void reload()
@@ -265,17 +255,15 @@ export function Overview(_props: OverviewProps) {
           title="Recent failures"
           loading={requests === null}
           rightSlot={
-            <Button
-              type="button"
+            <StatefulButton
               variant="ghost"
               size="xs"
-              onClick={() => void manualReload()}
-              disabled={busy}
+              successLabel="Refreshed"
               aria-label="Refresh overview"
+              onClick={() => void reload()}
             >
-              <RefreshCcw className="size-3" aria-hidden />
-              {busy ? 'Refreshing' : 'Refresh'}
-            </Button>
+              <RefreshCcw className="size-3" aria-hidden /> Refresh
+            </StatefulButton>
           }
         >
           {requests === null ? (

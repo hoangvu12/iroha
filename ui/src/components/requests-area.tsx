@@ -352,14 +352,25 @@ function RequestRow({
   const tone = event.outcome === 'success' ? 'healthy' : 'danger'
   return (
     <li>
-      <div className="bg-card hover:bg-muted/40 flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors">
+      <div
+        role="button"
+        tabIndex={busy ? -1 : 0}
+        aria-label={`Open request ${event.model}`}
+        aria-disabled={busy}
+        onClick={() => {
+          if (!busy) onOpen()
+        }}
+        onKeyDown={(event) => {
+          if (busy) return
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onOpen()
+          }
+        }}
+        className="bg-card hover:bg-muted/40 flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 transition-colors aria-disabled:cursor-not-allowed aria-disabled:hover:bg-card aria-disabled:opacity-70"
+      >
         <Dot tone={tone} />
-        <button
-          type="button"
-          onClick={onOpen}
-          disabled={busy}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        >
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <div className="flex items-center gap-2">
               <span className="truncate font-mono text-sm">{event.model}</span>
@@ -381,7 +392,7 @@ function RequestRow({
               )}
             </div>
           </div>
-        </button>
+        </div>
         <span
           className="text-muted-foreground font-mono tabular-nums shrink-0 text-xs"
           title={`HTTP ${event.status}`}

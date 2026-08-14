@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ClipboardList, SearchX } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { StatefulButton } from '@/components/ui/stateful-button'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -43,7 +44,6 @@ export function AuditArea({
   const [filter, setFilter] = useState<AuditFilter>({})
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState<AuditError | null>(null)
-  const [busy, setBusy] = useState(false)
 
   const reload = useCallback(
     async (currentFilter: AuditFilter, currentOffset: number) => {
@@ -76,21 +76,9 @@ export function AuditArea({
   }
 
   const doClear = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await clearAudit(csrfToken)
-      await reload(filter, 0)
-      setOffset(0)
-    } catch (cause) {
-      setError(
-        cause instanceof AuditError
-          ? cause
-          : new AuditError('request_failed', 'Could not clear the audit feed.'),
-      )
-    } finally {
-      setBusy(false)
-    }
+    await clearAudit(csrfToken)
+    await reload(filter, 0)
+    setOffset(0)
   }
 
   const total = list?.total ?? null
@@ -105,15 +93,26 @@ export function AuditArea({
               {total.toLocaleString('en-US')} total
             </span>
           )}
-          <Button
-            type="button"
+          <StatefulButton
             variant="outline"
             size="sm"
-            onClick={() => void doClear()}
-            disabled={busy || list === null || list.total === 0}
+            disabled={list === null || list.total === 0}
+            successLabel="Cleared"
+            onClick={async () => {
+              try {
+                await doClear()
+              } catch (cause) {
+                setError(
+                  cause instanceof AuditError
+                    ? cause
+                    : new AuditError('request_failed', 'Could not clear the audit feed.'),
+                )
+                throw cause
+              }
+            }}
           >
-            {busy ? 'Clearing…' : 'Clear feed'}
-          </Button>
+            Clear feed
+          </StatefulButton>
         </div>
       </header>
 

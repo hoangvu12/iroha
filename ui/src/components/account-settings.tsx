@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { KeyRound } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { StatefulButton } from '@/components/ui/stateful-button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -33,7 +34,6 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
   const csrfToken = state.session?.csrfToken ?? ''
   const [sessions, setSessions] = useState<readonly SessionSummary[] | null>(null)
   const [sessionsError, setSessionsError] = useState<AuthError | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null)
   const [retention, setRetention] = useState<RetentionView | null>(null)
   const [retentionDraft, setRetentionDraft] = useState<string>('30')
   const [retentionError, setRetentionError] = useState<string | null>(null)
@@ -76,28 +76,14 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
   }, [])
 
   const revokeOne = async (session: SessionSummary) => {
-    setBusyId(session.id)
-    try {
-      await revokeSession(session.id, csrfToken)
-      if (session.current) onSignedOut()
-      else await reloadSessions()
-    } catch (cause) {
-      setSessionsError(cause instanceof AuthError ? cause : new AuthError('request_failed', 'Revoke failed.'))
-    } finally {
-      setBusyId(null)
-    }
+    await revokeSession(session.id, csrfToken)
+    if (session.current) onSignedOut()
+    else await reloadSessions()
   }
 
   const revokeEverything = async () => {
-    setBusyId('all')
-    try {
-      await revokeAllSessions(csrfToken)
-      onSignedOut()
-    } catch (cause) {
-      setSessionsError(cause instanceof AuthError ? cause : new AuthError('request_failed', 'Revoke failed.'))
-    } finally {
-      setBusyId(null)
-    }
+    await revokeAllSessions(csrfToken)
+    onSignedOut()
   }
 
   const saveRetention = (event: FormEvent) => {
@@ -150,15 +136,26 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
               Every browser currently signed in as the Owner.
             </p>
           </div>
-          <Button
-            type="button"
+          <StatefulButton
             variant="outline"
             size="sm"
-            onClick={() => void revokeEverything()}
-            disabled={busyId !== null || sessions === null}
+            disabled={sessions === null}
+            successLabel="Signed out"
+            onClick={async () => {
+              try {
+                await revokeEverything()
+              } catch (cause) {
+                setSessionsError(
+                  cause instanceof AuthError
+                    ? cause
+                    : new AuthError('request_failed', 'Revoke failed.'),
+                )
+                throw cause
+              }
+            }}
           >
             Sign out everywhere
-          </Button>
+          </StatefulButton>
         </div>
 
         <Separator className="my-4" />
@@ -188,8 +185,18 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
               <SessionRow
                 key={session.id}
                 session={session}
-                busy={busyId !== null}
-                onRevoke={() => void revokeOne(session)}
+                onRevoke={async () => {
+                  try {
+                    await revokeOne(session)
+                  } catch (cause) {
+                    setSessionsError(
+                      cause instanceof AuthError
+                        ? cause
+                        : new AuthError('request_failed', 'Revoke failed.'),
+                    )
+                    throw cause
+                  }
+                }}
               />
             ))}
           </ul>
@@ -251,12 +258,10 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
 
 function SessionRow({
   session,
-  busy,
   onRevoke,
 }: {
   readonly session: SessionSummary
-  readonly busy: boolean
-  readonly onRevoke: () => void
+  readonly onRevoke: () => Promise<void>
 }) {
   return (
     <li>
@@ -273,16 +278,15 @@ function SessionRow({
             {formatTime(session.lastSeenAt)}
           </span>
         </div>
-        <Button
-          type="button"
+        <StatefulButton
           variant="ghost"
           size="sm"
-          onClick={onRevoke}
-          disabled={busy}
+          successLabel={session.current ? 'Signed out' : 'Revoked'}
           aria-label={`Revoke session ${session.id}`}
+          onClick={() => void onRevoke()}
         >
           {session.current ? 'Sign out' : 'Revoke'}
-        </Button>
+        </StatefulButton>
       </div>
     </li>
   )

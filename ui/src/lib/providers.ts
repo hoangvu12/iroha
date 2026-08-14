@@ -313,6 +313,34 @@ export async function addKey(
   )
 }
 
+export interface BulkAddKeysResult {
+  readonly added: readonly { readonly index: number; readonly keyId: string }[]
+  readonly failed: readonly {
+    readonly index: number
+    readonly problems: readonly FieldProblem[]
+  }[]
+}
+
+export async function bulkAddKeys(
+  providerId: string,
+  entries: readonly { readonly upstreamKey: string; readonly baseUrl?: string }[],
+  csrfToken: string,
+): Promise<BulkAddKeysResult> {
+  return await request<BulkAddKeysResult>(
+    'POST',
+    `/providers/${encodeURIComponent(providerId)}/keys/bulk`,
+    {
+      body: {
+        keys: entries.map((e) => ({
+          upstreamKey: e.upstreamKey,
+          ...(e.baseUrl !== undefined ? { baseUrl: e.baseUrl } : {}),
+        })),
+      },
+      csrfToken,
+    },
+  )
+}
+
 export async function updateKeySettings(
   providerId: string,
   keyId: string,

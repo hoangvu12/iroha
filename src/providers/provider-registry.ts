@@ -44,6 +44,16 @@ export type ProviderResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly failure: ProviderFailure }
 
+/**
+ * The per-entry verdict of a bulk import. Successful entries carry the new
+ * key id at its original batch position; failed entries carry the field
+ * problems the same way the single-row form would have surfaced them.
+ */
+export interface BulkAddKeysResult {
+  readonly added: readonly { readonly index: number; readonly keyId: string }[]
+  readonly failed: readonly { readonly index: number; readonly problems: readonly FieldProblem[] }[]
+}
+
 /** What the Owner may see about an Upstream Key. Never the key itself. */
 export interface KeyView {
   readonly id: string
@@ -951,6 +961,96 @@ export class ProviderRegistry {
     await this.#probeConnectionKeys(providerId)
 
     return { ok: true, value: await this.#viewOf(providerId) }
+  }
+
+  /**
+   * Adds many Upstream Keys to a Provider in one pass. Each entry is stored
+   * encrypted and Unverified in its own transaction, audited as `key.created`,
+   * and per-entry validation failures are recorded without stopping the rest
+   * of the batch — the Owner gets partial success so a single bad line never
+   * costs the good ones next to it.
+   *
+   * Bulk-imported keys intentionally carry no per-key `accountId`,
+   * `allowedModels`, or `deniedModels`: the Owner configures those selectively
+   * through the existing Configure dialog after import. The base URL override
+   * follows the same inheritance rules as `addKey`, and `baseUrlInherited: false`
+   * is recorded on the audit only when the entry supplied its own URL.
+   *
+   * Probing happens once at the end — looping `addKey` would pay for a fresh
+   * probe after every insert and turn a 200-key paste into 200 sequential
+   * probes, which is the budget the spec asks us to avoid.
+   */
+  async bulkAddKeys(
+    providerId: string,
+    input: {
+      keys: readonly { readonly upstreamKey?: unknown; readonly baseUrl?: unknown }[]
+    },
+  ): Promise<ProviderResult<BulkAddKeysResult>> {
+    const connection = await this.#database.providers.getProvider(providerId)
+    if (connection === null) return failed({ code: 'provider_not_found' })
+    if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
+
+    const added: { index: number; keyId: string }[] = []
+    const failedEntries: { index: number; problems: readonly FieldProblem[] }[] = []
+
+    for (let index = 0; index < input.keys.length; index += 1) {
+      const entry = input.keys[index]
+      const problems: FieldProblem[] = []
+
+      if (entry === null || typeof entry !== 'object') {
+        problems.push({ field: `keys[${index}]`, message: 'must be an Upstream Key object' })
+        failedEntries.push({ index, problems })
+        continue
+      }
+
+      problems.push(...upstreamKeyProblems(entry.upstreamKey))
+      const baseUrl = readKeyBaseUrl(entry.baseUrl, connection.baseUrl, problems)
+      if (problems.length > 0) {
+        failedEntries.push({ index, problems })
+        continue
+      }
+
+      const keyId = newId('uk')
+      const at = this.#clock.now()
+      await this.#database.transaction(async (repositories) => {
+        await repositories.providers.insertKey({
+          id: keyId,
+          providerId,
+          baseUrl,
+          accountId: null,
+          encryptedKey: await this.#cipher.encrypt((entry.upstreamKey as string).trim()),
+          health: 'unverified',
+          lastProbeAt: null,
+          lastProbeVerdict: null,
+          lastProbeReason: null,
+          healthReason: null,
+          healthChangedAt: at,
+          retryAfterAt: null,
+          healthScope: 'key',
+          healthScopeId: null,
+          healthModel: null,
+          allowedModels: null,
+          deniedModels: null,
+          createdAt: at,
+          updatedAt: at,
+        })
+        await repositories.audit.record({
+          action: 'key.created',
+          outcome: 'success',
+          detail: {
+            providerId,
+            keyId,
+            ...(baseUrl !== null ? { baseUrlInherited: false } : {}),
+          },
+          at,
+        })
+      })
+      added.push({ index, keyId })
+    }
+
+    await this.#probeConnectionKeys(providerId)
+
+    return { ok: true, value: { added, failed: failedEntries } }
   }
 
   /**

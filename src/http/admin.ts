@@ -507,6 +507,57 @@ export function createAdminRoutes({
         response: { 201: providerResponse, ...errorResponses },
       },
     )
+    .post(
+      '/providers/:id/keys/bulk',
+      async ({ params, body, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          // The status is split into its literals: a unioned code would type the
+          // response against two declared schemas at once and match neither.
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        // The body is validated by hand rather than by an Elysia schema: a
+        // schema validation error would echo the offending value back to the
+        // client, and that value can be an Upstream Key. Manually translating
+        // the bad shape into the `validation_failed` envelope keeps the value
+        // out of the error report (see the route-level doc on lines 33-40).
+        const parsed = validateBulkKeysBody(body)
+        if (!parsed.ok) {
+          return status(400, validationFailureBody(parsed.problems))
+        }
+
+        const result = await providers.bulkAddKeys(params.id, { keys: parsed.value.keys })
+        if (!result.ok) {
+          const failure = toFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(200, {
+          added: result.value.added.map((entry) => ({
+            index: entry.index,
+            keyId: entry.keyId,
+          })),
+          failed: result.value.failed.map((entry) => ({
+            index: entry.index,
+            problems: entry.problems.map((problem) => ({
+              field: problem.field,
+              message: problem.message,
+            })),
+          })),
+        })
+      },
+      {
+        detail: {
+          tags: ['Upstream Keys'],
+          summary: 'Bulk add Upstream Keys',
+          description:
+            'Imports many Upstream Keys in one call with partial-success semantics: each entry is validated and inserted independently, and the response records which entries were added and which failed. The batch is capped at 200 entries; entries past the cap are refused before any work begins. Per-key `allowedModels`, `deniedModels`, and `accountId` are not honored — the Owner configures them later via PATCH /providers/:id/keys/:keyId. The response carries the per-entry verdict, not the full Provider view; the UI refetches the Provider separately.',
+        },
+        response: { 200: bulkKeysResponse, ...errorResponses },
+      },
+    )
     .patch(
       '/providers/:id/keys/:keyId',
       async ({ params, body, request, cookie, status }) => {
@@ -948,6 +999,25 @@ const gatewayKeyCreatedResponse = t.Object({
 
 const gatewayKeyListResponse = t.Object({ keys: t.Array(gatewayKeyResponse) })
 
+/**
+ * The bulk-import response shape: per-entry verdicts so the Owner UI can
+ * surface partial-success inline.
+ */
+const bulkKeysResponse = t.Object({
+  added: t.Array(
+    t.Object({
+      index: t.Number(),
+      keyId: t.String(),
+    }),
+  ),
+  failed: t.Array(
+    t.Object({
+      index: t.Number(),
+      problems: t.Array(t.Object({ field: t.String(), message: t.String() })),
+    }),
+  ),
+})
+
 const errorResponse = t.Object({
   error: t.Object({
     code: t.String(),
@@ -1168,6 +1238,66 @@ function validationFailureBody(
       problems: problems.map((problem) => ({ field: problem.field, message: problem.message })),
     },
   }
+}
+
+/**
+ * Whole-batch validation for the bulk-add endpoint. Each entry's contents
+ * (bad upstreamKey, bad baseUrl) are caught by the registry's per-entry
+ * rules and surface in the `failed[]` array; this function only refuses the
+ * whole batch for shape problems that prevent any per-entry work.
+ */
+function validateBulkKeysBody(body: unknown):
+  | { ok: true; value: { keys: { readonly upstreamKey: string; readonly baseUrl?: string }[] } }
+  | { ok: false; problems: readonly { readonly field: string; readonly message: string }[] } {
+  const problems: { field: string; message: string }[] = []
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return { ok: false, problems: [{ field: 'body', message: 'A JSON object is required.' }] }
+  }
+
+  const obj = body as Record<string, unknown>
+  const keysValue = obj.keys
+
+  if (keysValue === undefined) {
+    return { ok: false, problems: [{ field: 'keys', message: 'A `keys` array is required.' }] }
+  }
+
+  if (!Array.isArray(keysValue)) {
+    return { ok: false, problems: [{ field: 'keys', message: '`keys` must be an array.' }] }
+  }
+
+  if (keysValue.length < 1) {
+    problems.push({ field: 'keys', message: 'At least one entry is required.' })
+  } else if (keysValue.length > 200) {
+    problems.push({ field: 'keys', message: 'At most 200 entries are allowed.' })
+  } else {
+    const keys: { upstreamKey: string; baseUrl?: string }[] = []
+    for (let i = 0; i < keysValue.length; i++) {
+      const entry = keysValue[i]
+      const entryPath = `keys[${i}]`
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+        problems.push({ field: entryPath, message: 'Each entry must be an object.' })
+        continue
+      }
+      const e = entry as Record<string, unknown>
+      if (typeof e.upstreamKey !== 'string') {
+        problems.push({ field: `${entryPath}.upstreamKey`, message: '`upstreamKey` must be a string.' })
+        continue
+      }
+      if (e.baseUrl !== undefined && e.baseUrl !== null && typeof e.baseUrl !== 'string') {
+        problems.push({ field: `${entryPath}.baseUrl`, message: '`baseUrl` must be a string when present.' })
+        continue
+      }
+      const key: { upstreamKey: string; baseUrl?: string } = { upstreamKey: e.upstreamKey }
+      if (typeof e.baseUrl === 'string') key.baseUrl = e.baseUrl
+      keys.push(key)
+    }
+    if (problems.length === 0) {
+      return { ok: true, value: { keys } }
+    }
+  }
+
+  return { ok: false, problems }
 }
 
 function asObject(body: unknown): Record<string, unknown> {

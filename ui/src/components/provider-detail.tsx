@@ -45,6 +45,7 @@ import { ProviderIcon } from '@/components/provider-icon'
 import { EditProviderForm } from '@/components/edit-provider-form'
 import { ModelListPicker } from '@/components/model-list-picker'
 import { CodeSnippetCard } from '@/components/code-snippet-card'
+import { BulkKeyInput } from '@/components/bulk-key-input'
 import {
   HEALTH_LABELS,
   HEALTH_ORDER,
@@ -57,6 +58,7 @@ import {
   activateKey,
   addKey,
   archiveProvider,
+  bulkAddKeys,
   disableKey,
   duplicateProvider,
   fetchProviders,
@@ -69,6 +71,7 @@ import {
   type KeyView,
   type ProviderView,
 } from '@/lib/providers'
+import type { BulkKeyEntry } from '@/lib/parse-bulk-keys'
 import { fetchRequests, type RequestEventView } from '@/lib/requests'
 import { useBrandByTemplateId } from '@/lib/use-provider-templates'
 import { refreshCatalog } from '@/lib/catalog'
@@ -591,6 +594,7 @@ function UpstreamKeysCard({
           onAdd={(input) =>
             run('add-key', () => addKey(provider.id, input, csrfToken))
           }
+          onChanged={onChanged}
           onDone={() => setAdding(false)}
           onCancel={() => setAdding(false)}
         />
@@ -664,6 +668,7 @@ function AddKeyDialog({
   defaultBaseUrl,
   csrfToken,
   onAdd,
+  onChanged,
   onDone,
   onCancel,
 }: {
@@ -677,35 +682,82 @@ function AddKeyDialog({
     readonly allowedModels: readonly string[] | null
     readonly deniedModels: readonly string[] | null
   }) => Promise<void>
+  readonly onChanged: () => void
   readonly onDone: () => void
   readonly onCancel: () => void
 }) {
+  const [keyInputMode, setKeyInputMode] = useState<'single' | 'bulk'>('single')
   const [value, setValue] = useState('')
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl)
   const [allowedModels, setAllowedModels] = useState<readonly string[]>([])
   const [deniedModels, setDeniedModels] = useState<readonly string[]>([])
+  const [bulkKeys, setBulkKeys] = useState<readonly BulkKeyEntry[]>([])
+  const [bulkPartialResult, setBulkPartialResult] = useState<{
+    readonly added: number
+    readonly failed: readonly {
+      readonly index: number
+      readonly problems: readonly { readonly field: string; readonly message: string }[]
+    }[]
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ManagementError | null>(null)
 
   const trimmedBaseUrl = baseUrl.trim()
   const explicitOverride = trimmedBaseUrl !== '' && trimmedBaseUrl !== defaultBaseUrl
 
+  const switchMode = (next: 'single' | 'bulk') => {
+    if (busy || keyInputMode === next) return
+    setKeyInputMode(next)
+    setError(null)
+    setBulkPartialResult(null)
+  }
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault()
-    if (busy || value === '') return
-    setBusy(true)
+    if (busy) return
     setError(null)
-    void onAdd({
-      upstreamKey: value,
-      baseUrl: explicitOverride ? trimmedBaseUrl : null,
-      accountId: null,
-      allowedModels: allowedModels.length === 0 ? null : allowedModels,
-      deniedModels: deniedModels.length === 0 ? null : deniedModels,
-    })
-      .then(() => {
-        setValue('')
-        setBaseUrl(defaultBaseUrl)
-        onDone()
+    setBulkPartialResult(null)
+    if (keyInputMode === 'single') {
+      if (value === '') return
+      setBusy(true)
+      void onAdd({
+        upstreamKey: value,
+        baseUrl: explicitOverride ? trimmedBaseUrl : null,
+        accountId: null,
+        allowedModels: allowedModels.length === 0 ? null : allowedModels,
+        deniedModels: deniedModels.length === 0 ? null : deniedModels,
+      })
+        .then(() => {
+          setValue('')
+          setBaseUrl(defaultBaseUrl)
+          onDone()
+        })
+        .catch((cause: unknown) =>
+          setError(
+            cause instanceof ManagementError
+              ? cause
+              : new ManagementError('request_failed', 'Could not save.'),
+          ),
+        )
+        .finally(() => setBusy(false))
+      return
+    }
+    if (bulkKeys.length === 0) return
+    setBusy(true)
+    void bulkAddKeys(providerId, bulkKeys, csrfToken)
+      .then((result) => {
+        if (result.failed.length === 0) {
+          setBulkKeys([])
+          setBulkPartialResult(null)
+          onChanged()
+          onDone()
+          return
+        }
+        onChanged()
+        setBulkPartialResult({
+          added: result.added.length,
+          failed: result.failed,
+        })
       })
       .catch((cause: unknown) =>
         setError(
@@ -716,6 +768,11 @@ function AddKeyDialog({
       )
       .finally(() => setBusy(false))
   }
+
+  const totalEntries = bulkKeys.length
+  const partialFailed = bulkPartialResult?.failed ?? []
+  const visibleFailures = partialFailed.slice(0, 5)
+  const extraFailures = partialFailed.length - visibleFailures.length
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
@@ -728,76 +785,131 @@ function AddKeyDialog({
           </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="upstream-add-key"
-              className="text-foreground text-sm font-medium"
+          <div
+            role="group"
+            aria-label="Upstream key input mode"
+            className="border-border bg-muted/40 inline-flex w-fit items-center gap-1 rounded-md border p-1"
+          >
+            <Button
+              type="button"
+              size="xs"
+              variant={keyInputMode === 'single' ? 'secondary' : 'ghost'}
+              aria-pressed={keyInputMode === 'single'}
+              onClick={() => switchMode('single')}
+              disabled={busy}
             >
-              Upstream key
-            </label>
-            <input
-              id="upstream-add-key"
-              type="password"
-              autoComplete="off"
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-              className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="add-key-base-url"
-              className="text-foreground text-sm font-medium"
+              Single entry
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              variant={keyInputMode === 'bulk' ? 'secondary' : 'ghost'}
+              aria-pressed={keyInputMode === 'bulk'}
+              onClick={() => switchMode('bulk')}
+              disabled={busy}
             >
-              Base URL override
-            </label>
-            <p className="text-muted-foreground text-xs">
-              Optional. Leave blank or set to the Provider default to inherit it. Set a
-              different URL to send requests from this key to a separate endpoint.
-            </p>
-            <input
-              id="add-key-base-url"
-              type="url"
-              autoComplete="off"
-              placeholder={defaultBaseUrl}
-              value={baseUrl}
-              onChange={(event) => setBaseUrl(event.target.value)}
-              className="border-input bg-background h-9 rounded-md border px-2 font-mono text-sm"
-            />
+              Bulk paste
+            </Button>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-foreground text-sm font-medium">
-              Only allow models
-            </label>
-            <p className="text-muted-foreground text-xs">
-              Restrict this upstream key to a subset of the catalog. Leave empty to allow
-              everything.
-            </p>
-            <ModelListPicker
-              providerId={providerId}
-              csrfToken={csrfToken}
-              selected={allowedModels}
-              onChange={setAllowedModels}
-            />
-          </div>
+          {keyInputMode === 'single' ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="upstream-add-key"
+                  className="text-foreground text-sm font-medium"
+                >
+                  Upstream key
+                </label>
+                <input
+                  id="upstream-add-key"
+                  type="password"
+                  autoComplete="off"
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                  className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                />
+              </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-foreground text-sm font-medium">
-              Exclude models
-            </label>
-            <p className="text-muted-foreground text-xs">
-              Block specific model IDs even when the key would otherwise reach them. Leave
-              empty to exclude nothing.
-            </p>
-            <ModelListPicker
-              providerId={providerId}
-              csrfToken={csrfToken}
-              selected={deniedModels}
-              onChange={setDeniedModels}
-            />
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="add-key-base-url"
+                  className="text-foreground text-sm font-medium"
+                >
+                  Base URL override
+                </label>
+                <p className="text-muted-foreground text-xs">
+                  Optional. Leave blank or set to the Provider default to inherit it. Set a
+                  different URL to send requests from this key to a separate endpoint.
+                </p>
+                <input
+                  id="add-key-base-url"
+                  type="url"
+                  autoComplete="off"
+                  placeholder={defaultBaseUrl}
+                  value={baseUrl}
+                  onChange={(event) => setBaseUrl(event.target.value)}
+                  className="border-input bg-background h-9 rounded-md border px-2 font-mono text-sm"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-foreground text-sm font-medium">
+                  Only allow models
+                </label>
+                <p className="text-muted-foreground text-xs">
+                  Restrict this upstream key to a subset of the catalog. Leave empty to allow
+                  everything.
+                </p>
+                <ModelListPicker
+                  providerId={providerId}
+                  csrfToken={csrfToken}
+                  selected={allowedModels}
+                  onChange={setAllowedModels}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-foreground text-sm font-medium">
+                  Exclude models
+                </label>
+                <p className="text-muted-foreground text-xs">
+                  Block specific model IDs even when the key would otherwise reach them. Leave
+                  empty to exclude nothing.
+                </p>
+                <ModelListPicker
+                  providerId={providerId}
+                  csrfToken={csrfToken}
+                  selected={deniedModels}
+                  onChange={setDeniedModels}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              {bulkPartialResult !== null && partialFailed.length > 0 && (
+                <Alert variant="destructive" role="alert">
+                  <AlertTitle>
+                    Added {bulkPartialResult.added} of{' '}
+                    {bulkPartialResult.added + partialFailed.length} keys
+                  </AlertTitle>
+                  <AlertDescription className="whitespace-pre-line">
+                    {visibleFailures
+                      .map(
+                        (failure) =>
+                          `Line ${failure.index + 1}: ${failure.problems[0]?.message ?? 'invalid entry'}`,
+                      )
+                      .join('\n')}
+                    {extraFailures > 0 ? `\n…and ${extraFailures} more` : ''}
+                  </AlertDescription>
+                </Alert>
+              )}
+              <BulkKeyInput
+                onParsed={(result) => setBulkKeys(result.entries)}
+                defaultBaseUrl={defaultBaseUrl}
+              />
+            </>
+          )}
 
           {error !== null && (
             <Alert variant="destructive" role="alert">
@@ -806,8 +918,23 @@ function AddKeyDialog({
             </Alert>
           )}
           <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={busy || value === ''}>
-              {busy ? 'Adding…' : 'Add key'}
+            <Button
+              type="submit"
+              size="sm"
+              disabled={
+                busy ||
+                (keyInputMode === 'single'
+                  ? value === ''
+                  : totalEntries === 0)
+              }
+            >
+              {busy
+                ? 'Adding…'
+                : keyInputMode === 'bulk'
+                  ? totalEntries === 1
+                    ? 'Add 1 key'
+                    : `Add ${totalEntries} keys`
+                  : 'Add key'}
             </Button>
             <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={busy}>
               Cancel

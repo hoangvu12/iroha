@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { createSecretCipher } from '../../src/crypto/index.ts'
 import {
   createBuiltInAdapterRegistry,
@@ -90,5 +90,166 @@ describe('ProviderRegistry: per-Upstream-Key base URL override', () => {
     if (!resolved.ok) throw new Error(resolved.failure.code)
     expect(resolved.value.keyId).toBe(overrideKeyId)
     expect(resolved.value.baseUrl).toBe(DEFAULT_URL)
+  })
+})
+
+describe('ProviderRegistry: bulkAddKeys', () => {
+  let opened: Awaited<ReturnType<typeof sqliteEngine.open>>
+  let clock: TestClock
+  let registry: ProviderRegistry
+  let providerId: string
+
+  beforeEach(async () => {
+    opened = await sqliteEngine.open()
+    clock = testClock()
+    registry = new ProviderRegistry({
+      database: opened.database,
+      cipher: createSecretCipher(TEST_MASTER_KEY),
+      keyProbe: fakeKeyProbe(),
+      adapterRegistry: createBuiltInAdapterRegistry(),
+      clock,
+    })
+    const created = await registry.create({
+      displayName: 'Bulk Import Provider',
+      baseUrl: DEFAULT_URL,
+      keys: [{ upstreamKey: 'sk-initial-upstream-key' }],
+    })
+    if (!created.ok) throw new Error(created.failure.code)
+    providerId = created.value.id
+  })
+
+  afterEach(async () => {
+    await opened.dispose()
+  })
+
+  test('empty list returns added: [] and failed: []', async () => {
+    const result = await registry.bulkAddKeys(providerId, { keys: [] })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.added).toEqual([])
+    expect(result.value.failed).toEqual([])
+
+    const keys = await opened.database.providers.listKeys(providerId)
+    expect(keys).toHaveLength(1)
+  })
+
+  test('all-valid batch inserts every key and audits each', async () => {
+    const result = await registry.bulkAddKeys(providerId, {
+      keys: [
+        { upstreamKey: 'sk-bulk-1' },
+        { upstreamKey: 'sk-bulk-2', baseUrl: OVERRIDE_URL },
+        { upstreamKey: 'sk-bulk-3' },
+      ],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.added).toHaveLength(3)
+    expect(result.value.failed).toEqual([])
+    expect(result.value.added.map((entry) => entry.index)).toEqual([0, 1, 2])
+    for (const entry of result.value.added) {
+      expect(entry.keyId).toMatch(/^uk_/)
+    }
+
+    const stored = await opened.database.providers.listKeys(providerId)
+    expect(stored).toHaveLength(4)
+    // The two keys without a per-key baseUrl inherit the Provider default;
+    // the middle one carries its own override. Bulk-imported keys carry no
+    // account / model restrictions and start unverified until the probe runs.
+    const overrideKey = stored.find((key) => key.baseUrl === OVERRIDE_URL)
+    expect(overrideKey).toBeDefined()
+    for (const key of stored) {
+      expect(key.accountId).toBeNull()
+      expect(key.allowedModels).toBeNull()
+      expect(key.deniedModels).toBeNull()
+    }
+
+    const events = await opened.database.audit.list({ limit: 50 })
+    const created = events.filter((event) => event.action === 'key.created')
+    // The initial key plus three bulk-inserted keys.
+    expect(created).toHaveLength(4)
+    const overrideAudit = created.find(
+      (event) => (event.detail as { keyId?: unknown }).keyId === overrideKey?.id,
+    )
+    expect(overrideAudit).toBeDefined()
+    expect(overrideAudit?.detail).toMatchObject({ baseUrlInherited: false })
+    const inheritedAudits = created.filter(
+      (event) => (event.detail as { keyId?: unknown }).keyId !== overrideKey?.id,
+    )
+    for (const audit of inheritedAudits) {
+      expect(audit.detail).not.toHaveProperty('baseUrlInherited')
+    }
+  })
+
+  test('mixed valid/invalid batch records failures and keeps going', async () => {
+    const result = await registry.bulkAddKeys(providerId, {
+      keys: [
+        { upstreamKey: 'sk-bulk-1' },
+        { upstreamKey: '' },
+        { upstreamKey: 'sk-bulk-3' },
+        { upstreamKey: 'sk-bulk-4', baseUrl: 'not-a-url' },
+        { upstreamKey: 'sk-bulk-5' },
+      ],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.added.map((entry) => entry.index)).toEqual([0, 2, 4])
+    expect(result.value.failed.map((entry) => entry.index)).toEqual([1, 3])
+    for (const failure of result.value.failed) {
+      expect(failure.problems.length).toBeGreaterThan(0)
+    }
+
+    const stored = await opened.database.providers.listKeys(providerId)
+    // The initial key plus the three valid bulk entries; the two bad lines
+    // never reach storage, proving the loop continued past them.
+    expect(stored).toHaveLength(4)
+  })
+
+  test('archived provider short-circuits with provider_archived', async () => {
+    const archived = await registry.archive(providerId)
+    if (!archived.ok) throw new Error(archived.failure.code)
+    const eventsBefore = await opened.database.audit.list({ limit: 50 })
+
+    const result = await registry.bulkAddKeys(providerId, {
+      keys: [{ upstreamKey: 'sk-should-not-be-added' }],
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.failure.code).toBe('provider_archived')
+
+    const eventsAfter = await opened.database.audit.list({ limit: 50 })
+    expect(eventsAfter).toHaveLength(eventsBefore.length)
+    expect(eventsAfter.some((event) => event.action === 'key.created')).toBe(true) // initial key
+    const newEvents = eventsAfter.slice(eventsBefore.length)
+    expect(newEvents.some((event) => event.action === 'key.created')).toBe(false)
+  })
+
+  test('missing provider short-circuits with provider_not_found', async () => {
+    const result = await registry.bulkAddKeys('pr_does_not_exist', {
+      keys: [{ upstreamKey: 'sk-should-not-be-added' }],
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.failure.code).toBe('provider_not_found')
+  })
+
+  test('five-key batch probes the connection exactly once', async () => {
+    // `#probeConnectionKeys` is private; the only path that reaches
+    // `listKeys(providerId)` from inside `bulkAddKeys` is the single probe
+    // pass at the end, so a spy on that call counts probe invocations.
+    const listKeysSpy = spyOn(opened.database.providers, 'listKeys')
+
+    const result = await registry.bulkAddKeys(providerId, {
+      keys: [
+        { upstreamKey: 'sk-bulk-1' },
+        { upstreamKey: 'sk-bulk-2' },
+        { upstreamKey: 'sk-bulk-3' },
+        { upstreamKey: 'sk-bulk-4' },
+        { upstreamKey: 'sk-bulk-5' },
+      ],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.added).toHaveLength(5)
+    expect(listKeysSpy).toHaveBeenCalledTimes(1)
   })
 })

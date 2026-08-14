@@ -41,6 +41,7 @@ import {
   toManagementError,
   useSubmission,
 } from '@/components/edit-provider-form'
+import { BulkKeyInput } from '@/components/bulk-key-input'
 import { describeProviderStatus } from '@/lib/provider-status'
 import {
   archiveProvider,
@@ -57,6 +58,7 @@ import {
   type ProviderView,
 } from '@/lib/providers'
 import { fetchRequests } from '@/lib/requests'
+import type { BulkKeyEntry } from '@/lib/parse-bulk-keys'
 import { useBrandByTemplateId } from '@/lib/use-provider-templates'
 
 interface ProvidersAreaProps {
@@ -137,10 +139,6 @@ export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New Provider</DialogTitle>
-            <DialogDescription>
-              A name, a default base URL, and one Upstream Key. The base URL is
-              required at creation; you can set per-key URL overrides later.
-            </DialogDescription>
           </DialogHeader>
           <CreateProviderForm
             csrfToken={csrfToken}
@@ -419,6 +417,11 @@ function CreateProviderForm({
   const [keys, setKeys] = useState<readonly CreateProviderKeyRow[]>(() => [
     { rowId: makeRowId(), upstreamKey: '', baseUrl: '' },
   ])
+  // Bulk-mode parsed entries live alongside `keys` so toggling between Single
+  // and Bulk does not destroy either. The submit handler picks which array
+  // to send based on `keyInputMode`.
+  const [bulkKeys, setBulkKeys] = useState<readonly BulkKeyEntry[]>([])
+  const [keyInputMode, setKeyInputMode] = useState<'single' | 'bulk'>('single')
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(false)
   // Default to the Generic OpenAI-compatible template up front so the Owner
   // never faces a blank selector or a loading state: the template list fetch
@@ -514,7 +517,10 @@ function CreateProviderForm({
       {
         displayName,
         baseUrl,
-        keys: keys.map((row) => ({ upstreamKey: row.upstreamKey, baseUrl: row.baseUrl })),
+        keys:
+          keyInputMode === 'bulk'
+            ? bulkKeys.map((b) => ({ upstreamKey: b.upstreamKey, baseUrl: b.baseUrl }))
+            : keys.map((row) => ({ upstreamKey: row.upstreamKey, baseUrl: row.baseUrl })),
         allowInsecureHttp,
         templateId,
       },
@@ -522,18 +528,6 @@ function CreateProviderForm({
     )
     onCreated()
   }, onFailure)
-
-  const baseUrlHint =
-    'Optional. Leave blank to set the Provider’s URL later, or fill in your own OpenAI-compatible base URL.'
-
-  const keysHint = (
-    <>
-      Add one Upstream Key now, or several if the upstream brand serves you
-      from multiple endpoints. Each key is encrypted with the installation
-      master key and never shown again. Add more keys later from the
-      Provider detail page.
-    </>
-  )
 
   const topLevelKeysProblem = form.problemFor('keys')
 
@@ -593,7 +587,6 @@ function CreateProviderForm({
       <Field
         id="new-base-url"
         label="Default base URL"
-        hint={baseUrlHint}
         value={baseUrl}
         onChange={setBaseUrl}
         problem={form.problemFor('baseUrl')}
@@ -601,32 +594,64 @@ function CreateProviderForm({
 
       <div className="flex flex-col gap-2">
         <Label>Upstream keys</Label>
-        <p className="text-muted-foreground text-xs">{keysHint}</p>
-        <ul className="flex flex-col gap-3">
-          {keys.map((row, index) => (
-            <CreateProviderKeyRowFields
-              key={row.rowId}
-              index={index}
-              row={row}
-              defaultBaseUrl={baseUrl}
-              canRemove={keys.length > 1}
-              onChange={(patch) => updateKeyRow(row.rowId, patch)}
-              onRemove={() => removeKeyRow(row.rowId)}
-              upstreamKeyProblem={form.problemFor(`keys[${index}].upstreamKey`)}
-              baseUrlProblem={form.problemFor(`keys[${index}].baseUrl`)}
-            />
-          ))}
-        </ul>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={addKeyRow}
-          className="self-start"
+        <div
+          role="group"
+          aria-label="Upstream key input mode"
+          className="border-border bg-muted/40 inline-flex w-fit items-center gap-1 rounded-md border p-1"
         >
-          <Plus className="size-3.5" aria-hidden />
-          Add another key
-        </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant={keyInputMode === 'single' ? 'secondary' : 'ghost'}
+            aria-pressed={keyInputMode === 'single'}
+            onClick={() => setKeyInputMode('single')}
+          >
+            Single entry
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant={keyInputMode === 'bulk' ? 'secondary' : 'ghost'}
+            aria-pressed={keyInputMode === 'bulk'}
+            onClick={() => setKeyInputMode('bulk')}
+          >
+            Bulk paste
+          </Button>
+        </div>
+        {keyInputMode === 'single' ? (
+          <>
+            <ul className="flex flex-col gap-3">
+              {keys.map((row, index) => (
+                <CreateProviderKeyRowFields
+                  key={row.rowId}
+                  index={index}
+                  row={row}
+                  defaultBaseUrl={baseUrl}
+                  canRemove={keys.length > 1}
+                  onChange={(patch) => updateKeyRow(row.rowId, patch)}
+                  onRemove={() => removeKeyRow(row.rowId)}
+                  upstreamKeyProblem={form.problemFor(`keys[${index}].upstreamKey`)}
+                  baseUrlProblem={form.problemFor(`keys[${index}].baseUrl`)}
+                />
+              ))}
+            </ul>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addKeyRow}
+              className="self-start"
+            >
+              <Plus className="size-3.5" aria-hidden />
+              Add another key
+            </Button>
+          </>
+        ) : (
+          <BulkKeyInput
+            onParsed={(result) => setBulkKeys(result.entries)}
+            defaultBaseUrl={baseUrl}
+          />
+        )}
         {topLevelKeysProblem !== undefined && (
           <p className="text-status-danger text-xs">{topLevelKeysProblem}</p>
         )}
@@ -650,7 +675,11 @@ function CreateProviderForm({
         <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={form.busy}>
           Cancel
         </Button>
-        <Button type="submit" size="sm" disabled={form.busy}>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={form.busy || (keyInputMode === 'bulk' && bulkKeys.length === 0)}
+        >
           {form.busy ? 'Creating…' : 'Create provider'}
         </Button>
       </div>
@@ -719,8 +748,8 @@ function CreateProviderKeyRowFields({
         onChange={(value) => onChange({ baseUrl: value })}
         hint={
           defaultBaseUrl.trim() === ''
-            ? 'Optional. Leave blank to inherit the Provider default (once set).'
-            : `Optional. Leave blank to inherit the Provider default: ${defaultBaseUrl}`
+            ? 'Inherits the Provider default once set.'
+            : `Inherits ${defaultBaseUrl}.`
         }
         problem={baseUrlProblem}
       />

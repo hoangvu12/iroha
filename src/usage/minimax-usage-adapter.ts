@@ -169,6 +169,7 @@ function parseSubscription(
       plan: tier,
       resetAt,
       scope: { kind: 'connection_model', model: tier },
+      keyId: null,
       confidence: 'confirmed',
       diagnostics: {
         source: 'minimax-usage-adapter',
@@ -214,6 +215,7 @@ function parseCredit(body: unknown): readonly UsageReading[] {
       plan: null,
       resetAt: null,
       scope: { kind: 'provider' },
+      keyId: null,
       confidence: 'confirmed',
       diagnostics: {
         source: 'minimax-usage-adapter',

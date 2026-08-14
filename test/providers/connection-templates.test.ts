@@ -176,6 +176,7 @@ describe('Provider Connection templates', () => {
               plan: null,
               resetAt: null,
               scope: { kind: 'unknown' as const },
+              keyId: null,
               confidence: 'unknown' as const,
               diagnostics: { source: 'mock' },
             },

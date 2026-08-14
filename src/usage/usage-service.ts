@@ -35,13 +35,32 @@ export type UsageServiceResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly failure: UsageServiceFailure }
 
-/** One attempt to find an eligible key for the poll's upstream request. */
+/** One eligible Upstream Key the service will poll this refresh. */
 interface UsagePollTarget {
   readonly baseUrl: string
   readonly allowInsecureHttp: boolean
   readonly upstreamKey: string
   /** The eligible Upstream Key this poll is talking to; one of the connection's keys. */
   readonly candidate: UpstreamKeyRecord
+}
+
+/**
+ * The per-key storage the snapshot's `result` carries. Each entry's readings
+ * are tagged with the matching `keyId` so the UI can route them to the right
+ * row. An entry is `undefined` when the last poll for that key failed; the
+ * prior entry is preserved across failures so a temporarily-down key
+ * doesn't blank its row, and overwritten on a successful poll so a
+ * permanently-down key eventually clears once the next eligible poll
+ * succeeds.
+ */
+type PerKeyReadings = Readonly<Record<string, readonly UsageReading[]>>
+
+/** A failure attached to the refresh's connection-level failure metadata. */
+interface UsageFailureRecord {
+  readonly at: Date
+  readonly code: string
+  readonly message: string
+  readonly retryAfterSeconds: number | null
 }
 
 export interface UsageServiceOptions {
@@ -175,10 +194,13 @@ export class UsageService {
   }
 
   /**
-   * Polls the connection's configured Usage Adapter once, persists the
-   * outcome, and returns the updated view. A polling failure never erases the
-   * previously successful reading; it is recorded separately so the Owner can
-   * read the latest of each.
+   * Polls the connection's configured Usage Adapter once per eligible
+   * Upstream Key, in parallel, persists the per-key outcome, and returns
+   * the updated view. A failure on one key never erases another key's
+   * previously successful reading; the prior reading is preserved for that
+   * key only. The connection-level `lastFailureAt`/`Code`/`Message` track
+   * the most recent failure across all keys so the Owner still sees a
+   * single, latest error for the connection.
    */
   async refresh(providerId: string): Promise<UsageServiceResult<UsageView>> {
     const connection = await this.#database.providers.getProvider(providerId)
@@ -186,45 +208,48 @@ export class UsageService {
     if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
     if (!connection.enabled) return failed({ code: 'provider_disabled' })
 
-    const target = await this.#resolveTarget(connection)
-    if (!target.ok) return target
+    const targets = await this.#resolveTargets(connection)
+    if (!targets.ok) return targets
 
     const at = this.#clock.now()
     const adapter = this.#adapterFor(connection)
     const visibility = adapter.visibility
-    const poll = await adapter.read({
-      baseUrl: target.value.baseUrl,
-      allowInsecureHttp: target.value.allowInsecureHttp,
-      upstreamKey: target.value.upstreamKey,
-      signal: null,
-    })
+
+    const polls = await Promise.all(
+      targets.value.map(async (target) => {
+        const poll = await adapter.read({
+          baseUrl: target.baseUrl,
+          allowInsecureHttp: target.allowInsecureHttp,
+          upstreamKey: target.upstreamKey,
+          signal: null,
+        })
+        return { target, poll }
+      }),
+    )
 
     const prior = await this.#database.usage.get(providerId)
-    const next = await this.#recordOutcome(providerId, prior, at, poll, visibility)
+    const next = await this.#recordOutcome(providerId, prior, at, polls, visibility)
 
-    if (poll.ok) {
+    const anySuccess = polls.some(({ poll }) => poll.ok)
+    if (anySuccess) {
       this.#failureStreak.delete(providerId)
-    } else if (poll.failure.code === 'rate_limited') {
-      this.#bumpFailureStreak(providerId)
     } else {
       this.#bumpFailureStreak(providerId)
     }
 
     if (next.ok) {
+      const successfulKeys = polls.filter(({ poll }) => poll.ok).length
+      const failedKeys = polls.length - successfulKeys
       await this.#database.audit.record({
         action: 'usage.refreshed',
-        outcome: poll.ok ? 'success' : 'failure',
+        outcome: successfulKeys > 0 || polls.length === 0 ? 'success' : 'failure',
         detail: {
           providerId,
-          ...(poll.ok
-            ? {
-                visibility,
-                readings: poll.readings.length,
-                scope: poll.readings[0]?.scope.kind ?? 'unknown',
-              }
-            : {
-                code: poll.failure.code,
-              }),
+          visibility,
+          polledKeys: polls.length,
+          successfulKeys,
+          failedKeys,
+          readings: next.value.readings.length,
         },
         at,
       })
@@ -275,72 +300,109 @@ export class UsageService {
     return readings[0]?.scope ?? null
   }
 
-  async #resolveTarget(
+  async #resolveTargets(
     connection: ProviderRecord,
-  ): Promise<UsageServiceResult<UsagePollTarget>> {
+  ): Promise<UsageServiceResult<readonly UsagePollTarget[]>> {
     const keys = await this.#database.providers.listKeys(connection.id)
-    const eligible = keys.find((key) => key.health === 'active' || key.health === 'unverified')
-      ?? keys.find((key) => key.health !== 'disabled')
-    if (eligible === undefined) return failed({ code: 'no_eligible_key' })
+    const eligible = keys.filter(
+      (key) => key.health === 'active' || key.health === 'unverified'
+        || key.health === 'cooling_down' || key.health === 'exhausted',
+    )
+    if (eligible.length === 0) return failed({ code: 'no_eligible_key' })
 
-    try {
-      const plaintext = await this.#cipher.decrypt(eligible.encryptedKey)
-      return {
-        ok: true,
-        value: {
-          baseUrl: connection.baseUrl,
-          allowInsecureHttp: connection.allowInsecureHttp,
-          upstreamKey: plaintext,
-          candidate: eligible,
-        },
+    const targets: UsagePollTarget[] = []
+    for (const key of eligible) {
+      let plaintext: string
+      try {
+        plaintext = await this.#cipher.decrypt(key.encryptedKey)
+      } catch (cause) {
+        if (cause instanceof SecretCipherError) return failed({ code: 'stored_key_unreadable' })
+        throw cause
       }
-    } catch (cause) {
-      if (cause instanceof SecretCipherError) return failed({ code: 'stored_key_unreadable' })
-      throw cause
+      targets.push({
+        baseUrl: connection.baseUrl,
+        allowInsecureHttp: connection.allowInsecureHttp,
+        upstreamKey: plaintext,
+        candidate: key,
+      })
     }
+    return { ok: true, value: targets }
   }
 
   async #recordOutcome(
     providerId: string,
     prior: UsageSnapshotRecord | null,
     at: Date,
-    poll: UsagePollResult,
+    polls: ReadonlyArray<{ readonly target: UsagePollTarget; readonly poll: UsagePollResult }>,
     visibility: UsageVisibility,
   ): Promise<UsageServiceResult<UsageView>> {
-    let next: UsageSnapshotRecord
+    const priorByKey = prior === null ? {} : perKeyMapFromSnapshot(prior.result)
+    const nextByKey: Record<string, readonly UsageReading[]> = { ...priorByKey }
 
-    if (poll.ok) {
-      next = {
-        providerId,
-        visibility,
-        syncedAt: at,
-        lastSuccessAt: at,
-        lastFailureAt: prior?.lastFailureAt ?? null,
-        lastFailureCode: prior?.lastFailureCode ?? null,
-        lastFailureMessage: prior?.lastFailureMessage ?? null,
-        result: poll.readings,
+    // Track the freshest success and failure across the polls. A successful
+    // poll for a key replaces that key's prior entry; a failed poll leaves
+    // the prior entry in place so a temporarily down key doesn't blank its
+    // row. Keys that disappeared from the eligible list since the last
+    // refresh (e.g. the Owner disabled one) keep their prior entry for one
+    // cycle; they get dropped on the next successful refresh that lists
+    // them as no longer eligible.
+    let latestSuccessAt: Date | null = prior?.lastSuccessAt ?? null
+    let latestFailure: UsageFailureRecord | null = null
+    if (prior?.lastFailureAt !== null && prior?.lastFailureAt !== undefined
+      && prior.lastFailureCode !== null && prior.lastFailureMessage !== null) {
+      latestFailure = {
+        at: prior.lastFailureAt,
+        code: prior.lastFailureCode,
+        message: prior.lastFailureMessage,
+        retryAfterSeconds: null,
       }
-    } else {
-      next = {
-        providerId,
-        visibility,
-        syncedAt: at,
-        lastSuccessAt: prior?.lastSuccessAt ?? null,
-        lastFailureAt: at,
-        lastFailureCode: poll.failure.code,
-        lastFailureMessage: messageFor(poll.failure),
-        result: prior?.result ?? null,
+    }
+
+    for (const { target, poll } of polls) {
+      const keyId = target.candidate.id
+      if (poll.ok) {
+        nextByKey[keyId] = poll.readings.map((reading) => ({ ...reading, keyId }))
+        if (latestSuccessAt === null || at.getTime() > latestSuccessAt.getTime()) {
+          latestSuccessAt = at
+        }
+        continue
       }
+
+      const message = messageFor(poll.failure)
+      const retryAfterSeconds = poll.failure.code === 'rate_limited'
+        ? Math.max(1, poll.failure.retryAfterSeconds)
+        : null
+      const record: UsageFailureRecord = { at, code: poll.failure.code, message, retryAfterSeconds }
+      if (latestFailure === null || record.at.getTime() >= latestFailure.at.getTime()) {
+        latestFailure = record
+      }
+    }
+
+    const eligibleIds = new Set(polls.map(({ target }) => target.candidate.id))
+    for (const keyId of Object.keys(nextByKey)) {
+      if (!eligibleIds.has(keyId)) delete nextByKey[keyId]
+    }
+
+    const next: UsageSnapshotRecord = {
+      providerId,
+      visibility,
+      syncedAt: at,
+      lastSuccessAt: latestSuccessAt,
+      lastFailureAt: latestFailure?.at ?? prior?.lastFailureAt ?? null,
+      lastFailureCode: latestFailure?.code ?? prior?.lastFailureCode ?? null,
+      lastFailureMessage: latestFailure?.message ?? prior?.lastFailureMessage ?? null,
+      result: nextByKey,
     }
 
     await this.#database.usage.put(next)
 
-    if (!poll.ok && poll.failure.code === 'rate_limited') {
-      const retryAfterSeconds = Math.max(1, poll.failure.retryAfterSeconds)
+    const rateLimit = latestFailure?.code === 'rate_limited' ? latestFailure : null
+    if (rateLimit !== null) {
+      const retryAfterSeconds = rateLimit.retryAfterSeconds ?? 1
       return failed({
         code: 'rate_limited',
         retryAfterSeconds,
-        retryAt: new Date(at.getTime() + retryAfterSeconds * 1000),
+        retryAt: new Date(rateLimit.at.getTime() + retryAfterSeconds * 1000),
       })
     }
 
@@ -415,35 +477,90 @@ function toView(
  * is a string. Normalise here so the rest of the service can rely on the
  * declared shape and the HTTP DTO's `toISOString()` calls never blow up.
  *
- * Accepts either the current `UsageReading[]` shape or the legacy single
- * `UsageReading` shape that pre-dates the multi-reading contract — old rows
- * are read back as a one-element list so the UI does not have to fork.
+ * Accepts three shapes, oldest first:
+ *
+ * 1. A single `UsageReading` object (the original contract, pre multi-reading).
+ * 2. A flat `UsageReading[]` (the multi-reading contract, pre per-key).
+ * 3. A `Record<keyId, UsageReading[]>` (the per-key contract; current).
+ *
+ * The legacy shapes come back with `keyId: null` on every reading; the new
+ * shape preserves the per-key attribution. Every reading's `resetAt` is
+ * coerced to a `Date` so the HTTP DTO can call `toISOString()` on it.
  */
 function normalizeReadings(raw: unknown): readonly UsageReading[] {
   if (raw === null) return []
   if (Array.isArray(raw)) {
     const out: UsageReading[] = []
     for (const entry of raw) {
-      const reading = normalizeReading(entry)
+      const reading = normalizeReading(entry, null)
       if (reading !== null) out.push(reading)
     }
     return out
   }
-  const legacy = normalizeReading(raw)
+  if (typeof raw === 'object') {
+    const recordLike = raw as Record<string, unknown>
+    const looksLikePerKeyMap = Object.values(recordLike).every(
+      (value) => Array.isArray(value) || value === null,
+    )
+    if (looksLikePerKeyMap) {
+      const out: UsageReading[] = []
+      for (const [keyId, value] of Object.entries(recordLike)) {
+        if (value === null) continue
+        if (!Array.isArray(value)) continue
+        for (const entry of value) {
+          const reading = normalizeReading(entry, keyId)
+          if (reading !== null) out.push(reading)
+        }
+      }
+      return out
+    }
+  }
+  const legacy = normalizeReading(raw, null)
   return legacy === null ? [] : [legacy]
 }
 
-function normalizeReading(raw: unknown): UsageReading | null {
+function normalizeReading(raw: unknown, keyId: string | null): UsageReading | null {
   if (raw === null) return null
   if (typeof raw !== 'object') return null
-  const r = raw as Partial<UsageReading> & { resetAt?: unknown }
+  const r = raw as Partial<UsageReading> & { resetAt?: unknown; keyId?: unknown }
   const resetAt =
     typeof r.resetAt === 'string'
       ? new Date(r.resetAt)
       : r.resetAt instanceof Date
         ? r.resetAt
         : null
-  return { ...(r as UsageReading), resetAt }
+  // A legacy reading may carry no `keyId` field; the caller's hint wins
+  // unless the reading already has one (the per-key map writes it; the
+  // flat list doesn't).
+  const resolvedKeyId = typeof r.keyId === 'string' ? r.keyId : keyId
+  return { ...(r as UsageReading), resetAt, keyId: resolvedKeyId }
+}
+
+/**
+ * Reads the snapshot's `result` back into the per-key map shape the writer
+ * produces. Used by `#recordOutcome` so a partial failure can preserve the
+ * prior readings for keys that didn't successfully poll this round. Legacy
+ * flat-list and single-reading snapshots are flattened: the readings are
+ * treated as connection-wide (`keyId: null`) and dropped, because the writer
+ * will rebuild the per-key map on the next successful refresh.
+ */
+function perKeyMapFromSnapshot(raw: unknown): Record<string, readonly UsageReading[]> {
+  if (raw === null || typeof raw !== 'object') return {}
+  const recordLike = raw as Record<string, unknown>
+  const looksLikePerKeyMap = Object.values(recordLike).every(
+    (value) => Array.isArray(value) || value === null,
+  )
+  if (!looksLikePerKeyMap) return {}
+  const out: Record<string, readonly UsageReading[]> = {}
+  for (const [keyId, value] of Object.entries(recordLike)) {
+    if (!Array.isArray(value)) continue
+    out[keyId] = value.map((entry) => {
+      const reading = normalizeReading(entry, keyId)
+      if (reading === null) return null
+      return reading
+    }).filter((reading): reading is UsageReading => reading !== null)
+  }
+  return out
 }
 
 function messageFor(failure: UsageFailure): string {

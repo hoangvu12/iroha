@@ -141,6 +141,7 @@ function successReading(input: {
         plan: null,
         resetAt: input.resetAt,
         scope,
+        keyId: null,
         confidence: 'confirmed',
         diagnostics: { source: 'mock-credit-adapter' },
       },

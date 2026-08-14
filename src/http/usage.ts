@@ -116,6 +116,7 @@ const usageReading = t.Object({
   plan: t.Union([t.Null(), t.String()]),
   resetAt: t.Union([t.Null(), t.String()]),
   scope: usageScope,
+  keyId: t.Union([t.Null(), t.String()]),
   confidence: t.Union([t.Literal('confirmed'), t.Literal('unknown')]),
   diagnostics: t.Object({}, { additionalProperties: true }),
 })
@@ -174,6 +175,7 @@ function toUsageDto(view: UsageView, recovery: UsageRecoveryEvidence | null): Us
       plan: reading.plan,
       resetAt: reading.resetAt?.toISOString() ?? null,
       scope: toScopeDto(reading.scope),
+      keyId: reading.keyId,
       confidence: reading.confidence,
       diagnostics: { ...reading.diagnostics },
     })),

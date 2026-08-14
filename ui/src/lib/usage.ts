@@ -14,6 +14,14 @@ export interface UsageReadingView {
   readonly plan: string | null
   readonly resetAt: string | null
   readonly scope: UsageScope
+  /**
+   * The Upstream Key the service used to fetch this reading, or `null` for a
+   * reading that isn't tied to a specific key (legacy data, a reading the
+   * service couldn't attribute to a key). The cell for a key in the Upstream
+   * Keys table shows readings whose `keyId` matches the row's key, plus any
+   * with `keyId: null`.
+   */
+  readonly keyId: string | null
   readonly confidence: 'confirmed' | 'unknown'
   readonly diagnostics: Readonly<Record<string, unknown>>
 }

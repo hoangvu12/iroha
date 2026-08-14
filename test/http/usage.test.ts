@@ -29,6 +29,7 @@ interface UsageBody {
     plan: string | null
     resetAt: string | null
     scope: { kind: string; [key: string]: unknown }
+    keyId: string | null
     confidence: 'confirmed' | 'unknown'
     diagnostics: Record<string, unknown>
   }[]
@@ -439,5 +440,61 @@ describe('Usage Adapter mock fixtures exercised end-to-end', () => {
     expect(body.stale).toBe(true)
     expect(body.readings[0]?.balance).toBe(88)
     expect(body.lastFailureCode).toBe('rate_limited')
+  })
+})
+
+describe('the Owner usage surface polls every eligible Upstream Key', () => {
+  let iroha: TestApp
+  let csrf: string
+  let connection: ConnectionBody
+
+  beforeEach(async () => {
+    iroha = await createTestApp({
+      usageAdapter: createMockCreditUsageAdapter({
+        initialBalances: {
+          [UPSTREAM_KEY]: 42,
+          'sk-second-upstream-for-usage': 17,
+        },
+        accountId: 'shared-account',
+      }),
+    })
+    csrf = (await completeSetup(iroha)).csrf
+    const created = await iroha.fetch('/api/v1/admin/providers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Per-key usage example',
+        baseUrl: BASE_URL,
+        keys: [{ upstreamKey: UPSTREAM_KEY }, { upstreamKey: 'sk-second-upstream-for-usage' }],
+      }),
+      csrf,
+    })
+    if (created.status !== 201) {
+      throw new Error(`Connection create failed with ${created.status}: ${await created.text()}`)
+    }
+    connection = (await created.json()) as ConnectionBody
+  })
+
+  afterEach(async () => {
+    await iroha.dispose()
+  })
+
+  test('each reading carries the keyId of the Upstream Key that fetched it', async () => {
+    const response = await iroha.fetch(
+      `/api/v1/admin/providers/${connection.id}/usage/refresh`,
+      { method: 'POST', csrf },
+    )
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as UsageBody
+    expect(body.readings).toHaveLength(2)
+    const byKey = new Map(
+      body.readings.filter((r) => r.keyId !== null).map((r) => [r.keyId as string, r]),
+    )
+    const balances = [...byKey.values()].map((r) => r.balance).sort()
+    expect(balances).toEqual([17, 42])
+    for (const reading of body.readings) {
+      expect(reading.keyId).not.toBeNull()
+      expect(reading.scope).toEqual({ kind: 'account', accountId: 'shared-account' })
+    }
   })
 })

@@ -64,6 +64,17 @@ export interface UsageReading {
   readonly resetAt: Date | null
   /** Where this reading applies; `unknown` is honest, never a guess. */
   readonly scope: UsageCapacityScope
+  /**
+   * The Upstream Key the service used to fetch this reading. `null` for a
+   * reading that is not tied to a specific key (e.g. a legacy snapshot
+   * written before per-key polling landed, or a reactive-only reading the
+   * service cannot attribute to a key). The adapter never sets this; the
+   * `UsageService` does, at the moment it knows which key the poll ran
+   * through. The `scope` field above describes the *entitlement* (account,
+   * model, provider); `keyId` describes the *transport* and decides which
+   * row in the Upstream Keys table the reading belongs in.
+   */
+  readonly keyId: string | null
   /** Whether the adapter stands behind this reading. */
   readonly confidence: 'confirmed' | 'unknown'
   /**

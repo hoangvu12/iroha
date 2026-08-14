@@ -524,6 +524,129 @@ describe('UsageService authoritative plan adapter', () => {
   })
 })
 
+describe('UsageService per-Upstream-Key polling', () => {
+  let fixture: Fixture
+  let service: UsageService
+  let dispose: () => Promise<void>
+  let adapter: ReturnType<typeof createMockCreditUsageAdapter>
+
+  beforeEach(async () => {
+    adapter = createMockCreditUsageAdapter({
+      initialBalances: { 'sk-upstream-for-usage': 42, 'sk-second-upstream': 25 },
+      accountId: 'shared-account',
+    })
+    const built = await buildFixture(adapter)
+    fixture = built.fixture
+    service = built.service
+    dispose = built.dispose
+    adapter.respondWith((request) =>
+      successReadingFor({
+        balance: adapterBalanceFor(request.upstreamKey),
+        accountId: fixture.accountId,
+      }),
+    )
+    await fixture.registry.addKey(fixture.providerId, {
+      upstreamKey: 'sk-second-upstream',
+    })
+  })
+
+  afterEach(async () => {
+    await dispose()
+  })
+
+  test('each eligible Upstream Key is polled and tagged with its keyId', async () => {
+    const view = await service.refresh(fixture.providerId)
+    if (!view.ok) throw new Error(view.failure.code)
+
+    expect(view.value.readings).toHaveLength(2)
+    const byKey = new Map(view.value.readings.map((r) => [r.keyId, r]))
+    expect(byKey.get(fixture.keyId)?.balance).toBe(42)
+    const secondKeyId = view.value.readings.find((r) => r.keyId !== fixture.keyId)?.keyId
+    expect(secondKeyId).toBeDefined()
+    expect(byKey.get(secondKeyId ?? '')?.balance).toBe(25)
+    expect(adapter.calls).toHaveLength(2)
+  })
+
+  test('a partial failure keeps the successful key\'s reading and records the failure at the connection level', async () => {
+    // First refresh — both keys succeed.
+    await service.refresh(fixture.providerId)
+
+    // Second refresh — first key fails, second key still works. The failure
+    // is recorded at the connection level (one latest-failure across all
+    // keys) and the prior reading for the failed key is preserved.
+    let callCount = 0
+    adapter.respondWith((request) => {
+      callCount += 1
+      if (request.upstreamKey === 'sk-upstream-for-usage') {
+        return {
+          ok: false,
+          failure: { code: 'upstream_refused', status: 503, message: 'service unavailable' },
+        }
+      }
+      return successReadingFor({
+        balance: adapterBalanceFor(request.upstreamKey),
+        accountId: fixture.accountId,
+      })
+    })
+
+    const after = await service.refresh(fixture.providerId)
+    if (!after.ok) throw new Error(after.failure.code)
+
+    expect(after.value.lastFailureAt).not.toBeNull()
+    expect(after.value.lastFailureCode).toBe('upstream_refused')
+    // The failure and the success landed in the same refresh, so the
+    // snapshot is not "stale" in the lastFailureAt > lastSuccessAt sense.
+    expect(after.value.stale).toBe(false)
+
+    const byKey = new Map(after.value.readings.map((r) => [r.keyId, r]))
+    const secondKeyId = after.value.readings.find((r) => r.keyId !== fixture.keyId)?.keyId
+    expect(secondKeyId).toBeDefined()
+    // The successful key's reading was just refreshed; its balance is 25.
+    expect(byKey.get(secondKeyId ?? '')?.balance).toBe(25)
+    expect(callCount).toBe(2)
+    // The failed key's prior reading is preserved at its old balance.
+    expect(byKey.get(fixture.keyId)?.balance).toBe(42)
+  })
+
+  test('a rate-limited key surfaces 429 with the most restrictive retryAfter', async () => {
+    let callCount = 0
+    adapter.respondWith((request) => {
+      callCount += 1
+      if (request.upstreamKey === 'sk-upstream-for-usage') {
+        return {
+          ok: false,
+          failure: { code: 'rate_limited', retryAfterSeconds: 30 },
+        }
+      }
+      return successReadingFor({
+        balance: adapterBalanceFor(request.upstreamKey),
+        accountId: fixture.accountId,
+      })
+    })
+
+    const result = await service.refresh(fixture.providerId)
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('rate-limited refresh must fail')
+    expect(result.failure.code).toBe('rate_limited')
+    if (result.failure.code !== 'rate_limited') throw new Error('expected rate_limited')
+    expect(result.failure.retryAfterSeconds).toBe(30)
+    expect(callCount).toBe(2)
+  })
+
+  test('the snapshot\'s result is keyed by Upstream Key id after refresh', async () => {
+    await service.refresh(fixture.providerId)
+    const stored = await fixture.opened.database.usage.get(fixture.providerId)
+    if (stored === null) throw new Error('expected a snapshot')
+    if (stored.result === null || typeof stored.result !== 'object' || Array.isArray(stored.result)) {
+      throw new Error('expected the per-key map shape')
+    }
+    const map = stored.result as Record<string, unknown>
+    const keyIds = Object.keys(map)
+    expect(keyIds).toContain(fixture.keyId)
+    expect(keyIds.length).toBe(2)
+  })
+})
+
 describe('UsageService input validation', () => {
   let fixture: Fixture
   let dispose: () => Promise<void>
@@ -618,21 +741,95 @@ describe('UsageService snapshot JSON roundtrip', () => {
     const service = built.service
     await service.refresh(built.fixture.providerId)
 
-    // Simulate a snapshot persisted before the multi-reading contract: write
-    // a single UsageReading object into `result` rather than an array.
+    // Simulate the snapshot shape that pre-dates the multi-reading contract:
+    // a single UsageReading object written straight into `result`. The
+    // reader must still surface it as a one-element list, with `keyId: null`
+    // because the per-key attribution didn't exist when the row was written.
     const opened = built.fixture.opened
     const prior = await opened.database.usage.get(built.fixture.providerId)
     if (prior === null) throw new Error('expected a snapshot')
-    const firstReading = prior.result
-    if (!Array.isArray(firstReading)) throw new Error('expected an array snapshot')
-    const legacy = firstReading[0]
-    if (legacy === undefined) throw new Error('expected at least one reading')
-    await opened.database.usage.put({ ...prior, result: legacy })
+    const legacySingleReading = {
+      unit: 'usd',
+      balance: 7,
+      used: 93,
+      limit: 100,
+      remainingPercent: 7,
+      plan: null,
+      resetAt: null,
+      scope: { kind: 'account', accountId: 'legacy-account' },
+      confidence: 'confirmed',
+      diagnostics: { source: 'mock-credit-adapter' },
+    }
+    await opened.database.usage.put({ ...prior, result: legacySingleReading })
 
     const viewed = await service.view(built.fixture.providerId)
     if (!viewed.ok) throw new Error(viewed.failure.code)
     expect(viewed.value.readings).toHaveLength(1)
     expect(viewed.value.readings[0]?.balance).toBe(7)
+    expect(viewed.value.readings[0]?.keyId).toBeNull()
+
+    await built.dispose()
+  })
+
+  test('reads a legacy flat-list snapshot and re-homes it on the next refresh', async () => {
+    // The flat-list shape was the contract between the multi-reading and
+    // per-key contracts: an array of UsageReading objects with no per-key
+    // attribution. A reader must surface them with `keyId: null`, and the
+    // very next successful refresh must convert the snapshot to the
+    // per-key map shape so the per-key contract becomes the durable form.
+    const adapter = createMockPlanUsageAdapter({
+      used: 10,
+      limit: 100,
+      resetAt: new Date('2026-03-01T00:00:00.000Z'),
+      scope: 'connection_model',
+      model: 'legacy-model',
+    })
+    const built = await buildFixture(adapter)
+    const service = built.service
+
+    // Hand-craft a legacy flat-list snapshot without going through refresh.
+    const opened = built.fixture.opened
+    const legacyReading = {
+      unit: 'requests',
+      balance: null,
+      used: null,
+      limit: null,
+      remainingPercent: 90,
+      plan: 'legacy-model',
+      resetAt: '2026-03-01T00:00:00.000Z',
+      scope: { kind: 'connection_model', model: 'legacy-model' },
+      confidence: 'confirmed',
+      diagnostics: { source: 'mock-plan-adapter' },
+    }
+    const created = await opened.database.providers.getProvider(built.fixture.providerId)
+    if (created === null) throw new Error('expected a provider')
+    await opened.database.usage.put({
+      providerId: built.fixture.providerId,
+      visibility: 'authoritative',
+      syncedAt: new Date('2026-02-01T00:00:00.000Z'),
+      lastSuccessAt: new Date('2026-02-01T00:00:00.000Z'),
+      lastFailureAt: null,
+      lastFailureCode: null,
+      lastFailureMessage: null,
+      result: [legacyReading],
+    })
+
+    const viewed = await service.view(built.fixture.providerId)
+    if (!viewed.ok) throw new Error(viewed.failure.code)
+    expect(viewed.value.readings).toHaveLength(1)
+    expect(viewed.value.readings[0]?.remainingPercent).toBe(90)
+    expect(viewed.value.readings[0]?.keyId).toBeNull()
+
+    // The very next refresh rewrites the snapshot in the per-key map shape.
+    const refreshed = await service.refresh(built.fixture.providerId)
+    if (!refreshed.ok) throw new Error(refreshed.failure.code)
+    const stored = await opened.database.usage.get(built.fixture.providerId)
+    if (stored === null) throw new Error('expected a snapshot')
+    if (stored.result === null || Array.isArray(stored.result) || typeof stored.result !== 'object') {
+      throw new Error('expected per-key map shape after refresh')
+    }
+    const keyIds = Object.keys(stored.result as Record<string, unknown>)
+    expect(keyIds).toEqual([built.fixture.keyId])
 
     await built.dispose()
   })
@@ -662,6 +859,7 @@ function successReadingFor(input: {
         plan: null,
         resetAt: null,
         scope: { kind: 'account', accountId: input.accountId },
+        keyId: null,
         confidence: 'confirmed',
         diagnostics: { source: 'mock-credit-adapter' },
       },

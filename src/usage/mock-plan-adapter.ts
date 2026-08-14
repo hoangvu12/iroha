@@ -95,6 +95,7 @@ function planReading(input: {
         plan: input.scopeKind === 'connection_model' ? input.model ?? null : null,
         resetAt: input.resetAt,
         scope,
+        keyId: null,
         confidence: 'confirmed',
         diagnostics: { source: 'mock-plan-adapter' },
       },

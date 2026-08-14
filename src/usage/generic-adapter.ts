@@ -38,6 +38,7 @@ export function createGenericUsageAdapter(): UsageAdapter {
             plan: null,
             resetAt: null,
             scope: { kind: 'unknown' },
+            keyId: null,
             confidence: 'unknown',
             diagnostics: { reason: 'no entitlement API is exposed by the generic adapter' },
           },

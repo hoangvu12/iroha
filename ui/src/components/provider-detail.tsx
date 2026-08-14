@@ -74,7 +74,6 @@ import {
   fetchUsage,
   refreshUsage,
   type UsageReadingView,
-  type UsageScope,
   type UsageView,
 } from '@/lib/usage'
 import { formatTime as formatTimeWithUtc } from '@/lib/time'
@@ -1525,22 +1524,24 @@ const USAGE_TONE_CLASS: Record<'danger' | 'muted' | 'default', string> = {
   default: '',
 }
 
-function scopeMatchesKey(scope: UsageScope, keyId: string): boolean {
-  if (scope.kind !== 'key') return true
-  return scope.keyId === keyId
-}
-
 /**
  * Reads the snapshot's `readings` and keeps only those that apply to this
- * row. Per-account and per-model scopes pass through; per-key scopes only
- * pass when this row is the named key. Returns `null` when nothing applies.
+ * row. A reading with `keyId: null` is treated as connection-wide and shown
+ * for every key (legacy data, a reactive-only reading the service couldn't
+ * attribute to a specific key). A reading with `keyId: 'k1'` is shown only
+ * in k1's row. The `scope` field is kept for the UI's own display — it
+ * describes the *entitlement* (account, model, provider), and `keyId`
+ * describes the *transport*; they are two different concepts and the filter
+ * lives on `keyId`.
  */
 function readingsForRow(
   usage: UsageView | null,
   keyId: string,
 ): readonly UsageReadingView[] | null {
   if (usage === null) return null
-  const filtered = usage.readings.filter((reading) => scopeMatchesKey(reading.scope, keyId))
+  const filtered = usage.readings.filter(
+    (reading) => reading.keyId === null || reading.keyId === keyId,
+  )
   return filtered.length === 0 ? null : filtered
 }
 
@@ -1647,6 +1648,7 @@ function primaryForCell(readings: readonly UsageReadingView[]): UsageReadingView
         plan: null,
         resetAt: null,
         scope: { kind: 'unknown' },
+        keyId: null,
         confidence: 'unknown',
         diagnostics: {},
       }

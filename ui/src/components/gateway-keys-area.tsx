@@ -41,6 +41,7 @@ import {
   type GatewayKeyView,
 } from '@/lib/gateway-keys'
 import { fetchProviders, type ProviderView } from '@/lib/providers'
+import { useBrandByTemplateId } from '@/lib/use-provider-templates'
 
 /**
  * The Gateway Keys area. Lists every key with its name, scope, and revocation
@@ -283,6 +284,7 @@ function ScopeIcons({
   readonly hasCorsOrigins: boolean
   readonly className?: string
 }) {
+  const { brandFor } = useBrandByTemplateId()
   if (scope.length === 0) {
     return (
       <span
@@ -310,7 +312,6 @@ function ScopeIcons({
         {shown.map((entry) => {
           const provider = providers.find((p) => p.id === entry.providerId)
           const label = provider?.displayName ?? entry.providerId
-          const baseUrl = provider?.baseUrl ?? ''
           const title = entry.models === null
             ? `${label} · all models`
             : entry.models.length === 0
@@ -323,8 +324,7 @@ function ScopeIcons({
               className="ring-card inline-flex ring-2"
             >
               <ProviderIcon
-                displayName={label}
-                baseUrl={baseUrl}
+                brand={brandFor(provider?.templateId ?? null)}
                 {...(provider?.templateId === undefined || provider.templateId === null
                   ? {}
                   : { templateId: provider.templateId })}
@@ -384,6 +384,7 @@ function CreateGatewayKeyForm({
   const [corsOrigins, setCorsOrigins] = useState<readonly string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<GatewayKeyError | null>(null)
+  const { brandFor } = useBrandByTemplateId()
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -464,8 +465,7 @@ function CreateGatewayKeyForm({
                     }
                   />
                   <ProviderIcon
-                    displayName={provider.displayName}
-                    baseUrl={provider.baseUrl}
+                    brand={brandFor(provider.templateId)}
                     {...(provider.templateId === null
                       ? {}
                       : { templateId: provider.templateId })}

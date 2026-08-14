@@ -35,6 +35,7 @@ function safeTemplate(id: string, over: Partial<ProviderTemplate> = {}): Provide
     knownModels: ['curated-model-a', 'curated-model-b'],
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
+    brand: null,
     ...over,
   }
 }

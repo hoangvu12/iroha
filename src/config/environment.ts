@@ -31,6 +31,13 @@ export interface IrohaConfiguration {
   readonly setupToken: string | undefined
   /** Enables browser-based Owner password recovery when present. */
   readonly recoveryToken: string | undefined
+  /**
+   * The logo.dev API token used to render Provider brand tiles. When set,
+   * built-in templates with a `brand` declaration resolve their tile through
+   * logo.dev via the server-side proxy; the token never reaches the browser.
+   * When unset, brand tiles fall back to the generic server icon.
+   */
+  readonly logoDevToken: string | undefined
   readonly shutdownGraceMs: number
   readonly host: string
   readonly port: number
@@ -84,6 +91,7 @@ export function loadConfiguration(source: EnvironmentSource = Bun.env): IrohaCon
   const masterKey = readRequiredSecret(source, 'IROHA_MASTER_KEY', problems)
   const setupToken = readOptionalSecret(source, 'IROHA_SETUP_TOKEN', problems)
   const recoveryToken = readOptionalSecret(source, 'IROHA_RECOVERY_TOKEN', problems)
+  const logoDevToken = readLogoDevToken(source)
   const shutdownGraceMs = readShutdownGraceMs(source, problems)
   const host = readHost(source, problems)
   const port = readPort(source, problems)
@@ -92,7 +100,16 @@ export function loadConfiguration(source: EnvironmentSource = Bun.env): IrohaCon
     throw new ConfigurationError(problems)
   }
 
-  return { database, masterKey, setupToken, recoveryToken, shutdownGraceMs, host, port }
+  return {
+    database,
+    masterKey,
+    setupToken,
+    recoveryToken,
+    logoDevToken,
+    shutdownGraceMs,
+    host,
+    port,
+  }
 }
 
 function readDatabase(
@@ -208,6 +225,18 @@ function readOptionalSecret(
   const raw = source[variable]?.trim()
   if (!raw) return undefined
   return validateSecret(raw, variable, problems) ?? undefined
+}
+
+/**
+ * Reads the optional logo.dev token. Unlike the auth secrets, this is a
+ * vendor API key, not a credential Iroha issues or guards: a blank value
+ * means "no provider tiles", and a present value is forwarded as a query
+ * parameter to a third-party endpoint. The minimum length rule does not
+ * apply, and a missing value never becomes a startup problem.
+ */
+function readLogoDevToken(source: EnvironmentSource): string | undefined {
+  const raw = source.LOGO_DEV_TOKEN?.trim()
+  return raw === undefined || raw === '' ? undefined : raw
 }
 
 function validateSecret(

@@ -70,6 +70,7 @@ import {
   type ProviderView,
 } from '@/lib/providers'
 import { fetchRequests, type RequestEventView } from '@/lib/requests'
+import { useBrandByTemplateId } from '@/lib/use-provider-templates'
 import { refreshCatalog } from '@/lib/catalog'
 import {
   fetchUsage,
@@ -252,6 +253,7 @@ function ProviderHeader({
   readonly archived: boolean
   readonly onBack: () => void
 }) {
+  const { brandFor } = useBrandByTemplateId()
   return (
     <div className="flex flex-col gap-4">
       <Button type="button" variant="ghost" size="sm" onClick={onBack} className="self-start">
@@ -260,8 +262,7 @@ function ProviderHeader({
 
       <div className="flex items-center gap-3">
         <ProviderIcon
-          displayName={provider.displayName}
-          baseUrl={provider.baseUrl}
+          brand={brandFor(provider.templateId)}
           {...(provider.templateId === null ? {} : { templateId: provider.templateId })}
         />
         <div className="flex flex-col gap-1">

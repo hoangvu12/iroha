@@ -1,5 +1,6 @@
 import { openapi } from '@elysiajs/openapi'
 import { Elysia, t } from 'elysia'
+import { BrandLogoService } from '../brand-logos/index.ts'
 import type { SecretCipher } from '../crypto/index.ts'
 import { RequestHistoryService } from '../history/index.ts'
 import type { InferenceAdapter } from '../inference/index.ts'
@@ -21,6 +22,7 @@ import { createAuditRoutes } from './audit.ts'
 import { createAuthRoutes } from './auth.ts'
 import { createBackgroundRoutes } from './background-jobs.ts'
 import { type SchedulerSurface, StaticScheduler } from './background-scheduler-surface.ts'
+import { createBrandLogoRoutes } from './brand-logos.ts'
 import { createCatalogRoutes } from './catalog.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
@@ -72,6 +74,13 @@ export interface AppOptions {
   /** Overrides the transport defaults read from the global settings store. */
   readonly transportDefaults?: TransportDefaults | undefined
   readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
+  /**
+   * The brand logo service that serves cached logo.dev images for Provider
+   * Templates. When omitted, no brand route is mounted and the UI falls back
+   * to its generic icon. The token the service holds is configured by the
+   * deployment; tests inject their own.
+   */
+  readonly brandLogos?: BrandLogoService | undefined
 }
 
 const liveResponse = t.Object({ status: t.Literal('alive') })
@@ -184,6 +193,7 @@ export function createApp(options: AppOptions) {
           { name: 'Settings', description: 'Iroha-wide settings the Owner can read or update.' },
           { name: 'Background Jobs', description: 'Scheduled job status, manual triggers, and per-job schedule settings.' },
           { name: 'Metrics', description: 'Bounded Prometheus metrics and the optional exposure switch.' },
+          { name: 'Brand Logos', description: 'Cached logo.dev images for built-in Provider Templates, served from the server-side proxy so the vendor token never reaches the browser.' },
         ],
         components: {
           securitySchemes: {
@@ -196,6 +206,7 @@ export function createApp(options: AppOptions) {
     .use(createAuthRoutes({ identity }))
     .use(createAdminRoutes({ identity, providers, gatewayKeys, adapterRegistry }))
     .use(createDirectoryRoutes({ gatewayKeys }))
+    .use(createBrandLogoRoutes({ brandLogos: options.brandLogos ?? noBrandLogoService() }))
     .use(createCatalogRoutes({ identity, modelCatalog }))
     .use(
       createUsageRoutes({
@@ -330,3 +341,18 @@ function isTrackedInferenceRequest(request: Request): boolean {
 }
 
 export { StaticScheduler, type SchedulerSurface }
+
+/**
+ * Brand logo service used when the deployment did not configure one. The
+ * route stays mounted so its response shape (and 404) is observable in every
+ * environment, but every lookup returns null and the UI falls back to its
+ * generic icon. A real service with an undefined token and no templates
+ * reaches the early-return before any disk or network access.
+ */
+function noBrandLogoService(): BrandLogoService {
+  return new BrandLogoService({
+    token: undefined,
+    cacheDirectory: './data/logos',
+    templates: [],
+  })
+}

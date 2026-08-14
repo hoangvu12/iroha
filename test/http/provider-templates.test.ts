@@ -26,6 +26,7 @@ interface TemplateDto {
   knownModels: string[]
   inferenceAdapterId: string
   usageAdapterId: string | null
+  brand: { domain: string; accentColor: string } | null
 }
 
 interface TemplateListBody {
@@ -89,6 +90,21 @@ describe('the Provider Templates admin endpoint', () => {
     const body = (await response.json()) as TemplateListBody
     const openai = body.templates.find((template) => template.id === 'openai')
     expect(openai?.knownModels).toContain('gpt-4o-mini')
+  })
+
+  test('every branded template carries its brand identity; the generic default carries none', async () => {
+    const response = await iroha.fetch(BASE)
+    const body = (await response.json()) as TemplateListBody
+    const byId = new Map(body.templates.map((template) => [template.id, template]))
+
+    const openai = byId.get('openai')
+    expect(openai?.brand).toEqual({ domain: 'openai.com', accentColor: '#10A37F' })
+    const openrouter = byId.get('openrouter')
+    expect(openrouter?.brand).toEqual({ domain: 'openrouter.ai', accentColor: '#3D55E6' })
+    const MiniMax = byId.get('MiniMax')
+    expect(MiniMax?.brand).toEqual({ domain: 'minimax.io', accentColor: '#F43F5E' })
+    const generic = byId.get('generic-openai-compatible')
+    expect(generic?.brand).toBeNull()
   })
 
   test('requires the Owner session', async () => {

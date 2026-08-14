@@ -25,6 +25,7 @@ import { stubUpstreamTransport } from './inference.ts'
 import { RequestHistoryService } from '../../src/history/index.ts'
 import { StaticScheduler } from '../../src/http/background-scheduler-surface.ts'
 import { MetricsCollector, MetricsSettingsService } from '../../src/metrics/metrics.ts'
+import type { BrandLogoService } from '../../src/brand-logos/index.ts'
 
 export const ORIGIN = 'http://iroha.test'
 
@@ -83,6 +84,8 @@ export interface TestAppOptions {
   /** Transport defaults; tests can override CORS allow-list, etc. */
   readonly transportDefaults?: TransportDefaults
   readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
+  /** Replaces the brand logo service the assembled app uses. */
+  readonly brandLogos?: BrandLogoService
 }
 
 export const SETUP_TOKEN = 'setup-token-for-tests-0123456789abcdef'
@@ -237,6 +240,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     ...(options.transportDefaults === undefined
       ? {}
       : { transportDefaults: options.transportDefaults }),
+    ...(options.brandLogos === undefined ? {} : { brandLogos: options.brandLogos }),
     retrySleep:
       options.retrySleep ??
       (async (_ms, signal) => {

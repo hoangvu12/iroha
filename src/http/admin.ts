@@ -901,6 +901,14 @@ const templateCapabilitiesResponse = t.Object({
   responses: t.Boolean(),
 })
 
+const templateBrandDto = t.Union([
+  t.Null(),
+  t.Object({
+    domain: t.String(),
+    accentColor: t.String(),
+  }),
+])
+
 const templateDto = t.Object({
   id: t.String(),
   displayName: t.String(),
@@ -912,6 +920,7 @@ const templateDto = t.Object({
   knownModels: t.Array(t.String()),
   inferenceAdapterId: t.String(),
   usageAdapterId: t.Union([t.Null(), t.String()]),
+  brand: templateBrandDto,
 })
 
 const templateListResponse = t.Object({ templates: t.Array(templateDto) })
@@ -1008,6 +1017,7 @@ function toTemplateDto(template: ProviderTemplate): typeof templateDto.static {
     knownModels: [...template.knownModels],
     inferenceAdapterId: template.inferenceAdapterId,
     usageAdapterId: template.usageAdapterId,
+    brand: template.brand === null ? null : { ...template.brand },
   }
 }
 

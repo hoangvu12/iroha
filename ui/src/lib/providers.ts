@@ -91,6 +91,13 @@ export interface ProviderTemplateCapabilities {
   readonly responses: boolean
 }
 
+export interface ProviderTemplateBrand {
+  /** The hostname logo.dev resolves to for this template's tile. */
+  readonly domain: string
+  /** CSS hex; tinted onto the brand tile in both light and dark modes. */
+  readonly accentColor: string
+}
+
 export interface ProviderTemplateView {
   readonly id: string
   readonly displayName: string
@@ -102,6 +109,8 @@ export interface ProviderTemplateView {
   readonly knownModels: readonly string[]
   readonly inferenceAdapterId: string
   readonly usageAdapterId: string | null
+  /** The brand identity the management UI uses for this template. */
+  readonly brand: ProviderTemplateBrand | null
 }
 
 export async function fetchProviders(signal?: AbortSignal): Promise<readonly ProviderView[]> {

@@ -45,6 +45,25 @@ export const REACTIVE_ONLY_USAGE_ADAPTER_ID = 'reactive-only-usage-adapter'
 export const MINIMAX_USAGE_ADAPTER_ID = 'minimax-usage-adapter'
 
 /**
+ * The brand identity of a Provider Template: the upstream domain logo.dev
+ * resolves for the tile, and the accent colour the management UI tints the
+ * tile with. Both fields belong on the template because every brand decision
+ * for one Provider should live in one file; a brand split across CSS vars,
+ * inline SVGs, and string-matching heuristics falls apart the moment a fifth
+ * Provider is added.
+ *
+ * Omitted (or null) for templates that name no upstream brand (for example
+ * the generic default). The UI renders a generic server icon and the brand
+ * logo route returns 404 in that case.
+ */
+export interface ProviderTemplateBrand {
+  /** The hostname logo.dev should resolve to (for example "openai.com"). */
+  readonly domain: string
+  /** CSS hex; tinted onto the brand tile in both light and dark modes. */
+  readonly accentColor: string
+}
+
+/**
  * The fields a template may prefill on a new Provider Connection. The Owner
  * may override every one of them; the template only seeds sensible defaults.
  *
@@ -60,6 +79,9 @@ export const MINIMAX_USAGE_ADAPTER_ID = 'minimax-usage-adapter'
  *
  * `inferenceAdapterId` and `usageAdapterId` are the registered adapters the
  * template assumes; the registry rejects a template that names a missing one.
+ *
+ * `brand` is the visual identity the management UI uses for this template.
+ * Omitted for templates that name no upstream brand.
  */
 export interface ProviderTemplate {
   readonly id: string
@@ -85,6 +107,8 @@ export interface ProviderTemplate {
    * is honest by default.
    */
   readonly usageAdapterId: string | null
+  /** The brand identity rendered in the management UI. Null when the template has no upstream brand. */
+  readonly brand: ProviderTemplateBrand | null
 }
 
 /**
@@ -111,12 +135,13 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     knownModels: [],
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
+    brand: null,
   },
   {
     id: 'openai',
     displayName: 'OpenAI',
     description:
-      'OpenAI\u2019s public OpenAI-compatible surface. Bearer authentication and the full capability set Iroha knows OpenAI supports.',
+      'OpenAI’s public OpenAI-compatible surface. Bearer authentication and the full capability set Iroha knows OpenAI supports.',
     baseUrl: 'https://api.openai.com/v1',
     authHeader: 'authorization',
     authPrefix: 'Bearer ',
@@ -141,12 +166,13 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     ],
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
+    brand: { domain: 'openai.com', accentColor: '#10A37F' },
   },
   {
     id: 'openrouter',
     displayName: 'OpenRouter',
     description:
-      'OpenRouter\u2019s OpenAI-compatible surface. Bearer authentication; the catalog merges whatever OpenRouter reports on refresh.',
+      'OpenRouter’s OpenAI-compatible surface. Bearer authentication; the catalog merges whatever OpenRouter reports on refresh.',
     baseUrl: 'https://openrouter.ai/api/v1',
     authHeader: 'authorization',
     authPrefix: 'Bearer ',
@@ -160,12 +186,13 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     knownModels: [],
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
+    brand: { domain: 'openrouter.ai', accentColor: '#3D55E6' },
   },
   {
     id: 'MiniMax',
     displayName: 'MiniMax',
     description:
-      'MiniMax\u2019s OpenAI-compatible endpoint. Bearer authentication; supports chat completions, streaming, tools, and the OpenAI Responses API. Entitlement polls chain the MiniMax coding-plan and credit endpoints.',
+      'MiniMax’s OpenAI-compatible endpoint. Bearer authentication; supports chat completions, streaming, tools, and the OpenAI Responses API. Entitlement polls chain the MiniMax coding-plan and credit endpoints.',
     baseUrl: 'https://api.minimax.io/v1',
     authHeader: 'authorization',
     authPrefix: 'Bearer ',
@@ -188,6 +215,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     ],
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: MINIMAX_USAGE_ADAPTER_ID,
+    brand: { domain: 'minimax.io', accentColor: '#F43F5E' },
   },
 ]
 

@@ -54,6 +54,7 @@ import {
   type ProviderView,
 } from '@/lib/providers'
 import { fetchRequests } from '@/lib/requests'
+import { useBrandByTemplateId } from '@/lib/use-provider-templates'
 
 interface ProvidersAreaProps {
   readonly csrfToken: string
@@ -224,6 +225,7 @@ function ProviderRow({
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
+  const { brandFor } = useBrandByTemplateId()
   const [rowError, setRowError] = useState<ManagementError | null>(null)
   const status = describeProviderStatus(provider.keys)
 
@@ -276,8 +278,7 @@ function ProviderRow({
         className="bg-card hover:bg-muted/40 group flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 transition-colors"
       >
         <ProviderIcon
-          displayName={provider.displayName}
-          baseUrl={provider.baseUrl}
+          brand={brandFor(provider.templateId)}
           {...(provider.templateId === null ? {} : { templateId: provider.templateId })}
         />
         <span className="flex min-w-0 flex-1 flex-col">
@@ -548,8 +549,7 @@ function CreateProviderForm({
               {selectedTemplate !== null ? (
                 <span className="flex items-center gap-2">
                   <ProviderIcon
-                    displayName={selectedTemplate.displayName}
-                    baseUrl={selectedTemplate.baseUrl}
+                    brand={selectedTemplate.brand}
                     templateId={selectedTemplate.id}
                     size="sm"
                   />
@@ -565,8 +565,7 @@ function CreateProviderForm({
               <SelectItem key={template.id} value={template.id} textValue={template.displayName}>
                 <span className="flex items-center gap-2">
                   <ProviderIcon
-                    displayName={template.displayName}
-                    baseUrl={template.baseUrl}
+                    brand={template.brand}
                     templateId={template.id}
                     size="sm"
                   />

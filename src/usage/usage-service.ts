@@ -258,6 +258,46 @@ export class UsageService {
     return next
   }
 
+  /** Tracks an in-flight post-inference refresh per Provider so concurrent request successes collapse into one poll. */
+  readonly #inflightRefresh = new Map<string, Promise<void>>()
+
+  /**
+   * Called by the inference path after a successful request. Refreshes the
+   * Provider's usage snapshot right away so the Owner sees fresh capacity
+   * without waiting for the next scheduled poll — but only when the Provider
+   * actually has a Usage Adapter implemented. A Provider whose template
+   * resolves to the reactive-only generic adapter has no usage to read, so
+   * the call is a no-op and a request success never triggers a pointless
+   * poll.
+   *
+   * Concurrent successes for one Provider collapse into a single poll: the
+   * first caller runs the refresh and every caller after it awaits the same
+   * in-flight promise, so a burst of requests cannot stack parallel polls
+   * against the Provider's entitlement API.
+   */
+  async refreshAfterInference(providerId: string): Promise<void> {
+    const existing = this.#inflightRefresh.get(providerId)
+    if (existing !== undefined) {
+      await existing
+      return
+    }
+    const run = this.#refreshAfterInferenceUnsafe(providerId)
+    this.#inflightRefresh.set(providerId, run)
+    try {
+      await run
+    } finally {
+      this.#inflightRefresh.delete(providerId)
+    }
+  }
+
+  async #refreshAfterInferenceUnsafe(providerId: string): Promise<void> {
+    const connection = await this.#database.providers.getProvider(providerId)
+    if (connection === null) return
+    const adapter = this.#adapterFor(connection)
+    if (adapter.visibility !== 'authoritative') return
+    await this.refresh(providerId)
+  }
+
   /**
    * Resolves authoritative recovery evidence from the latest snapshot. Returns
    * `null` when the adapter is reactive-only, the latest reading is too

@@ -16,6 +16,7 @@ import type { InferenceTarget, ProviderRegistry } from '../providers/index.ts'
 import type { MetricsCollector } from '../metrics/metrics.ts'
 import type { InferenceActivity, ShutdownController } from '../runtime/shutdown.ts'
 import { systemTimer, type Timer } from '../runtime/timer.ts'
+import type { UsageService } from '../usage/index.ts'
 
 /** The terminal shape of one attempt's outcome, what the recorder writes. */
 interface AttemptTerminal {
@@ -99,6 +100,8 @@ export interface InferenceRoutesOptions {
   readonly database?: Database
   /** Writes request-history rows; tests can inject a no-op. */
   readonly requestHistory?: RequestHistoryService
+  /** Refreshes the usage snapshot after a successful request for Providers that have a Usage Adapter. */
+  readonly usageService?: UsageService
   readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
@@ -222,6 +225,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           adapterCapabilities,
           database: options.database ?? null,
           requestHistory,
+          ...(options.usageService === undefined ? {} : { usageService: options.usageService }),
           ...(activity === undefined ? {} : { requestActivity: activity }),
         })
       },
@@ -255,6 +259,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           adapterCapabilities,
           database: options.database ?? null,
           requestHistory,
+          ...(options.usageService === undefined ? {} : { usageService: options.usageService }),
           ...(activity === undefined ? {} : { requestActivity: activity }),
         })
       },
@@ -289,6 +294,7 @@ async function forwardGeneration(options: {
   requestHistory?: RequestHistoryService | undefined
   requestActivity?: InferenceActivity
   metrics?: MetricsCollector
+  usageService?: UsageService | undefined
 }): Promise<Response> {
   const {
     request,
@@ -306,6 +312,7 @@ async function forwardGeneration(options: {
     requestHistory,
     requestActivity,
     metrics,
+    usageService,
   } = options
   const correlationId = newRequestId()
   const requestSignal = requestActivity?.signal ?? request.signal
@@ -591,6 +598,9 @@ async function forwardGeneration(options: {
         totalTokens: usage.totalTokens,
         errorCode: null,
       })
+      if (usageService !== undefined) {
+        void usageService.refreshAfterInference(providerId).catch(() => undefined)
+      }
       return new Response(lastUpstream.kind === 'stream' ? lastUpstream.stream : lastUpstream.body, {
         status: lastUpstream.status,
         headers: {

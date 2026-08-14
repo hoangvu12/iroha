@@ -702,6 +702,69 @@ describe('UsageService input validation', () => {
   })
 })
 
+describe('UsageService post-inference refresh', () => {
+  test('is a no-op for a Provider with no Usage Adapter implemented', async () => {
+    const built = await buildFixture(createGenericUsageAdapter())
+    const service = built.service
+
+    await service.refreshAfterInference(built.fixture.providerId)
+
+    const stored = await built.fixture.opened.database.usage.get(built.fixture.providerId)
+    expect(stored).toBeNull()
+
+    await built.dispose()
+  })
+
+  test('refreshes the snapshot for a Provider with an authoritative adapter', async () => {
+    const adapter = createMockPlanUsageAdapter({ used: 30, limit: 100 })
+    const built = await buildFixture(adapter)
+    const service = built.service
+
+    await service.refreshAfterInference(built.fixture.providerId)
+
+    const view = await service.view(built.fixture.providerId)
+    if (!view.ok) throw new Error(view.failure.code)
+    expect(view.value.readings).toHaveLength(1)
+    expect((view.value.readings[0] as UsageReading).remainingPercent).toBe(70)
+    expect(view.value.lastSuccessAt).not.toBeNull()
+    expect(adapter.calls).toHaveLength(1)
+
+    await built.dispose()
+  })
+
+  test('concurrent successes collapse into a single poll', async () => {
+    const built = await buildFixture(createGenericUsageAdapter())
+    const fixture = built.fixture
+
+    let release: (() => void) | null = null
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    let calls = 0
+    const authoritative: UsageAdapter = {
+      visibility: 'authoritative',
+      async read() {
+        calls += 1
+        await gate
+        return { ok: true, readings: [] }
+      },
+    }
+    const typed = new UsageService({
+      database: fixture.opened.database,
+      cipher: createSecretCipher(TEST_MASTER_KEY),
+      adapter: authoritative,
+      clock: fixture.clock,
+    })
+
+    const first = typed.refreshAfterInference(fixture.providerId)
+    const second = typed.refreshAfterInference(fixture.providerId)
+    release!()
+    await Promise.all([first, second])
+
+    expect(calls).toBe(1)
+
+    await built.dispose()
+  })
+})
+
 describe('UsageService snapshot JSON roundtrip', () => {
   test('recovers a Date resetAt from the persisted JSON string', async () => {
     const adapter = createMockPlanUsageAdapter({

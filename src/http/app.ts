@@ -259,6 +259,7 @@ export function createApp(options: AppOptions) {
         database,
         requestHistory,
         transportDefaults,
+        usageService,
         ...(options.timer === undefined ? {} : { timer: options.timer }),
         ...(options.shutdown === undefined ? {} : { shutdown: options.shutdown }),
         ...(options.metrics === undefined ? {} : { metrics: options.metrics }),

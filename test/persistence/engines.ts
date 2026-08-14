@@ -10,6 +10,13 @@ import { openDatabase, type Database } from '../../src/persistence/index.ts'
  * SQLite always runs. PostgreSQL runs when `IROHA_TEST_POSTGRES_URL` names a
  * reachable database that the suite may create and drop tables in; without it
  * the PostgreSQL cases are skipped rather than silently reported as passing.
+ *
+ * ⚠️  `IROHA_TEST_POSTGRES_URL` must point at a *disposable* database. The
+ * postgres engine's `open()` drops the entire `public` schema on every
+ * `beforeEach` (`resetPostgresSchema` below). Pointing it at a live database
+ * will wipe every row in `public.*` and require a fresh setup. Spin up a
+ * throwaway neon branch, a local docker-compose postgres, or any other
+ * instance you can re-create in one command.
  */
 export interface TestEngine {
   readonly name: 'sqlite' | 'postgres'
@@ -18,6 +25,18 @@ export interface TestEngine {
 }
 
 export const POSTGRES_URL = Bun.env.IROHA_TEST_POSTGRES_URL
+
+if (POSTGRES_URL && !POSTGRES_URL.includes('test') && !POSTGRES_URL.includes('disposable')) {
+  // Cheap safety net: a URL that doesn't even mention "test" or "disposable"
+  // almost certainly points at a live database. The schema drop will destroy
+  // data. Bail loudly so a developer notices before running the suite.
+  console.warn(
+    '[iroha] IROHA_TEST_POSTGRES_URL does not look like a disposable database ' +
+      '(no "test" or "disposable" in the host). The conformance suite will ' +
+      '`drop schema public cascade` on every beforeEach. If this is a live ' +
+      'database, unset the variable and run sqlite-only.',
+  )
+}
 
 export const sqliteEngine: TestEngine = {
   name: 'sqlite',

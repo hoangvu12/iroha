@@ -171,7 +171,15 @@ class PostgresSettingsRepository implements SettingsRepository {
   }
 
   async put(key: string, value: unknown): Promise<SettingRecord> {
-    const row = { key, value: value ?? null, updatedAt: new Date() }
+    // The settings.value column is `jsonb NOT NULL`. The sqlite track wraps
+    // every value through `JSON.stringify` so `null` becomes the JSON literal
+    // `null` (round-tripped via JSON.parse on read). This track does the same:
+    // pass the JSON-encoded form in, and let postgres parse it back into a
+    // native jsonb value. The column is NOT NULL, so we never write the SQL
+    // `NULL`; the value is always a non-null string that parses to whatever
+    // the caller wanted (including the JSON literal `null`).
+    const encoded = JSON.stringify(value ?? null)
+    const row = { key, value: encoded, updatedAt: new Date() }
 
     const [stored] = await this.handle
       .insert(settings)
@@ -195,7 +203,13 @@ class PostgresSettingsRepository implements SettingsRepository {
 }
 
 function toRecord(row: { key: string; value: unknown; updatedAt: Date }): SettingRecord {
-  return { key: row.key, value: row.value, updatedAt: row.updatedAt }
+  // Drizzle returns the jsonb value already-parsed (numbers, objects, etc.,
+  // not the raw text). Re-encode and decode through JSON so the read path
+  // matches the write path: what the caller put in, they get back. A
+  // non-string `row.value` (e.g. a pre-existing row from a different code
+  // path) round-trips through `JSON.stringify` and comes out the same shape.
+  const encoded = typeof row.value === 'string' ? row.value : JSON.stringify(row.value)
+  return { key: row.key, value: JSON.parse(encoded) as unknown, updatedAt: row.updatedAt }
 }
 
 class PostgresOwnerRepository implements OwnerRepository {
@@ -1141,6 +1155,37 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
   constructor(private readonly handle: Handle) {}
 
   async recordEvent(event: RequestEventRecord): Promise<void> {
+    // The request-history service writes the event row lazily in
+    // `startAttempt` (with status=0, outcome='failure' defaults) and then
+    // overwrites it in `finalize` (with the real status and outcome). A
+    // pure `INSERT ... ON CONFLICT DO UPDATE` upsert does not behave the
+    // same on every engine — the rewrite below is an UPDATE-by-id first,
+    // falling back to INSERT when the row was never written (the
+    // `recordSkip` path runs without a prior `startAttempt`). The attempt
+    // row already uses this UPDATE-by-id shape (`updateAttempt`) and
+    // works correctly across both engines.
+    const updated = await this.handle
+      .update(requestEvents)
+      .set({
+        occurredAt: event.occurredAt,
+        providerId: event.providerId,
+        model: event.model,
+        gatewayKeyId: event.gatewayKeyId,
+        keyId: event.keyId,
+        status: event.status,
+        outcome: event.outcome,
+        latencyMs: event.latencyMs,
+        isStreaming: event.isStreaming,
+        promptTokens: event.promptTokens,
+        completionTokens: event.completionTokens,
+        totalTokens: event.totalTokens,
+        errorCode: event.errorCode,
+      })
+      .where(eq(requestEvents.id, event.id))
+      .returning({ id: requestEvents.id })
+
+    if (updated.length > 0) return
+
     await this.handle
       .insert(requestEvents)
       .values({
@@ -1158,24 +1203,6 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
         completionTokens: event.completionTokens,
         totalTokens: event.totalTokens,
         errorCode: event.errorCode,
-      })
-      .onConflictDoUpdate({
-        target: requestEvents.id,
-        set: {
-          occurredAt: event.occurredAt,
-          providerId: event.providerId,
-          model: event.model,
-          gatewayKeyId: event.gatewayKeyId,
-          keyId: event.keyId,
-          status: event.status,
-          outcome: event.outcome,
-          latencyMs: event.latencyMs,
-          isStreaming: event.isStreaming,
-          promptTokens: event.promptTokens,
-          completionTokens: event.completionTokens,
-          totalTokens: event.totalTokens,
-          errorCode: event.errorCode,
-        },
       })
   }
 

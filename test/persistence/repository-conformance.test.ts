@@ -1169,6 +1169,55 @@ for (const engine of availableEngines) {
         expect(stored?.totalTokens).toBe(17)
       })
 
+      test('overwrites every field between the startAttempt default write and the finalize write', async () => {
+        // Mirrors the inference code path: startAttempt lazily writes the
+        // event row with the schema defaults (status=0, outcome='failure',
+        // latencyMs=0, keyId=null) so the FK to providers can fail safely if
+        // the connection vanishes mid-call, then finalize overwrites every
+        // field with the real values. Every field must update — a partial
+        // update is the bug that previously made the requests page show a
+        // red dot on a 200-status call.
+        await database.providers.insertProvider(connection('pc_rh'))
+        await database.requestHistory.recordEvent(
+          event('req_one', 'pc_rh', {
+            status: 0,
+            outcome: 'failure',
+            latencyMs: 0,
+            keyId: null,
+            promptTokens: null,
+            completionTokens: null,
+            totalTokens: null,
+            errorCode: null,
+          }),
+        )
+        await database.requestHistory.recordEvent(
+          event('req_one', 'pc_rh', {
+            status: 200,
+            outcome: 'success',
+            latencyMs: 1234,
+            keyId: 'uk_one',
+            promptTokens: 40,
+            completionTokens: 57,
+            totalTokens: 97,
+            errorCode: null,
+          }),
+        )
+
+        const stored = await database.requestHistory.getEvent('req_one')
+        expect(stored).toEqual(
+          event('req_one', 'pc_rh', {
+            status: 200,
+            outcome: 'success',
+            latencyMs: 1234,
+            keyId: 'uk_one',
+            promptTokens: 40,
+            completionTokens: 57,
+            totalTokens: 97,
+            errorCode: null,
+          }),
+        )
+      })
+
       test('records attempts and patches the outcome', async () => {
         await database.providers.insertProvider(connection('pc_rh'))
         await database.requestHistory.recordEvent(event('req_one', 'pc_rh'))

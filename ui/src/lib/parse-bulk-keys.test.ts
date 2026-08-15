@@ -296,6 +296,23 @@ describe('parseBulkKeyInput', () => {
 })
 
 describe('parseBulkKeyJson', () => {
+  test('maps Nyanis key and url aliases to the canonical fields', () => {
+    const result = parseBulkKeyJson(
+      '[{"candidateId":3833,"key":"sk-nyanis","provider":"dashscope","status":"working","url":"https://dashscope-intl.aliyuncs.com/compatible-mode/v1"}]',
+    )
+    expect(result).toEqual({
+      ok: true,
+      entries: [
+        {
+          upstreamKey: 'sk-nyanis',
+          baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+        },
+      ],
+      skippedHeader: false,
+      comments: 0,
+    })
+  })
+
   test('parses a valid JSON array of entries', () => {
     const result = parseBulkKeyJson(
       '[{"upstreamKey":"sk-1"},{"upstreamKey":"sk-2","baseUrl":"https://b.example.com"}]',

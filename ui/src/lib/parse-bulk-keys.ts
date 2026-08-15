@@ -99,24 +99,31 @@ export function parseBulkKeyJson(text: string): ParseBulkResult {
         message: 'Each entry must be an object with upstreamKey and optional baseUrl',
       }
     }
-    const candidate = item as { upstreamKey?: unknown; baseUrl?: unknown }
-    if (typeof candidate.upstreamKey !== 'string' || candidate.upstreamKey === '') {
+    const candidate = item as {
+      upstreamKey?: unknown
+      key?: unknown
+      baseUrl?: unknown
+      url?: unknown
+    }
+    const upstreamKey = candidate.upstreamKey ?? candidate.key
+    const baseUrl = candidate.baseUrl ?? candidate.url
+    if (typeof upstreamKey !== 'string' || upstreamKey === '') {
       return {
         ok: false,
         reason: 'malformed_json',
-        message: 'Each entry must have a non-empty string upstreamKey',
+        message: 'Each entry must have a non-empty string upstreamKey or key',
       }
     }
-    const entry: BulkKeyEntry = { upstreamKey: candidate.upstreamKey }
-    if (candidate.baseUrl !== undefined && candidate.baseUrl !== null) {
-      if (typeof candidate.baseUrl !== 'string') {
+    const entry: BulkKeyEntry = { upstreamKey }
+    if (baseUrl !== undefined && baseUrl !== null) {
+      if (typeof baseUrl !== 'string') {
         return {
           ok: false,
           reason: 'malformed_json',
-          message: 'Entry baseUrl must be a string when present',
+          message: 'Entry baseUrl or url must be a string when present',
         }
       }
-      if (candidate.baseUrl !== '') entry.baseUrl = candidate.baseUrl
+      if (baseUrl !== '') entry.baseUrl = baseUrl
     }
     entries.push(entry)
   }

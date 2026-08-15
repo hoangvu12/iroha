@@ -102,6 +102,31 @@ describe('normalizeOpenAiResponseBody', () => {
     expect(out.choices[0]!.message.reasoning_content).toBeUndefined()
   })
 
+  test('removes content duplicated in a native reasoning field', () => {
+    const body = JSON.stringify({
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'private thought',
+            reasoning: 'private thought',
+          },
+        },
+      ],
+    })
+
+    const out = JSON.parse(normalizeOpenAiResponseBody(body)) as {
+      choices: { message: Record<string, unknown> }[]
+    }
+
+    expect(out.choices[0]!.message).toEqual({
+      role: 'assistant',
+      content: '',
+      reasoning: 'private thought',
+    })
+  })
+
   test('passes through bodies that need no normalisation', () => {
     const body = JSON.stringify({
       choices: [{ index: 0, message: { role: 'assistant', content: 'plain reply' } }],

@@ -58,20 +58,20 @@ function parseSse(body: string): Array<{ payload: unknown; isDone: boolean }> {
 
 describe('splitStreamingReasoning', () => {
   test('opens, closes, and tracks state across calls', () => {
-    const initial = { inReasoning: false }
+    const initial = { inReasoning: false, pendingBuffer: '' }
     const first = splitStreamingReasoning(initial, '<think>\nThe user said hi.\n')
     expect(first.reasoning).toBe('\nThe user said hi.\n')
     expect(first.content).toBe('')
     expect(first.inReasoning).toBe(true)
 
-    const second = splitStreamingReasoning({ inReasoning: first.inReasoning }, '</think>\n\nHello!')
+    const second = splitStreamingReasoning({ inReasoning: first.inReasoning, pendingBuffer: '' }, '</think>\n\nHello!')
     expect(second.reasoning).toBe('')
     expect(second.content).toBe('Hello!')
     expect(second.inReasoning).toBe(false)
   })
 
   test('recognises the thinking and budget:thinking tag variants', () => {
-    const thinking = splitStreamingReasoning({ inReasoning: false }, '<thinking>plan</thinking>done')
+    const thinking = splitStreamingReasoning({ inReasoning: false, pendingBuffer: '' }, '<thinking>plan</thinking>done')
     expect(thinking).toEqual({
       reasoning: 'plan',
       content: 'done',
@@ -80,7 +80,7 @@ describe('splitStreamingReasoning', () => {
     })
 
     const budget = splitStreamingReasoning(
-      { inReasoning: false },
+      { inReasoning: false, pendingBuffer: '' },
       '<budget:thinking>b</budget:thinking>answer',
     )
     expect(budget).toEqual({
@@ -93,7 +93,7 @@ describe('splitStreamingReasoning', () => {
 
   test('keeps trailing whitespace on the visible-text half', () => {
     const split = splitStreamingReasoning(
-      { inReasoning: false },
+      { inReasoning: false, pendingBuffer: '' },
       '<think>thinking</think>\n\nHello!',
     )
     expect(split.content).toBe('Hello!')
@@ -101,7 +101,7 @@ describe('splitStreamingReasoning', () => {
   })
 
   test('handles text that contains no tags by leaving the state alone', () => {
-    const split = splitStreamingReasoning({ inReasoning: false }, 'just words')
+    const split = splitStreamingReasoning({ inReasoning: false, pendingBuffer: '' }, 'just words')
     expect(split.content).toBe('just words')
     expect(split.reasoning).toBe('')
     expect(split.inReasoning).toBe(false)
@@ -110,7 +110,7 @@ describe('splitStreamingReasoning', () => {
 
   test('a closed block followed by more text in the same chunk is fully split', () => {
     const split = splitStreamingReasoning(
-      { inReasoning: false },
+      { inReasoning: false, pendingBuffer: '' },
       '<think>a</think>one<think>b</think>two',
     )
     expect(split.reasoning).toBe('ab')
@@ -172,6 +172,51 @@ describe('createOpenAiStreamingNormalizer', () => {
     })
   })
 
+  test('removes overlapping content from native reasoning deltas', async () => {
+    const upstream = chunk(
+      [
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                content: 'The user wants me\n<think>\n',
+                reasoning: 'The user wants me',
+              },
+            },
+          ],
+        },
+        {
+          choices: [{ index: 0, delta: { content: 'private body', reasoning: 'private body' } }],
+        },
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                content: '</think>\n\nFinal answer',
+                reasoning: 'last thought',
+              },
+            },
+          ],
+        },
+      ]
+        .map((payload) => `data: ${JSON.stringify(payload)}\n\n`)
+        .join(''),
+    )
+
+    const deltas = parseSse(await pipe(upstream)).map(
+      (event) =>
+        (event.payload as { choices: { delta: Record<string, unknown> }[] }).choices[0]!.delta,
+    )
+
+    expect(deltas).toEqual([
+      { content: '', reasoning: 'The user wants me' },
+      { content: '', reasoning: 'private body' },
+      { content: 'Final answer', reasoning: 'last thought' },
+    ])
+  })
+
   test('drops audio_content and the brand-name name from every delta', async () => {
     const upstream = chunk(
       [
@@ -230,5 +275,61 @@ describe('createOpenAiStreamingNormalizer', () => {
       choices: { delta: Record<string, unknown> }[]
     }
     expect(delta.choices[0]!.delta).toEqual({ content: 'v', reasoning_content: 'r' })
+  })
+
+  test('plain reasoning chunks after the opening tag are routed into reasoning_content, not content', async () => {
+    // Reproduces the leak seen in the opencode session: the first delta opens
+    // a reasoning block and emits reasoning_content; the next deltas carry
+    // only content (no reasoning field) and must still be moved to
+    // reasoning_content so the visible text the client concatenates does
+    // not include the model's chain-of-thought.
+    const upstream = chunk(
+      [
+        { choices: [{ index: 0, delta: { content: '<think>hello' } }] },
+        { choices: [{ index: 0, delta: { content: ' world' } }] },
+        { choices: [{ index: 0, delta: { content: '</think>\n\nDone.' } }] },
+      ]
+        .map((payload) => `data: ${JSON.stringify(payload)}\n\n`)
+        .concat('data: [DONE]\n\n')
+        .join(''),
+    )
+
+    const body = await pipe(upstream)
+    const deltas = parseSse(body)
+      .filter((event) => !event.isDone)
+      .map((event) => (event.payload as { choices: { delta: Record<string, unknown> }[] }).choices[0]!.delta)
+
+    expect(deltas).toEqual([
+      { content: '', reasoning_content: 'hello' },
+      { content: '', reasoning_content: ' world' },
+      // The close tag and the visible text are in the same chunk here, so
+      // the leading whitespace pair gets stripped by the splitter.
+      { content: 'Done.', reasoning_content: '' },
+    ])
+  })
+
+  test('held partial tag text is emitted before the done sentinel', async () => {
+    const upstream = chunk(
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '<thi' } }] })}\n\n` +
+        'data: [DONE]\n\n',
+    )
+
+    const events = parseSse(await pipe(upstream))
+
+    expect(events).toEqual([
+      {
+        payload: {
+          choices: [{ index: 0, delta: { content: '', reasoning_content: '' } }],
+        },
+        isDone: false,
+      },
+      {
+        payload: {
+          choices: [{ index: 0, delta: { content: '<thi', reasoning_content: '' } }],
+        },
+        isDone: false,
+      },
+      { payload: null, isDone: true },
+    ])
   })
 })

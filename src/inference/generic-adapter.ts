@@ -5,6 +5,13 @@ import type {
   InferenceForwardRequest,
   InferenceForwardResult,
 } from './adapter.ts'
+import {
+  appendStreamingReasoning,
+  flushStreamingReasoning,
+  type StreamingReasoningState,
+} from './streaming-reasoning.ts'
+
+export { appendStreamingReasoning as splitStreamingReasoning } from './streaming-reasoning.ts'
 
 export interface GenericInferenceAdapterOptions {
   /** Injectable transport; production uses the runtime's fetch. */
@@ -187,7 +194,10 @@ function normalizeAssistantMessage(message: Record<string, unknown>): Record<str
   const existingReasoning = pickReasoningField(next)
   const content = next.content
 
-  if (existingReasoning === undefined && typeof content === 'string') {
+  if (typeof existingReasoning === 'string' && content === existingReasoning && content.length > 0) {
+    next.content = ''
+    mutated = true
+  } else if (existingReasoning === undefined && typeof content === 'string') {
     const match = REASONING_TAG_PATTERN.exec(content)
     if (match !== null) {
       const reasoning = match[1] ?? ''
@@ -343,9 +353,7 @@ const STREAM_DECODER = new TextDecoder()
  * reattached to the *first* `delta.content` emitted after the close tag so
  * the client sees no whitespace discontinuity.
  */
-interface StreamingChoiceState {
-  inReasoning: boolean
-}
+type StreamingChoiceState = StreamingReasoningState
 
 /**
  * Stateful byte-level transform that wraps an upstream SSE body so that
@@ -368,7 +376,8 @@ export function createOpenAiStreamingNormalizer(): TransformStream<Uint8Array, U
 
   return new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller): void {
-      buffer += STREAM_DECODER.decode(chunk, { stream: true })
+      const decoded = STREAM_DECODER.decode(chunk, { stream: true })
+      buffer += decoded
 
       let boundary: number
       while ((boundary = buffer.indexOf('\n\n')) !== -1) {
@@ -378,6 +387,7 @@ export function createOpenAiStreamingNormalizer(): TransformStream<Uint8Array, U
         if (out !== null) {
           if (out === '[DONE]') {
             if (doneEmitted) continue
+            enqueuePendingReasoning(controller, choiceStates)
             doneEmitted = true
             controller.enqueue(STREAM_ENCODER.encode(`data: [DONE]\n\n`))
           } else {
@@ -389,19 +399,57 @@ export function createOpenAiStreamingNormalizer(): TransformStream<Uint8Array, U
       }
     },
     flush(controller): void {
-      buffer += STREAM_DECODER.decode()
-      if (buffer.length === 0) return
-      const out = normalizeSseEvent(buffer, choiceStates)
-      buffer = ''
-      if (out === null) {
-        controller.enqueue(STREAM_ENCODER.encode(`${buffer}\n\n`))
-      } else if (out === '[DONE]') {
-        if (!doneEmitted) controller.enqueue(STREAM_ENCODER.encode(`data: [DONE]\n\n`))
-      } else {
-        controller.enqueue(STREAM_ENCODER.encode(`data: ${out}\n\n`))
+      const tail = STREAM_DECODER.decode()
+      if (tail.length > 0) {
+        buffer += tail
+      }
+      if (buffer.length > 0) {
+        const event = buffer
+        buffer = ''
+        const out = normalizeSseEvent(event, choiceStates)
+        if (out === null) {
+          controller.enqueue(STREAM_ENCODER.encode(`${event}\n\n`))
+        } else if (out === '[DONE]') {
+          if (!doneEmitted) {
+            enqueuePendingReasoning(controller, choiceStates)
+            doneEmitted = true
+            controller.enqueue(STREAM_ENCODER.encode(`data: [DONE]\n\n`))
+          }
+        } else {
+          controller.enqueue(STREAM_ENCODER.encode(`data: ${out}\n\n`))
+        }
+      }
+
+      // Drain any per-choice text that was held back to keep a partial tag
+      // prefix across a chunk boundary. Emitted *before* [DONE] so the
+      // reasoning-to-content transition lands in the right place.
+      if (!doneEmitted) {
+        enqueuePendingReasoning(controller, choiceStates)
       }
     },
   })
+}
+
+function enqueuePendingReasoning(
+  controller: TransformStreamDefaultController<Uint8Array>,
+  choiceStates: ReadonlyMap<number, StreamingChoiceState>,
+): void {
+  for (const [index, state] of choiceStates) {
+    const flushed = flushStreamingReasoning(state)
+    if (flushed === null) continue
+    const encoded = JSON.stringify({
+      choices: [
+        {
+          index,
+          delta: {
+            content: flushed.content,
+            reasoning_content: flushed.reasoning,
+          },
+        },
+      ],
+    })
+    controller.enqueue(STREAM_ENCODER.encode(`data: ${encoded}\n\n`))
+  }
 }
 
 /**
@@ -454,7 +502,7 @@ function normalizeSseEvent(event: string, choiceStates: Map<number, StreamingCho
     if (choice === null || typeof choice !== 'object') continue
     const index = (choice as Record<string, unknown>).index
     const idx = typeof index === 'number' ? index : 0
-    const state = choiceStates.get(idx) ?? { inReasoning: false }
+    const state = choiceStates.get(idx) ?? { inReasoning: false, pendingBuffer: '' }
     const normalised = normalizeStreamingDelta(choice as Record<string, unknown>, state)
     if (normalised !== null) {
       ;(choice as Record<string, unknown>).delta = normalised
@@ -485,88 +533,43 @@ function normalizeStreamingDelta(
   }
 
   const content = d.content
-  // Skip the split when the upstream already published a separate
-  // reasoning field — the buffered normaliser treats that as authoritative,
-  // and the streaming path has to do the same so OpenRouter / Kimi / GLM
-  // responses round-trip untouched.
-  if (typeof content === 'string' && content.length > 0 && !('reasoning_content' in d) && !('reasoning' in d)) {
-    const split = splitStreamingReasoning(state, content)
-    if (split.mutated) {
-      // Always set both fields (possibly to empty string) when the chunk
-      // participates in reasoning, so a client diffing consecutive deltas
-      // sees a deterministic shape regardless of whether reasoning is open
-      // or closed at this boundary.
-      d.content = split.content
-      d.reasoning_content = split.reasoning
-      state.inReasoning = split.inReasoning
+  const hasReasoningDelta = typeof d.reasoning === 'string' && d.reasoning.length > 0
+  const duplicatesReasoningContent = content === d.reasoning_content
+  if (typeof content === 'string' && content.length > 0) {
+    if (hasReasoningDelta) {
+      const reasoning = d.reasoning as string
+      let remainder = content
+      if (content.startsWith(reasoning)) remainder = content.slice(reasoning.length)
+      else if (reasoning.startsWith(content)) remainder = ''
+
+      if (state.inReasoning || remainder.includes('<')) {
+        const tagStart = remainder.indexOf('<')
+        if (tagStart > 0 && remainder.slice(0, tagStart).trim().length === 0) {
+          remainder = remainder.slice(tagStart)
+        }
+        const split = appendStreamingReasoning(state, remainder)
+        d.content = split.content
+      } else {
+        d.content = ''
+      }
       mutated = true
+    } else if (duplicatesReasoningContent) {
+      d.content = ''
+      mutated = true
+    } else if (!('reasoning_content' in d) && !('reasoning' in d)) {
+      const split = appendStreamingReasoning(state, content)
+      if (split.mutated) {
+        // Always set both fields (possibly to empty string) when the chunk
+        // participates in reasoning, so a client diffing consecutive deltas
+        // sees a deterministic shape regardless of whether reasoning is open
+        // or closed at this boundary.
+        d.content = split.content
+        d.reasoning_content = split.reasoning
+        state.inReasoning = split.inReasoning
+        mutated = true
+      }
     }
   }
 
   return mutated ? d : null
-}
-
-interface StreamingSplitResult {
-  reasoning: string
-  content: string
-  inReasoning: boolean
-  mutated: boolean
-}
-
-/**
- * Routes characters of one `delta.content` string into `reasoning` vs
- * `content` based on the current open/close state and the positions of
- * `<think|thinking|budget:thinking>` and `</…>` tags inside it. Tags that
- * straddle the boundary are split across the two outputs so the close-tag
- * prefix stays with the reasoning half and the trailing whitespace stays
- * with the clean-text half — preserving the visible output's leading
- * whitespace while keeping the reasoning field tight.
- */
-export function splitStreamingReasoning(
-  initial: StreamingChoiceState,
-  text: string,
-): StreamingSplitResult {
-  const tagRegex = /<\/?(?:think|thinking|budget:thinking)>/g
-  let reasoning = ''
-  let content = ''
-  let state = initial.inReasoning
-  let mutated = false
-  let sawCloseInChunk = false
-  let lastIndex = 0
-  let m: RegExpExecArray | null
-  while ((m = tagRegex.exec(text)) !== null) {
-    mutated = true
-    const isClose = m[0].startsWith('</')
-    const between = text.slice(lastIndex, m.index)
-    if (state) reasoning += between
-    else content += between
-
-    if (isClose && state) {
-      state = false
-      sawCloseInChunk = true
-    } else if (!isClose && !state) {
-      state = true
-    }
-
-    lastIndex = m.index + m[0].length
-  }
-  const trailing = text.slice(lastIndex)
-  if (state) {
-    reasoning += trailing
-  } else {
-    content += trailing
-  }
-
-  // The upstream emits `</think>\n\n<visible>`. When this chunk carries
-  // both the close tag and the first visible characters, the leading
-  // whitespace pair belongs to the reasoning block visually but arrives
-  // inside the *content* run — strip it here so a concatenating client
-  // sees no stray blank prefix.
-  if (sawCloseInChunk && content.length > 0) {
-    content = content.replace(/^\s+/, '')
-  }
-
-  if (trailing.length > 0 && mutated) mutated = true
-
-  return { reasoning, content, inReasoning: state, mutated }
 }

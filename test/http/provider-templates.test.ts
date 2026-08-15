@@ -72,7 +72,13 @@ describe('the Provider Templates admin endpoint', () => {
     const response = await iroha.fetch(BASE)
     const body = (await response.json()) as TemplateListBody
     for (const template of body.templates) {
-      expect(template.inferenceAdapterId).toBe('generic-inference-adapter')
+      // The Anthropic template points at its typed adapter; every other
+      // built-in template uses the generic one.
+      if (template.id === 'anthropic') {
+        expect(template.inferenceAdapterId).toBe('anthropic-inference-adapter')
+      } else {
+        expect(template.inferenceAdapterId).toBe('generic-inference-adapter')
+      }
       expect(template.usageAdapterId).not.toBe('')
     }
     // MiniMax is the only built-in template that ships a typed Usage Adapter

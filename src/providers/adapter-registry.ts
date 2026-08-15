@@ -1,10 +1,12 @@
 import { createGenericInferenceAdapter, type InferenceAdapter } from '../inference/index.ts'
+import { createAnthropicInferenceAdapter } from '../inference/anthropic-adapter.ts'
 import {
   createGenericUsageAdapter,
   createMinimaxUsageAdapter,
   type UsageAdapter,
 } from '../usage/index.ts'
 import {
+  ANTHROPIC_INFERENCE_ADAPTER_ID,
   BUILT_IN_PROVIDER_TEMPLATES,
   GENERIC_INFERENCE_ADAPTER_ID,
   MINIMAX_USAGE_ADAPTER_ID,
@@ -209,15 +211,41 @@ export class AdapterRegistry {
 }
 
 /**
- * The Adapter Registry every Iroha build ships with: the generic Inference
- * Adapter, the reactive-only generic Usage Adapter, and the built-in Provider
- * Templates. Tests can construct their own registry through the constructor
- * to assert validation behaviour; production reaches for this constant.
+ * The optional inputs to {@link createBuiltInAdapterRegistry} for tests and
+ * future builds. Every field defaults to production-correct behaviour; an
+ * option exists for the seam only when a caller genuinely needs to swap the
+ * value (most often to inject the test's mock upstream transport into every
+ * built-in Inference Adapter).
  */
-export function createBuiltInAdapterRegistry(): AdapterRegistry {
+export interface BuiltInAdapterRegistryOptions {
+  /**
+   * Replaces the built-in generic Inference Adapter. Tests inject the same
+   * mock transport they use for the catalog so the adapter records against
+   * the same fetch the rest of the suite drives.
+   */
+  readonly genericInferenceAdapter?: InferenceAdapter
+  /**
+   * Replaces the built-in Anthropic Inference Adapter. Tests inject the
+   * same mock transport so an Anthropic Provider Connection's calls reach
+   * the same recorded calls list as a generic OpenAI-shaped call.
+   */
+  readonly anthropicInferenceAdapter?: InferenceAdapter
+}
+
+/**
+ * The Adapter Registry every Iroha build ships with: the generic Inference
+ * Adapter, the typed Anthropic Inference Adapter, the reactive-only generic
+ * Usage Adapter, and the built-in Provider Templates. Tests can construct
+ * their own registry through the constructor to assert validation
+ * behaviour; production reaches for this constant.
+ */
+export function createBuiltInAdapterRegistry(
+  options: BuiltInAdapterRegistryOptions = {},
+): AdapterRegistry {
   return new AdapterRegistry({
     inferenceAdapters: inferenceAdapters({
-      [GENERIC_INFERENCE_ADAPTER_ID]: createGenericInferenceAdapter(),
+      [GENERIC_INFERENCE_ADAPTER_ID]: options.genericInferenceAdapter ?? createGenericInferenceAdapter(),
+      [ANTHROPIC_INFERENCE_ADAPTER_ID]: options.anthropicInferenceAdapter ?? createAnthropicInferenceAdapter(),
     }),
     usageAdapters: usageAdapters({
       [REACTIVE_ONLY_USAGE_ADAPTER_ID]: createGenericUsageAdapter(),

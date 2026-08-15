@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { Elysia, t } from 'elysia'
 import type { RequestHistoryService } from '../history/index.ts'
 import type { AttemptOutcome } from '../persistence/index.ts'
+import { adapterBlockedHeaders } from '../inference/blocked-headers.ts'
 import {
   callerSuppliedIdempotency,
   generateIdempotencyValue,
@@ -12,6 +13,7 @@ import {
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
+import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import type { InferenceTarget, ProviderRegistry } from '../providers/index.ts'
 import type { MetricsCollector } from '../metrics/metrics.ts'
 import type { InferenceActivity, ShutdownController } from '../runtime/shutdown.ts'
@@ -90,6 +92,13 @@ export interface InferenceRoutesOptions {
   readonly providers: ProviderRegistry
   readonly inference: InferenceAdapter
   readonly modelCatalog: ModelCatalogService
+  /**
+   * The Adapter Registry the route consults to pick the Inference Adapter
+   * for each Provider Connection. When omitted, every request uses the
+   * `inference` option above, preserving the single-adapter behaviour
+   * older callers relied on.
+   */
+  readonly adapterRegistry?: AdapterRegistry
   /** Streaming deadlines; tests inject a fake timer to drive them. */
   readonly timer?: Timer
   readonly shutdown?: ShutdownController
@@ -128,7 +137,6 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
   const timer = options.timer ?? systemTimer
   const retrySleep = options.retrySleep ?? sleepWithTimer(timer)
   const transport = options.transportDefaults ?? DEFAULT_TRANSPORT
-  const adapterCapabilities: InferenceAdapterCapabilities = inference.capabilities
   const requestHistory = options.requestHistory
 
   return new Elysia({ name: 'iroha/inference', prefix: '/providers' })
@@ -140,7 +148,6 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           gatewayKeys,
           database: options.database ?? null,
           transport,
-          adapterCapabilities,
           request,
         })
       },
@@ -222,7 +229,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           timeouts: options.timeouts,
           retrySleep,
           transport,
-          adapterCapabilities,
+          adapterRegistry: options.adapterRegistry ?? null,
           database: options.database ?? null,
           requestHistory,
           ...(options.usageService === undefined ? {} : { usageService: options.usageService }),
@@ -256,7 +263,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           timeouts: options.timeouts,
           retrySleep,
           transport,
-          adapterCapabilities,
+          adapterRegistry: options.adapterRegistry ?? null,
           database: options.database ?? null,
           requestHistory,
           ...(options.usageService === undefined ? {} : { usageService: options.usageService }),
@@ -290,7 +297,8 @@ async function forwardGeneration(options: {
   timeouts?: StreamingTimeouts | undefined
   retrySleep: (ms: number, signal: AbortSignal) => Promise<void>
   transport: TransportDefaults
-  adapterCapabilities: InferenceAdapterCapabilities
+  /** The Adapter Registry the route consults to pick the per-Provider Adapter. */
+  adapterRegistry?: AdapterRegistry | null
   requestHistory?: RequestHistoryService | undefined
   requestActivity?: InferenceActivity
   metrics?: MetricsCollector
@@ -307,7 +315,7 @@ async function forwardGeneration(options: {
     timer,
     retrySleep,
     transport,
-    adapterCapabilities,
+    adapterRegistry,
     timeouts,
     requestHistory,
     requestActivity,
@@ -372,16 +380,28 @@ async function forwardGeneration(options: {
   const maxAttempts = retryPolicy?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
   const retryAmbiguousNetwork = retryPolicy?.retryAmbiguousNetwork ?? false
   const totalRetryBudgetMs = retryPolicy?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
+  // The route picks one Inference Adapter per Provider Connection. The
+  // dispatch falls back to the single inference the route was assembled with
+  // when no Adapter Registry is supplied (older callers and tests that build
+  // a registry manually still get the same behaviour), and to the generic
+  // adapter when the Provider's template id names no typed adapter.
+  const providerAdapter = resolveAdapterForProvider({
+    registry: adapterRegistry ?? null,
+    templateId: retryPolicy?.templateId ?? null,
+    fallback: inference,
+  })
+  const providerAdapterCapabilities = providerAdapter.capabilities
   let alternateUsed = false
   let sameKeyRetries = 0
+  let ambiguousNetworkRetries = 0
   let lastUpstream: Awaited<ReturnType<InferenceAdapter['forward']>> | null = null
   let retainedTarget: InferenceTarget | null = null
   let lastAttemptRecorder: { readonly finalize: (outcome: AttemptTerminal) => Promise<void> } | null = null
   let lastAttemptKeyId: string | null = null
 
   const callerHeaders = headersOf(request)
-  const inboundIdempotency = callerSuppliedIdempotency(callerHeaders, adapterCapabilities.idempotencyHeader)
-  const generatedIdempotency = inboundIdempotency === null && adapterCapabilities.idempotencyGenerationSafe
+  const inboundIdempotency = callerSuppliedIdempotency(callerHeaders, providerAdapterCapabilities.idempotencyHeader)
+  const generatedIdempotency = inboundIdempotency === null && providerAdapterCapabilities.idempotencyGenerationSafe
     ? generateIdempotencyValue()
     : null
 
@@ -429,7 +449,7 @@ async function forwardGeneration(options: {
     const upstreamHeaders = buildUpstreamHeaders({
       callerHeaders,
       target,
-      adapterCapabilities,
+      adapterCapabilities: providerAdapterCapabilities,
       inboundIdempotency,
       generatedIdempotency,
     })
@@ -448,7 +468,7 @@ async function forwardGeneration(options: {
       staticHeaders: target.staticHeaders,
       redirectAllowSameOrigin: target.redirectAllowSameOrigin,
       idempotencyHeader: target.idempotencyHeader,
-      idempotencyGenerationSafe: adapterCapabilities.idempotencyGenerationSafe,
+      idempotencyGenerationSafe: providerAdapterCapabilities.idempotencyGenerationSafe,
       connectionTimeoutMs: target.connectionTimeoutMs,
       firstByteTimeoutMs: target.firstByteTimeoutMs,
       nonStreamingTotalTimeoutMs: target.nonStreamingTotalTimeoutMs,
@@ -458,7 +478,7 @@ async function forwardGeneration(options: {
 
     if (envelope.stream) {
       const streamed = await streamChatCompletion(
-        inference,
+        providerAdapter,
         timer,
         streamingTimeoutsFor(timeouts, target, transport),
         forwardRequest,
@@ -488,14 +508,16 @@ async function forwardGeneration(options: {
         streamingResponse = true
         return monitorResponse(streamed, requestActivity)
       }
+      const headerMap = Object.fromEntries(streamed.headers.entries())
+      const classification = providerAdapter.classifyFailure({
+        kind: 'buffered', status: streamed.status, headers: headerMap, body: '',
+      })
       await providers.recordInferenceFailure({
         keyId: target.keyId,
         model: envelope.model,
-        status: streamed.status,
-        retryAfterSeconds: numericRetryAfter(streamed.headers),
+        classification,
         reason: `upstream HTTP ${streamed.status}`,
       })
-      const headerMap = Object.fromEntries(streamed.headers.entries())
       const refusal = upstreamRefusal(streamed.status, headerMap)
       await lastAttemptRecorder?.finalize({
         status: streamed.status,
@@ -505,18 +527,14 @@ async function forwardGeneration(options: {
         at: new Date(),
       })
       const status = streamed.status
-      if ((status === 401 || status === 403) && attempt < maxAttempts) {
+      const boundedAlternate = classification.kind === 'capacity_limited' || classification.kind === 'payment_required'
+      if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed) && attempt < maxAttempts) {
+        if (boundedAlternate) alternateUsed = true
         attemptedKeys.push(target.keyId)
         metrics?.recordRetry()
         continue
       }
-      if (status === 429 && !alternateUsed && attempt < maxAttempts) {
-        alternateUsed = true
-        attemptedKeys.push(target.keyId)
-        metrics?.recordRetry()
-        continue
-      }
-      if (status >= 500 && sameKeyRetries < 1 && attempt < maxAttempts) {
+      if (classification.retryAction === 'retry_same' && sameKeyRetries < 1 && attempt < maxAttempts) {
         sameKeyRetries++
         retainedTarget = target
         await retrySleep(100, requestSignal)
@@ -538,9 +556,36 @@ async function forwardGeneration(options: {
     }
 
     try {
-      lastUpstream = await inference.forward(forwardRequest)
+      lastUpstream = await providerAdapter.forward(forwardRequest)
     } catch (cause) {
       if (isAbort(cause)) throw cause
+      if (isAnthropicForwardError(cause)) {
+        const refusal = anthropicForwardRefusal(cause as AnthropicForwardErrorLike)
+        await lastAttemptRecorder?.finalize({
+          status: refusal.status,
+          outcome: 'failure',
+          errorCode: refusal.code,
+          retryAfterSeconds: null,
+          at: new Date(),
+        })
+        await history?.finalize({
+          status: refusal.status,
+          outcome: 'failure',
+          isStreaming: false,
+          latencyMs: timer.now() - startedAt,
+          keyId: target.keyId,
+          promptTokens: null,
+          completionTokens: null,
+          totalTokens: null,
+          errorCode: refusal.code,
+        })
+        return error(
+          refusal.status,
+          { ...responseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) },
+          refusal,
+          correlationId,
+        )
+      }
       await lastAttemptRecorder?.finalize({
         status: null,
         outcome: 'failure',
@@ -550,9 +595,11 @@ async function forwardGeneration(options: {
       })
       if (
         retryAmbiguousNetwork &&
+        ambiguousNetworkRetries < 1 &&
         attempt < maxAttempts &&
         timer.now() - startedAt < totalRetryBudgetMs
       ) {
+        ambiguousNetworkRetries++
         retainedTarget = target
         await retrySleep(100, requestSignal)
         metrics?.recordRetry()
@@ -611,11 +658,11 @@ async function forwardGeneration(options: {
     }
 
     const status = lastUpstream.status
+    const classification = providerAdapter.classifyFailure(lastUpstream)
     await providers.recordInferenceFailure({
       keyId: target.keyId,
       model: envelope.model,
-      status,
-      retryAfterSeconds: numericRetryAfter(lastUpstream.headers),
+      classification,
       reason: `upstream HTTP ${status}`,
     })
 
@@ -631,18 +678,14 @@ async function forwardGeneration(options: {
     const insideBudget = timer.now() - startedAt < totalRetryBudgetMs
     if (!insideBudget || requestSignal.aborted) break
 
-    if (status === 401 || status === 403) {
+    const boundedAlternate = classification.kind === 'capacity_limited' || classification.kind === 'payment_required'
+    if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed)) {
+      if (boundedAlternate) alternateUsed = true
       attemptedKeys.push(target.keyId)
       metrics?.recordRetry()
       continue
     }
-    if (status === 429 && !alternateUsed) {
-      alternateUsed = true
-      attemptedKeys.push(target.keyId)
-      metrics?.recordRetry()
-      continue
-    }
-    if (status >= 500 && sameKeyRetries < 1) {
+    if (classification.retryAction === 'retry_same' && sameKeyRetries < 1) {
       sameKeyRetries++
       retainedTarget = target
       await retrySleep(100, requestSignal)
@@ -744,33 +787,7 @@ function buildUpstreamHeaders(options: {
   return result
 }
 
-const FORWARD_BLOCKED_HEADERS = new Set([
-  'authorization',
-  'connection',
-  'content-length',
-  'cookie',
-  'expect',
-  'host',
-  'keep-alive',
-  'origin',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'referer',
-  'set-cookie',
-  'te',
-  'traceparent',
-  'tracestate',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
-  'via',
-  'x-correlation-id',
-  'x-forwarded-for',
-  'x-forwarded-host',
-  'x-forwarded-proto',
-  'x-real-ip',
-  'x-request-id',
-])
+const FORWARD_BLOCKED_HEADERS = adapterBlockedHeaders
 
 function shouldForwardHeader(name: string): boolean {
   if (FORWARD_BLOCKED_HEADERS.has(name.toLowerCase())) return false
@@ -1353,7 +1370,6 @@ async function handleCors(options: {
   gatewayKeys: GatewayKeyRegistry
   database: Database | null
   transport: TransportDefaults
-  adapterCapabilities: InferenceAdapterCapabilities
   request: Request
 }): Promise<Response> {
   const origin = options.request.headers.get('origin')
@@ -1398,4 +1414,59 @@ async function handleCors(options: {
       },
     },
   )
+}
+
+/**
+ * Picks the Inference Adapter that should handle one Provider Connection's
+ * request. The dispatch order is:
+ *
+ *   1. the Adapter Registry the route was assembled with (when supplied),
+ *      looking up the Provider Template's `inferenceAdapterId`;
+ *   2. when the template names the generic adapter (or the connection has no
+ *      template), the fallback the route was assembled with (the same one the
+ *      single-adapter era passed in directly);
+ *   3. the fallback outright when no registry is supplied, which preserves
+ *      the pre-registry behaviour for older tests and external callers.
+ *
+ * The dispatch never throws and never returns null: the fallback is the
+ * route's guarantee that every request reaches an adapter.
+ */
+function resolveAdapterForProvider(options: {
+  registry: AdapterRegistry | null
+  templateId: string | null
+  fallback: InferenceAdapter
+}): InferenceAdapter {
+  const { registry, templateId, fallback } = options
+  if (registry === null) return fallback
+  if (templateId === null) return fallback
+  const template = registry.providerTemplate(templateId)
+  if (template === null) return fallback
+  const adapter = registry.inferenceAdapter(template.inferenceAdapterId)
+  if (adapter === null) return fallback
+  return adapter
+}
+
+/**
+ * Detects an Anthropic adapter error without depending on its class type.
+ * The adapter sets `name` to `AnthropicForwardError`; matching by name keeps
+ * the route from needing an extra import.
+ */
+function isAnthropicForwardError(cause: unknown): boolean {
+  if (typeof cause !== 'object' || cause === null) return false
+  return (cause as { name?: unknown }).name === 'AnthropicForwardError'
+}
+
+/**
+ * The structural shape an Anthropic adapter error exposes. The route
+ * pattern-matches on `name` and reads these three fields to build the Iroha
+ * refusal envelope.
+ */
+interface AnthropicForwardErrorLike {
+  readonly status: number
+  readonly code: string
+  readonly message: string
+}
+
+function anthropicForwardRefusal(cause: AnthropicForwardErrorLike): Refusal {
+  return { status: cause.status, code: cause.code, message: cause.message }
 }

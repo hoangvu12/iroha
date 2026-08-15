@@ -6,6 +6,10 @@
 export type {
   InferenceAdapter,
   InferenceAdapterCapabilities,
+  InferenceFailureCapacityScope,
+  InferenceFailureClassification,
+  InferenceFailureKind,
+  InferenceFailureRetryAction,
   InferenceForwardRequest,
   InferenceForwardResult,
 } from './adapter.ts'
@@ -16,3 +20,11 @@ export {
   upstreamUrl,
   type GenericInferenceAdapterOptions,
 } from './generic-adapter.ts'
+export {
+  DEFAULT_ANTHROPIC_MAX_TOKENS,
+  DEFAULT_ANTHROPIC_VERSION,
+  createAnthropicInferenceAdapter,
+  getMaxTokensForModel,
+  type AnthropicForwardError,
+  type AnthropicInferenceAdapterOptions,
+} from './anthropic-adapter.ts'

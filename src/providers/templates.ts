@@ -29,6 +29,13 @@ import type { ProviderCapabilities } from '../persistence/index.ts'
 export const GENERIC_INFERENCE_ADAPTER_ID = 'generic-inference-adapter'
 
 /**
+ * The well-known Inference Adapter id the typed Anthropic Inference Adapter
+ * is registered under. The `anthropic` Provider Template references it;
+ * the Adapter Registry asserts it exists at startup.
+ */
+export const ANTHROPIC_INFERENCE_ADAPTER_ID = 'anthropic-inference-adapter'
+
+/**
  * The well-known Usage Adapter id the reactive-only generic Usage Adapter is
  * registered under. Built-in templates that have no documented entitlement
  * API point at it; the Adapter Registry asserts it exists at startup.
@@ -224,6 +231,42 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: MINIMAX_USAGE_ADAPTER_ID,
     brand: { domain: 'minimax.io', accentColor: '#F43F5E' },
+  },
+  {
+    id: 'anthropic',
+    displayName: 'Anthropic',
+    description:
+      'Anthropic’s first-party API. Authentication uses the `x-api-key` header; the typed Anthropic Inference Adapter translates OpenAI-shape requests and responses to and from the Anthropic Messages envelope.',
+    baseUrl: 'https://api.anthropic.com/v1',
+    authHeader: 'x-api-key',
+    authPrefix: '',
+    capabilities: {
+      chat: true,
+      streaming: true,
+      tools: true,
+      structuredOutput: true,
+      responses: true,
+    },
+    knownModels: [
+      'anthropic-opus-5',
+      'anthropic-sonnet-5',
+      'anthropic-fable-5',
+      'anthropic-mythos-5',
+      'anthropic-opus-4-8',
+      'anthropic-opus-4-7',
+      'anthropic-mythos-preview',
+      'anthropic-opus-4-6',
+      'anthropic-sonnet-4-6',
+      'anthropic-haiku-4-5',
+      'anthropic-haiku-4-5-20251001',
+      'anthropic-opus-4-5',
+      'anthropic-opus-4-5-20251101',
+      'anthropic-sonnet-4-5',
+      'anthropic-sonnet-4-5-20250929',
+    ],
+    inferenceAdapterId: ANTHROPIC_INFERENCE_ADAPTER_ID,
+    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
+    brand: { domain: 'anthropic.com', accentColor: '#D97757' },
   },
 ]
 

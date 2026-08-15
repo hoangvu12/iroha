@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { adapterBlockedHeaders } from './blocked-headers.ts'
 import type {
   InferenceAdapter,
   InferenceAdapterCapabilities,
+  InferenceFailureClassification,
   InferenceForwardRequest,
   InferenceForwardResult,
 } from './adapter.ts'
@@ -25,38 +27,12 @@ const GENERIC_CAPABILITIES: InferenceAdapterCapabilities = {
 }
 
 /**
- * Hop-by-hop headers (RFC 9113 §8.2.2 and friends), proxy-control headers,
- * credential-bearing headers, and headers Iroha itself owns are never
- * forwarded upstream. Everything else passes through so provider extensions
- * keep working.
+ * Hop-by-hop, proxy-control, credential-bearing, and Iroha-owned headers
+ * are never forwarded upstream. Everything else passes through so provider
+ * extensions keep working. The list lives in `blocked-headers.ts` so every
+ * adapter and the inference HTTP route share one source of truth.
  */
-const BLOCKED_HEADERS = new Set([
-  'authorization',
-  'connection',
-  'content-length',
-  'cookie',
-  'expect',
-  'host',
-  'keep-alive',
-  'origin',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'referer',
-  'set-cookie',
-  'te',
-  'traceparent',
-  'tracestate',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
-  'via',
-  'x-correlation-id',
-  'x-forwarded-for',
-  'x-forwarded-host',
-  'x-forwarded-proto',
-  'x-real-ip',
-  'x-request-id',
-])
+const BLOCKED_HEADERS = adapterBlockedHeaders
 
 /**
  * The generic OpenAI-compatible Inference Adapter: endpoint construction from
@@ -79,6 +55,7 @@ export function createGenericInferenceAdapter(
 
   return {
     capabilities: GENERIC_CAPABILITIES,
+    classifyFailure: classifyGenericFailure,
 
     async forward(request: InferenceForwardRequest): Promise<InferenceForwardResult> {
       const forwarded: Record<string, string> = {}
@@ -428,6 +405,32 @@ export function createOpenAiStreamingNormalizer(): TransformStream<Uint8Array, U
       }
     },
   })
+}
+
+/** Conservative semantics shared by OpenAI-compatible adapters without a documented override. */
+export function classifyGenericFailure(result: InferenceForwardResult): InferenceFailureClassification {
+  const retryAfterSeconds = numericHeader(result.headers['retry-after'])
+  if (result.status === 401) {
+    return { kind: 'authentication_invalid', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
+  }
+  if (result.status === 403) {
+    return { kind: 'authentication_rejected', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
+  }
+  if (result.status === 429) {
+    return { kind: 'capacity_limited', capacityScope: 'unknown', retryAction: 'try_alternate', retryAfterSeconds }
+  }
+  if (result.status === 402) {
+    return { kind: 'payment_required', capacityScope: 'unknown', retryAction: 'try_alternate', retryAfterSeconds }
+  }
+  if (result.status >= 500) {
+    return { kind: 'provider_failure', capacityScope: 'connection_model', retryAction: 'retry_same', retryAfterSeconds }
+  }
+  return { kind: 'request_rejected', capacityScope: 'unknown', retryAction: 'stop', retryAfterSeconds }
+}
+
+function numericHeader(value: string | undefined): number | null {
+  if (value === undefined || !/^\d+$/.test(value.trim())) return null
+  return Number(value.trim())
 }
 
 function enqueuePendingReasoning(

@@ -256,6 +256,7 @@ export function createApp(options: AppOptions) {
         providers,
         inference,
         modelCatalog,
+        adapterRegistry,
         database,
         requestHistory,
         transportDefaults,

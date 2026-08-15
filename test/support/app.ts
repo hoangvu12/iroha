@@ -3,7 +3,7 @@ import { createApp } from '../../src/http/app.ts'
 import type { StreamingTimeouts, TransportDefaults } from '../../src/http/inference.ts'
 import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
-import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
+import { createAnthropicInferenceAdapter, createGenericInferenceAdapter } from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
 import { BackgroundScheduleSettingsService } from '../../src/jobs/index.ts'
 import { ModelCatalogService, templateKnowledgeFromRegistry } from '../../src/models/index.ts'
@@ -177,7 +177,13 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   // server, so every test request shares the throttle's unknown source.
 
   const upstreamKeyProbe = options.upstreamKeyProbe ?? fakeKeyProbe()
-  const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry()
+  const upstreamTransport = options.upstreamTransport ?? stubUpstreamTransport()
+  const inference = createGenericInferenceAdapter({ fetch: upstreamTransport })
+  const anthropicInferenceAdapter = createAnthropicInferenceAdapter({ fetch: upstreamTransport })
+  const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry({
+    genericInferenceAdapter: inference,
+    anthropicInferenceAdapter,
+  })
   const providers = new ProviderRegistry({
     database,
     cipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),
@@ -190,9 +196,6 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
 
   const readiness = new ReadinessState()
   readiness.markMigrated()
-  const inference = createGenericInferenceAdapter({
-    fetch: options.upstreamTransport ?? stubUpstreamTransport(),
-  })
   const modelCatalog = new ModelCatalogService({
     database,
     cipher: options.secretCipher ?? createSecretCipher(TEST_MASTER_KEY),

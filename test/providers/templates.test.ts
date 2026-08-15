@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  ANTHROPIC_INFERENCE_ADAPTER_ID,
   BUILT_IN_PROVIDER_TEMPLATES,
   findBuiltInTemplate,
   GENERIC_INFERENCE_ADAPTER_ID,
@@ -44,9 +45,15 @@ describe('the built-in Provider Templates', () => {
     }
   })
 
-  test('every built-in template references the generic Inference Adapter', () => {
+  test('every built-in template references a registered Inference Adapter', () => {
+    // The Anthropic template references the typed Anthropic Inference Adapter;
+    // every other built-in template uses the generic one.
     for (const template of BUILT_IN_PROVIDER_TEMPLATES) {
-      expect(template.inferenceAdapterId).toBe(GENERIC_INFERENCE_ADAPTER_ID)
+      if (template.id === 'anthropic') {
+        expect(template.inferenceAdapterId).toBe(ANTHROPIC_INFERENCE_ADAPTER_ID)
+      } else {
+        expect(template.inferenceAdapterId).toBe(GENERIC_INFERENCE_ADAPTER_ID)
+      }
     }
   })
 
@@ -120,5 +127,25 @@ describe('the built-in Provider Templates', () => {
     expect(openai.capabilities.streaming).toBe(true)
     expect(openai.capabilities.tools).toBe(true)
     expect(openai.capabilities.responses).toBe(true)
+  })
+
+  test('the Anthropic template authenticates with x-api-key and advertises every capability', () => {
+    const anthropic = findBuiltInTemplate('anthropic') as ProviderTemplate
+    expect(anthropic.authHeader).toBe('x-api-key')
+    expect(anthropic.authPrefix).toBe('')
+    expect(anthropic.baseUrl).toBe('https://api.anthropic.com/v1')
+    // The typed adapter translates OpenAI-shape to Anthropic-shape at the
+    // boundary, so every public surface is reachable and the template
+    // advertises all five capability flags.
+    expect(anthropic.capabilities.chat).toBe(true)
+    expect(anthropic.capabilities.streaming).toBe(true)
+    expect(anthropic.capabilities.tools).toBe(true)
+    expect(anthropic.capabilities.structuredOutput).toBe(true)
+    expect(anthropic.capabilities.responses).toBe(true)
+    expect(anthropic.knownModels.length).toBeGreaterThan(0)
+    expect(anthropic.knownModels).toContain('anthropic-opus-5')
+    // Anthropic exposes no entitlement API; the reactive-only generic
+    // Usage Adapter is the honest default.
+    expect(anthropic.usageAdapterId).toBe(REACTIVE_ONLY_USAGE_ADAPTER_ID)
   })
 })

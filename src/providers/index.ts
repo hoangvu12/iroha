@@ -30,6 +30,7 @@ export {
   type UpstreamKeyProbe,
 } from './key-probe.ts'
 export {
+  ANTHROPIC_INFERENCE_ADAPTER_ID,
   BUILT_IN_PROVIDER_TEMPLATES,
   findBuiltInTemplate,
   GENERIC_INFERENCE_ADAPTER_ID,

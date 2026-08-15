@@ -84,8 +84,61 @@ export interface InferenceAdapterCapabilities {
   readonly idempotencyGenerationSafe: boolean
 }
 
+export type InferenceFailureKind =
+  | 'authentication_invalid'
+  | 'authentication_rejected'
+  | 'capacity_limited'
+  | 'payment_required'
+  | 'provider_failure'
+  | 'request_rejected'
+
+export type InferenceFailureRetryAction = 'stop' | 'retry_same' | 'try_alternate'
+
+export type InferenceFailureCapacityScope = 'key' | 'account' | 'connection_model' | 'provider' | 'unknown'
+
+/** Provider-owned meaning extracted from one non-success upstream answer. */
+export interface InferenceFailureClassification {
+  readonly kind: InferenceFailureKind
+  readonly capacityScope: InferenceFailureCapacityScope
+  readonly retryAction: InferenceFailureRetryAction
+  readonly retryAfterSeconds: number | null
+}
+
+/**
+ * The optional inputs {@link InferenceAdapter.forwardAnthropic} uses. The
+ * request is the Anthropic-shape body an Anthropic SDK caller sent to
+ * `POST /providers/{connection_id}/v1/messages`. The `passthrough` flag tells
+ * the adapter whether the target Provider is Anthropic (forward the body to
+ * upstream `/v1/messages` verbatim, stream SSE events verbatim, preserve the
+ * Anthropic error envelope) or a non-Anthropic Provider that speaks the
+ * OpenAI-compatible surface (translate the Anthropic-shape body to OpenAI-shape,
+ * call upstream with OpenAI-shape, translate the OpenAI-shape response back to
+ * Anthropic-shape).
+ */
+export interface AnthropicForwardRequest extends InferenceForwardRequest {
+  /**
+   * `true` when the target Provider is Anthropic and the body should be
+   * passed through verbatim; `false` when the body should be translated to
+   * OpenAI-shape for a non-Anthropic Provider and the response translated back.
+   */
+  readonly passthrough: boolean
+}
+
 export interface InferenceAdapter {
   /** What this adapter declares about itself; the routing layer reads it once. */
   readonly capabilities: InferenceAdapterCapabilities
+  classifyFailure(result: InferenceForwardResult): InferenceFailureClassification
   forward(request: InferenceForwardRequest): Promise<InferenceForwardResult>
+  /**
+   * Optional. Handles an Anthropic-shape request body from an Anthropic SDK
+   * caller to `POST /providers/{connection_id}/v1/messages`. When the target
+   * Provider is Anthropic (`passthrough: true`) the adapter forwards the body
+   * verbatim and streams SSE events verbatim. When the target Provider is a
+   * non-Anthropic OpenAI-compatible Provider (`passthrough: false`) the
+   * adapter translates the Anthropic-shape body to OpenAI-shape, calls the
+   * upstream, and translates the response back to Anthropic-shape. Adapters
+   * that do not understand the Anthropic envelope omit this method and the
+   * route returns 404 for `/v1/messages`.
+   */
+  forwardAnthropic?(request: AnthropicForwardRequest): Promise<InferenceForwardResult>
 }

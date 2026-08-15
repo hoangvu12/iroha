@@ -4,6 +4,7 @@
  * responses unchanged and owns safe authentication injection.
  */
 export type {
+  AnthropicForwardRequest,
   InferenceAdapter,
   InferenceAdapterCapabilities,
   InferenceFailureCapacityScope,

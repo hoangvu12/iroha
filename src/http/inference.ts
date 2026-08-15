@@ -9,10 +9,12 @@ import {
   type InferenceAdapter,
   type InferenceAdapterCapabilities,
   type InferenceForwardRequest,
+  type InferenceForwardResult,
 } from '../inference/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
+import { ANTHROPIC_INFERENCE_ADAPTER_ID } from '../providers/templates.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import type { InferenceTarget, ProviderRegistry } from '../providers/index.ts'
 import type { MetricsCollector } from '../metrics/metrics.ts'
@@ -275,6 +277,39 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           hide: true,
           summary: 'Create Responses',
           description: 'The OpenAI-compatible provider-scoped Responses surface is covered by the capability matrix and intentionally omitted from the custom API document.',
+        },
+        response: { 200: t.Unknown() },
+      },
+    )
+    .post(
+      '/:providerId/v1/messages',
+      async ({ request, params }) => {
+        const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
+        if (activity === null) return shuttingDownError()
+        return await forwardAnthropicMessages({
+          request,
+          providerId: params.providerId,
+          gatewayKeys,
+          providers,
+          modelCatalog,
+          timer,
+          ...(metrics === undefined ? {} : { metrics }),
+          timeouts: options.timeouts,
+          retrySleep,
+          transport,
+          adapterRegistry: options.adapterRegistry ?? null,
+          database: options.database ?? null,
+          requestHistory,
+          ...(options.usageService === undefined ? {} : { usageService: options.usageService }),
+          ...(activity === undefined ? {} : { requestActivity: activity }),
+        })
+      },
+      {
+        detail: {
+          hide: true,
+          summary: 'Create Messages (Anthropic-compatible)',
+          description:
+            'The Anthropic-compatible provider-scoped Messages surface. When the Provider Connection is an Anthropic Provider the body is forwarded verbatim to upstream /v1/messages; when the Provider Connection is an OpenAI-compatible Provider the adapter translates the Anthropic-shape body to OpenAI-shape and the response back to Anthropic-shape.',
         },
         response: { 200: t.Unknown() },
       },
@@ -758,6 +793,846 @@ await history?.finalize({
   } finally {
     if (!streamingResponse) requestActivity?.finish()
   }
+}
+
+/**
+ * The Anthropic-compatible `/v1/messages` public surface. Anthropic SDK
+ * callers hit this route; the body is Anthropic-shape. When the Provider
+ * Connection uses the `anthropic` template the body is forwarded verbatim to
+ * upstream `/v1/messages`; when the Provider Connection uses any other
+ * template the Anthropic adapter translates the body to OpenAI-shape, calls
+ * upstream `/chat/completions`, and translates the response back to
+ * Anthropic-shape.
+ *
+ * Error envelopes are Anthropic-shape (matching the caller's wire format).
+ * Streaming SSE events follow Anthropic's documented event ordering whether
+ * the upstream is Anthropic (passthrough) or an OpenAI-shaped Provider
+ * (translated).
+ */
+async function forwardAnthropicMessages(options: {
+  request: Request
+  providerId: string
+  database?: Database | null
+  gatewayKeys: GatewayKeyRegistry
+  providers: ProviderRegistry
+  modelCatalog: ModelCatalogService
+  timer: Timer
+  timeouts?: StreamingTimeouts | undefined
+  retrySleep: (ms: number, signal: AbortSignal) => Promise<void>
+  transport: TransportDefaults
+  adapterRegistry: AdapterRegistry | null
+  requestHistory?: RequestHistoryService | undefined
+  requestActivity?: InferenceActivity
+  metrics?: MetricsCollector
+  usageService?: UsageService | undefined
+}): Promise<Response> {
+  const {
+    request,
+    providerId,
+    providers,
+    modelCatalog,
+    timer,
+    retrySleep,
+    transport,
+    adapterRegistry,
+    timeouts,
+    requestHistory,
+    requestActivity,
+    metrics,
+    usageService,
+    database,
+  } = options
+
+  const correlationId = newRequestId()
+  const requestSignal = requestActivity?.signal ?? request.signal
+  let streamingResponse = false
+
+  try {
+    const baseHeaders: Record<string, string> = {
+      'content-type': 'application/json',
+      'x-request-id': correlationId,
+    }
+    const cors = await buildCorsHeaders({
+      providerId,
+      gatewayKeys: options.gatewayKeys,
+      database: database ?? null,
+      transport,
+      request,
+    })
+    const responseHeaders: Record<string, string> = { ...baseHeaders, ...cors }
+
+    const corsPreflight = await maybeCorsDeny({
+      request,
+      providerId,
+      gatewayKeys: options.gatewayKeys,
+      database: database ?? null,
+      transport,
+      correlationId,
+      headers: responseHeaders,
+    })
+    if (corsPreflight !== null) return corsPreflight
+
+    const anthropicAdapter = adapterRegistry?.inferenceAdapter(ANTHROPIC_INFERENCE_ADAPTER_ID) ?? null
+    if (anthropicAdapter === null || anthropicAdapter.forwardAnthropic === undefined) {
+      return anthropicMessagesErrorResponse(
+        404,
+        'route_unavailable',
+        'This Iroha build does not expose the Anthropic-compatible /v1/messages surface.',
+        responseHeaders,
+        correlationId,
+      )
+    }
+
+    const envelope = readAnthropicEnvelope(await request.text())
+    if (!envelope.ok) {
+      return anthropicMessagesErrorResponse(
+        envelope.status,
+        envelope.code,
+        envelope.message,
+        responseHeaders,
+        correlationId,
+      )
+    }
+
+    const token = bearerToken(request.headers)
+    const authorization = await options.gatewayKeys.authorizeInference(providerId, envelope.model, token)
+    if (!authorization.ok) {
+      const refusal = authorizationRefusal(authorization)
+      return anthropicMessagesErrorResponse(
+        refusal.status,
+        refusal.code,
+        refusal.message,
+        responseHeaders,
+        correlationId,
+      )
+    }
+
+    if (await modelCatalog.isExcluded(providerId, envelope.model)) {
+      return anthropicMessagesErrorResponse(
+        403,
+        'model_excluded',
+        'This model is excluded on this Provider Connection.',
+        responseHeaders,
+        correlationId,
+      )
+    }
+
+    const retryPolicy = await providers.getProvider(providerId)
+    const templateId = retryPolicy?.templateId ?? null
+    const passthrough = templateId === 'anthropic'
+    const maxAttempts = retryPolicy?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
+    const retryAmbiguousNetwork = retryPolicy?.retryAmbiguousNetwork ?? false
+    const totalRetryBudgetMs = retryPolicy?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
+
+    const attemptedKeys: string[] = []
+    const startedAt = timer.now()
+    let alternateUsed = false
+    let sameKeyRetries = 0
+    let ambiguousNetworkRetries = 0
+    let lastUpstream: InferenceForwardResult | null = null
+    let retainedTarget: InferenceTarget | null = null
+    let lastAttemptRecorder: { readonly finalize: (outcome: AttemptTerminal) => Promise<void> } | null = null
+    let lastAttemptKeyId: string | null = null
+
+    const callerHeaders = headersOf(request)
+    const providerAdapterCapabilities = anthropicAdapter.capabilities
+    const inboundIdempotency = callerSuppliedIdempotency(callerHeaders, providerAdapterCapabilities.idempotencyHeader)
+    const generatedIdempotency = inboundIdempotency === null && providerAdapterCapabilities.idempotencyGenerationSafe
+      ? generateIdempotencyValue()
+      : null
+
+    const history = requestHistory?.beginRequest({
+      id: correlationId,
+      providerId,
+      model: envelope.model,
+      gatewayKeyId: authorization.keyId,
+    }) ?? null
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (requestSignal.aborted) throw abortError()
+
+      let target: InferenceTarget
+      if (retainedTarget !== null) {
+        target = retainedTarget
+        retainedTarget = null
+      } else {
+        const resolution = await providers.resolveInference(
+          providerId,
+          envelope.model,
+          attemptedKeys,
+          alternateUsed,
+        )
+        if (!resolution.ok) {
+          // For the Anthropic-shape route the Anthropic SDK expects to see
+          // the upstream's actual error envelope, not an Iroha-shaped
+          // `upstream_credentials_unavailable` wrapper. When the retry loop
+          // exhausted the eligible keys but we did get at least one
+          // non-success upstream answer, surface that envelope verbatim
+          // (passthrough mode) or translated (OpenAI-shape → Anthropic-shape).
+          if (lastUpstream !== null && lastUpstream.kind === 'buffered') {
+            await history?.finalize({
+              status: lastUpstream.status,
+              outcome: 'failure',
+              isStreaming: false,
+              latencyMs: timer.now() - startedAt,
+              keyId: lastAttemptKeyId,
+              promptTokens: null,
+              completionTokens: null,
+              totalTokens: null,
+              errorCode: resolutionRefusal(resolution.failure).code,
+            })
+            return returnLastUpstreamAsAnthropic(lastUpstream, responseHeaders, correlationId)
+          }
+          const refusal = resolutionRefusal(resolution.failure)
+          const retryAfter = await providers.earliestRetryAfterSeconds(providerId)
+          await history?.recordSkip(refusal.code, new Date())
+          return anthropicMessagesErrorResponse(
+            refusal.status,
+            refusal.code,
+            refusal.message,
+            { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
+            correlationId,
+          )
+        }
+        target = resolution.value
+      }
+
+      lastAttemptKeyId = target.keyId
+      lastAttemptRecorder = (await history?.startAttempt({
+        attemptNumber: attempt,
+        keyId: target.keyId,
+        at: new Date(),
+      })) ?? null
+
+      const upstreamHeaders = buildUpstreamHeaders({
+        callerHeaders,
+        target,
+        adapterCapabilities: providerAdapterCapabilities,
+        inboundIdempotency,
+        generatedIdempotency,
+      })
+
+      const forwardRequest: InferenceForwardRequest = {
+        baseUrl: target.baseUrl,
+        allowInsecureHttp: target.allowInsecureHttp,
+        path: '/messages',
+        method: 'POST',
+        body: envelope.raw,
+        headers: upstreamHeaders,
+        upstreamKey: target.upstreamKey,
+        signal: requestSignal,
+        authHeader: target.authHeader,
+        authPrefix: target.authPrefix,
+        staticHeaders: target.staticHeaders,
+        redirectAllowSameOrigin: target.redirectAllowSameOrigin,
+        idempotencyHeader: target.idempotencyHeader,
+        idempotencyGenerationSafe: providerAdapterCapabilities.idempotencyGenerationSafe,
+        connectionTimeoutMs: target.connectionTimeoutMs,
+        firstByteTimeoutMs: target.firstByteTimeoutMs,
+        nonStreamingTotalTimeoutMs: target.nonStreamingTotalTimeoutMs,
+        streamingIdleTimeoutMs: target.streamingIdleTimeoutMs,
+        totalRetryTimeoutMs: target.totalRetryTimeoutMs,
+      }
+
+      if (envelope.stream) {
+        if (anthropicAdapter.forwardAnthropic === undefined) {
+          return anthropicMessagesErrorResponse(
+            404,
+            'route_unavailable',
+            'This Iroha build does not expose the Anthropic-compatible /v1/messages surface.',
+            responseHeaders,
+            correlationId,
+          )
+        }
+        const streamed = await streamAnthropicMessages(
+          { forwardAnthropic: anthropicAdapter.forwardAnthropic, classifyFailure: anthropicAdapter.classifyFailure },
+          timer,
+          forwardRequest,
+          passthrough,
+          streamingTimeoutsFor(timeouts, target, transport),
+          responseHeaders,
+          correlationId,
+        )
+        if (streamed.status >= 200 && streamed.status < 300) {
+          await providers.recordInferenceSuccess(target.keyId)
+          await lastAttemptRecorder?.finalize({
+            status: streamed.status,
+            outcome: 'success',
+            errorCode: null,
+            retryAfterSeconds: null,
+            at: new Date(),
+          })
+          await history?.finalize({
+            status: streamed.status,
+            outcome: 'success',
+            isStreaming: true,
+            latencyMs: timer.now() - startedAt,
+            keyId: target.keyId,
+            promptTokens: null,
+            completionTokens: null,
+            totalTokens: null,
+            errorCode: null,
+          })
+          streamingResponse = true
+          return monitorResponse(streamed, requestActivity)
+        }
+        const headerMap = Object.fromEntries(streamed.headers.entries())
+        const classification = anthropicAdapter.classifyFailure({
+          kind: 'buffered', status: streamed.status, headers: headerMap, body: '',
+        })
+        await providers.recordInferenceFailure({
+          keyId: target.keyId,
+          model: envelope.model,
+          classification,
+          reason: `upstream HTTP ${streamed.status}`,
+        })
+        const refusal = upstreamRefusal(streamed.status, headerMap)
+        await lastAttemptRecorder?.finalize({
+          status: streamed.status,
+          outcome: 'failure',
+          errorCode: refusal.code,
+          retryAfterSeconds: numericRetryAfter(streamed.headers),
+          at: new Date(),
+        })
+        const status = streamed.status
+        const boundedAlternate = classification.kind === 'capacity_limited' || classification.kind === 'payment_required'
+        if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed) && attempt < maxAttempts) {
+          if (boundedAlternate) alternateUsed = true
+          attemptedKeys.push(target.keyId)
+          metrics?.recordRetry()
+          continue
+        }
+        if (classification.retryAction === 'retry_same' && sameKeyRetries < 1 && attempt < maxAttempts) {
+          sameKeyRetries++
+          retainedTarget = target
+          await retrySleep(100, requestSignal)
+          metrics?.recordRetry()
+          continue
+        }
+        await history?.finalize({
+          status: streamed.status,
+          outcome: 'failure',
+          isStreaming: true,
+          latencyMs: timer.now() - startedAt,
+          keyId: target.keyId,
+          promptTokens: null,
+          completionTokens: null,
+          totalTokens: null,
+          errorCode: refusal.code,
+        })
+        return anthropicMessagesUpstreamResponse(streamed, responseHeaders, correlationId)
+      }
+
+      try {
+        lastUpstream = await anthropicAdapter.forwardAnthropic!({
+          ...forwardRequest,
+          passthrough,
+        })
+      } catch (cause) {
+        if (isAbort(cause)) throw cause
+        if (isAnthropicForwardError(cause)) {
+          const refusal = anthropicForwardRefusal(cause as AnthropicForwardErrorLike)
+          await lastAttemptRecorder?.finalize({
+            status: refusal.status,
+            outcome: 'failure',
+            errorCode: refusal.code,
+            retryAfterSeconds: null,
+            at: new Date(),
+          })
+          await history?.finalize({
+            status: refusal.status,
+            outcome: 'failure',
+            isStreaming: false,
+            latencyMs: timer.now() - startedAt,
+            keyId: target.keyId,
+            promptTokens: null,
+            completionTokens: null,
+            totalTokens: null,
+            errorCode: refusal.code,
+          })
+          return anthropicMessagesErrorResponse(
+            refusal.status,
+            refusal.code,
+            refusal.message,
+            responseHeaders,
+            correlationId,
+          )
+        }
+        await lastAttemptRecorder?.finalize({
+          status: null,
+          outcome: 'failure',
+          errorCode: 'upstream_unreachable',
+          retryAfterSeconds: null,
+          at: new Date(),
+        })
+        if (
+          retryAmbiguousNetwork &&
+          ambiguousNetworkRetries < 1 &&
+          attempt < maxAttempts &&
+          timer.now() - startedAt < totalRetryBudgetMs
+        ) {
+          ambiguousNetworkRetries++
+          retainedTarget = target
+          await retrySleep(100, requestSignal)
+          metrics?.recordRetry()
+          continue
+        }
+        await history?.finalize({
+          status: 502,
+          outcome: 'failure',
+          isStreaming: false,
+          latencyMs: timer.now() - startedAt,
+          keyId: target.keyId,
+          promptTokens: null,
+          completionTokens: null,
+          totalTokens: null,
+          errorCode: 'upstream_unreachable',
+        })
+        return anthropicMessagesErrorResponse(
+          502,
+          'upstream_unreachable',
+          'The Provider could not be reached.',
+          responseHeaders,
+          correlationId,
+        )
+      }
+
+      if (lastUpstream.status >= 200 && lastUpstream.status < 300) {
+        await providers.recordInferenceSuccess(target.keyId)
+        await lastAttemptRecorder?.finalize({
+          status: lastUpstream.status,
+          outcome: 'success',
+          errorCode: null,
+          retryAfterSeconds: null,
+          at: new Date(),
+        })
+        await history?.finalize({
+          status: lastUpstream.status,
+          outcome: 'success',
+          isStreaming: false,
+          latencyMs: timer.now() - startedAt,
+          keyId: target.keyId,
+          promptTokens: null,
+          completionTokens: null,
+          totalTokens: null,
+          errorCode: null,
+        })
+        if (usageService !== undefined) {
+          void usageService.refreshAfterInference(providerId).catch(() => undefined)
+        }
+        const responseHeadersWithContentType: Record<string, string> = {
+          ...responseHeaders,
+          'content-type': lastUpstream.headers['content-type'] ?? 'application/json',
+        }
+        if (lastUpstream.kind === 'stream') {
+          return new Response(lastUpstream.stream, {
+            status: lastUpstream.status,
+            headers: responseHeadersWithContentType,
+          })
+        }
+        return new Response(lastUpstream.body, {
+          status: lastUpstream.status,
+          headers: responseHeadersWithContentType,
+        })
+      }
+
+      const status = lastUpstream.status
+      const classification = anthropicAdapter.classifyFailure(lastUpstream)
+      await providers.recordInferenceFailure({
+        keyId: target.keyId,
+        model: envelope.model,
+        classification,
+        reason: `upstream HTTP ${status}`,
+      })
+
+      const refusal = upstreamRefusal(status, lastUpstream.headers)
+      await lastAttemptRecorder?.finalize({
+        status,
+        outcome: 'failure',
+        errorCode: refusal.code,
+        retryAfterSeconds: numericRetryAfter(lastUpstream.headers),
+        at: new Date(),
+      })
+
+      const insideBudget = timer.now() - startedAt < totalRetryBudgetMs
+      if (!insideBudget || requestSignal.aborted) break
+
+      const boundedAlternate = classification.kind === 'capacity_limited' || classification.kind === 'payment_required'
+      if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed)) {
+        if (boundedAlternate) alternateUsed = true
+        attemptedKeys.push(target.keyId)
+        metrics?.recordRetry()
+        continue
+      }
+      if (classification.retryAction === 'retry_same' && sameKeyRetries < 1) {
+        sameKeyRetries++
+        retainedTarget = target
+        await retrySleep(100, requestSignal)
+        metrics?.recordRetry()
+        continue
+      }
+      break
+    }
+
+    if (lastUpstream === null) {
+      await history?.finalize({
+        status: 503,
+        outcome: 'failure',
+        isStreaming: false,
+        latencyMs: timer.now() - startedAt,
+        keyId: lastAttemptKeyId,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+        errorCode: 'upstream_credentials_unavailable',
+      })
+      return anthropicMessagesErrorResponse(
+        503,
+        'upstream_credentials_unavailable',
+        'No eligible Upstream Key is available for this connection.',
+        responseHeaders,
+        correlationId,
+      )
+    }
+    if (lastUpstream.status === 429) {
+      const retryAfter = await providers.earliestRetryAfterSeconds(providerId)
+      await history?.finalize({
+        status: 503,
+        outcome: 'failure',
+        isStreaming: false,
+        latencyMs: timer.now() - startedAt,
+        keyId: lastAttemptKeyId,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+        errorCode: 'upstream_credentials_unavailable',
+      })
+      return anthropicMessagesErrorResponse(
+        503,
+        'upstream_credentials_unavailable',
+        'No eligible Upstream Key is available for this connection.',
+        { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
+        correlationId,
+      )
+    }
+    const refusal = upstreamRefusal(lastUpstream.status, lastUpstream.headers)
+    await history?.finalize({
+      status: refusal.status,
+      outcome: 'failure',
+      isStreaming: false,
+      latencyMs: timer.now() - startedAt,
+      keyId: lastAttemptKeyId,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      errorCode: refusal.code,
+    })
+    return anthropicMessagesUpstreamResponse(
+      makeBufferedFromForward(lastUpstream),
+      { ...responseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) },
+      correlationId,
+    )
+  } finally {
+    if (!streamingResponse) requestActivity?.finish()
+  }
+}
+
+/**
+ * The Anthropic-shape envelope: the caller's body is Anthropic-shape and
+ * carries a top-level `model`. Other fields are unknown to the route; the
+ * adapter forwards them unchanged.
+ */
+type AnthropicMessagesEnvelope =
+  | { readonly ok: true; readonly model: string; readonly raw: string; readonly stream: boolean }
+  | { readonly ok: false; readonly status: 400; readonly code: string; readonly message: string }
+
+function readAnthropicEnvelope(raw: string): AnthropicMessagesEnvelope {
+  if (raw === '') {
+    return { ok: false, status: 400, code: 'invalid_request', message: 'A request body is required.' }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { ok: false, status: 400, code: 'invalid_request', message: 'The request body is not valid JSON.' }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, status: 400, code: 'invalid_request', message: 'The request body must be a JSON object.' }
+  }
+  const model = (parsed as Record<string, unknown>).model
+  if (typeof model !== 'string' || model.trim() === '') {
+    return { ok: false, status: 400, code: 'model_required', message: 'The request must name a model.' }
+  }
+  return {
+    ok: true,
+    model: model.trim(),
+    raw,
+    stream: (parsed as Record<string, unknown>).stream === true,
+  }
+}
+
+/**
+ * Returns an Anthropic-shape error envelope: `{type: "error", error: {type,
+ * message}, request_id}`. The Iroha code is preserved in the `error.type`
+ * field so callers can branch on it; the upstream HTTP status is preserved.
+ */
+function anthropicMessagesErrorResponse(
+  status: number,
+  code: string,
+  message: string,
+  headers: Record<string, string>,
+  correlationId: string,
+): Response {
+  return new Response(
+    JSON.stringify({
+      type: 'error',
+      error: { type: code, message },
+      request_id: correlationId,
+    }),
+    { status, headers: { ...headers, 'content-type': 'application/json' } },
+  )
+}
+
+/**
+ * Surfaces the last upstream answer to the Anthropic SDK caller. The body is
+ * either an Anthropic-shape error envelope (passthrough mode) or an
+ * OpenAI-shape error envelope (OpenAI-Provider mode); the latter is
+ * translated to Anthropic-shape here so the caller gets a consistent wire
+ * format.
+ */
+function returnLastUpstreamAsAnthropic(
+  lastUpstream: InferenceForwardResult,
+  baseHeaders: Record<string, string>,
+  correlationId: string,
+): Response {
+  if (lastUpstream.kind !== 'buffered') {
+    return anthropicMessagesErrorResponse(
+      lastUpstream.status,
+      'upstream_error',
+      'The Provider answered with an error.',
+      baseHeaders,
+      correlationId,
+    )
+  }
+  if (looksLikeOpenAiError(lastUpstream.body)) {
+    const envelope = translateBufferedUpstreamErrorToAnthropic(lastUpstream.status, lastUpstream.body, correlationId)
+    return new Response(JSON.stringify(envelope), {
+      status: lastUpstream.status,
+      headers: { ...baseHeaders, 'content-type': 'application/json' },
+    })
+  }
+  // Already Anthropic-shape (passthrough mode) — return verbatim.
+  return new Response(lastUpstream.body, {
+    status: lastUpstream.status,
+    headers: { ...baseHeaders, 'content-type': lastUpstream.headers['content-type'] ?? 'application/json' },
+  })
+}
+
+/**
+ * The streaming sibling of {@link returnLastUpstreamAsAnthropic}. The body
+ * already carries Anthropic-shape (passthrough) or the OpenAI-shape error
+ * was translated by {@link streamAnthropicMessages} before this is called;
+ * either way we just surface the response.
+ */
+function anthropicMessagesUpstreamResponse(
+  response: Response,
+  baseHeaders: Record<string, string>,
+  _correlationId: string,
+): Response {
+  const headers: Record<string, string> = {
+    ...baseHeaders,
+    'content-type': response.headers.get('content-type') ?? 'application/json',
+  }
+  return new Response(response.body, {
+    status: response.status,
+    headers,
+  })
+}
+
+/**
+ * Reads the upstream body and returns a fresh Response with the same status
+ * and headers. Used by the non-streaming retry loop where the upstream
+ * answered with an error status.
+ */
+function makeBufferedFromForward(result: InferenceForwardResult): Response {
+  const body = result.kind === 'buffered' ? result.body : ''
+  const headers: Record<string, string> = { ...result.headers, 'content-type': result.headers['content-type'] ?? 'application/json' }
+  return new Response(body, { status: result.status, headers })
+}
+
+function looksLikeOpenAiError(rawBody: string): boolean {
+  if (rawBody === '') return false
+  try {
+    const parsed = JSON.parse(rawBody) as { error?: unknown }
+    return typeof parsed === 'object' && parsed !== null && typeof parsed.error === 'object'
+  } catch {
+    return false
+  }
+}
+
+function translateBufferedUpstreamErrorToAnthropic(
+  status: number,
+  rawBody: string,
+  correlationId: string,
+): Record<string, unknown> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawBody)
+  } catch {
+    parsed = null
+  }
+  const anthropicType = openAiStatusToAnthropicType(status)
+  const message = readOpenAiErrorMessageFromParse(parsed, rawBody)
+  return {
+    type: 'error',
+    error: { type: anthropicType, message },
+    request_id: correlationId,
+  }
+}
+
+function readOpenAiErrorMessageFromParse(parsed: unknown, rawBody: string): string {
+  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+    const err = (parsed as Record<string, unknown>).error
+    if (typeof err === 'object' && err !== null && !Array.isArray(err)) {
+      const msg = (err as Record<string, unknown>).message
+      if (typeof msg === 'string' && msg.length > 0) return msg
+    }
+  }
+  if (rawBody.length > 0) return rawBody
+  return 'The Provider answered with an error.'
+}
+
+function openAiStatusToAnthropicType(status: number): string {
+  switch (status) {
+    case 400:
+      return 'invalid_request_error'
+    case 401:
+      return 'authentication_error'
+    case 403:
+      return 'permission_error'
+    case 404:
+      return 'not_found_error'
+    case 409:
+      return 'conflict_error'
+    case 413:
+      return 'request_too_large'
+    case 429:
+      return 'rate_limit_error'
+    case 500:
+      return 'api_error'
+    default:
+      return status >= 500 ? 'api_error' : 'invalid_request_error'
+  }
+}
+
+/**
+ * Reads a {@link ReadableStream} of bytes into a UTF-8 string. Used when an
+ * upstream error arrives on a stream-shaped {@link InferenceForwardResult}
+ * (the non-streaming path returns a buffered body directly).
+ */
+async function readStreamAsText(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let out = ''
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      out += decoder.decode(next.value, { stream: true })
+    }
+    out += decoder.decode()
+  } finally {
+    reader.releaseLock()
+  }
+  return out
+}
+
+/**
+ * The streaming sibling of `forwardAnthropicMessages`. Streams Anthropic
+ * SSE events back to the caller; the Anthropic adapter handles the
+ * passthrough-vs-translate decision via `forwardAnthropic({passthrough})`.
+ */
+async function streamAnthropicMessages(
+  anthropicAdapter: {
+    forwardAnthropic: NonNullable<InferenceAdapter['forwardAnthropic']>
+    classifyFailure: InferenceAdapter['classifyFailure']
+  },
+  timer: Timer,
+  forwardRequest: InferenceForwardRequest,
+  passthrough: boolean,
+  timeouts: StreamingTimeouts,
+  baseHeaders: Record<string, string>,
+  correlationId: string,
+): Promise<Response> {
+  const upstream = new AbortController()
+  const abortUpstream = () => upstream.abort()
+  const callerAbort = () => abortUpstream()
+  forwardRequest.signal?.addEventListener('abort', callerAbort, { once: true })
+  if (forwardRequest.signal?.aborted === true) abortUpstream()
+
+  let answer: Awaited<ReturnType<NonNullable<typeof anthropicAdapter>['forwardAnthropic']>>
+  try {
+    answer = await anthropicAdapter.forwardAnthropic({
+      ...forwardRequest,
+      stream: true,
+      signal: upstream.signal,
+      passthrough,
+    })
+  } catch (cause) {
+    if (isAbort(cause)) throw cause
+    return anthropicMessagesErrorResponse(
+      502,
+      'upstream_unreachable',
+      'The Provider could not be reached.',
+      baseHeaders,
+      correlationId,
+    )
+  }
+
+  if (answer.status < 200 || answer.status >= 300) {
+    const rawBody = answer.kind === 'buffered'
+      ? await Promise.resolve(answer.body)
+      : await readStreamAsText(answer.stream)
+    if (looksLikeOpenAiError(rawBody)) {
+      const envelope = translateBufferedUpstreamErrorToAnthropic(answer.status, rawBody, correlationId)
+      return new Response(JSON.stringify(envelope), {
+        status: answer.status,
+        headers: { ...baseHeaders, 'content-type': 'application/json' },
+      })
+    }
+    return new Response(rawBody, {
+      status: answer.status,
+      headers: {
+        ...baseHeaders,
+        'content-type': answer.headers['content-type'] ?? 'application/json',
+      },
+    })
+  }
+
+  if (answer.kind !== 'stream') {
+    return new Response(answer.body, {
+      status: answer.status,
+      headers: {
+        ...baseHeaders,
+        'content-type': answer.headers['content-type'] ?? 'application/json',
+      },
+    })
+  }
+
+  const guarded = deadlineGuard(answer.stream, {
+    timer,
+    timeouts,
+    signal: upstream.signal,
+    abort: abortUpstream,
+  })
+
+  return new Response(guarded.stream, {
+    status: answer.status,
+    headers: {
+      ...baseHeaders,
+      'content-type': answer.headers['content-type'] ?? 'text/event-stream',
+    },
+  })
 }
 
 /** Adds the Iroha-managed authentication, static, and idempotency headers to a forwarded request. */

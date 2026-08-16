@@ -8,6 +8,8 @@ import {
   generateIdempotencyValue,
   type InferenceAdapter,
   type InferenceAdapterCapabilities,
+  type InferenceFailureKind,
+  type InferenceFailureClassification,
   type InferenceForwardRequest,
   type InferenceForwardResult,
 } from '../inference/index.ts'
@@ -21,6 +23,7 @@ import type { MetricsCollector } from '../metrics/metrics.ts'
 import type { InferenceActivity, ShutdownController } from '../runtime/shutdown.ts'
 import { systemTimer, type Timer } from '../runtime/timer.ts'
 import type { UsageService } from '../usage/index.ts'
+import type { CapacityEvidence } from '../providers/provider-evidence.ts'
 
 /** The terminal shape of one attempt's outcome, what the recorder writes. */
 interface AttemptTerminal {
@@ -28,6 +31,7 @@ interface AttemptTerminal {
   readonly outcome: AttemptOutcome
   readonly errorCode: string | null
   readonly retryAfterSeconds: number | null
+  readonly diagnostics?: unknown
   readonly at: Date
 }
 
@@ -433,6 +437,7 @@ async function forwardGeneration(options: {
   let retainedTarget: InferenceTarget | null = null
   let lastAttemptRecorder: { readonly finalize: (outcome: AttemptTerminal) => Promise<void> } | null = null
   let lastAttemptKeyId: string | null = null
+  let authoritativeExhaustionKnown = false
 
   const callerHeaders = headersOf(request)
   const inboundIdempotency = callerSuppliedIdempotency(callerHeaders, providerAdapterCapabilities.idempotencyHeader)
@@ -461,8 +466,14 @@ async function forwardGeneration(options: {
         alternateUsed,
       )
       if (!resolution.ok) {
-        const refusal = resolutionRefusal(resolution.failure)
-        const retryAfter = await providers.earliestRetryAfterSeconds(providerId)
+        const refusal = authoritativeExhaustionKnown && resolution.failure.code === 'no_eligible_key'
+          ? providerCapacityExhaustedRefusal()
+          : resolutionRefusal(resolution.failure)
+        const retryAfter = lastUpstream === null
+          ? await providers.earliestRetryAfterSeconds(providerId)
+          : numericRetryAfter(lastUpstream.headers)
+            ?? await providers.earliestRetryAfterSeconds(providerId)
+            ?? (lastUpstream.status === 429 ? 30 : null)
         await history?.recordSkip(refusal.code, new Date())
         return error(
           refusal.status,
@@ -519,6 +530,13 @@ async function forwardGeneration(options: {
         forwardRequest,
         responseHeaders,
         correlationId,
+        {
+          providerId,
+          model: envelope.model,
+          keyId: target.keyId,
+          attemptNumber: attempt,
+          endpointHost: safeHostname(target.baseUrl),
+        },
       )
       if (streamed.status >= 200 && streamed.status < 300) {
         await providers.recordInferenceSuccess(target.keyId)
@@ -544,9 +562,16 @@ async function forwardGeneration(options: {
         return monitorResponse(streamed, requestActivity)
       }
       const headerMap = Object.fromEntries(streamed.headers.entries())
-      const classification = providerAdapter.classifyFailure({
-        kind: 'buffered', status: streamed.status, headers: headerMap, body: '',
-      })
+      const classification = providerAdapter.classifyFailure(
+        {
+          kind: 'buffered', status: streamed.status, headers: headerMap, body: await streamed.clone().text(),
+        },
+        { keyId: target.keyId, observedAt: new Date() },
+      )
+      authoritativeExhaustionKnown = await reconcileInferenceCapacity({
+        providers, usageService, providerId, keyId: target.keyId,
+        model: envelope.model, classification,
+      }) || authoritativeExhaustionKnown
       await providers.recordInferenceFailure({
         keyId: target.keyId,
         model: envelope.model,
@@ -559,10 +584,11 @@ async function forwardGeneration(options: {
         outcome: 'failure',
         errorCode: refusal.code,
         retryAfterSeconds: numericRetryAfter(streamed.headers),
+        diagnostics: classification.diagnostics,
         at: new Date(),
       })
       const status = streamed.status
-      const boundedAlternate = classification.kind === 'capacity_limited' || classification.kind === 'payment_required'
+      const boundedAlternate = isSingleAlternateFailure(classification.kind)
       if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed) && attempt < maxAttempts) {
         if (boundedAlternate) alternateUsed = true
         attemptedKeys.push(target.keyId)
@@ -593,7 +619,19 @@ async function forwardGeneration(options: {
     try {
       lastUpstream = await providerAdapter.forward(forwardRequest)
     } catch (cause) {
-      if (isAbort(cause)) throw cause
+      if (isAbort(cause)) {
+        await lastAttemptRecorder?.finalize({
+          status: null, outcome: 'failure', errorCode: 'request_cancelled',
+          retryAfterSeconds: null, at: new Date(),
+        })
+        await history?.finalize({
+          status: 499, outcome: 'failure', isStreaming: false,
+          latencyMs: timer.now() - startedAt, keyId: target.keyId,
+          promptTokens: null, completionTokens: null, totalTokens: null,
+          errorCode: 'request_cancelled',
+        })
+        throw cause
+      }
       if (isAnthropicForwardError(cause)) {
         const refusal = anthropicForwardRefusal(cause as AnthropicForwardErrorLike)
         await lastAttemptRecorder?.finalize({
@@ -693,7 +731,22 @@ async function forwardGeneration(options: {
     }
 
     const status = lastUpstream.status
-    const classification = providerAdapter.classifyFailure(lastUpstream)
+    await logUpstreamFailure(lastUpstream, {
+      requestId: correlationId,
+      providerId,
+      model: envelope.model,
+      keyId: target.keyId,
+      attemptNumber: attempt,
+      endpointHost: safeHostname(target.baseUrl),
+    })
+    const classification = providerAdapter.classifyFailure(
+      lastUpstream,
+      { keyId: target.keyId, observedAt: new Date() },
+    )
+    authoritativeExhaustionKnown = await reconcileInferenceCapacity({
+      providers, usageService, providerId, keyId: target.keyId,
+      model: envelope.model, classification,
+    }) || authoritativeExhaustionKnown
     await providers.recordInferenceFailure({
       keyId: target.keyId,
       model: envelope.model,
@@ -707,13 +760,14 @@ async function forwardGeneration(options: {
       outcome: 'failure',
       errorCode: refusal.code,
       retryAfterSeconds: numericRetryAfter(lastUpstream.headers),
+      diagnostics: classification.diagnostics,
       at: new Date(),
     })
 
     const insideBudget = timer.now() - startedAt < totalRetryBudgetMs
     if (!insideBudget || requestSignal.aborted) break
 
-    const boundedAlternate = classification.kind === 'capacity_limited' || classification.kind === 'payment_required'
+    const boundedAlternate = isSingleAlternateFailure(classification.kind)
     if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed)) {
       if (boundedAlternate) alternateUsed = true
       attemptedKeys.push(target.keyId)
@@ -750,7 +804,8 @@ await history?.finalize({
   )
 }
   if (lastUpstream.status === 429) {
-    const retryAfter = await providers.earliestRetryAfterSeconds(providerId)
+    const retryAfter = numericRetryAfter(lastUpstream.headers)
+      ?? await providers.earliestRetryAfterSeconds(providerId)
     await history?.finalize({
       status: 503,
       outcome: 'failure',
@@ -773,6 +828,16 @@ await history?.finalize({
     )
   }
   const refusal = upstreamRefusal(lastUpstream.status, lastUpstream.headers)
+  if (authoritativeExhaustionKnown) {
+    const exhausted = providerCapacityExhaustedRefusal()
+    await history?.finalize({
+      status: exhausted.status, outcome: 'failure', isStreaming: false,
+      latencyMs: timer.now() - startedAt, keyId: lastAttemptKeyId,
+      promptTokens: null, completionTokens: null, totalTokens: null,
+      errorCode: exhausted.code,
+    })
+    return error(exhausted.status, responseHeaders, exhausted, correlationId)
+  }
   await history?.finalize({
     status: refusal.status,
     outcome: 'failure',
@@ -981,7 +1046,12 @@ async function forwardAnthropicMessages(options: {
               totalTokens: null,
               errorCode: resolutionRefusal(resolution.failure).code,
             })
-            return returnLastUpstreamAsAnthropic(lastUpstream, responseHeaders, correlationId)
+            const retryAfter = numericRetryAfter(lastUpstream.headers) ?? (lastUpstream.status === 429 ? 30 : null)
+            return returnLastUpstreamAsAnthropic(
+              lastUpstream,
+              { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
+              correlationId,
+            )
           }
           const refusal = resolutionRefusal(resolution.failure)
           const retryAfter = await providers.earliestRetryAfterSeconds(providerId)
@@ -1095,7 +1165,7 @@ async function forwardAnthropicMessages(options: {
           at: new Date(),
         })
         const status = streamed.status
-        const boundedAlternate = classification.kind === 'capacity_limited' || classification.kind === 'payment_required'
+        const boundedAlternate = isSingleAlternateFailure(classification.kind)
         if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed) && attempt < maxAttempts) {
           if (boundedAlternate) alternateUsed = true
           attemptedKeys.push(target.keyId)
@@ -1129,7 +1199,19 @@ async function forwardAnthropicMessages(options: {
           passthrough,
         })
       } catch (cause) {
-        if (isAbort(cause)) throw cause
+        if (isAbort(cause)) {
+          await lastAttemptRecorder?.finalize({
+            status: null, outcome: 'failure', errorCode: 'request_cancelled',
+            retryAfterSeconds: null, at: new Date(),
+          })
+          await history?.finalize({
+            status: 499, outcome: 'failure', isStreaming: false,
+            latencyMs: timer.now() - startedAt, keyId: target.keyId,
+            promptTokens: null, completionTokens: null, totalTokens: null,
+            errorCode: 'request_cancelled',
+          })
+          throw cause
+        }
         if (isAnthropicForwardError(cause)) {
           const refusal = anthropicForwardRefusal(cause as AnthropicForwardErrorLike)
           await lastAttemptRecorder?.finalize({
@@ -1257,7 +1339,7 @@ async function forwardAnthropicMessages(options: {
       const insideBudget = timer.now() - startedAt < totalRetryBudgetMs
       if (!insideBudget || requestSignal.aborted) break
 
-      const boundedAlternate = classification.kind === 'capacity_limited' || classification.kind === 'payment_required'
+      const boundedAlternate = isSingleAlternateFailure(classification.kind)
       if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed)) {
         if (boundedAlternate) alternateUsed = true
         attemptedKeys.push(target.keyId)
@@ -1833,12 +1915,100 @@ function safeRetryAfter(headers: Readonly<Record<string, string>>): string | und
   return /^\d+$/.test(value.trim()) ? value.trim() : undefined
 }
 
+function providerCapacityExhaustedRefusal(): Refusal {
+  return {
+    status: 503,
+    code: 'provider_capacity_exhausted',
+    message: 'Authoritative Provider entitlement shows no remaining capacity.',
+  }
+}
+
+/**
+ * Uses fresh entitlement immediately. A positive entitlement does not erase
+ * the observed failure: it becomes a short authoritative cooldown. Missing or
+ * stale authority starts one deduplicated refresh without delaying failover.
+ */
+async function reconcileInferenceCapacity(input: {
+  readonly providers: ProviderRegistry
+  readonly usageService: UsageService | undefined
+  readonly providerId: string
+  readonly keyId: string
+  readonly model: string
+  readonly classification: InferenceFailureClassification
+}): Promise<boolean> {
+  if (input.classification.capacityEvidence === undefined || input.usageService === undefined) {
+    return false
+  }
+
+  const authoritative = await input.usageService.capacityEvidenceFor(
+    input.providerId,
+    input.keyId,
+    60_000,
+  )
+  if (authoritative.length === 0) {
+    void input.usageService.refreshAfterInference(input.providerId).catch(() => undefined)
+    return false
+  }
+
+  const exhausted = authoritative.filter((evidence) => evidenceEstablishesExhaustion(evidence))
+  const evidence = exhausted.length > 0
+    ? exhausted
+    : authoritative.map((item) => cooldownEvidence(item, input.classification))
+  await input.providers.reconcileCapacityEvidence({
+    providerId: input.providerId,
+    keyId: input.keyId,
+    model: input.model,
+    capacityEvidence: evidence,
+  })
+  return exhausted.length > 0
+}
+
+function evidenceEstablishesExhaustion(evidence: CapacityEvidence): boolean {
+  return evidence.availability === 'exhausted'
+    || evidence.facts.remaining !== undefined && evidence.facts.remaining <= 0
+    || evidence.facts.remainingPercent !== undefined && evidence.facts.remainingPercent <= 0
+}
+
+function cooldownEvidence(
+  evidence: CapacityEvidence,
+  classification: InferenceFailureClassification,
+): CapacityEvidence {
+  const seconds = Math.max(1, classification.retryAfterSeconds ?? 30)
+  const failureObservedAt = classification.capacityEvidence?.observedAt ?? evidence.observedAt
+  const retryAt = new Date(failureObservedAt.getTime() + seconds * 1_000)
+  return {
+    ...evidence,
+    availability: 'temporarily_limited',
+    reason: 'temporarily_limited',
+    observedAt: failureObservedAt,
+    freshUntil: retryAt,
+    recheckAt: retryAt,
+    diagnostics: {
+      ...evidence.diagnostics,
+      ...classification.diagnostics,
+      classification: 'capacity_limited',
+      capacityScope: evidence.scope.kind,
+      retryAfterSeconds: seconds,
+      retryAt: retryAt.toISOString(),
+    },
+  }
+}
+
+/** Failures whose alternate-key retry is deliberately capped at one. */
+function isSingleAlternateFailure(kind: InferenceFailureKind): boolean {
+  return kind === 'capacity_limited' ||
+    kind === 'payment_required' ||
+    kind === 'content_inspection_failed'
+}
+
 /** One OpenAI-shaped error: message, type, param, stable code, and correlation. */
 function error(
   status: number,
   headers: Record<string, string>,
   refusal: { code: string; message: string },
   correlationId: string,
+  upstreamCode?: string | null,
+  upstreamType?: string | null,
 ): Response {
   return new Response(
     JSON.stringify({
@@ -1848,6 +2018,8 @@ function error(
         param: null,
         code: refusal.code,
         request_id: correlationId,
+        ...(upstreamCode === null || upstreamCode === undefined ? {} : { upstream_code: upstreamCode }),
+        ...(upstreamType === null || upstreamType === undefined ? {} : { upstream_type: upstreamType }),
       },
     }),
     { status, headers },
@@ -1948,6 +2120,7 @@ async function streamChatCompletion(
   request: InferenceForwardRequest,
   baseHeaders: Record<string, string>,
   correlationId: string,
+  diagnosticContext: UpstreamFailureDiagnosticContext,
 ): Promise<Response> {
   const upstream = new AbortController()
   const abortUpstream = () => upstream.abort()
@@ -1971,12 +2144,18 @@ async function streamChatCompletion(
   }
 
   if (answer.status < 200 || answer.status >= 300) {
+    const diagnostic = await logUpstreamFailure(answer, {
+      ...diagnosticContext,
+      requestId: correlationId,
+    })
     const refusal = upstreamRefusal(answer.status, answer.headers)
     return error(
       refusal.status,
       { ...baseHeaders, ...(refusal.retryAfter ? { 'retry-after': refusal.retryAfter } : {}) },
       refusal,
       correlationId,
+      typeof diagnostic.upstreamCode === 'string' ? diagnostic.upstreamCode : null,
+      typeof diagnostic.upstreamType === 'string' ? diagnostic.upstreamType : null,
     )
   }
 
@@ -2006,6 +2185,105 @@ async function streamChatCompletion(
       'content-type': answer.headers['content-type'] ?? 'text/event-stream',
     },
   })
+}
+
+interface UpstreamFailureDiagnosticContext {
+  readonly providerId: string
+  readonly model: string
+  readonly keyId: string
+  readonly attemptNumber: number
+  readonly endpointHost: string | null
+}
+
+interface UpstreamFailureDiagnosticInput extends UpstreamFailureDiagnosticContext {
+  readonly requestId: string
+  readonly status: number
+  readonly body: string
+}
+
+async function logUpstreamFailure(
+  answer: InferenceForwardResult,
+  context: UpstreamFailureDiagnosticContext & { readonly requestId: string },
+): Promise<Record<string, unknown>> {
+  const body = await readBoundedUpstreamError(answer)
+  const diagnostic = upstreamFailureDiagnostic({
+    ...context,
+    status: answer.status,
+    body,
+  })
+  console.warn(JSON.stringify(diagnostic))
+  return diagnostic
+}
+
+const UPSTREAM_ERROR_BODY_LIMIT = 16_384
+/** Builds the only upstream-body-derived object allowed into inference logs. */
+export function upstreamFailureDiagnostic(input: UpstreamFailureDiagnosticInput): Record<string, unknown> {
+  const fields = safeUpstreamErrorFields(input.body)
+  return {
+    event: 'upstream_inference_failure',
+    requestId: input.requestId,
+    providerId: input.providerId,
+    model: input.model,
+    keyId: input.keyId,
+    attemptNumber: input.attemptNumber,
+    endpointHost: input.endpointHost,
+    status: input.status,
+    upstreamCode: fields.code,
+    upstreamType: fields.type,
+    upstreamRequestId: fields.requestId,
+  }
+}
+
+async function readBoundedUpstreamError(answer: InferenceForwardResult): Promise<string> {
+  if (answer.kind === 'buffered') return answer.body.slice(0, UPSTREAM_ERROR_BODY_LIMIT)
+  const reader = answer.stream.getReader()
+  const decoder = new TextDecoder()
+  let out = ''
+  try {
+    while (out.length < UPSTREAM_ERROR_BODY_LIMIT) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      out += decoder.decode(chunk.value, { stream: true })
+    }
+    out += decoder.decode()
+  } catch {
+    // The structural HTTP failure remains useful even when its body breaks.
+  } finally {
+    if (out.length >= UPSTREAM_ERROR_BODY_LIMIT) await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
+  }
+  return out.slice(0, UPSTREAM_ERROR_BODY_LIMIT)
+}
+
+function safeUpstreamErrorFields(body: string): { code: string | null; type: string | null; requestId: string | null } {
+  let root: unknown
+  try { root = JSON.parse(body) } catch { return { code: null, type: null, requestId: null } }
+  if (root === null || typeof root !== 'object' || Array.isArray(root)) {
+    return { code: null, type: null, requestId: null }
+  }
+  const record = root as Record<string, unknown>
+  const nested = record.error !== null && typeof record.error === 'object' && !Array.isArray(record.error)
+    ? record.error as Record<string, unknown>
+    : record
+  return {
+    code: safeDiagnosticField(nested.code, 80),
+    type: safeDiagnosticField(nested.type, 80),
+    requestId: safeDiagnosticField(record.request_id ?? record.requestId, 120),
+  }
+}
+
+function safeDiagnosticField(value: unknown, limit: number): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const text = String(value)
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\b(?:sk|key|token)-[A-Za-z0-9_-]{8,}\b/gi, '<REDACTED>')
+    .replace(/Bearer\s+\S+/gi, 'Bearer <REDACTED>')
+    .trim()
+  return text === '' ? null : text.slice(0, limit)
+}
+
+function safeHostname(baseUrl: string): string | null {
+  try { return new URL(baseUrl).hostname } catch { return null }
 }
 
 /**

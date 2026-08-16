@@ -168,7 +168,7 @@ describe('Provider administration', () => {
       const [key] = created.keys
       expect(key?.id).toMatch(/^uk_/)
       expect(key?.health).toBe('active')
-      expect(key?.lastProbe).toMatchObject({ verdict: 'usable', reason: null })
+      expect(key?.lastProbe).toMatchObject({ verdict: 'authenticated', reason: null })
     })
 
     test('sends the submitted key to the provider seam, not to storage', async () => {
@@ -230,7 +230,7 @@ describe('Provider administration', () => {
     })
 
     test('keeps a usable probe result and activates the key on creation', async () => {
-      probe.respondWith({ verdict: 'usable', reason: null })
+      probe.respondWith({ verdict: 'authenticated', reason: null })
 
       const created = await createProvider()
 
@@ -314,7 +314,7 @@ describe('Provider administration', () => {
     })
 
     test('accepts an insecure base URL once explicitly allowed', async () => {
-      probe.respondWith({ verdict: 'usable', reason: null })
+      probe.respondWith({ verdict: 'authenticated', reason: null })
 
       const created = await createProvider({
         baseUrl: 'http://localhost:8000/v1',
@@ -421,6 +421,23 @@ describe('Provider administration', () => {
   })
 
   describe('inspection and listing', () => {
+    test('lists Providers created before the authenticated Credential Evidence rename', async () => {
+      const created = await createProvider()
+      const key = await iroha.database.providers.getKey(created.keys[0]!.id)
+      expect(key).not.toBeNull()
+      await iroha.database.providers.updateKey(
+        created.keys[0]!.id,
+        { lastProbeVerdict: 'usable' as never },
+        new Date(),
+      )
+
+      const response = await iroha.fetch(BASE)
+
+      expect(response.status).toBe(200)
+      const payload = await response.json() as { providers: ProviderBody[] }
+      expect(payload.providers[0]?.keys[0]?.lastProbe?.verdict).toBe('authenticated')
+    })
+
     test('lists every Provider, most recently created first', async () => {
       const first = await createProvider({ displayName: 'First' })
       iroha.clock.advance(60)
@@ -573,7 +590,7 @@ describe('Provider administration', () => {
       probe.respondWith({ verdict: 'inconclusive', reason: 'the provider could not be reached' })
       const created = await createProvider()
 
-      probe.respondWith({ verdict: 'usable', reason: null })
+      probe.respondWith({ verdict: 'authenticated', reason: null })
       const keyId = created.keys[0]!.id
       const response = await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/test`, {
         method: 'POST',
@@ -583,7 +600,7 @@ describe('Provider administration', () => {
       const updated = (await response.json()) as ProviderBody
       expect(response.status).toBe(200)
       expect(updated.keys[0]?.health).toBe('active')
-      expect(updated.keys[0]?.lastProbe).toMatchObject({ verdict: 'usable', reason: null })
+      expect(updated.keys[0]?.lastProbe).toMatchObject({ verdict: 'authenticated', reason: null })
     })
 
     test('retesting a Disabled key records the outcome but keeps it disabled', async () => {
@@ -592,7 +609,7 @@ describe('Provider administration', () => {
 
       await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/disable`, { method: 'POST', csrf })
 
-      probe.respondWith({ verdict: 'usable', reason: null })
+      probe.respondWith({ verdict: 'authenticated', reason: null })
       const response = await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/test`, {
         method: 'POST',
         csrf,
@@ -600,7 +617,7 @@ describe('Provider administration', () => {
 
       const updated = (await response.json()) as ProviderBody
       expect(updated.keys[0]?.health).toBe('disabled')
-      expect(updated.keys[0]?.lastProbe?.verdict).toBe('usable')
+      expect(updated.keys[0]?.lastProbe?.verdict).toBe('authenticated')
     })
 
     test('disable and activate are audited without secret values', async () => {

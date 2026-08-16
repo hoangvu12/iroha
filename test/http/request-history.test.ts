@@ -45,6 +45,7 @@ interface RequestAttemptDto {
   outcome: 'success' | 'failure' | 'skipped'
   errorCode: string | null
   retryAfterSeconds: number | null
+  diagnostics: Record<string, string | number>
 }
 
 describe('private request history and audit', () => {
@@ -118,6 +119,37 @@ describe('private request history and audit', () => {
     })
 
   describe('request history', () => {
+    test('returns sanitized Provider diagnostics for each attempt', async () => {
+      const requestId = 'req_http_diagnostics'
+      const at = new Date('2026-08-16T00:00:00.000Z')
+      await iroha.database.requestHistory.recordEvent({
+        id: requestId, occurredAt: at, providerId: connection.id, model: MODEL,
+        gatewayKeyId: keyId, keyId: upstreamKeyId, status: 429, outcome: 'failure',
+        latencyMs: 10, isStreaming: false, promptTokens: null, completionTokens: null,
+        totalTokens: null, errorCode: 'upstream_rate_limited',
+      })
+      await iroha.database.requestHistory.recordAttempt({
+        requestId, attemptNumber: 1, keyId: upstreamKeyId, startedAt: at, completedAt: at,
+        status: 429, outcome: 'failure', errorCode: 'upstream_rate_limited', retryAfterSeconds: 12,
+        diagnostics: {
+          status: 429, providerCode: 'quota_window', providerType: 'rate_limit',
+          classification: 'capacity_limited', capacityScope: 'key', limitingWindow: 'weekly',
+          retryAfterSeconds: 12, recheckAt: '2026-08-16T01:00:00.000Z', remainingPercent: 0,
+          body: UPSTREAM_KEY, message: UPSTREAM_KEY, headers: { authorization: UPSTREAM_KEY },
+        },
+      })
+
+      const response = await iroha.fetch(`/api/v1/admin/requests/${requestId}`)
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as { attempts: RequestAttemptDto[] }
+      expect(body.attempts[0]?.diagnostics).toEqual({
+        status: 429, providerCode: 'quota_window', providerType: 'rate_limit',
+        classification: 'capacity_limited', capacityScope: 'key', limitingWindow: 'weekly',
+        retryAfterSeconds: 12, recheckAt: '2026-08-16T01:00:00.000Z', remainingPercent: 0,
+      })
+      expect(JSON.stringify(body)).not.toContain(UPSTREAM_KEY)
+    })
+
     test('records a successful inference call without prompts or responses', async () => {
       const response = await chat(keySecret, { model: MODEL, messages: [{ role: 'user', content: 'hi' }] })
       expect(response.status).toBe(200)
@@ -201,6 +233,63 @@ describe('private request history and audit', () => {
       expect(successfulWithFailure).toBeDefined()
       expect(successfulWithFailure!.attempts.some((a) => a.status === 401)).toBe(true)
     })
+
+    for (const recovered of [
+      { failedStatus: 402, stream: false },
+      { failedStatus: 429, stream: true },
+    ] as const) {
+      test(`finalizes a ${recovered.failedStatus} -> 200 ${recovered.stream ? 'streaming' : 'non-streaming'} request as successful`, async () => {
+        const second = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/keys`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ upstreamKey: `sk-recovery-${recovered.failedStatus}-alternate` }),
+          csrf,
+        })
+        expect(second.status).toBe(201)
+
+        let inferenceCalls = 0
+        upstream.respondWith(() => {
+          inferenceCalls++
+          if (inferenceCalls === 1) {
+            return new Response('{"error":{"code":"capacity","message":"not persisted"}}', {
+              status: recovered.failedStatus,
+              ...(recovered.failedStatus === 429 ? { headers: { 'retry-after': '9' } } : {}),
+            })
+          }
+          return Response.json({
+            id: `chatcmpl-recovered-${recovered.failedStatus}`,
+            object: 'chat.completion',
+            created: 1,
+            model: MODEL,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          })
+        })
+
+        const response = await chat(keySecret, {
+          model: MODEL,
+          messages: [{ role: 'user', content: 'recover' }],
+          stream: recovered.stream,
+        })
+        expect(response.status).toBe(200)
+        const requestId = response.headers.get('x-request-id')!
+
+        const detail = await iroha.fetch(`/api/v1/admin/requests/${requestId}`)
+        expect(detail.status).toBe(200)
+        const body = (await detail.json()) as { event: RequestEventDto; attempts: RequestAttemptDto[] }
+        expect(body.event).toMatchObject({
+          id: requestId,
+          status: 200,
+          outcome: 'success',
+          isStreaming: recovered.stream,
+          errorCode: null,
+        })
+        expect(body.attempts.map((attempt) => ({ status: attempt.status, outcome: attempt.outcome }))).toEqual([
+          { status: recovered.failedStatus, outcome: 'failure' },
+          { status: 200, outcome: 'success' },
+        ])
+      })
+    }
 
     test('records a no-eligible-key failure with the Iroha code', async () => {
       // Disable every key so no eligible Upstream Key remains.

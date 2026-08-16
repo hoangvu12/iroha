@@ -179,7 +179,7 @@ export interface ProviderCapabilities {
  * The durable result of the last low-cost test of an Upstream Key. Reasons are
  * structural descriptions and never contain the key or any secret.
  */
-export type KeyProbeVerdict = 'usable' | 'rejected' | 'inconclusive'
+export type KeyProbeVerdict = 'authenticated' | 'rejected' | 'inconclusive'
 
 /**
  * The Key Health states a key can hold before the full Key Health engine
@@ -560,6 +560,12 @@ export interface RequestAttemptRecord {
   readonly outcome: AttemptOutcome
   readonly errorCode: string | null
   readonly retryAfterSeconds: number | null
+  /** Bounded allow-listed Provider facts; never raw response content. */
+  readonly diagnostics: import('../providers/provider-evidence.ts').ProviderDiagnostics
+}
+
+export type RequestAttemptInput = Omit<RequestAttemptRecord, 'id' | 'diagnostics'> & {
+  readonly diagnostics?: unknown
 }
 
 /**
@@ -630,7 +636,7 @@ export interface RequestHistoryRepository {
    * attempt finishes. The caller writes a `null` `completedAt` at start and
    * the final attempt outcome by `updateAttempt`.
    */
-  recordAttempt(attempt: Omit<RequestAttemptRecord, 'id'>): Promise<RequestAttemptRecord>
+  recordAttempt(attempt: RequestAttemptInput): Promise<RequestAttemptRecord>
 
   /** Patches the outcome of a previously recorded attempt. */
   updateAttempt(
@@ -641,6 +647,7 @@ export interface RequestHistoryRepository {
       readonly outcome: AttemptOutcome
       readonly errorCode: string | null
       readonly retryAfterSeconds: number | null
+      readonly diagnostics?: unknown
     },
   ): Promise<void>
 

@@ -139,7 +139,7 @@ describe('durable scoped Key Health', () => {
     expect((await opened.database.providers.getKey(trial.value.keyId))?.health).toBe('active')
   })
 
-  test('manual test restores an exhausted key when the probe is authoritative', async () => {
+  test('manual authentication never clears authoritative exhaustion', async () => {
     await registry.recordInferenceFailure({
       keyId: keyIds[0]!,
       model: 'gpt-4o',
@@ -150,7 +150,9 @@ describe('durable scoped Key Health', () => {
 
     await registry.testKey(providerId, keyIds[0]!)
 
-    expect((await opened.database.providers.getKey(keyIds[0]!))?.health).toBe('active')
+    const stored = await opened.database.providers.getKey(keyIds[0]!)
+    expect(stored?.health).toBe('exhausted')
+    expect(stored?.lastProbeVerdict).toBe('authenticated')
   })
 
   test('manual test probes a key with a base URL override against its own URL', async () => {

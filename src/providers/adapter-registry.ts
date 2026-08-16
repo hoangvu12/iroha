@@ -1,5 +1,10 @@
-import { createGenericInferenceAdapter, type InferenceAdapter } from '../inference/index.ts'
+import {
+  createGenericInferenceAdapter,
+  createMinimaxInferenceAdapter,
+  type InferenceAdapter,
+} from '../inference/index.ts'
 import { createAnthropicInferenceAdapter } from '../inference/anthropic-adapter.ts'
+import { createDashscopeInferenceAdapter } from '../inference/dashscope-adapter.ts'
 import {
   createGenericUsageAdapter,
   createMinimaxUsageAdapter,
@@ -7,9 +12,11 @@ import {
 } from '../usage/index.ts'
 import {
   ANTHROPIC_INFERENCE_ADAPTER_ID,
+  DASHSCOPE_INFERENCE_ADAPTER_ID,
   BUILT_IN_PROVIDER_TEMPLATES,
   GENERIC_INFERENCE_ADAPTER_ID,
   MINIMAX_USAGE_ADAPTER_ID,
+  MINIMAX_INFERENCE_ADAPTER_ID,
   REACTIVE_ONLY_USAGE_ADAPTER_ID,
   type ProviderTemplate,
 } from './templates.ts'
@@ -230,6 +237,10 @@ export interface BuiltInAdapterRegistryOptions {
    * the same recorded calls list as a generic OpenAI-shaped call.
    */
   readonly anthropicInferenceAdapter?: InferenceAdapter
+  /** Replaces the typed DashScope adapter in transport-focused tests. */
+  readonly dashscopeInferenceAdapter?: InferenceAdapter
+  /** Replaces the typed MiniMax adapter in transport-focused tests. */
+  readonly minimaxInferenceAdapter?: InferenceAdapter
 }
 
 /**
@@ -246,6 +257,8 @@ export function createBuiltInAdapterRegistry(
     inferenceAdapters: inferenceAdapters({
       [GENERIC_INFERENCE_ADAPTER_ID]: options.genericInferenceAdapter ?? createGenericInferenceAdapter(),
       [ANTHROPIC_INFERENCE_ADAPTER_ID]: options.anthropicInferenceAdapter ?? createAnthropicInferenceAdapter(),
+      [DASHSCOPE_INFERENCE_ADAPTER_ID]: options.dashscopeInferenceAdapter ?? createDashscopeInferenceAdapter(),
+      [MINIMAX_INFERENCE_ADAPTER_ID]: options.minimaxInferenceAdapter ?? createMinimaxInferenceAdapter(),
     }),
     usageAdapters: usageAdapters({
       [REACTIVE_ONLY_USAGE_ADAPTER_ID]: createGenericUsageAdapter(),

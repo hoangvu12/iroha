@@ -35,6 +35,12 @@ export const GENERIC_INFERENCE_ADAPTER_ID = 'generic-inference-adapter'
  */
 export const ANTHROPIC_INFERENCE_ADAPTER_ID = 'anthropic-inference-adapter'
 
+/** Typed DashScope adapter for provider-specific content-inspection retries. */
+export const DASHSCOPE_INFERENCE_ADAPTER_ID = 'dashscope-inference-adapter'
+
+/** Typed MiniMax adapter for structured text-capacity failure evidence. */
+export const MINIMAX_INFERENCE_ADAPTER_ID = 'minimax-inference-adapter'
+
 /**
  * The well-known Usage Adapter id the reactive-only generic Usage Adapter is
  * registered under. Built-in templates that have no documented entitlement
@@ -204,6 +210,33 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     brand: { domain: 'openrouter.ai', accentColor: '#3D55E6' },
   },
   {
+    id: 'dashscope',
+    displayName: 'DashScope',
+    description:
+      'Alibaba Cloud DashScope international OpenAI-compatible endpoint with bounded recovery from intermittent content-inspection failures.',
+    baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    authHeader: 'authorization',
+    authPrefix: 'Bearer ',
+    capabilities: {
+      chat: true,
+      streaming: true,
+      tools: true,
+      structuredOutput: true,
+      responses: false,
+    },
+    knownModels: [
+      'qwen3-coder-next',
+      'qwen3-coder-plus',
+      'qwen3-max-2026-01-23',
+      'qwen3.5-plus',
+      'qwen3.6-plus',
+      'qwen3.7-plus',
+    ],
+    inferenceAdapterId: DASHSCOPE_INFERENCE_ADAPTER_ID,
+    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
+    brand: { domain: 'aliyun.com', accentColor: '#FF6A00' },
+  },
+  {
     id: 'MiniMax',
     displayName: 'MiniMax',
     description:
@@ -228,7 +261,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
       'MiniMax-M2.1-highspeed',
       'MiniMax-M2',
     ],
-    inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
+    inferenceAdapterId: MINIMAX_INFERENCE_ADAPTER_ID,
     usageAdapterId: MINIMAX_USAGE_ADAPTER_ID,
     brand: { domain: 'minimax.io', accentColor: '#F43F5E' },
   },

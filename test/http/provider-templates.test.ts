@@ -76,6 +76,10 @@ describe('the Provider Templates admin endpoint', () => {
       // built-in template uses the generic one.
       if (template.id === 'anthropic') {
         expect(template.inferenceAdapterId).toBe('anthropic-inference-adapter')
+      } else if (template.id === 'dashscope') {
+        expect(template.inferenceAdapterId).toBe('dashscope-inference-adapter')
+      } else if (template.id === 'MiniMax') {
+        expect(template.inferenceAdapterId).toBe('minimax-inference-adapter')
       } else {
         expect(template.inferenceAdapterId).toBe('generic-inference-adapter')
       }

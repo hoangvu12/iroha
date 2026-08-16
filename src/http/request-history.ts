@@ -124,6 +124,21 @@ const attemptDto = t.Object({
   outcome: t.Union([t.Literal('success'), t.Literal('failure'), t.Literal('skipped')]),
   errorCode: t.Union([t.Null(), t.String()]),
   retryAfterSeconds: t.Union([t.Null(), t.Number()]),
+  diagnostics: t.Object({
+    status: t.Optional(t.Number()),
+    providerCode: t.Optional(t.String()),
+    providerType: t.Optional(t.String()),
+    classification: t.Optional(t.String()),
+    capacityScope: t.Optional(t.String()),
+    limitingWindow: t.Optional(t.String()),
+    retryAfterSeconds: t.Optional(t.Number()),
+    retryAt: t.Optional(t.String()),
+    recheckAt: t.Optional(t.String()),
+    remaining: t.Optional(t.Number()),
+    remainingPercent: t.Optional(t.Number()),
+    used: t.Optional(t.Number()),
+    limit: t.Optional(t.Number()),
+  }),
 })
 
 const listResponse = t.Object({
@@ -197,6 +212,7 @@ function toAttemptDto(attempt: {
   outcome: 'success' | 'failure' | 'skipped'
   errorCode: string | null
   retryAfterSeconds: number | null
+  diagnostics: import('../providers/provider-evidence.ts').ProviderDiagnostics
 }): AttemptDto {
   return {
     id: attempt.id,
@@ -208,6 +224,7 @@ function toAttemptDto(attempt: {
     outcome: attempt.outcome,
     errorCode: attempt.errorCode,
     retryAfterSeconds: attempt.retryAfterSeconds,
+    diagnostics: attempt.diagnostics,
   }
 }
 

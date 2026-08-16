@@ -1,0 +1,17 @@
+{
+  "model_remains": [
+    {
+      "model_name": "general",
+      "current_interval_remaining_percent": 41,
+      "current_interval_status": 9876,
+      "end_time": 1900000000000,
+      "current_weekly_remaining_percent": 0,
+      "current_weekly_status": 3,
+      "weekly_end_time": 1910000000000
+    }
+  ],
+  "base_resp": {
+    "status_code": 0,
+    "status_msg": "success"
+  }
+}

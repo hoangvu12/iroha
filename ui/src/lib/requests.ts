@@ -8,6 +8,24 @@ export interface RequestAttemptView {
   readonly outcome: 'success' | 'failure' | 'skipped'
   readonly errorCode: string | null
   readonly retryAfterSeconds: number | null
+  readonly diagnostics: {
+    readonly status?: number
+    readonly providerCode?: string
+    readonly providerType?: string
+    readonly classification?: string
+    readonly capacityScope?: string
+    readonly limitingWindow?: string
+    readonly retryAfterSeconds?: number
+    readonly retryAt?: string
+    readonly recheckAt?: string
+    readonly evidenceAuthority?: 'authoritative' | 'provisional' | 'unknown'
+    readonly evidenceObservedAt?: string
+    readonly evidenceFreshUntil?: string
+    readonly remaining?: number
+    readonly remainingPercent?: number
+    readonly used?: number
+    readonly limit?: number
+  }
 }
 
 export interface RequestEventView {

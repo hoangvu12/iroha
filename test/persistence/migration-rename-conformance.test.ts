@@ -44,7 +44,7 @@ function seedSqliteFixture(file: string): AppliedFixture {
     // same executor the forwards-migration test uses.
     const crypto = require('node:crypto') as typeof import('node:crypto')
     const appliedHashes: string[] = []
-    for (const entry of journal.entries.filter((e) => e.tag !== '0012_provider_rename')) {
+    for (const entry of journal.entries.filter((_, index) => index < 12)) {
       const sql = require('node:fs').readFileSync(
         join(SQLITE_DIR, `${entry.tag}.sql`),
         'utf8',
@@ -58,7 +58,7 @@ function seedSqliteFixture(file: string): AppliedFixture {
     client.exec(
       'CREATE TABLE IF NOT EXISTS __drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)',
     )
-    const appliedEntries = journal.entries.filter((e) => e.tag !== '0012_provider_rename')
+    const appliedEntries = journal.entries.filter((_, index) => index < 12)
     for (let i = 0; i < appliedEntries.length; i++) {
       client
         .prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)')
@@ -197,7 +197,7 @@ async function seedPostgresFixture(url: string): Promise<AppliedFixture> {
     const journal = JSON.parse(
       fs.readFileSync(join(POSTGRES_DIR, 'meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string; when: number; breakpoints: boolean }[] }
-    for (const entry of journal.entries.filter((e) => e.tag !== '0012_provider_rename')) {
+    for (const entry of journal.entries.filter((_, index) => index < 12)) {
       const sql = fs.readFileSync(join(POSTGRES_DIR, `${entry.tag}.sql`), 'utf8')
       for (const stmt of sql.split('--> statement-breakpoint').map((s) => s.trim()).filter((s) => s.length > 0)) {
         await pool.query(stmt)
@@ -217,7 +217,7 @@ async function seedPostgresFixture(url: string): Promise<AppliedFixture> {
     await pool.query(
       'CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)',
     )
-    for (const entry of journal.entries.filter((e) => e.tag !== '0012_provider_rename')) {
+    for (const entry of journal.entries.filter((_, index) => index < 12)) {
       const sql = fs.readFileSync(join(POSTGRES_DIR, `${entry.tag}.sql`), 'utf8')
       const hash = (await import('node:crypto')).createHash('sha256').update(sql).digest('hex')
       await pool.query(
@@ -466,7 +466,7 @@ describe('SQLite Provider-rename migration on a populated fixture', () => {
       client.exec(
         'CREATE TABLE IF NOT EXISTS __drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)',
       )
-      for (const entry of journal.entries.filter((e) => e.tag !== '0012_provider_rename')) {
+      for (const entry of journal.entries.filter((_, index) => index < 12)) {
         const sql = fs.readFileSync(join(SQLITE_DIR, `${entry.tag}.sql`), 'utf8')
         const hash = crypto.createHash('sha256').update(sql).digest('hex')
         for (const stmt of sql.split('--> statement-breakpoint').map((s) => s.trim()).filter((s) => s.length > 0)) {
@@ -598,7 +598,7 @@ if (POSTGRES_URL) {
         const journal = JSON.parse(
           fs.readFileSync(join(POSTGRES_DIR, 'meta/_journal.json'), 'utf8'),
         ) as { entries: { tag: string; when: number }[] }
-        for (const entry of journal.entries.filter((e) => e.tag !== '0012_provider_rename')) {
+        for (const entry of journal.entries.filter((_, index) => index < 12)) {
           const sql = fs.readFileSync(join(POSTGRES_DIR, `${entry.tag}.sql`), 'utf8')
           for (const stmt of sql.split('--> statement-breakpoint').map((s) => s.trim()).filter((s) => s.length > 0)) {
             await pool.query(stmt)

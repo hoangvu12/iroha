@@ -35,6 +35,7 @@ import {
   type ProviderRepository,
   type Repositories,
   type RequestAttemptRecord,
+  type RequestAttemptInput,
   type RequestEventRecord,
   type RequestHistoryFilter,
   type RequestHistoryListOptions,
@@ -53,6 +54,7 @@ import {
   type UsageRepository,
   type UsageSnapshotRecord,
 } from '../repository.ts'
+import { providerDiagnosticsOf } from '../../providers/provider-evidence.ts'
 import {
   auditEvents,
   backgroundJobs,
@@ -755,7 +757,9 @@ function toKey(row: KeyRow): UpstreamKeyRecord {
     encryptedKey: row.encryptedKey,
     health: row.health as UpstreamKeyHealth,
     lastProbeAt: row.lastProbeAt,
-    lastProbeVerdict: row.lastProbeVerdict as KeyProbeVerdict | null,
+    lastProbeVerdict: row.lastProbeVerdict === 'usable'
+      ? 'authenticated'
+      : row.lastProbeVerdict as KeyProbeVerdict | null,
     lastProbeReason: row.lastProbeReason,
     healthReason: row.healthReason,
     healthChangedAt: row.healthChangedAt ?? row.updatedAt,
@@ -1206,7 +1210,7 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
       })
   }
 
-  async recordAttempt(attempt: Omit<RequestAttemptRecord, 'id'>): Promise<RequestAttemptRecord> {
+  async recordAttempt(attempt: RequestAttemptInput): Promise<RequestAttemptRecord> {
     const [row] = await this.handle
       .insert(requestAttempts)
       .values({
@@ -1219,6 +1223,7 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
         outcome: attempt.outcome,
         errorCode: attempt.errorCode,
         retryAfterSeconds: attempt.retryAfterSeconds,
+        diagnostics: providerDiagnosticsOf(attempt.diagnostics),
       })
       .returning()
 
@@ -1234,6 +1239,7 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
       readonly outcome: AttemptOutcome
       readonly errorCode: string | null
       readonly retryAfterSeconds: number | null
+      readonly diagnostics?: unknown
     },
   ): Promise<void> {
     await this.handle
@@ -1244,6 +1250,9 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
         outcome: patch.outcome,
         errorCode: patch.errorCode,
         retryAfterSeconds: patch.retryAfterSeconds,
+        ...(patch.diagnostics === undefined
+          ? {}
+          : { diagnostics: providerDiagnosticsOf(patch.diagnostics) }),
       })
       .where(eq(requestAttempts.id, id))
   }
@@ -1383,6 +1392,7 @@ function toAttempt(row: RequestAttemptRow): RequestAttemptRecord {
     outcome: row.outcome as AttemptOutcome,
     errorCode: row.errorCode,
     retryAfterSeconds: row.retryAfterSeconds,
+    diagnostics: providerDiagnosticsOf(row.diagnostics),
   }
 }
 

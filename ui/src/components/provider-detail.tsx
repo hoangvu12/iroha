@@ -170,16 +170,6 @@ export function ProviderDetail({
     void reloadUsage()
   }, [reloadUsage])
 
-  /**
-   * Triggered by the per-key Refresh action: actually polls the configured
-   * Usage Adapter (POST .../usage/refresh) and re-reads the snapshot so the
-   * Usage column on every row reflects the new reading.
-   */
-  const refreshUsageNow = useCallback(async () => {
-    await refreshUsage(providerId, csrfToken)
-    await reloadUsage()
-  }, [providerId, csrfToken, reloadUsage])
-
   if (provider === null && error === null) {
     return <Skeleton className="h-48 w-full" />
   }
@@ -226,7 +216,7 @@ export function ProviderDetail({
         csrfToken={csrfToken}
         usage={usage}
         onChanged={reload}
-        onUsageChanged={() => void refreshUsageNow()}
+        onUsageChanged={() => void reloadUsage()}
         onOpenUsageDialog={setUsageDialogReadings}
       />
 
@@ -1617,10 +1607,10 @@ function usageResetTooltip(reading: UsageReadingView): string | null {
 function usageTextTone(reading: UsageReadingView): 'danger' | 'muted' | 'default' {
   if (!isCreditReading(reading)) {
     if (reading.remainingPercent === null) return 'muted'
-    return 'default'
+    return reading.remainingPercent <= 0 ? 'danger' : 'default'
   }
   if (reading.balance === null) return 'muted'
-  return reading.balance < 0 ? 'danger' : 'default'
+  return reading.balance <= 0 ? 'danger' : 'default'
 }
 
 const USAGE_TONE_CLASS: Record<'danger' | 'muted' | 'default', string> = {
@@ -1660,8 +1650,11 @@ function UsageCell({
   readonly onOpenDialog: (readings: readonly UsageReadingView[]) => void
 }) {
   const readings = readingsForRow(usage, keyId)
+  if (usage?.visibility === 'reactive_only') {
+    return <span className="text-muted-foreground block w-full text-center text-xs">Not available</span>
+  }
   if (readings === null) {
-    return <span className="text-muted-foreground text-xs">—</span>
+    return <span className="text-muted-foreground block w-full text-center text-xs">Unknown</span>
   }
 
   const subscriptions = readings.filter((reading) => !isCreditReading(reading))
@@ -1675,11 +1668,12 @@ function UsageCell({
       {primarySub !== null && (
         <ReadingLine
           reading={primarySub}
+          stale={usage?.stale === true}
           onOpenDialog={hasDialog ? () => onOpenDialog(readings) : null}
         />
       )}
       {primaryCredit !== undefined && (
-        <ReadingLine reading={primaryCredit} onOpenDialog={null} />
+        <ReadingLine reading={primaryCredit} stale={usage?.stale === true} onOpenDialog={null} />
       )}
     </div>
   )
@@ -1687,9 +1681,11 @@ function UsageCell({
 
 function ReadingLine({
   reading,
+  stale,
   onOpenDialog,
 }: {
   readonly reading: UsageReadingView
+  readonly stale: boolean
   readonly onOpenDialog: (() => void) | null
 }) {
   const resetTip = usageResetTooltip(reading)
@@ -1697,9 +1693,14 @@ function ReadingLine({
   const interactive = onOpenDialog !== null
   const isCredit = isCreditReading(reading)
   const percent = !isCredit ? reading.remainingPercent : null
+  const exhausted = !stale && (isCredit
+    ? reading.balance !== null && reading.balance <= 0
+    : reading.remainingPercent !== null && reading.remainingPercent <= 0)
+  const headline = exhausted ? 'Exhausted' : usageTopLine(reading)
+  const reason = exhausted ? usageExhaustionReason(reading) : null
   return (
     <div
-      className={`flex items-center gap-2 font-mono text-xs ${tone} ${isCredit ? 'justify-center' : ''} ${interactive ? 'hover:text-foreground cursor-pointer' : ''}`}
+      className={`flex items-center gap-2 font-mono text-xs ${tone} ${isCredit || exhausted ? 'justify-center' : ''} ${interactive ? 'hover:text-foreground cursor-pointer' : ''}`}
       onClick={interactive ? onOpenDialog : undefined}
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : undefined}
@@ -1715,8 +1716,12 @@ function ReadingLine({
       }
       aria-label={interactive ? 'Show usage breakdown' : undefined}
     >
-      <span className={`shrink-0 font-mono text-xs ${isCredit ? '' : 'w-20 text-right'}`}>{usageTopLine(reading)}</span>
-      {percent !== null && <ProgressBar reading={reading} />}
+      <span className={`shrink-0 text-xs ${isCredit || exhausted ? 'text-center' : 'min-w-20 text-right'}`}>
+        <span className="font-medium">{headline}</span>
+        {reason !== null && <span className="text-muted-foreground"> · {reason}</span>}
+        {stale && <span className="text-status-warning"> - stale</span>}
+      </span>
+      {percent !== null && !exhausted && <ProgressBar reading={reading} />}
       {resetTip !== null && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1735,6 +1740,14 @@ function ReadingLine({
       )}
     </div>
   )
+}
+
+function usageExhaustionReason(reading: UsageReadingView): string {
+  if (isCreditReading(reading)) return 'credit'
+  const window = reading.diagnostics.limitingWindow
+  if (window === 'weekly') return 'weekly window'
+  if (window === 'five_hour') return 'five-hour window'
+  return 'text capacity'
 }
 
 /** A mini progress bar showing remaining percent, coloured by how much is left. */
@@ -1760,7 +1773,7 @@ function ProgressBar({ reading }: { readonly reading: UsageReadingView }) {
 
 /**
  * The cell's primary reading: subscription windows use the mean remaining
- * percent so the cell answers "is this provider usable?" with one number;
+ * percent so the cell answers "is this provider usable?" with the limiting number;
  * credit-only readings pass through unchanged.
  */
 function primaryForCell(readings: readonly UsageReadingView[]): UsageReadingView {
@@ -1788,10 +1801,11 @@ function primaryForCell(readings: readonly UsageReadingView[]): UsageReadingView
   if (withPercent.length === 0) {
     return subscription[0] as UsageReadingView
   }
-  const sum = withPercent.reduce((acc, r) => acc + (r.remainingPercent as number), 0)
-  const avg = sum / withPercent.length
-  const first = withPercent[0] as UsageReadingView
-  return { ...first, remainingPercent: avg }
+  return withPercent.reduce((limiting, reading) =>
+    (reading.remainingPercent as number) < (limiting.remainingPercent as number)
+      ? reading
+      : limiting,
+  )
 }
 
 function UsageDialog({

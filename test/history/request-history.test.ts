@@ -97,6 +97,124 @@ describe('RequestHistoryService', () => {
     expect(attempts[0]!.outcome).toBe('success')
   })
 
+  test('persists only bounded allow-listed Provider diagnostics on an attempt', async () => {
+    const secret = 'sk-provider-secret-must-not-survive'
+    const service = createService()
+    await database.providers.insertProvider({
+      id: 'pc_diagnostics', displayName: 'Diagnostics', baseUrl: 'https://api.example.com/v1',
+      allowInsecureHttp: false, enabled: true, retryMaxAttempts: 3,
+      retryAmbiguousNetwork: false, archivedAt: null, templateId: null,
+      capabilities: { chat: true, streaming: true, tools: false, structuredOutput: false, responses: false },
+      authHeader: 'authorization', authPrefix: 'Bearer ', staticHeadersEncrypted: '[]',
+      redirectAllowSameOrigin: false, connectionTimeoutMs: 10_000, firstByteTimeoutMs: 20_000,
+      nonStreamingTotalTimeoutMs: 120_000, streamingIdleTimeoutMs: 30_000,
+      totalRetryTimeoutMs: 30_000, idempotencyHeader: 'Idempotency-Key',
+      createdAt: new Date(), updatedAt: new Date(),
+    })
+    const recorder = service.beginRequest({
+      id: 'req_diagnostics', providerId: 'pc_diagnostics', model: 'MiniMax-M3', gatewayKeyId: null,
+    })
+    const attempt = await recorder.startAttempt({ attemptNumber: 1, keyId: 'uk_one', at: new Date() })
+    await attempt.finalize({
+      status: 429, outcome: 'failure', errorCode: 'upstream_rate_limited', retryAfterSeconds: 12,
+      diagnostics: {
+        status: 429, providerCode: `limit-${'x'.repeat(100)}`, providerType: 'rate_limit',
+        classification: 'capacity_limited', capacityScope: 'key', limitingWindow: 'weekly',
+        retryAfterSeconds: 12, recheckAt: '2026-08-16T01:00:00.000Z', remaining: 0,
+        remainingPercent: 0, used: 100, limit: 100,
+        body: { prompt: secret, completion: secret }, message: secret,
+        headers: { authorization: `Bearer ${secret}` }, arbitrary: secret,
+      },
+      at: new Date(),
+    })
+
+    const stored = (await service.getAttempts('req_diagnostics'))[0]!
+    expect(stored.diagnostics).toEqual({
+      status: 429, providerCode: `limit-${'x'.repeat(58)}`, providerType: 'rate_limit',
+      classification: 'capacity_limited', capacityScope: 'key', limitingWindow: 'weekly',
+      retryAfterSeconds: 12, recheckAt: '2026-08-16T01:00:00.000Z', remaining: 0,
+      remainingPercent: 0, used: 100, limit: 100,
+    })
+    expect(JSON.stringify(stored)).not.toContain(secret)
+  })
+
+  test('finalizes a recovered request as successful while preserving the failed alternate trail', async () => {
+    const service = createService()
+    await database.providers.insertProvider({
+      id: 'pc_recovered',
+      displayName: 'Recovered',
+      baseUrl: 'https://api.example.com/v1',
+      allowInsecureHttp: false,
+      enabled: true,
+      retryMaxAttempts: 3,
+      retryAmbiguousNetwork: false,
+      archivedAt: null,
+      templateId: null,
+      capabilities: { chat: true, streaming: true, tools: false, structuredOutput: false, responses: false },
+      authHeader: 'authorization',
+      authPrefix: 'Bearer ',
+      staticHeadersEncrypted: '[]',
+      redirectAllowSameOrigin: false,
+      connectionTimeoutMs: 10_000,
+      firstByteTimeoutMs: 20_000,
+      nonStreamingTotalTimeoutMs: 120_000,
+      streamingIdleTimeoutMs: 30_000,
+      totalRetryTimeoutMs: 30_000,
+      idempotencyHeader: 'Idempotency-Key',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const recorder = service.beginRequest({
+      id: 'req_recovered',
+      providerId: 'pc_recovered',
+      model: 'gpt-4o-mini',
+      gatewayKeyId: null,
+    })
+    const failed = await recorder.startAttempt({ attemptNumber: 1, keyId: 'uk_exhausted', at: new Date() })
+    await failed.finalize({
+      status: 402,
+      outcome: 'failure',
+      errorCode: 'upstream_payment_required',
+      retryAfterSeconds: null,
+      at: new Date(),
+    })
+    const recovered = await recorder.startAttempt({ attemptNumber: 2, keyId: 'uk_healthy', at: new Date() })
+    await recovered.finalize({
+      status: 200,
+      outcome: 'success',
+      errorCode: null,
+      retryAfterSeconds: null,
+      at: new Date(),
+    })
+    await recorder.finalize({
+      status: 200,
+      outcome: 'success',
+      isStreaming: false,
+      latencyMs: 12,
+      keyId: 'uk_healthy',
+      promptTokens: 3,
+      completionTokens: 4,
+      totalTokens: 7,
+      errorCode: null,
+    })
+
+    expect(await service.getEvent('req_recovered')).toMatchObject({
+      status: 200,
+      outcome: 'success',
+      keyId: 'uk_healthy',
+      errorCode: null,
+    })
+    expect((await service.getAttempts('req_recovered')).map((attempt) => ({
+      attemptNumber: attempt.attemptNumber,
+      status: attempt.status,
+      outcome: attempt.outcome,
+    }))).toEqual([
+      { attemptNumber: 1, status: 402, outcome: 'failure' },
+      { attemptNumber: 2, status: 200, outcome: 'success' },
+    ])
+  })
+
   test('disabled retention writes nothing', async () => {
     const service = createService()
     await service.writeRetention({ days: 0 })

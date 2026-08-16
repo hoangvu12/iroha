@@ -435,7 +435,7 @@ function RequestDetail({ detail }: { readonly detail: RequestEventDetail }) {
         <span className="text-muted-foreground text-xs">Attempts</span>
         <ol className="flex flex-col gap-1 text-xs">
           {attempts.map((attempt) => (
-            <AttemptLine key={attempt.id} attempt={attempt} />
+            <AttemptLine key={attempt.id} attempt={attempt} totalAttempts={attempts.length} />
           ))}
         </ol>
       </div>
@@ -443,7 +443,10 @@ function RequestDetail({ detail }: { readonly detail: RequestEventDetail }) {
   )
 }
 
-function AttemptLine({ attempt }: { readonly attempt: RequestAttemptView }) {
+function AttemptLine({ attempt, totalAttempts }: {
+  readonly attempt: RequestAttemptView
+  readonly totalAttempts: number
+}) {
   const tone =
     attempt.outcome === 'success'
       ? 'text-status-healthy'
@@ -452,20 +455,75 @@ function AttemptLine({ attempt }: { readonly attempt: RequestAttemptView }) {
         : 'text-status-danger'
 
   return (
-    <li className="bg-muted/40 flex flex-wrap items-baseline gap-x-2 rounded-md px-2 py-1.5">
-      <span className="font-mono">#{attempt.attemptNumber}</span>
-      <span className={tone}>{attempt.outcome}</span>
-      {attempt.status !== null && <span className="font-mono">{attempt.status}</span>}
-      {attempt.errorCode !== null && (
-        <span className="text-muted-foreground">{attempt.errorCode}</span>
-      )}
-      {attempt.retryAfterSeconds !== null && (
-        <span className="text-muted-foreground">retry after {attempt.retryAfterSeconds}s</span>
-      )}
-      <span className="text-muted-foreground ml-auto font-mono text-[10px]">
-        {attempt.keyId ?? '—'}
-      </span>
+    <li className="bg-muted/40 flex min-w-0 flex-col gap-2 rounded-md px-3 py-2.5">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="font-mono">#{attempt.attemptNumber}</span>
+        {attempt.attemptNumber > 1 && <span className="text-muted-foreground">Alternate</span>}
+        <span className={tone}>{attempt.outcome}</span>
+        {attempt.status !== null && <span className="font-mono">HTTP {attempt.status}</span>}
+        {attempt.errorCode !== null && (
+          <span className="text-muted-foreground break-all">{attempt.errorCode}</span>
+        )}
+        <span className="text-muted-foreground ml-auto break-all font-mono text-[10px]">
+          {attempt.keyId ?? '—'}
+        </span>
+      </div>
+      <AttemptDiagnostics attempt={attempt} totalAttempts={totalAttempts} />
     </li>
+  )
+}
+
+function AttemptDiagnostics({ attempt, totalAttempts }: {
+  readonly attempt: RequestAttemptView
+  readonly totalAttempts: number
+}) {
+  const diagnostics = attempt.diagnostics
+  const facts = [
+    diagnostics.providerCode === undefined ? null : ['Provider code', diagnostics.providerCode],
+    diagnostics.providerType === undefined ? null : ['Provider type', diagnostics.providerType],
+    diagnostics.classification === undefined ? null : ['Classification', diagnostics.classification],
+    diagnostics.capacityScope === undefined ? null : ['Capacity scope', diagnostics.capacityScope],
+    diagnostics.limitingWindow === undefined ? null : ['Limiting window', diagnostics.limitingWindow.replaceAll('_', ' ')],
+    diagnostics.remaining === undefined ? null : ['Remaining', String(diagnostics.remaining)],
+    diagnostics.remainingPercent === undefined ? null : ['Remaining', `${diagnostics.remainingPercent}%`],
+    diagnostics.evidenceAuthority === undefined ? null : ['Evidence', diagnostics.evidenceAuthority],
+    diagnostics.evidenceObservedAt === undefined ? null : ['Evidence observed', formatTime(diagnostics.evidenceObservedAt)],
+    diagnostics.evidenceFreshUntil === undefined ? null : ['Evidence fresh until', formatTime(diagnostics.evidenceFreshUntil)],
+  ].filter((fact): fact is [string, string] => fact !== null)
+  const retrySeconds = diagnostics.retryAfterSeconds ?? attempt.retryAfterSeconds
+  const retryTime = diagnostics.retryAt ?? diagnostics.recheckAt
+
+  if (facts.length === 0 && retrySeconds === null && retryTime === undefined && totalAttempts < 2) {
+    return null
+  }
+
+  return (
+    <dl className="grid min-w-0 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-2">
+      {facts.map(([label, value]) => (
+        <div key={`${label}-${value}`} className="flex min-w-0 gap-1.5">
+          <dt className="text-muted-foreground shrink-0">{label}</dt>
+          <dd className="min-w-0 break-all font-mono">{value}</dd>
+        </div>
+      ))}
+      {retrySeconds !== null && (
+        <div className="flex gap-1.5">
+          <dt className="text-muted-foreground">Retry after</dt>
+          <dd className="font-mono">{retrySeconds}s</dd>
+        </div>
+      )}
+      {retryTime !== undefined && (
+        <div className="flex min-w-0 gap-1.5">
+          <dt className="text-muted-foreground shrink-0">{diagnostics.recheckAt === retryTime ? 'Recheck' : 'Retry'}</dt>
+          <dd className="min-w-0 truncate" title={retryTime}>{formatTime(retryTime)}</dd>
+        </div>
+      )}
+      {totalAttempts > 1 && (
+        <div className="flex gap-1.5">
+          <dt className="text-muted-foreground">Trail</dt>
+          <dd>{attempt.attemptNumber} of {totalAttempts}</dd>
+        </div>
+      )}
+    </dl>
   )
 }
 

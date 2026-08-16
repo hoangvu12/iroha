@@ -855,7 +855,7 @@ export function createAdminRoutes({
 
 export type AdminRoutes = ReturnType<typeof createAdminRoutes>
 
-const probeVerdict = t.Union([t.Literal('usable'), t.Literal('rejected'), t.Literal('inconclusive')])
+const probeVerdict = t.Union([t.Literal('authenticated'), t.Literal('rejected'), t.Literal('inconclusive')])
 const keyHealth = t.Union([
   t.Literal('unverified'),
   t.Literal('active'),

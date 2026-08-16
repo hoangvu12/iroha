@@ -277,6 +277,7 @@ export const requestAttempts = sqliteTable(
     outcome: text('outcome').notNull(),
     errorCode: text('error_code'),
     retryAfterSeconds: integer('retry_after_seconds'),
+    diagnostics: text('provider_diagnostics', { mode: 'json' }).notNull().default({}),
   },
   (table) => ({ pkRequestAttempt: primaryKey({ columns: [table.id] }) }),
 )

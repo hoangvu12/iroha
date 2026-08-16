@@ -7,6 +7,7 @@
 export { createGenericUsageAdapter } from './generic-adapter.ts'
 export {
   createMinimaxUsageAdapter,
+  minimaxCapacityEvidenceOf,
   type MinimaxUsageAdapterOptions,
 } from './minimax-usage-adapter.ts'
 export {

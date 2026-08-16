@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import {
   ANTHROPIC_INFERENCE_ADAPTER_ID,
+  DASHSCOPE_INFERENCE_ADAPTER_ID,
   BUILT_IN_PROVIDER_TEMPLATES,
   findBuiltInTemplate,
   GENERIC_INFERENCE_ADAPTER_ID,
+  MINIMAX_INFERENCE_ADAPTER_ID,
   MINIMAX_USAGE_ADAPTER_ID,
   REACTIVE_ONLY_USAGE_ADAPTER_ID,
   type ProviderTemplate,
@@ -13,6 +15,7 @@ const REQUIRED_TEMPLATE_IDS = [
   'generic-openai-compatible',
   'openai',
   'openrouter',
+  'dashscope',
   'MiniMax',
 ] as const
 
@@ -51,6 +54,10 @@ describe('the built-in Provider Templates', () => {
     for (const template of BUILT_IN_PROVIDER_TEMPLATES) {
       if (template.id === 'anthropic') {
         expect(template.inferenceAdapterId).toBe(ANTHROPIC_INFERENCE_ADAPTER_ID)
+      } else if (template.id === 'dashscope') {
+        expect(template.inferenceAdapterId).toBe(DASHSCOPE_INFERENCE_ADAPTER_ID)
+      } else if (template.id === 'MiniMax') {
+        expect(template.inferenceAdapterId).toBe(MINIMAX_INFERENCE_ADAPTER_ID)
       } else {
         expect(template.inferenceAdapterId).toBe(GENERIC_INFERENCE_ADAPTER_ID)
       }

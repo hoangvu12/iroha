@@ -144,8 +144,8 @@ export function buildDefaultJobs(): BackgroundJob[] {
           })) {
             continue
           }
-          const result = await jobs.usage.refresh(connection.id)
-          if (result.ok || result.failure.code === 'rate_limited') {
+          const result = await jobs.usage.refresh(connection.id, { force: false })
+          if (result.ok || result.failure.code === 'rate_limited' || result.failure.code === 'no_eligible_key') {
             succeeded += 1
           } else if (result.failure.code === 'provider_archived') {
             // The connection was archived between the list and the refresh;

@@ -9,6 +9,7 @@ export type {
   InferenceAdapterCapabilities,
   InferenceFailureCapacityScope,
   InferenceFailureClassification,
+  InferenceFailureContext,
   InferenceFailureKind,
   InferenceFailureRetryAction,
   InferenceForwardRequest,
@@ -29,3 +30,5 @@ export {
   type AnthropicForwardError,
   type AnthropicInferenceAdapterOptions,
 } from './anthropic-adapter.ts'
+export { createDashscopeInferenceAdapter } from './dashscope-adapter.ts'
+export { createMinimaxInferenceAdapter } from './minimax-adapter.ts'

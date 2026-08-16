@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "rate_limit_exceeded",
+    "type": "rate_limit_error",
+    "message": "arbitrary provider text"
+  }
+}

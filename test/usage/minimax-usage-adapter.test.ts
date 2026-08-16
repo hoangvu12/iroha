@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { createMinimaxUsageAdapter } from '../../src/usage/minimax-usage-adapter.ts'
+import {
+  createMinimaxUsageAdapter,
+  minimaxCapacityEvidenceOf,
+} from '../../src/usage/minimax-usage-adapter.ts'
+import creditNegative from '../fixtures/minimax/credit-negative.json'
+import subscriptionMalformed from '../fixtures/minimax/subscription-malformed.json'
+import subscriptionUndocumentedStatus from '../fixtures/minimax/subscription-undocumented-status.json'
 
 const UPSTREAM_KEY = 'sk-upstream-secret-value-for-tests'
 
@@ -97,6 +103,180 @@ describe('the MiniMax Usage Adapter', () => {
     expect(reading.resetAt).toEqual(new Date(1_900_000_000_000))
     expect(reading.confidence).toBe('confirmed')
     expect(reading.diagnostics).toMatchObject({ source: 'minimax-usage-adapter', kind: 'subscription' })
+  })
+
+  test('uses reported percentages when MiniMax redacts plan counts as zero', async () => {
+    route(() =>
+      jsonResponse({
+        model_remains: [
+          {
+            model_name: 'general',
+            current_interval_total_count: 0,
+            current_interval_usage_count: 0,
+            current_interval_remaining_percent: 85,
+            current_interval_status: 1,
+            current_weekly_total_count: 0,
+            current_weekly_usage_count: 0,
+            current_weekly_remaining_percent: 100,
+            current_weekly_status: 3,
+            end_time: 1_900_000_000_000,
+          },
+        ],
+        base_resp: { status_code: 0, status_msg: 'success' },
+      }),
+    )
+
+    const result = await createMinimaxUsageAdapter({ fetch: fetchImpl }).read({
+      baseUrl: 'https://api.minimax.io/v1',
+      allowInsecureHttp: false,
+      upstreamKey: UPSTREAM_KEY,
+      signal: null,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.readings).toHaveLength(1)
+    expect(result.readings[0]?.remainingPercent).toBe(85)
+    expect(result.readings[0]?.limit).toBeNull()
+    expect(result.readings[0]?.used).toBeNull()
+  })
+
+  test('uses the weekly percentage when the weekly Token Plan limit is lower', async () => {
+    route(() => jsonResponse({
+      model_remains: [{
+        model_name: 'general',
+        current_interval_remaining_percent: 17,
+        current_interval_status: 1,
+        current_weekly_remaining_percent: 0,
+        current_weekly_status: 2,
+        end_time: 1_900_000_000_000,
+        weekly_end_time: 1_910_000_000_000,
+      }],
+      base_resp: { status_code: 0, status_msg: 'success' },
+    }))
+
+    const result = await createMinimaxUsageAdapter({ fetch: fetchImpl }).read({
+      baseUrl: 'https://api.minimax.io/v1',
+      allowInsecureHttp: false,
+      upstreamKey: UPSTREAM_KEY,
+      signal: null,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.readings[0]?.remainingPercent).toBe(0)
+    expect(result.readings[0]?.resetAt).toEqual(new Date(1_910_000_000_000))
+  })
+
+  test('uses percentages rather than undocumented status numbers to find the limiting window', async () => {
+    route(() => jsonResponse(subscriptionUndocumentedStatus))
+
+    const result = await createMinimaxUsageAdapter({ fetch: fetchImpl }).read({
+      baseUrl: 'https://api.minimax.io/v1',
+      allowInsecureHttp: false,
+      upstreamKey: UPSTREAM_KEY,
+      signal: null,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.readings[0]?.remainingPercent).toBe(0)
+    expect(result.readings[0]?.resetAt).toEqual(new Date(1_910_000_000_000))
+    expect(result.readings[0]?.diagnostics).toMatchObject({
+      intervalStatus: 9876,
+      weeklyStatus: 3,
+      limitingWindow: 'weekly',
+    })
+  })
+
+  test('normalizes negative credit without collapsing it to unavailable evidence', async () => {
+    route(
+      () => jsonResponse({ model_remains: null, base_resp: { status_code: 2062 } }),
+      () => jsonResponse(creditNegative),
+    )
+
+    const result = await createMinimaxUsageAdapter({ fetch: fetchImpl }).read({
+      baseUrl: 'https://api.minimax.io/v1',
+      allowInsecureHttp: false,
+      upstreamKey: UPSTREAM_KEY,
+      signal: null,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.readings[0]?.balance).toBe(-1.25)
+  })
+
+  test('maps non-positive credit to authoritative key-scoped exhaustion', () => {
+    const observedAt = new Date('2026-08-16T05:00:00.000Z')
+    const evidence = minimaxCapacityEvidenceOf({
+      unit: 'cny', balance: -1.25, used: null, limit: null,
+      remainingPercent: null, plan: null, resetAt: null,
+      scope: { kind: 'provider' }, keyId: null, confidence: 'confirmed',
+      diagnostics: { source: 'minimax-usage-adapter', kind: 'credit' },
+    }, 'key-credit', observedAt)
+
+    expect(evidence).toEqual({
+      availability: 'exhausted', authority: 'authoritative',
+      scope: { kind: 'key', keyId: 'key-credit' }, reason: 'credit_exhausted',
+      observedAt, freshUntil: new Date('2026-08-16T05:01:00.000Z'), recheckAt: null,
+      facts: { remaining: -1.25, unit: 'cny' },
+      diagnostics: {
+        classification: 'credit_exhausted', capacityScope: 'key', remaining: -1.25,
+      },
+    })
+  })
+
+  test('maps the limiting subscription percentage and timestamp without interpreting status numbers', () => {
+    const observedAt = new Date('2026-08-16T05:00:00.000Z')
+    const evidence = minimaxCapacityEvidenceOf({
+      unit: 'requests', balance: null, used: null, limit: null,
+      remainingPercent: 0, plan: 'general', resetAt: new Date('2026-08-16T06:00:00.000Z'),
+      scope: { kind: 'connection_model', model: 'general' }, keyId: null,
+      confidence: 'confirmed',
+      diagnostics: { kind: 'subscription', intervalStatus: 9876, weeklyStatus: 3, limitingWindow: 'weekly' },
+    }, 'key-plan', observedAt)
+
+    expect(evidence.availability).toBe('exhausted')
+    expect(evidence.reason).toBe('window_exhausted')
+    expect(evidence.scope).toEqual({ kind: 'key', keyId: 'key-plan' })
+    expect(evidence.recheckAt).toEqual(new Date('2026-08-16T06:00:00.000Z'))
+    expect(evidence.facts).toEqual({ remainingPercent: 0, unit: 'requests' })
+    expect(evidence.diagnostics).toEqual({
+      providerCode: '3', classification: 'window_exhausted', capacityScope: 'key',
+      limitingWindow: 'weekly', recheckAt: '2026-08-16T06:00:00.000Z', remainingPercent: 0,
+    })
+  })
+
+  test('maps fresh positive entitlement to authoritative availability', () => {
+    const observedAt = new Date('2026-08-16T05:00:00.000Z')
+    const evidence = minimaxCapacityEvidenceOf({
+      unit: 'requests', balance: null, used: null, limit: null,
+      remainingPercent: 41, plan: 'general', resetAt: null,
+      scope: { kind: 'connection_model', model: 'general' }, keyId: null,
+      confidence: 'confirmed', diagnostics: { kind: 'subscription', limitingWindow: 'five_hour' },
+    }, 'key-positive', observedAt)
+    expect(evidence.availability).toBe('available')
+    expect(evidence.reason).toBe('positive_entitlement')
+  })
+
+  test('falls through to credit when the subscription percentages are malformed', async () => {
+    route(
+      () => jsonResponse(subscriptionMalformed),
+      () => jsonResponse({ available_amount: '8.50', base_resp: { status_code: 0 } }),
+    )
+
+    const result = await createMinimaxUsageAdapter({ fetch: fetchImpl }).read({
+      baseUrl: 'https://api.minimax.io/v1',
+      allowInsecureHttp: false,
+      upstreamKey: UPSTREAM_KEY,
+      signal: null,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.readings[0]?.unit).toBe('cny')
+    expect(result.readings[0]?.balance).toBe(8.5)
   })
 
   test('falls through to credit on a 2062 no-active-subscription response', async () => {

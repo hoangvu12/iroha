@@ -1,0 +1,5 @@
+# Provider evidence feeds shared capacity reconciliation
+
+Inference and Usage Adapters emit normalized failure, credential, capacity, and sanitized diagnostic evidence, while one shared reconciliation module derives durable Key Health, Routing Eligibility, and the next capacity check. Provider-specific fields and meanings remain behind adapter seams; routing, manual refresh, scheduled polling, and inference-failure handling do not implement Provider rules independently. We rejected both generic HTTP-status-to-exhaustion mappings, which cannot distinguish billing exhaustion from throttling, and Provider-specific state machines, which would duplicate lifecycle behavior and make future adapters inconsistent.
+
+Upstream Account scope remains part of the current model because removing persisted account grouping requires separate migration analysis. MiniMax evidence is key-scoped unless an Upstream Account is explicitly configured; removal of that feature is tracked separately from capacity reconciliation.

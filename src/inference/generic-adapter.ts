@@ -87,11 +87,14 @@ export function createGenericInferenceAdapter(
 
       if (request.stream === true) {
         const upstream = response.body ?? new ReadableStream<Uint8Array>()
+        const contentType = response.headers.get('content-type') ?? ''
         return {
           kind: 'stream',
           status: response.status,
           headers: Object.fromEntries(response.headers.entries()),
-          stream: upstream.pipeThrough(createOpenAiStreamingNormalizer()),
+          stream: contentType.toLowerCase().includes('text/event-stream')
+            ? upstream.pipeThrough(createOpenAiStreamingNormalizer())
+            : upstream,
         }
       }
 
@@ -383,18 +386,12 @@ export function createOpenAiStreamingNormalizer(): TransformStream<Uint8Array, U
       if (buffer.length > 0) {
         const event = buffer
         buffer = ''
+        // Normalize a parseable final event but never manufacture the missing
+        // blank-line terminator; that would disguise truncation as completion.
         const out = normalizeSseEvent(event, choiceStates)
-        if (out === null) {
-          controller.enqueue(STREAM_ENCODER.encode(`${event}\n\n`))
-        } else if (out === '[DONE]') {
-          if (!doneEmitted) {
-            enqueuePendingReasoning(controller, choiceStates)
-            doneEmitted = true
-            controller.enqueue(STREAM_ENCODER.encode(`data: [DONE]\n\n`))
-          }
-        } else {
-          controller.enqueue(STREAM_ENCODER.encode(`data: ${out}\n\n`))
-        }
+        if (out === null) controller.enqueue(STREAM_ENCODER.encode(event))
+        else if (out === '[DONE]') controller.enqueue(STREAM_ENCODER.encode('data: [DONE]'))
+        else controller.enqueue(STREAM_ENCODER.encode(`data: ${out}`))
       }
 
       // Drain any per-choice text that was held back to keep a partial tag

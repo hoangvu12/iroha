@@ -12,11 +12,14 @@ import type {
   UpstreamKeyPatch,
   UpstreamKeyRecord,
 } from '../persistence/index.ts'
+import type { InferenceFailureClassification } from '../inference/index.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
 import type { UsageRecoveryEvidence } from '../usage/adapter.ts'
 import type { AdapterRegistry } from './adapter-registry.ts'
 import type { UpstreamKeyProbe } from './key-probe.ts'
 import { RoundRobinSelector } from './round-robin.ts'
+import { reconcileCapacity } from './capacity-reconciliation.ts'
+import type { CapacityEvidence, CredentialEvidence } from './provider-evidence.ts'
 import { GENERIC_PROVIDER_TEMPLATE_ID, type ProviderTemplate } from './templates.ts'
 
 export interface FieldProblem {
@@ -778,7 +781,7 @@ export class ProviderRegistry {
       await repositories.providers.updateKey(keyId, patch, at)
       await repositories.audit.record({
         action: 'key.tested',
-        outcome: probe.verdict === 'usable' ? 'success' : 'failure',
+        outcome: probe.verdict === 'authenticated' ? 'success' : 'failure',
         detail: {
           providerId,
           keyId,
@@ -1391,9 +1394,54 @@ export class ProviderRegistry {
     return { reactivated }
   }
 
+  /** Applies Provider-normalized evidence through the shared reconciliation engine. */
+  async reconcileCapacityEvidence(input: {
+    readonly providerId: string
+    readonly keyId: string
+    readonly model: string | null
+    readonly capacityEvidence: readonly CapacityEvidence[]
+    readonly credentialEvidence?: CredentialEvidence | null
+  }): Promise<{ readonly reconciled: boolean; readonly routingEligible: boolean; readonly nextCheckAt: Date | null }> {
+    const connection = await this.#database.providers.getProvider(input.providerId)
+    const key = await this.#database.providers.getKey(input.keyId)
+    if (connection === null || key === null || key.providerId !== input.providerId) {
+      return { reconciled: false, routingEligible: false, nextCheckAt: null }
+    }
+    const at = this.#clock.now()
+    const decision = reconcileCapacity({
+      ownerEnabled: connection.enabled && key.health !== 'disabled',
+      keyId: key.id,
+      accountId: key.accountId,
+      model: input.model,
+      existing: {
+        health: key.health,
+        reason: key.healthReason,
+        retryAfterAt: key.retryAfterAt,
+        scope: key.healthScope,
+        scopeId: key.healthScopeId,
+        model: key.healthModel,
+      },
+      credentialEvidence: input.credentialEvidence ?? null,
+      capacityEvidence: input.capacityEvidence,
+      now: at,
+    })
+    await this.#database.providers.updateKey(key.id, {
+      health: decision.health,
+      healthReason: decision.reason,
+      healthChangedAt: decision.health === key.health ? key.healthChangedAt : at,
+      retryAfterAt: decision.nextCheckAt,
+      healthScope: decision.scope,
+      healthScopeId: decision.scopeId,
+      healthModel: decision.model,
+    }, at)
+    return { reconciled: true, routingEligible: decision.routingEligible, nextCheckAt: decision.nextCheckAt }
+  }
+
   async recordInferenceFailure(input: {
     keyId: string
     model: string
+    classification?: InferenceFailureClassification
+    /** Legacy direct-call input; Gateway inference supplies `classification`. */
     status?: number
     retryAfterSeconds?: number | null
     reason: string
@@ -1402,8 +1450,14 @@ export class ProviderRegistry {
     if (key === null) return
     this.#controlledTrials.delete(healthClaim(key))
     const at = this.#clock.now()
-    const retryAfterAt = new Date(at.getTime() + Math.max(1, input.retryAfterSeconds ?? 30) * 1000)
-    if (input.status === 401) {
+    const classification = input.classification ?? legacyFailureClassification(
+      input.status,
+      input.retryAfterSeconds ?? null,
+      key.accountId !== null,
+    )
+    if (classification === null) return
+    const retryAfterAt = new Date(at.getTime() + Math.max(1, classification.retryAfterSeconds ?? 30) * 1000)
+    if (classification.kind === 'authentication_invalid') {
       await this.#database.providers.updateKey(
         key.id,
         healthPatch('invalid_authentication', input.reason, at, null, 'key', key.id, null),
@@ -1411,7 +1465,7 @@ export class ProviderRegistry {
       )
       return
     }
-    if (input.status === 403) {
+    if (classification.kind === 'authentication_rejected') {
       await this.#database.providers.updateKey(
         key.id,
         healthPatch('cooling_down', input.reason, at, retryAfterAt, 'key', key.id, null),
@@ -1419,8 +1473,10 @@ export class ProviderRegistry {
       )
       return
     }
-    if (input.status === 429) {
-      const scope = key.accountId === null ? 'unknown' : 'account'
+    if (classification.kind === 'capacity_limited') {
+      if (input.classification !== undefined && (classification.capacityEvidence === undefined
+        || classification.capacityEvidence.authority !== 'authoritative')) return
+      const scope = classification.capacityScope === 'account' && key.accountId !== null ? 'account' : 'unknown'
       const scopeId = key.accountId
       const affected =
         scope === 'account'
@@ -1439,7 +1495,7 @@ export class ProviderRegistry {
       )
       return
     }
-    if (input.status !== undefined && input.status >= 500) {
+    if (classification.kind === 'provider_failure') {
       await this.#database.providers.updateKey(
         key.id,
         healthPatch(
@@ -1660,10 +1716,17 @@ function probedPatch(
     }
   }
   switch (probe.verdict) {
-    case 'usable':
+    case 'authenticated':
+      if (key.health === 'exhausted' || key.health === 'invalid_authentication') {
+        return {
+          lastProbeAt: at,
+          lastProbeVerdict: probe.verdict,
+          lastProbeReason: probe.reason,
+        }
+      }
       return {
         health: 'active',
-        healthReason: 'manual test confirmed usable',
+        healthReason: 'manual test confirmed authentication',
         healthChangedAt: at,
         retryAfterAt: null,
         healthScope: 'key',
@@ -2309,4 +2372,16 @@ function newId(prefix: string): string {
 
 function failed(failure: ProviderFailure): ProviderResult<never> {
   return { ok: false, failure }
+}
+
+function legacyFailureClassification(
+  status: number | undefined,
+  retryAfterSeconds: number | null,
+  hasAccount: boolean,
+): InferenceFailureClassification | null {
+  if (status === 401) return { kind: 'authentication_invalid', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
+  if (status === 403) return { kind: 'authentication_rejected', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
+  if (status === 429) return { kind: 'capacity_limited', capacityScope: hasAccount ? 'account' : 'unknown', retryAction: 'try_alternate', retryAfterSeconds }
+  if (status !== undefined && status >= 500) return { kind: 'provider_failure', capacityScope: 'connection_model', retryAction: 'retry_same', retryAfterSeconds }
+  return null
 }

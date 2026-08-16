@@ -150,6 +150,12 @@ export interface UsageAdapterRequest {
 export interface UsageAdapter {
   readonly visibility: UsageVisibility
   read(request: UsageAdapterRequest): Promise<UsagePollResult>
+  /** Converts a successful normalized reading into shared capacity evidence. */
+  readonly capacityEvidenceOf?: (
+    reading: UsageReading,
+    keyId: string,
+    observedAt: Date,
+  ) => import('../providers/provider-evidence.ts').CapacityEvidence
 }
 
 /**

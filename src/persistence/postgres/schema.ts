@@ -270,6 +270,7 @@ export const requestAttempts = pgTable('request_attempts', {
   outcome: text('outcome').notNull(),
   errorCode: text('error_code'),
   retryAfterSeconds: integer('retry_after_seconds'),
+  diagnostics: jsonb('provider_diagnostics').notNull().default({}),
 })
 
 /**

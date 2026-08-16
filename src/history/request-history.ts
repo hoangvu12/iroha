@@ -9,6 +9,7 @@ import {
   type RequestHistoryListResult,
   type RequestOutcome,
 } from '../persistence/index.ts'
+import { providerDiagnosticsOf } from '../providers/provider-evidence.ts'
 
 /** The settings key holding the retention configuration. */
 export const REQUEST_HISTORY_SETTING_KEY = 'requestHistory.retention'
@@ -43,6 +44,7 @@ export interface InFlightAttempt {
     readonly outcome: AttemptOutcome
     readonly errorCode: string | null
     readonly retryAfterSeconds: number | null
+    readonly diagnostics?: unknown
     readonly at: Date
   }): Promise<void>
 }
@@ -182,6 +184,7 @@ export class RequestHistoryService {
           outcome: 'failure',
           errorCode: null,
           retryAfterSeconds: null,
+          diagnostics: {},
         })
 
         return {
@@ -189,13 +192,14 @@ export class RequestHistoryService {
           attemptNumber,
           startedAt: at,
           keyId,
-          async finalize({ status, outcome, errorCode, retryAfterSeconds, at: completedAt }) {
+          async finalize({ status, outcome, errorCode, retryAfterSeconds, diagnostics, at: completedAt }) {
             await repository.updateAttempt(recorded.id, {
               completedAt,
               status,
               outcome,
               errorCode,
               retryAfterSeconds,
+              diagnostics: providerDiagnosticsOf(diagnostics),
             })
           },
         }
@@ -265,6 +269,7 @@ export class RequestHistoryService {
             outcome: 'skipped',
             errorCode,
             retryAfterSeconds: null,
+            diagnostics: {},
           })
         } catch {
           // FK failed; the event row alone is still useful.

@@ -22,6 +22,24 @@ export {
   type UpstreamAccountView,
 } from './provider-registry.ts'
 export { RoundRobinSelector } from './round-robin.ts'
+export { reconcileCapacity } from './capacity-reconciliation.ts'
+export type {
+  CapacityReconciliationInput,
+  CapacityReconciliationResult,
+  DurableCapacityState,
+} from './capacity-reconciliation.ts'
+export { providerDiagnosticsOf } from './provider-evidence.ts'
+export type {
+  CapacityAvailability,
+  CapacityEvidence,
+  CapacityFacts,
+  CapacityReason,
+  CapacityScope,
+  CredentialEvidence,
+  CredentialEvidenceVerdict,
+  EvidenceAuthority,
+  ProviderDiagnostics,
+} from './provider-evidence.ts'
 export {
   createGenericKeyProbe,
   type KeyProbeOptions,

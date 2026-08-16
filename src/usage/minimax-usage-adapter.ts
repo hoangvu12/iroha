@@ -4,6 +4,9 @@ import type {
   UsagePollResult,
   UsageReading,
 } from './adapter.ts'
+import type { CapacityEvidence, ProviderDiagnostics } from '../providers/provider-evidence.ts'
+
+const INFERENCE_EVIDENCE_FRESHNESS_MS = 60_000
 
 /**
  * The MiniMax Usage Adapter: reads the Owner-facing entitlement for a
@@ -81,6 +84,73 @@ function regionFor(baseUrl: string): MiniMaxRegion {
   }
 }
 
+/**
+ * Converts a successful MiniMax text entitlement reading into the normalized
+ * evidence shared with reconciliation. Entitlement is deliberately key-scoped
+ * even though the legacy UsageReading describes the Provider endpoint shape.
+ */
+export function minimaxCapacityEvidenceOf(
+  reading: UsageReading,
+  keyId: string,
+  observedAt: Date,
+): CapacityEvidence {
+  const isCredit = reading.balance !== null
+  const remaining = reading.balance
+  const remainingPercent = reading.remainingPercent
+  const knownRemaining = isCredit ? remaining : remainingPercent
+  const authoritative = reading.confidence === 'confirmed' && knownRemaining !== null
+  const available = authoritative && (knownRemaining as number) > 0
+  const exhausted = authoritative && (knownRemaining as number) <= 0
+  const reason = available
+    ? 'positive_entitlement'
+    : exhausted
+      ? isCredit ? 'credit_exhausted' : 'window_exhausted'
+      : 'unknown'
+  const limitingWindow = safeDiagnosticString(reading.diagnostics.limitingWindow)
+  const providerStatus = limitingWindow === 'weekly'
+    ? safeDiagnosticNumber(reading.diagnostics.weeklyStatus)
+    : safeDiagnosticNumber(reading.diagnostics.intervalStatus)
+  const recheckAt = isCredit ? null : reading.resetAt
+  const facts = {
+    ...(remaining === null ? {} : { remaining }),
+    ...(remainingPercent === null ? {} : { remainingPercent }),
+    ...(reading.used === null ? {} : { used: reading.used }),
+    ...(reading.limit === null ? {} : { limit: reading.limit }),
+    unit: reading.unit,
+  }
+  const diagnostics: ProviderDiagnostics = {
+    ...(providerStatus === undefined ? {} : { providerCode: String(providerStatus) }),
+    classification: reason,
+    capacityScope: 'key',
+    ...(limitingWindow === undefined ? {} : { limitingWindow }),
+    ...(recheckAt === null ? {} : { recheckAt: recheckAt.toISOString() }),
+    ...(remaining === null ? {} : { remaining }),
+    ...(remainingPercent === null ? {} : { remainingPercent }),
+    ...(reading.used === null ? {} : { used: reading.used }),
+    ...(reading.limit === null ? {} : { limit: reading.limit }),
+  }
+
+  return {
+    availability: available ? 'available' : exhausted ? 'exhausted' : 'unknown',
+    authority: authoritative ? 'authoritative' : 'unknown',
+    scope: { kind: 'key', keyId },
+    reason,
+    observedAt,
+    freshUntil: new Date(observedAt.getTime() + INFERENCE_EVIDENCE_FRESHNESS_MS),
+    recheckAt,
+    facts,
+    diagnostics,
+  }
+}
+
+function safeDiagnosticString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= 64 ? value : undefined
+}
+
+function safeDiagnosticNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
 function authHeaders(upstreamKey: string, referer: string): Record<string, string> {
   return {
     authorization: `Bearer ${upstreamKey}`,
@@ -108,10 +178,14 @@ interface ModelRemain {
   readonly current_interval_total_count?: number
   readonly current_interval_usage_count?: number
   readonly current_interval_remaining_percent?: number
+  readonly current_interval_status?: number
   readonly remains_time?: number
-  readonly current_week_total_count?: number
-  readonly current_week_remaining_percent?: number
-  readonly current_week_remains_time?: number
+  readonly current_weekly_total_count?: number
+  readonly current_weekly_usage_count?: number
+  readonly current_weekly_remaining_percent?: number
+  readonly current_weekly_status?: number
+  readonly weekly_end_time?: number
+  readonly weekly_remains_time?: number
   readonly current_subscribe?: { readonly current_subscribe_end_time?: number }
 }
 
@@ -150,11 +224,24 @@ function parseSubscription(
     const tier = readModelName(entry)
     if (tier !== CODING_PLAN_TIER) continue
 
-    const remainingPercent = entry.current_interval_remaining_percent
-    if (typeof remainingPercent !== 'number') continue
+    const intervalPercent = entry.current_interval_remaining_percent
+    if (typeof intervalPercent !== 'number') continue
+
+    // MiniMax intentionally redacts request counts as zero for some Token
+    // Plans while still returning authoritative percentages. Its status
+    // number enum is undocumented, so status cannot decide availability.
+    // When both percentages are present, the lower window is authoritative.
+    const weeklyPercent = entry.current_weekly_remaining_percent
+    const hasWeeklyPercent = typeof weeklyPercent === 'number'
+    const weeklyIsLimiting = hasWeeklyPercent && weeklyPercent <= intervalPercent
+    const remainingPercent = weeklyIsLimiting ? weeklyPercent : intervalPercent
 
     const resetAt =
-      typeof entry.end_time === 'number' && entry.end_time > 0
+      weeklyIsLimiting && typeof entry.weekly_end_time === 'number' && entry.weekly_end_time > 0
+        ? new Date(entry.weekly_end_time)
+        : weeklyIsLimiting && typeof entry.weekly_remains_time === 'number' && entry.weekly_remains_time > 0
+          ? new Date(at.getTime() + entry.weekly_remains_time)
+        : typeof entry.end_time === 'number' && entry.end_time > 0
         ? new Date(entry.end_time)
         : typeof entry.remains_time === 'number' && entry.remains_time > 0
           ? new Date(at.getTime() + entry.remains_time)
@@ -174,6 +261,15 @@ function parseSubscription(
       diagnostics: {
         source: 'minimax-usage-adapter',
         kind: 'subscription',
+        intervalRemainingPercent: intervalPercent,
+        ...(typeof entry.current_interval_status === 'number'
+          ? { intervalStatus: entry.current_interval_status }
+          : {}),
+        ...(hasWeeklyPercent ? { weeklyRemainingPercent: weeklyPercent } : {}),
+        ...(typeof entry.current_weekly_status === 'number'
+          ? { weeklyStatus: entry.current_weekly_status }
+          : {}),
+        limitingWindow: weeklyIsLimiting ? 'weekly' : 'five_hour',
       },
     })
   }
@@ -272,6 +368,7 @@ export function createMinimaxUsageAdapter(
 
   return {
     visibility: 'authoritative',
+    capacityEvidenceOf: minimaxCapacityEvidenceOf,
     async read(request: UsageAdapterRequest): Promise<UsagePollResult> {
       if (request.signal?.aborted === true) {
         return {

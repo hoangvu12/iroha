@@ -1,4 +1,4 @@
-import type { KeyProbeVerdict } from '../persistence/index.ts'
+import type { CredentialEvidence } from './provider-evidence.ts'
 
 /**
  * The result of one low-cost test of an Upstream Key.
@@ -6,10 +6,7 @@ import type { KeyProbeVerdict } from '../persistence/index.ts'
  * Reasons are structural descriptions meant for the Owner. They never contain
  * the key, any other secret, or free upstream text, which may echo a secret.
  */
-export interface KeyProbeResult {
-  readonly verdict: KeyProbeVerdict
-  readonly reason: string | null
-}
+export interface KeyProbeResult extends CredentialEvidence {}
 
 export interface KeyProbeRequest {
   readonly baseUrl: string
@@ -81,7 +78,7 @@ export function createGenericKeyProbe(options: KeyProbeOptions = {}): UpstreamKe
 
       const { status } = response
 
-      if (status >= 200 && status < 300) return { verdict: 'usable', reason: null }
+      if (status >= 200 && status < 300) return { verdict: 'authenticated', reason: null }
       if (status === 401) {
         return { verdict: 'rejected', reason: 'the provider rejected the key (HTTP 401)' }
       }

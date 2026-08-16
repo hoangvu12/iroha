@@ -1,0 +1,1 @@
+ALTER TABLE `request_attempts` ADD `provider_diagnostics` text DEFAULT '{}' NOT NULL;

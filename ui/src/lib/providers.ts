@@ -13,7 +13,7 @@ export interface KeyView {
   readonly effectiveBaseUrl: string
   readonly lastProbe: {
     readonly at: string
-    readonly verdict: 'usable' | 'rejected' | 'inconclusive'
+    readonly verdict: 'authenticated' | 'rejected' | 'inconclusive'
     readonly reason: string | null
   } | null
   readonly healthReason: string | null

@@ -5,7 +5,7 @@ Iroha presents one self-hosted API through which its owner can use multiple AI i
 ## Language
 
 **Gateway**:
-The single OpenAI-compatible API exposed by Iroha to its owner's applications.
+The self-hosted API exposed by Iroha to its owner's applications. It surfaces two caller shapes under the provider-scoped prefix `/providers/{connection_id}/v1/`: the OpenAI-compatible `chat/completions`, `responses`, and `models` routes, and the Anthropic-compatible `messages` route. A caller picks the shape with the URL; the Provider Connection selected in the URL determines what reaches upstream. The OpenAI-compatible shape is forwarded or translated by the Provider Connection's Inference Adapter; the Anthropic-compatible shape is forwarded or translated by the same adapter with the round-trip inverted.
 _Avoid_: Proxy, aggregator
 
 **Provider**:
@@ -24,6 +24,14 @@ _Avoid_: Owner, key pool
 The resource affected by an upstream limit: one key, an Upstream Account, a provider-and-model pair, an entire Provider, or an unknown scope.
 _Avoid_: Rate limit, quota
 
+**Capacity Evidence**:
+A time-stamped Provider observation about whether a Capacity Scope is available, exhausted, temporarily limited, or unknown. Authoritative evidence comes from a Provider entitlement surface; observed inference failures remain provisional until a Provider-specific adapter can interpret them.
+_Avoid_: Usage status, quota result
+
+**Routing Eligibility**:
+The Gateway's derived decision that an Upstream Key may receive a new inference request. An Owner-enabled key is eligible only when its credential evidence and capacity evidence do not establish that it is invalid or exhausted.
+_Avoid_: Active status, round-robin status
+
 **Upstream Model**:
 A model offered by a Provider and addressed by its exact Provider-defined model name.
 _Avoid_: Alias, virtual model
@@ -39,6 +47,14 @@ _Avoid_: Billing API, quota checker
 **Inference Adapter**:
 Typed knowledge for speaking a Provider's inference API, including authentication, endpoint capabilities, and provider-specific failure classification. The generic form preserves the OpenAI-compatible request and response shape.
 _Avoid_: Plugin, driver, provider
+
+**Failure Classification**:
+An Inference Adapter's interpretation of one failed Provider response: the failure kind, affected Capacity Scope, safe Retry Action, and known retry timing. An unknown classification may guide a request-local fallback without asserting durable Key Health.
+_Avoid_: Status mapping, error table
+
+**Retry Action**:
+The bounded next step a Failure Classification permits: stop, retry the same Upstream Key, or try an eligible alternate. It does not itself change durable Key Health.
+_Avoid_: Retry policy, failover rule
 
 **Provider Template**:
 A built-in setup aid that supplies known defaults for creating a Provider without containing an account or secret.
@@ -64,6 +80,10 @@ _Avoid_: Role, permissions
 Iroha's durable knowledge of whether an Upstream Key is active, temporarily cooling down, invalid, exhausted, or disabled by the Owner.
 _Avoid_: Status, availability
 
-**Test verdict**:
-The result of one probe of an Upstream Key against its upstream: `usable`, `rejected`, or `inconclusive`. The verdict is recorded on the key's `lastProbe` and surfaces in the Owner UI as the inline test feedback in the key's row.
-_Avoid_: Result, outcome, status
+**Credential Evidence**:
+The result of probing whether an Upstream Key is accepted for a low-cost Provider operation: `authenticated`, `rejected`, or `inconclusive`. Authentication does not establish capacity or Routing Eligibility and cannot by itself clear authoritative exhaustion.
+_Avoid_: Test verdict, usable, Key Health
+
+**Provider Diagnostics**:
+Bounded, allow-listed facts retained from a Provider response to explain a Failure Classification or Capacity Evidence, such as HTTP status, Provider error code/type, limiting window, and retry timing. It excludes raw bodies, arbitrary messages, prompts, responses, headers, and secrets.
+_Avoid_: Error dump, upstream response

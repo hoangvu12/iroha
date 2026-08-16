@@ -35,7 +35,7 @@ async function buildFixture(
   const registry = new ProviderRegistry({
     database: opened.database,
     cipher,
-    keyProbe: { async test() { return { verdict: 'usable', reason: null } } },
+    keyProbe: { async test() { return { verdict: 'authenticated', reason: null } } },
     adapterRegistry: createBuiltInAdapterRegistry(),
     clock,
   })
@@ -267,11 +267,12 @@ describe('UsageService authoritative credit adapter', () => {
     if (evidence === null) throw new Error('expected recovery evidence')
 
     const result = await fixture.registry.reactivateFromUsage(fixture.providerId, evidence)
-    expect(result.reactivated).toEqual([fixture.keyId])
+    expect(result.reactivated).toEqual([])
+    expect((await fixture.opened.database.providers.getKey(fixture.keyId))?.health).toBe('active')
 
     const stored = await fixture.opened.database.providers.getKey(fixture.keyId)
     expect(stored?.health).toBe('active')
-    expect(stored?.healthReason).toBe('authoritative usage adapter evidence')
+    expect(stored?.healthReason).toBe('positive entitlement')
   })
 
   test('a stale authoritative reading does not reactive capacity', async () => {
@@ -331,7 +332,9 @@ describe('UsageService authoritative credit adapter', () => {
     if (evidence === null) throw new Error('expected account-scope evidence')
 
     const result = await fixture.registry.reactivateFromUsage(fixture.providerId, evidence)
-    expect([...result.reactivated].sort()).toEqual([fixture.keyId, secondKeyId].sort())
+    expect(result.reactivated).toEqual([])
+    expect((await fixture.opened.database.providers.listKeys(fixture.providerId)).map((key) => key.health))
+      .toEqual(['active', 'active'])
     for (const id of result.reactivated) {
       const stored = await fixture.opened.database.providers.getKey(id)
       expect(stored?.health).toBe('active')
@@ -443,7 +446,8 @@ describe('UsageService authoritative plan adapter', () => {
     if (evidence === null) throw new Error('expected connection_model evidence')
 
     const result = await fixture.registry.reactivateFromUsage(fixture.providerId, evidence)
-    expect(result.reactivated).toEqual([fixture.keyId])
+    expect(result.reactivated).toEqual([])
+    expect((await fixture.opened.database.providers.getKey(fixture.keyId))?.health).toBe('active')
 
     const reactivated = await fixture.opened.database.providers.getKey(fixture.keyId)
     const untouched = await fixture.opened.database.providers.getKey(secondKeyId)
@@ -490,7 +494,9 @@ describe('UsageService authoritative plan adapter', () => {
     if (evidence === null) throw new Error('expected provider-scope evidence')
 
     const result = await fixture.registry.reactivateFromUsage(fixture.providerId, evidence)
-    expect([...result.reactivated].sort()).toEqual([fixture.keyId, secondKeyId].sort())
+    expect(result.reactivated).toEqual([])
+    expect((await fixture.opened.database.providers.listKeys(fixture.providerId)).map((key) => key.health))
+      .toEqual(['active', 'active'])
   })
 
   test('a poll failure with no previous success still surfaces an Unknown view', async () => {
@@ -644,6 +650,36 @@ describe('UsageService per-Upstream-Key polling', () => {
     const keyIds = Object.keys(map)
     expect(keyIds).toContain(fixture.keyId)
     expect(keyIds.length).toBe(2)
+  })
+
+  test('provider-scoped readings from independent keys recover only the key with capacity', async () => {
+    adapter.respondWith((request) => ({
+      ok: true,
+      readings: [{
+        unit: 'credits',
+        balance: request.upstreamKey === 'sk-second-upstream' ? 25 : 0,
+        used: null,
+        limit: null,
+        remainingPercent: null,
+        plan: null,
+        resetAt: null,
+        scope: { kind: 'provider' },
+        keyId: null,
+        confidence: 'confirmed',
+        diagnostics: { kind: 'credit' },
+      }],
+    }))
+
+    const view = await service.refresh(fixture.providerId)
+    if (!view.ok) throw new Error(view.failure.code)
+    const positive = view.value.readings.find((reading) => reading.balance === 25)
+    if (positive?.keyId === null || positive?.keyId === undefined) {
+      throw new Error('expected the positive reading to name its Upstream Key')
+    }
+
+    const evidence = await service.recoveryEvidenceFor(fixture.providerId)
+    expect(evidence?.scope).toEqual({ kind: 'key', keyId: positive.keyId })
+    expect(evidence?.hasCapacity).toBe(true)
   })
 })
 
@@ -905,7 +941,7 @@ describe('UsageService snapshot JSON roundtrip', () => {
     const registry = new ProviderRegistry({
       database: opened.database,
       cipher,
-      keyProbe: { async test() { return { verdict: 'usable', reason: null } } },
+      keyProbe: { async test() { return { verdict: 'authenticated', reason: null } } },
       adapterRegistry: createBuiltInAdapterRegistry(),
       clock,
     })

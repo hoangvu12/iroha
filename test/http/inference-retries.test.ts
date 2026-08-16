@@ -21,7 +21,12 @@ describe('scoped inference retries', () => {
     const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Retry', baseUrl: BASE_URL, keys: [{ upstreamKey: FIRST_KEY }] }),
+      body: JSON.stringify({
+        templateId: 'dashscope',
+        displayName: 'Retry',
+        baseUrl: BASE_URL,
+        keys: [{ upstreamKey: FIRST_KEY }],
+      }),
       csrf,
     })
     providerId = ((await created.json()) as { id: string }).id
@@ -66,7 +71,7 @@ describe('scoped inference retries', () => {
     expect(keys.map((key) => key.health).sort()).toEqual(['active', 'invalid_authentication'])
   })
 
-  test('unknown-scope 429 tries at most one alternate and leaves a durable retry time', async () => {
+  test('generic unknown-scope 429 tries at most one alternate without durable exhaustion', async () => {
     upstream.respondWith(() => new Response('slow', { status: 429, headers: { 'retry-after': '17' } }))
 
     const response = await chat()
@@ -75,7 +80,40 @@ describe('scoped inference retries', () => {
     expect(response.headers.get('retry-after')).toBe('17')
     expect(upstream.calls).toHaveLength(2)
     const keys = await iroha.database.providers.listKeys(providerId)
-    expect(keys.filter((key) => key.health === 'exhausted')).toHaveLength(2)
+    expect(keys.map((key) => key.health).sort()).toEqual(['active', 'active'])
+  })
+
+  test('unrecognized 402 tries one alternate without durably exhausting either key', async () => {
+    upstream.respondWith(() =>
+      upstream.calls.length === 1
+        ? new Response('payment required', { status: 402 })
+        : Response.json(completion()),
+    )
+
+    const response = await chat()
+
+    expect(response.status).toBe(200)
+    expect(upstream.calls).toHaveLength(2)
+    expect(upstream.calls[0]?.headers.authorization).not.toBe(upstream.calls[1]?.headers.authorization)
+    const keys = await iroha.database.providers.listKeys(providerId)
+    expect(keys.map((key) => key.health).sort()).toEqual(['active', 'active'])
+  })
+
+  test('unrecognized 402 stops after one alternate even when another key is eligible', async () => {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}/keys`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ upstreamKey: 'sk-third-retry-key' }),
+      csrf,
+    })
+    upstream.respondWith(() => new Response('payment required', { status: 402 }))
+
+    const response = await chat()
+
+    expect(response.status).toBe(402)
+    expect(upstream.calls).toHaveLength(2)
+    const keys = await iroha.database.providers.listKeys(providerId)
+    expect(keys.map((key) => key.health).sort()).toEqual(['active', 'active', 'active'])
   })
 
   test('explicit server failure retries the same key once with a bounded attempt count', async () => {
@@ -133,6 +171,81 @@ describe('scoped inference retries', () => {
     expect(upstream.calls).toHaveLength(1)
   })
 
+  test('MiniMax structured 402 reconciles fresh zero entitlement and reports known exhaustion', async () => {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({
+        templateId: 'MiniMax', displayName: 'MiniMax capacity', baseUrl: BASE_URL,
+        keys: [{ upstreamKey: 'sk-minimax-first' }],
+      }),
+    })
+    const minimaxId = ((await created.json()) as { id: string }).id
+    await iroha.fetch(`/api/v1/admin/providers/${minimaxId}/keys`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ upstreamKey: 'sk-minimax-second' }),
+    })
+    const minimaxGatewayKey = await iroha.fetch('/api/v1/admin/gateway-keys', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ name: 'MiniMax app', scope: [{ providerId: minimaxId }] }),
+    })
+    const minimaxSecret = ((await minimaxGatewayKey.json()) as { secret: string }).secret
+    const keys = await iroha.database.providers.listKeys(minimaxId)
+    const at = iroha.clock.now()
+    const reading = {
+      unit: 'cny', balance: 0, used: null, limit: null, remainingPercent: null,
+      plan: null, resetAt: null, scope: { kind: 'provider' }, confidence: 'confirmed',
+      diagnostics: { kind: 'credit' },
+    }
+    await iroha.database.usage.put({
+      providerId: minimaxId, visibility: 'authoritative', syncedAt: at, lastSuccessAt: at,
+      lastFailureAt: null, lastFailureCode: null, lastFailureMessage: null,
+      result: Object.fromEntries(keys.map((key) => [key.id, [reading]])),
+    })
+    upstream.respondWith(() => Response.json({
+      error: { code: 'insufficient_balance', type: 'payment_required', message: 'do not persist me' },
+    }, { status: 402 }))
+
+    const response = await iroha.fetch(`/providers/${minimaxId}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${minimaxSecret}` },
+      body: JSON.stringify({ model: 'MiniMax-M3', messages: [{ role: 'user', content: 'Hello' }] }),
+    })
+
+    expect(response.status).toBe(503)
+    expect((await response.json()) as unknown).toMatchObject({ error: { code: 'provider_capacity_exhausted' } })
+    expect(upstream.calls.filter((call) => call.method === 'POST')).toHaveLength(2)
+    expect((await iroha.database.providers.listKeys(minimaxId)).map((key) => key.health).sort())
+      .toEqual(['exhausted', 'exhausted'])
+  })
+
+  test('DashScope data inspection failure tries exactly one alternate for streaming calls', async () => {
+    upstream.respondWith(() =>
+      upstream.calls.length === 1
+        ? Response.json({
+            error: {
+              code: 'data_inspection_failed',
+              message: 'Input data may contain inappropriate content.',
+            },
+            request_id: 'dashscope-request-id',
+          }, { status: 400 })
+        : Response.json(completion()),
+    )
+
+    const response = await iroha.fetch(`/providers/${providerId}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: 'user', content: 'Hello' }],
+        stream: true,
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(upstream.calls).toHaveLength(2)
+    expect(upstream.calls[0]?.headers.authorization).not.toBe(upstream.calls[1]?.headers.authorization)
+  })
+
   test('ambiguous network failure does not replay by default', async () => {
     upstream.respondWith(() => {
       throw new TypeError('connection reset')
@@ -144,7 +257,7 @@ describe('scoped inference retries', () => {
     expect(upstream.calls).toHaveLength(1)
   })
 
-  test('connection policy can explicitly allow one ambiguous network replay', async () => {
+  test('connection policy can explicitly enable one ambiguous network replay', async () => {
     await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
@@ -159,6 +272,25 @@ describe('scoped inference retries', () => {
     const response = await chat()
 
     expect(response.status).toBe(200)
+    expect(upstream.calls).toHaveLength(2)
+    expect(upstream.calls[0]?.headers.authorization).toBe(upstream.calls[1]?.headers.authorization)
+    expect(upstream.calls[0]?.headers['idempotency-key']).toBe(upstream.calls[1]?.headers['idempotency-key'])
+  })
+
+  test('repeated ambiguous network failures stop after one same-key replay', async () => {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ retryAmbiguousNetwork: true }),
+      csrf,
+    })
+    upstream.respondWith(() => {
+      throw new TypeError('connection reset')
+    })
+
+    const response = await chat()
+
+    expect(response.status).toBe(502)
     expect(upstream.calls).toHaveLength(2)
     expect(upstream.calls[0]?.headers.authorization).toBe(upstream.calls[1]?.headers.authorization)
   })

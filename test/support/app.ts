@@ -3,7 +3,12 @@ import { createApp } from '../../src/http/app.ts'
 import type { StreamingTimeouts, TransportDefaults } from '../../src/http/inference.ts'
 import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
-import { createAnthropicInferenceAdapter, createGenericInferenceAdapter } from '../../src/inference/index.ts'
+import {
+  createAnthropicInferenceAdapter,
+  createDashscopeInferenceAdapter,
+  createGenericInferenceAdapter,
+  createMinimaxInferenceAdapter,
+} from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
 import { BackgroundScheduleSettingsService } from '../../src/jobs/index.ts'
 import { ModelCatalogService, templateKnowledgeFromRegistry } from '../../src/models/index.ts'
@@ -61,7 +66,7 @@ export interface TestAppOptions {
   readonly sessionIdleSeconds?: number
   /** Replaces the cheap test hasher, for tests that watch how it is used. */
   readonly passwordHasher?: PasswordHasher
-  /** Replaces the key probe; defaults to one that answers "usable". */
+  /** Replaces the key probe; defaults to one that answers "authenticated". */
   readonly upstreamKeyProbe?: UpstreamKeyProbe | undefined
   /** Replaces the inference upstream transport; defaults to a closed stub. */
   readonly upstreamTransport?: typeof fetch | undefined
@@ -100,7 +105,7 @@ export interface FakeKeyProbe extends UpstreamKeyProbe {
   respondWith(result: KeyProbeResult): void
 }
 
-export function fakeKeyProbe(initial: KeyProbeResult = { verdict: 'usable', reason: null }): FakeKeyProbe {
+export function fakeKeyProbe(initial: KeyProbeResult = { verdict: 'authenticated', reason: null }): FakeKeyProbe {
   let answer = initial
   const calls: { baseUrl: string; upstreamKey: string }[] = []
 
@@ -180,9 +185,13 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   const upstreamTransport = options.upstreamTransport ?? stubUpstreamTransport()
   const inference = createGenericInferenceAdapter({ fetch: upstreamTransport })
   const anthropicInferenceAdapter = createAnthropicInferenceAdapter({ fetch: upstreamTransport })
+  const dashscopeInferenceAdapter = createDashscopeInferenceAdapter({ fetch: upstreamTransport })
+  const minimaxInferenceAdapter = createMinimaxInferenceAdapter({ fetch: upstreamTransport })
   const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry({
     genericInferenceAdapter: inference,
     anthropicInferenceAdapter,
+    dashscopeInferenceAdapter,
+    minimaxInferenceAdapter,
   })
   const providers = new ProviderRegistry({
     database,

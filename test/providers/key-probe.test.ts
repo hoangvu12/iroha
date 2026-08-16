@@ -45,7 +45,7 @@ describe('the generic key probe', () => {
     expect(seen[0]?.url).toBe('https://api.example.com/v1/models')
   })
 
-  test('calls a usable key usable', async () => {
+  test('records a successful models probe as authenticated only', async () => {
     for (const status of [200, 204, 299]) {
       const { fetch } = fakeFetch(async () => new Response('{}', { status }))
       const result = await createGenericKeyProbe({ fetch }).test({
@@ -53,8 +53,9 @@ describe('the generic key probe', () => {
         upstreamKey: API_KEY,
       })
 
-      expect(result.verdict).toBe('usable')
+      expect(result.verdict).toBe('authenticated')
       expect(result.reason).toBeNull()
+      expect(result).not.toHaveProperty('availability')
     }
   })
 

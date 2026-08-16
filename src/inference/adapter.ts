@@ -89,6 +89,7 @@ export type InferenceFailureKind =
   | 'authentication_rejected'
   | 'capacity_limited'
   | 'payment_required'
+  | 'content_inspection_failed'
   | 'provider_failure'
   | 'request_rejected'
 
@@ -102,6 +103,16 @@ export interface InferenceFailureClassification {
   readonly capacityScope: InferenceFailureCapacityScope
   readonly retryAction: InferenceFailureRetryAction
   readonly retryAfterSeconds: number | null
+  /** Provider-normalized capacity evidence, when the adapter can identify it safely. */
+  readonly capacityEvidence?: CapacityEvidence
+  /** Bounded, allow-listed facts extracted from the Provider response. */
+  readonly diagnostics?: ProviderDiagnostics
+}
+
+/** Request-local identity and clock supplied when normalized evidence is required. */
+export interface InferenceFailureContext {
+  readonly keyId: string
+  readonly observedAt: Date
 }
 
 /**
@@ -127,7 +138,10 @@ export interface AnthropicForwardRequest extends InferenceForwardRequest {
 export interface InferenceAdapter {
   /** What this adapter declares about itself; the routing layer reads it once. */
   readonly capabilities: InferenceAdapterCapabilities
-  classifyFailure(result: InferenceForwardResult): InferenceFailureClassification
+  classifyFailure(
+    result: InferenceForwardResult,
+    context?: InferenceFailureContext,
+  ): InferenceFailureClassification
   forward(request: InferenceForwardRequest): Promise<InferenceForwardResult>
   /**
    * Optional. Handles an Anthropic-shape request body from an Anthropic SDK
@@ -142,3 +156,4 @@ export interface InferenceAdapter {
    */
   forwardAnthropic?(request: AnthropicForwardRequest): Promise<InferenceForwardResult>
 }
+import type { CapacityEvidence, ProviderDiagnostics } from '../providers/provider-evidence.ts'

@@ -598,7 +598,7 @@ for (const engine of availableEngines) {
           {
             health: 'active',
             lastProbeAt: later,
-            lastProbeVerdict: 'usable',
+            lastProbeVerdict: 'authenticated',
             lastProbeReason: null,
           },
           later,
@@ -606,7 +606,7 @@ for (const engine of availableEngines) {
 
         expect(updated?.health).toBe('active')
         expect(updated?.lastProbeAt).toEqual(later)
-        expect(updated?.lastProbeVerdict).toBe('usable')
+        expect(updated?.lastProbeVerdict).toBe('authenticated')
         expect(updated?.encryptedKey).toBe('v1.stored.uk_one')
       })
 
@@ -1232,6 +1232,14 @@ for (const engine of availableEngines) {
           outcome: 'failure',
           errorCode: null,
           retryAfterSeconds: null,
+          diagnostics: {
+            status: 429,
+            providerCode: 'quota_window',
+            classification: 'capacity_limited',
+            capacityScope: 'key',
+            remainingPercent: 0,
+            message: 'must not persist',
+          },
         })
 
         await database.requestHistory.recordAttempt({
@@ -1259,6 +1267,14 @@ for (const engine of availableEngines) {
           { number: 1, key: 'uk_one', outcome: 'failure', status: 401, error: 'upstream_invalid_credentials' },
           { number: 2, key: 'uk_two', outcome: 'success', status: 200, error: null },
         ])
+        expect(attempts[0]?.diagnostics).toEqual({
+          status: 429,
+          providerCode: 'quota_window',
+          classification: 'capacity_limited',
+          capacityScope: 'key',
+          remainingPercent: 0,
+        })
+        expect(JSON.stringify(attempts)).not.toContain('must not persist')
       })
 
       test('orders events most-recent first and supports filters', async () => {

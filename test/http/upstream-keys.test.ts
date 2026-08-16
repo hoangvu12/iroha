@@ -166,7 +166,7 @@ describe('Upstream Key pools and Upstream Accounts', () => {
       await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/disable`, { method: 'POST', csrf })
       expect((await view(created.id)).keys[0]?.health).toBe('disabled')
 
-      probe.respondWith({ verdict: 'usable', reason: null })
+      probe.respondWith({ verdict: 'authenticated', reason: null })
       await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/test`, { method: 'POST', csrf })
       expect((await view(created.id)).keys[0]?.health).toBe('disabled')
     })
@@ -198,7 +198,7 @@ describe('Upstream Key pools and Upstream Accounts', () => {
       await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/disable`, { method: 'POST', csrf })
       expect((await view(created.id)).keys[1]?.health).toBe('disabled')
 
-      probe.respondWith({ verdict: 'usable', reason: null })
+      probe.respondWith({ verdict: 'authenticated', reason: null })
       const tested = await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/test`, {
         method: 'POST',
         csrf,

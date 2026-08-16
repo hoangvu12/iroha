@@ -1,0 +1,1 @@
+ALTER TABLE "request_attempts" ADD COLUMN "provider_diagnostics" jsonb DEFAULT '{}'::jsonb NOT NULL;

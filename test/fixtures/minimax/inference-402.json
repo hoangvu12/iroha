@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "insufficient_balance",
+    "type": "payment_required",
+    "message": "sensitive provider text must not cross the adapter seam"
+  }
+}

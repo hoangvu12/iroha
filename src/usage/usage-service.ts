@@ -1,6 +1,8 @@
 import { SecretCipherError, type SecretCipher } from '../crypto/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
+import { reconcileCapacity } from '../providers/capacity-reconciliation.ts'
+import type { CapacityEvidence } from '../providers/provider-evidence.ts'
 import type {
   Database,
   ProviderRecord,
@@ -202,13 +204,16 @@ export class UsageService {
    * the most recent failure across all keys so the Owner still sees a
    * single, latest error for the connection.
    */
-  async refresh(providerId: string): Promise<UsageServiceResult<UsageView>> {
+  async refresh(
+    providerId: string,
+    options: { readonly force?: boolean } = {},
+  ): Promise<UsageServiceResult<UsageView>> {
     const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'provider_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
     if (!connection.enabled) return failed({ code: 'provider_disabled' })
 
-    const targets = await this.#resolveTargets(connection)
+    const targets = await this.#resolveTargets(connection, options.force ?? true)
     if (!targets.ok) return targets
 
     const at = this.#clock.now()
@@ -229,6 +234,15 @@ export class UsageService {
 
     const prior = await this.#database.usage.get(providerId)
     const next = await this.#recordOutcome(providerId, prior, at, polls, visibility)
+
+    await Promise.all(polls.map(async ({ target, poll }) => {
+      if (!poll.ok) return
+      const evidence = poll.readings.map((reading) =>
+        adapter.capacityEvidenceOf?.(reading, target.candidate.id, at)
+          ?? capacityEvidenceFromReading(reading, target.candidate.id, at)
+      )
+      await this.#reconcileKey(connection, target.candidate, evidence, at)
+    }))
 
     const anySuccess = polls.some(({ poll }) => poll.ok)
     if (anySuccess) {
@@ -320,7 +334,26 @@ export class UsageService {
       return reading.balance > acc.balance ? reading : acc
     }, null)
 
-    const evidence = best === null ? null : recoveryEvidenceOf(best, at)
+    let evidence = best === null ? null : recoveryEvidenceOf(best, at)
+
+    // Per-Key polling means a Provider- or model-scoped reading was obtained
+    // with one specific key's entitlement. It must not revive unrelated keys
+    // whose own authoritative readings say they have no capacity. Explicit
+    // account scopes remain shared because the Owner grouped those keys.
+    const perKeyCapacity = readings
+      .filter((reading) => reading.keyId !== null)
+      .map((reading) => recoveryEvidenceOf(reading, at).hasCapacity)
+    const hasMixedPerKeyCapacity = perKeyCapacity.includes(true) && perKeyCapacity.includes(false)
+
+    if (
+      evidence !== null &&
+      hasMixedPerKeyCapacity &&
+      best?.keyId !== null &&
+      best?.keyId !== undefined &&
+      (evidence.scope.kind === 'provider' || evidence.scope.kind === 'connection_model')
+    ) {
+      evidence = { ...evidence, scope: { kind: 'key', keyId: best.keyId } }
+    }
 
     if (evidence === null) return null
 
@@ -329,6 +362,28 @@ export class UsageService {
     if (ageMs > this.#pollIntervalMs * 4) return null
 
     return evidence
+  }
+
+  /** Returns only fresh authoritative normalized evidence for one key. */
+  async capacityEvidenceFor(
+    providerId: string,
+    keyId: string,
+    maxAgeMs = 60_000,
+  ): Promise<readonly CapacityEvidence[]> {
+    const connection = await this.#database.providers.getProvider(providerId)
+    const snapshot = await this.#database.usage.get(providerId)
+    if (connection === null || snapshot === null || snapshot.visibility !== 'authoritative'
+      || snapshot.lastSuccessAt === null || this.#isStale(snapshot)) return []
+    const key = await this.#database.providers.getKey(keyId)
+    if (key === null || key.providerId !== providerId) return []
+    const age = this.#clock.now().getTime() - snapshot.lastSuccessAt.getTime()
+    if (age < 0 || age > maxAgeMs) return []
+    const adapter = this.#adapterFor(connection)
+    return normalizeReadings(snapshot.result)
+      .filter((reading) => reading.keyId === keyId)
+      .map((reading) => adapter.capacityEvidenceOf?.(reading, keyId, snapshot.lastSuccessAt!)
+        ?? capacityEvidenceFromReading(reading, keyId, snapshot.lastSuccessAt!))
+      .filter((evidence) => evidence.authority === 'authoritative')
   }
 
   /** The Capacity Scope the snapshot's readings share at the provider level. */
@@ -347,11 +402,14 @@ export class UsageService {
    */
   async #resolveTargets(
     connection: ProviderRecord,
+    force: boolean,
   ): Promise<UsageServiceResult<readonly UsagePollTarget[]>> {
+    const at = this.#clock.now()
     const keys = await this.#database.providers.listKeys(connection.id)
     const eligible = keys.filter(
       (key) => key.health === 'active' || key.health === 'unverified'
-        || key.health === 'cooling_down' || key.health === 'exhausted',
+        || key.health === 'cooling_down'
+        || key.health === 'exhausted' && (force || key.retryAfterAt === null || key.retryAfterAt <= at),
     )
     if (eligible.length === 0) return failed({ code: 'no_eligible_key' })
 
@@ -372,6 +430,42 @@ export class UsageService {
       })
     }
     return { ok: true, value: targets }
+  }
+
+  async #reconcileKey(
+    connection: ProviderRecord,
+    key: UpstreamKeyRecord,
+    evidence: readonly CapacityEvidence[],
+    at: Date,
+  ): Promise<void> {
+    const current = await this.#database.providers.getKey(key.id) ?? key
+    const modelEvidence = evidence.find((item) => item.scope.kind === 'connection_model')
+    const decision = reconcileCapacity({
+      ownerEnabled: connection.enabled && current.health !== 'disabled',
+      keyId: current.id,
+      accountId: current.accountId,
+      model: modelEvidence?.scope.kind === 'connection_model' ? modelEvidence.scope.model : null,
+      existing: {
+        health: current.health,
+        reason: current.healthReason,
+        retryAfterAt: current.retryAfterAt,
+        scope: current.healthScope,
+        scopeId: current.healthScopeId,
+        model: current.healthModel,
+      },
+      credentialEvidence: null,
+      capacityEvidence: evidence,
+      now: at,
+    })
+    await this.#database.providers.updateKey(current.id, {
+      health: decision.health,
+      healthReason: decision.reason,
+      healthChangedAt: decision.health === current.health ? current.healthChangedAt : at,
+      retryAfterAt: decision.nextCheckAt,
+      healthScope: decision.scope,
+      healthScopeId: decision.scopeId,
+      healthModel: decision.model,
+    }, at)
   }
 
   async #recordOutcome(
@@ -493,6 +587,44 @@ export class UsageService {
 
   #bumpFailureStreak(providerId: string): void {
     this.#failureStreak.set(providerId, (this.#failureStreak.get(providerId) ?? 0) + 1)
+  }
+}
+
+function capacityEvidenceFromReading(
+  reading: UsageReading,
+  keyId: string,
+  observedAt: Date,
+): CapacityEvidence {
+  const remaining = reading.balance ?? reading.remainingPercent
+  const authoritative = reading.confidence === 'confirmed' && remaining !== null
+  const available = authoritative && remaining > 0
+  const exhausted = authoritative && remaining <= 0
+  return {
+    availability: available ? 'available' : exhausted ? 'exhausted' : 'unknown',
+    authority: authoritative ? 'authoritative' : 'unknown',
+    // Per-key polling attributes otherwise broad endpoint readings to the
+    // credential whose entitlement was actually observed.
+    scope: reading.scope.kind === 'connection_model'
+      ? { kind: 'connection_model', model: reading.scope.model }
+      : reading.scope.kind === 'account'
+        ? { kind: 'account', accountId: reading.scope.accountId }
+        : reading.scope.kind === 'unknown'
+          ? { kind: 'unknown' }
+          : { kind: 'key', keyId },
+    reason: available ? 'positive_entitlement'
+      : exhausted ? reading.balance === null ? 'window_exhausted' : 'credit_exhausted'
+      : 'unknown',
+    observedAt,
+    freshUntil: new Date(observedAt.getTime() + 60_000),
+    recheckAt: reading.resetAt,
+    facts: {
+      ...(reading.balance === null ? {} : { remaining: reading.balance }),
+      ...(reading.remainingPercent === null ? {} : { remainingPercent: reading.remainingPercent }),
+      ...(reading.used === null ? {} : { used: reading.used }),
+      ...(reading.limit === null ? {} : { limit: reading.limit }),
+      unit: reading.unit,
+    },
+    diagnostics: {},
   }
 }
 

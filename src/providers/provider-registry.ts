@@ -238,19 +238,18 @@ export class ProviderRegistry {
 
   /** Resolve a public Handle once at the inference boundary; all later policy remains ID-based. */
   async resolveHandle(handle: string): Promise<
-    | { readonly ok: true; readonly providerId: string }
+    | { readonly ok: true; readonly providerId: string; readonly providerHandle: string }
     | { readonly ok: false; readonly code: 'invalid_provider_handle' | 'provider_not_allowed' }
   > {
     if (handle.length === 0 || handle.length > 63 || !PROVIDER_HANDLE_PATTERN.test(handle)) {
       return { ok: false, code: 'invalid_provider_handle' }
     }
 
-    const provider = (await this.#database.providers.listProviders())
-      .find((candidate) => candidate.handle === handle)
-    if (provider === undefined || provider.archivedAt !== null || !provider.enabled) {
+    const provider = await this.#database.providers.getProviderByHandle(handle)
+    if (provider === null || provider.archivedAt !== null || !provider.enabled) {
       return { ok: false, code: 'provider_not_allowed' }
     }
-    return { ok: true, providerId: provider.id }
+    return { ok: true, providerId: provider.id, providerHandle: provider.handle }
   }
 
   /** Every connection, archived ones included, most recently created first. */

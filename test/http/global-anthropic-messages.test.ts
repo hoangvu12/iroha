@@ -100,7 +100,7 @@ describe('global Anthropic Messages', () => {
       id: 'msg_scoped', type: 'message', role: 'assistant', model: 'served/scoped', content: [],
       stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 },
     }))
-    const response = await iroha.fetch(`/providers/${anthropicId}/v1/messages`, {
+    const response = await iroha.fetch(`/providers/${ANTHROPIC_HANDLE}/v1/messages`, {
       method: 'POST', headers: headers(secret),
       body: JSON.stringify({ model: 'nested/scoped', max_tokens: 8, messages: [] }),
     })

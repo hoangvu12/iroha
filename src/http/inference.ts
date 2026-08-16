@@ -375,6 +375,7 @@ export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
       token: bearerToken(request.headers),
       gatewayKeys: options.gatewayKeys,
       database,
+      providers: options.providers,
     })
     if (!authorization.ok) return { ok: false as const, response: errors.unauthorized(authorization.code) }
 

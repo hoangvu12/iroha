@@ -130,7 +130,6 @@ export function CodeSnippetCard({ provider }: CodeSnippetCardProps) {
   const snippet = buildSnippet({
     language,
     origin: snippetOrigin(),
-    providerId: provider.id,
     providerHandle: provider.handle,
     model: modelId ?? '',
     routingMode,
@@ -348,13 +347,12 @@ function snippetOrigin(): string {
 interface BuildSnippetInput {
   readonly language: SnippetLanguage
   readonly origin: string
-  readonly providerId: string
   readonly providerHandle: string
   readonly model: string
   readonly routingMode: RoutingMode
 }
 
-function buildSnippet({ language, origin, providerId, providerHandle, model, routingMode }: BuildSnippetInput): string {
+function buildSnippet({ language, origin, providerHandle, model, routingMode }: BuildSnippetInput): string {
   const baseUrl = routingMode === 'global' ? origin : `${origin}/providers/${providerHandle}`
   const routedModel = routingMode === 'global' ? `${providerHandle}/${model}` : model
   const chatCompletionsUrl = `${baseUrl}/v1/chat/completions`

@@ -1,5 +1,6 @@
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { Database } from '../persistence/index.ts'
+import type { ProviderRegistry } from '../providers/index.ts'
 
 export type QualifiedModelFailure =
   | 'gateway_key_invalid'
@@ -31,6 +32,7 @@ export async function authorizeQualifiedModel(options: {
   readonly token: string | null
   readonly gatewayKeys: GatewayKeyRegistry
   readonly database: Database
+  readonly providers: ProviderRegistry
 }): Promise<QualifiedModelResult> {
   const parsed = parseQualifiedModelId(options.input)
   if (!parsed.ok) return parsed
@@ -38,25 +40,23 @@ export async function authorizeQualifiedModel(options: {
   const authentication = await options.gatewayKeys.discover(options.token ?? '')
   if (!authentication.ok) return { ok: false, code: 'gateway_key_invalid' }
 
-  const provider = await options.database.providers.getProviderByHandle(parsed.providerHandle)
-  if (provider === null || provider.archivedAt !== null || !provider.enabled) {
-    return { ok: false, code: 'provider_not_allowed' }
-  }
-  const providerAuthorization = await options.gatewayKeys.authorizeProvider(provider.id, options.token)
+  const provider = await options.providers.resolveHandle(parsed.providerHandle)
+  if (!provider.ok) return provider
+  const providerAuthorization = await options.gatewayKeys.authorizeProvider(provider.providerId, options.token)
   if (!providerAuthorization.ok) {
     return { ok: false, code: providerAuthorization.code === 'gateway_key_invalid' ? 'gateway_key_invalid' : 'provider_not_allowed' }
   }
-  const modelAuthorization = await options.gatewayKeys.authorizeInference(provider.id, parsed.modelId, options.token)
+  const modelAuthorization = await options.gatewayKeys.authorizeInference(provider.providerId, parsed.modelId, options.token)
   if (!modelAuthorization.ok) {
     return { ok: false, code: modelAuthorization.code === 'model_not_allowed' ? 'model_not_allowed' : 'provider_not_allowed' }
   }
-  if (await options.database.modelCatalog.isExcluded(provider.id, parsed.modelId)) {
+  if (await options.database.modelCatalog.isExcluded(provider.providerId, parsed.modelId)) {
     return { ok: false, code: 'model_not_allowed' }
   }
   return {
     ok: true,
-    providerId: provider.id,
-    providerHandle: provider.handle,
+    providerId: provider.providerId,
+    providerHandle: provider.providerHandle,
     modelId: parsed.modelId,
     gatewayKeyId: modelAuthorization.keyId,
     gatewayKeyName: modelAuthorization.keyName,

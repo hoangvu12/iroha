@@ -30,7 +30,7 @@ describe('global Qualified Model discovery', () => {
     for await (const model of await client.models.list()) ids.push(model.id)
     expect(ids).toEqual(['alpha/openai/gpt-4o', 'alpha/zeta', 'beta/claude-3'].sort())
 
-    const providerScoped = await iroha.fetch(`/providers/${alpha}/v1/models`, { headers: { authorization: `Bearer ${secret}` } })
+    const providerScoped = await iroha.fetch('/providers/alpha/v1/models', { headers: { authorization: `Bearer ${secret}` } })
     expect(((await providerScoped.json()) as { data: { id: string }[] }).data.map((model) => model.id).sort()).toEqual(['openai/gpt-4o', 'zeta'])
   })
 
@@ -55,21 +55,21 @@ describe('global Qualified Model discovery', () => {
 
     const providerId = await createProvider('Private')
     const selected = await createKey({ mode: 'selected', providers: [{ providerId, models: ['known', 'unknown/nested'] }] })
-    expect(await authorizeQualifiedModel({ input: 'private/unknown/nested', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toMatchObject({ ok: true, providerId, providerHandle: 'private', modelId: 'unknown/nested' })
-    expect(await authorizeQualifiedModel({ input: 'private/denied', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'model_not_allowed' })
-    expect(await authorizeQualifiedModel({ input: 'absent/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'private/unknown/nested', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database, providers: iroha.providers })).toMatchObject({ ok: true, providerId, providerHandle: 'private', modelId: 'unknown/nested' })
+    expect(await authorizeQualifiedModel({ input: 'private/denied', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database, providers: iroha.providers })).toEqual({ ok: false, code: 'model_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'absent/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database, providers: iroha.providers })).toEqual({ ok: false, code: 'provider_not_allowed' })
     const inaccessible = await createProvider('Inaccessible')
-    expect(await authorizeQualifiedModel({ input: 'inaccessible/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'inaccessible/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database, providers: iroha.providers })).toEqual({ ok: false, code: 'provider_not_allowed' })
 
     await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: false }), csrf,
     })
-    expect(await authorizeQualifiedModel({ input: 'private/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'private/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database, providers: iroha.providers })).toEqual({ ok: false, code: 'provider_not_allowed' })
     await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true }), csrf,
     })
     await iroha.fetch(`/api/v1/admin/providers/${providerId}/archive`, { method: 'POST', csrf })
-    expect(await authorizeQualifiedModel({ input: 'private/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'private/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database, providers: iroha.providers })).toEqual({ ok: false, code: 'provider_not_allowed' })
   })
 
   test('rejects invalid Gateway Keys without catalog or upstream traffic', async () => {

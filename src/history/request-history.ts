@@ -237,7 +237,7 @@ export class RequestHistoryService {
           keyId: outcome.keyId ?? null,
           status: outcome.status,
           outcome: outcome.outcome,
-          latencyMs: outcome.latencyMs,
+          latencyMs: normalizeLatencyMs(outcome.latencyMs),
           isStreaming: outcome.isStreaming,
           promptTokens: outcome.promptTokens,
           completionTokens: outcome.completionTokens,
@@ -442,6 +442,11 @@ function percentile(values: readonly number[], requested: number): number {
   if (values.length === 0) return 0
   const sorted = [...values].sort((left, right) => left - right)
   return sorted[Math.ceil((requested / 100) * sorted.length) - 1] ?? 0
+}
+
+function normalizeLatencyMs(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.round(value))
 }
 
 function noopRecorder(id: string): InFlightRequest {

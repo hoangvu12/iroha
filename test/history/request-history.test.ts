@@ -79,7 +79,7 @@ describe('RequestHistoryService', () => {
       status: 200,
       outcome: 'success',
       isStreaming: false,
-      latencyMs: 500,
+      latencyMs: 500.6,
       keyId: 'uk_one',
       promptTokens: 5,
       completionTokens: 5,
@@ -90,6 +90,7 @@ describe('RequestHistoryService', () => {
     const stored = await service.getEvent('req_one')
     expect(stored).not.toBeNull()
     expect(stored!.keyId).toBe('uk_one')
+    expect(stored!.latencyMs).toBe(501)
     expect(stored!.promptTokens).toBe(5)
     expect(stored!.totalTokens).toBe(10)
 

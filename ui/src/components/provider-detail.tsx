@@ -258,9 +258,11 @@ function ProviderHeader({
           brand={brandFor(provider.templateId)}
           {...(provider.templateId === null ? {} : { templateId: provider.templateId })}
         />
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl font-semibold tracking-tight">{provider.displayName}</h1>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+            <h1 className="truncate text-2xl font-semibold tracking-tight">{provider.displayName}</h1>
+            <span className="text-muted-foreground max-w-56 truncate font-mono text-sm">
+              {provider.handle}
+            </span>
             <span
               className="border-border bg-card text-muted-foreground inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium"
               title={status.label}
@@ -278,9 +280,7 @@ function ProviderHeader({
                 Disabled
               </span>
             )}
-          </div>
-          <span className="font-mono text-sm">{provider.handle}</span>
-          <span className="text-muted-foreground font-mono text-xs">Internal ID: {provider.id}</span>
+          <span className="text-muted-foreground truncate font-mono text-xs">Internal ID: {provider.id}</span>
         </div>
       </div>
     </div>

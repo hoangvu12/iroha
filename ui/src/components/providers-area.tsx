@@ -284,10 +284,14 @@ function ProviderRow({
           {...(provider.templateId === null ? {} : { templateId: provider.templateId })}
         />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm font-medium tracking-tight">
-            {provider.displayName}
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-sm font-medium tracking-tight">
+              {provider.displayName}
+            </span>
+            <span className="text-muted-foreground max-w-40 shrink truncate font-mono text-xs">
+              {provider.handle}
+            </span>
           </span>
-          <span className="truncate font-mono text-xs">{provider.handle}</span>
           <span
             className="text-muted-foreground truncate font-mono text-xs"
             title={provider.baseUrl || 'No default base URL set'}
@@ -577,9 +581,6 @@ function CreateProviderForm({
           hint="Used in public inference URLs. It can never be renamed after creation."
           problem={form.problemFor('handle')}
         />
-        <Button type="button" variant="ghost" size="xs" className="self-start" onClick={() => { setHandle(proposeProviderHandle(displayName)); setHandleCustomized(false) }}>
-          Regenerate from display name
-        </Button>
         {handleSuggestion !== null && <button type="button" className="text-muted-foreground self-start text-xs underline" onClick={() => { setHandle(handleSuggestion); setHandleCustomized(true) }}>Use available {handleSuggestion}</button>}
       </div>
 

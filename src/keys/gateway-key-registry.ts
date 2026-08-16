@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { hashSecret, randomSecret, secretsMatch } from '../identity/secrets.ts'
 import type {
   Database,
+  GatewayKeyAccess,
   GatewayKeyRecord,
   GatewayKeyScopeEntry,
 } from '../persistence/index.ts'
@@ -14,6 +15,9 @@ export interface FieldProblem {
 
 export type GatewayKeyFailure =
   | { readonly code: 'gateway_key_not_found' }
+  | { readonly code: 'gateway_key_active' }
+  | { readonly code: 'gateway_key_revoked' }
+  | { readonly code: 'gateway_key_conflict' }
   | { readonly code: 'validation_failed'; readonly problems: readonly FieldProblem[] }
 
 export type GatewayKeyResult<T> =
@@ -25,6 +29,8 @@ export interface GatewayKeyView {
   readonly id: string
   readonly name: string
   readonly scope: readonly GatewayKeyScopeEntry[]
+  readonly access: GatewayKeyAccess
+  readonly revision: number
   /** Exact browser origins allowed to use this key; empty disables browser CORS. */
   readonly corsOrigins: readonly string[]
   readonly createdAt: Date
@@ -61,7 +67,7 @@ export type DiscoveryResult =
  * credential served the call.
  */
 export type InferenceAuthorization =
-  | { readonly ok: true; readonly keyId: string }
+  | { readonly ok: true; readonly keyId: string; readonly keyName: string }
   | {
       readonly ok: false
       readonly code: 'gateway_key_invalid' | 'connection_not_allowed' | 'model_not_allowed'
@@ -73,7 +79,7 @@ export type InferenceAuthorization =
  * the exact list; `null` means every effective catalog model is listable.
  */
 export type ConnectionAuthorization =
-  | { readonly ok: true; readonly keyId: string; readonly models: readonly string[] | null }
+  | { readonly ok: true; readonly keyId: string; readonly keyName: string; readonly models: readonly string[] | null }
   | {
       readonly ok: false
       readonly code: 'gateway_key_invalid' | 'connection_not_allowed'
@@ -123,11 +129,13 @@ export class GatewayKeyRegistry {
    */
   async create(input: {
     name: unknown
-    scope: unknown
+    scope?: unknown
+    access?: unknown
     corsOrigins?: unknown
   }): Promise<GatewayKeyResult<CreatedGatewayKey>> {
     const problems = [...nameProblems(input.name)]
-    const scope = await readScope(input.scope, this.#database, problems)
+    const access = await readAccess(input.access, input.scope, this.#database, problems)
+    const scope = access.mode === 'selected' ? access.providers : []
     const corsOrigins = readCorsOrigins(input.corsOrigins, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
@@ -141,6 +149,7 @@ export class GatewayKeyRegistry {
         name: (input.name as string).trim(),
         secretHash: hashSecret(secret),
         scope,
+        access,
         corsOrigins,
         createdAt: at,
         lastUsedAt: null,
@@ -197,6 +206,54 @@ export class GatewayKeyRegistry {
     return { ok: true, value: await this.#getOrThrow(id) }
   }
 
+  /** Atomically replaces every editable setting of one active Gateway Key. */
+  async update(
+    id: string,
+    input: { revision: unknown; name: unknown; access: unknown; corsOrigins: unknown },
+  ): Promise<GatewayKeyResult<GatewayKeyView>> {
+    const current = await this.#database.gatewayKeys.get(id)
+    if (current === null) return failed({ code: 'gateway_key_not_found' })
+    if (current.revokedAt !== null) return failed({ code: 'gateway_key_revoked' })
+
+    const problems = [...nameProblems(input.name), ...revisionProblems(input.revision)]
+    const access = await readAccess(input.access, undefined, this.#database, problems)
+    const corsOrigins = readCorsOrigins(input.corsOrigins, problems)
+    if (problems.length > 0) return failed({ code: 'validation_failed', problems })
+
+    const expectedRevision = input.revision as number
+    const scope = access.mode === 'selected' ? access.providers : []
+    const at = this.#clock.now()
+    const updated = await this.#database.transaction(async (repositories) => {
+      const saved = await repositories.gatewayKeys.updateActive(
+        id,
+        expectedRevision,
+        { name: (input.name as string).trim(), access, scope, corsOrigins },
+        at,
+      )
+      if (saved === null) return null
+      await repositories.audit.record({
+        action: 'gateway_key.updated',
+        outcome: 'success',
+        detail: {
+          gatewayKeyId: id,
+          before: { name: current.name, access: accessAuditMetadata(accessOf(current)) },
+          after: { name: saved.name, access: accessAuditMetadata(accessOf(saved)) },
+          revision: saved.revision ?? expectedRevision + 1,
+        },
+        at,
+      })
+      return saved
+    })
+
+    if (updated === null) {
+      const latest = await this.#database.gatewayKeys.get(id)
+      if (latest === null) return failed({ code: 'gateway_key_not_found' })
+      if (latest.revokedAt !== null) return failed({ code: 'gateway_key_revoked' })
+      return failed({ code: 'gateway_key_conflict' })
+    }
+    return { ok: true, value: toView(updated) }
+  }
+
   /**
    * Revokes a key so it can never authenticate again. Revoking twice changes
    * nothing the second time.
@@ -221,6 +278,26 @@ export class GatewayKeyRegistry {
     return { ok: true, value: await this.#getOrThrow(id) }
   }
 
+  /** Permanently removes a revoked credential while retaining safe audit history. */
+  async delete(id: string): Promise<GatewayKeyResult<void>> {
+    const key = await this.#database.gatewayKeys.get(id)
+    if (key === null) return failed({ code: 'gateway_key_not_found' })
+    if (key.revokedAt === null) return failed({ code: 'gateway_key_active' })
+
+    const at = this.#clock.now()
+    await this.#database.transaction(async (repositories) => {
+      const deleted = await repositories.gatewayKeys.deleteRevoked(id)
+      if (!deleted) throw new Error(`Revoked Gateway Key ${id} vanished during deletion`)
+      await repositories.audit.record({
+        action: 'gateway_key.deleted',
+        outcome: 'success',
+        detail: { gatewayKeyId: key.id, name: key.name },
+        at,
+      })
+    })
+    return { ok: true, value: undefined }
+  }
+
   /**
    * The Provider Directory: which Providers a presented credential may use.
    * A missing, malformed, revoked, or wrong secret all answer the same way, so
@@ -234,19 +311,31 @@ export class GatewayKeyRegistry {
     await this.#database.gatewayKeys.markUsed(key.id, this.#clock.now())
 
     const providers: DirectoryProvider[] = []
-    for (const entry of key.scope) {
+    const access = accessOf(key)
+    const entries = access.mode === 'all'
+      ? (await this.#database.providers.listProviders())
+          .filter((provider) => provider.enabled && provider.archivedAt === null)
+          .map((provider) => ({ providerId: provider.id, models: null }))
+      : access.providers
+    for (const entry of entries) {
       const provider = await this.#database.providers.getProvider(entry.providerId)
       // An out-of-scope or vanished Provider is absent, never an error: the
       // caller must not learn which Providers exist, only which it may use.
-      if (provider === null || provider.archivedAt !== null) continue
+      if (provider === null || provider.archivedAt !== null || !provider.enabled) continue
 
+      const models = key.access?.mode === 'all'
+        ? (await this.#database.modelCatalog.listEntries(provider.id))
+            .filter((model) => !model.excluded)
+            .map((model) => model.modelId)
+            .sort()
+        : entry.models ?? []
       providers.push({
         id: provider.id,
         displayName: provider.displayName,
         url: `/providers/${provider.id}/v1`,
         // A scope allowing every model has nothing to enumerate until the model
         // catalog exists; exact scope models are returned verbatim.
-        models: entry.models ?? [],
+        models,
         capabilities: {},
       })
     }
@@ -272,7 +361,7 @@ export class GatewayKeyRegistry {
       return { ok: false, code: 'model_not_allowed' }
     }
 
-    return { ok: true, keyId: located.keyId }
+    return { ok: true, keyId: located.keyId, keyName: located.keyName }
   }
 
   /**
@@ -281,7 +370,7 @@ export class GatewayKeyRegistry {
    * is returned so the route can shape the list. Failures are as silent as the
    * inference authorization's.
    */
-  async authorizeConnection(
+  async authorizeProvider(
     providerId: string,
     token: string | null,
   ): Promise<ConnectionAuthorization> {
@@ -295,11 +384,21 @@ export class GatewayKeyRegistry {
     const key = await this.#locateKey(token)
     if (key === null) return { ok: false, code: 'gateway_key_invalid' }
 
-    const entry = key.scope.find((candidate) => candidate.providerId === providerId)
+    const access = accessOf(key)
+    let entry: GatewayKeyScopeEntry | undefined
+    if (access.mode === 'all') {
+      const provider = await this.#database.providers.getProvider(providerId)
+      if (provider === null || provider.archivedAt !== null || !provider.enabled) {
+        return { ok: false, code: 'connection_not_allowed' }
+      }
+      entry = { providerId, models: null }
+    } else {
+      entry = access.providers.find((candidate) => candidate.providerId === providerId)
+    }
     if (entry === undefined) return { ok: false, code: 'connection_not_allowed' }
 
     await this.#database.gatewayKeys.markUsed(key.id, this.#clock.now())
-    return { ok: true, keyId: key.id, models: entry.models }
+    return { ok: true, keyId: key.id, keyName: key.name, models: entry.models }
   }
 
   async #locateKey(token: string | null): Promise<GatewayKeyRecord | null> {
@@ -330,15 +429,41 @@ export class GatewayKeyRegistry {
  * Problems are added for every rule broken; the returned entries are only
  * meaningful when the problem list is empty.
  */
+async function readAccess(
+  input: unknown,
+  legacyScope: unknown,
+  database: Database,
+  problems: FieldProblem[],
+): Promise<GatewayKeyAccess> {
+  if (input === undefined) {
+    return { mode: 'selected', providers: await readScope(legacyScope, database, problems) }
+  }
+  if (typeof input !== 'object' || input === null) {
+    problems.push({ field: 'access', message: 'must describe an access mode' })
+    return { mode: 'selected', providers: [] }
+  }
+  const access = input as Record<string, unknown>
+  if (access.mode === 'all') return { mode: 'all' }
+  if (access.mode === 'selected') {
+    return {
+      mode: 'selected',
+      providers: await readScope(access.providers, database, problems, 'access'),
+    }
+  }
+  problems.push({ field: 'access', message: 'mode must be all or selected' })
+  return { mode: 'selected', providers: [] }
+}
+
 async function readScope(
   input: unknown,
   database: Database,
   problems: FieldProblem[],
+  field = 'scope',
 ): Promise<readonly GatewayKeyScopeEntry[]> {
   if (input === undefined || input === null) return []
 
   if (!Array.isArray(input)) {
-    problems.push({ field: 'scope', message: 'must be a list of Providers' })
+    problems.push({ field, message: 'must be a list of Providers' })
     return []
   }
 
@@ -347,14 +472,14 @@ async function readScope(
 
   for (const raw of input) {
     if (typeof raw !== 'object' || raw === null) {
-      problems.push({ field: 'scope', message: 'each entry must name a Provider' })
+      problems.push({ field, message: 'each entry must name a Provider' })
       continue
     }
 
     const entry = raw as Record<string, unknown>
     const providerId = typeof entry.providerId === 'string' ? entry.providerId.trim() : ''
     if (providerId === '') {
-      problems.push({ field: 'scope', message: 'each entry must name a Provider' })
+      problems.push({ field, message: 'each entry must name a Provider' })
       continue
     }
     if (seen.has(providerId)) continue
@@ -362,11 +487,11 @@ async function readScope(
 
     const scopeProvider = await database.providers.getProvider(providerId)
     if (scopeProvider === null) {
-      problems.push({ field: 'scope', message: 'names a Provider that does not exist' })
+      problems.push({ field, message: 'names a Provider that does not exist' })
       continue
     }
     if (scopeProvider.archivedAt !== null) {
-      problems.push({ field: 'scope', message: 'names a Provider that is archived' })
+      problems.push({ field, message: 'names a Provider that is archived' })
       continue
     }
 
@@ -418,15 +543,36 @@ function nameProblems(input: unknown): readonly FieldProblem[] {
   return []
 }
 
+function revisionProblems(input: unknown): readonly FieldProblem[] {
+  return Number.isSafeInteger(input) && (input as number) >= 1
+    ? []
+    : [{ field: 'revision', message: 'must be a positive integer' }]
+}
+
 function toView(key: GatewayKeyRecord): GatewayKeyView {
   return {
     id: key.id,
     name: key.name,
     scope: key.scope,
+    access: accessOf(key),
+    revision: key.revision ?? 1,
     corsOrigins: [...key.corsOrigins],
     createdAt: key.createdAt,
     lastUsedAt: key.lastUsedAt,
     revokedAt: key.revokedAt,
+  }
+}
+
+function accessOf(key: GatewayKeyRecord): GatewayKeyAccess {
+  return key.access ?? { mode: 'selected', providers: key.scope }
+}
+
+function accessAuditMetadata(access: GatewayKeyAccess): Readonly<Record<string, unknown>> {
+  if (access.mode === 'all') return { mode: 'all' }
+  return {
+    mode: 'selected',
+    providerCount: access.providers.length,
+    restrictedProviderCount: access.providers.filter((entry) => entry.models !== null).length,
   }
 }
 

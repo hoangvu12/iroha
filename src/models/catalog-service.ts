@@ -128,8 +128,9 @@ export class ModelCatalogService {
 
   /** The current catalog and sync state of one connection. Read-only. */
   async view(providerId: string): Promise<ModelCatalogResult<CatalogView>> {
-    const connection = await this.#database.providers.getProvider(providerId)
-    if (connection === null) return failed({ code: 'provider_not_found' })
+    const provider = await this.#database.providers.getProvider(providerId)
+    if (provider === null) return failed({ code: 'provider_not_found' })
+    await this.#syncTemplateKnowledge(providerId, provider.templateId, this.#clock.now())
     return await this.#viewOf(providerId)
   }
 

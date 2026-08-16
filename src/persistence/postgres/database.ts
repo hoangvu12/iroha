@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { and, asc, count, desc, eq, gte, ilike, inArray, lt, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, lte, ne, sql } from 'drizzle-orm'
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { Pool } from 'pg'
@@ -602,6 +602,34 @@ class PostgresGatewayKeyRepository implements GatewayKeyRepository {
     return row ? toGatewayKey(row) : null
   }
 
+  async deleteRevoked(id: string): Promise<boolean> {
+    const rows = await this.handle
+      .delete(gatewayKeys)
+      .where(and(eq(gatewayKeys.id, id), isNotNull(gatewayKeys.revokedAt)))
+      .returning({ id: gatewayKeys.id })
+    return rows.length > 0
+  }
+
+  async updateActive(
+    id: string,
+    expectedRevision: number,
+    patch: { name: string; access: import('../repository.ts').GatewayKeyAccess; scope: readonly GatewayKeyScopeEntry[]; corsOrigins: readonly string[] },
+    _at: Date,
+  ): Promise<GatewayKeyRecord | null> {
+    const [row] = await this.handle
+      .update(gatewayKeys)
+      .set({
+        name: patch.name,
+        accessMode: patch.access.mode,
+        scope: [...patch.scope],
+        corsOrigins: [...patch.corsOrigins],
+        revision: expectedRevision + 1,
+      })
+      .where(and(eq(gatewayKeys.id, id), eq(gatewayKeys.revision, expectedRevision), isNull(gatewayKeys.revokedAt)))
+      .returning()
+    return row ? toGatewayKey(row) : null
+  }
+
   async updateCorsOrigins(
     id: string,
     origins: readonly string[],
@@ -624,6 +652,10 @@ function toGatewayKey(row: GatewayKeyRow): GatewayKeyRecord {
     name: row.name,
     secretHash: row.secretHash,
     scope: row.scope as readonly GatewayKeyScopeEntry[],
+    access: row.accessMode === 'all'
+      ? { mode: 'all' }
+      : { mode: 'selected', providers: row.scope as readonly GatewayKeyScopeEntry[] },
+    revision: row.revision,
     corsOrigins: (row.corsOrigins ?? []) as readonly string[],
     createdAt: row.createdAt,
     lastUsedAt: row.lastUsedAt,
@@ -636,6 +668,8 @@ function encodeGatewayKeyRow(key: GatewayKeyRecord): {
   name: string
   secretHash: string
   scope: readonly GatewayKeyScopeEntry[]
+  accessMode: string
+  revision: number
   corsOrigins: readonly string[]
   createdAt: Date
   lastUsedAt: Date | null
@@ -646,6 +680,8 @@ function encodeGatewayKeyRow(key: GatewayKeyRecord): {
     name: key.name,
     secretHash: key.secretHash,
     scope: key.scope,
+    accessMode: key.access?.mode ?? 'selected',
+    revision: key.revision ?? 1,
     corsOrigins: [...key.corsOrigins],
     createdAt: key.createdAt,
     lastUsedAt: key.lastUsedAt,
@@ -1176,6 +1212,7 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
         providerId: event.providerId,
         model: event.model,
         gatewayKeyId: event.gatewayKeyId,
+        gatewayKeyName: event.gatewayKeyName,
         keyId: event.keyId,
         status: event.status,
         outcome: event.outcome,
@@ -1200,6 +1237,7 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
         providerId: event.providerId,
         model: event.model,
         gatewayKeyId: event.gatewayKeyId,
+        gatewayKeyName: event.gatewayKeyName,
         keyId: event.keyId,
         status: event.status,
         outcome: event.outcome,
@@ -1380,6 +1418,7 @@ function toEvent(row: RequestEventRow): RequestEventRecord {
     providerId: row.providerId,
     model: row.model,
     gatewayKeyId: row.gatewayKeyId,
+    ...(row.gatewayKeyName === null ? {} : { gatewayKeyName: row.gatewayKeyName }),
     keyId: row.keyId,
     status: row.status,
     outcome: row.outcome as RequestOutcome,

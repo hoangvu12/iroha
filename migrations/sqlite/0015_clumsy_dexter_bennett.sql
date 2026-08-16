@@ -1,0 +1,1 @@
+ALTER TABLE `gateway_keys` ADD `access_mode` text DEFAULT 'selected' NOT NULL;

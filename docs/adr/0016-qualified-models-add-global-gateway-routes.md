@@ -1,0 +1,5 @@
+# Qualified Model IDs add deterministic global Gateway routes
+
+Iroha adds conventional global `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` routes alongside the provider-scoped routes retained by ADR-0001. Global calls select a Provider explicitly with a Qualified Model ID, `<provider_id>/<model_id>`, split at the first slash; unlike the ambiguous aliases rejected by ADR-0001, the prefix is an immutable Provider ID, unqualified IDs are rejected, and Iroha never searches across Providers. This supersedes ADR-0001 only where it rejected an additive unscoped surface and provider-qualified IDs: explicit provider-scoped URLs and exact upstream model forwarding remain supported.
+
+Global discovery lists only Qualified Model IDs authorized by the Gateway Key. Global responses qualify the actual upstream-reported model with the selected Provider ID, falling back to the requested Qualified Model ID when upstream omits the model; this preserves routing identity without hiding upstream alias or fallback resolution.

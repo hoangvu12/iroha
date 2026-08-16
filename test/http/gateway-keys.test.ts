@@ -15,9 +15,13 @@ interface GatewayKeyBody {
   id: string
   name: string
   scope: { providerId: string; models: string[] | null }[]
+  access:
+    | { mode: 'all' }
+    | { mode: 'selected'; providers: { providerId: string; models: string[] | null }[] }
   createdAt: string
   lastUsedAt: string | null
   revoked: boolean
+  revision: number
 }
 
 interface CreatedKeyBody extends GatewayKeyBody {
@@ -112,6 +116,24 @@ describe('Gateway Key administration', () => {
   })
 
   describe('creation and the one-time secret', () => {
+    test('creates explicit unrestricted access before any Provider exists', async () => {
+      const response = await createKeyRequest({ access: { mode: 'all' }, scope: undefined })
+
+      expect(response.status).toBe(201)
+      const created = (await response.json()) as CreatedKeyBody
+      expect(created.access).toEqual({ mode: 'all' })
+      expect(created.scope).toEqual([])
+
+      const inspected = await iroha.fetch(`${BASE}/${created.id}`)
+      expect(((await inspected.json()) as GatewayKeyBody).access).toEqual({ mode: 'all' })
+    })
+
+    test('maps legacy scope creation to explicit selected access', async () => {
+      const created = await createKey({ scope: [] })
+
+      expect(created.access).toEqual({ mode: 'selected', providers: [] })
+    })
+
     test('creates a named key with a public identity and a usable secret', async () => {
       const created = await createKey({ name: 'Production app' })
 
@@ -266,6 +288,104 @@ describe('Gateway Key administration', () => {
     })
   })
 
+  describe('editing', () => {
+    test('atomically changes name, access, and CORS origins without rotating the secret', async () => {
+      const provider = await createConnection('Selected after edit')
+      const created = await createKey({ access: { mode: 'all' }, scope: undefined })
+
+      const response = await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          revision: created.revision,
+          name: 'Edited app',
+          access: { mode: 'selected', providers: [{ providerId: provider.id, models: ['future/model'] }] },
+          corsOrigins: ['https://app.example'],
+        }),
+        csrf,
+      })
+
+      expect(response.status).toBe(200)
+      const edited = (await response.json()) as GatewayKeyBody
+      expect(edited).toMatchObject({
+        name: 'Edited app',
+        revision: 2,
+        access: { mode: 'selected', providers: [{ providerId: provider.id, models: ['future/model'] }] },
+        corsOrigins: ['https://app.example'],
+      })
+      expect((await discover(created.secret)).status).toBe(200)
+    })
+
+    test('rejects a stale revision without overwriting the newer policy', async () => {
+      const created = await createKey({ name: 'Original' })
+      const edit = (name: string, revision: number) => iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision, name, access: created.access, corsOrigins: [] }),
+        csrf,
+      })
+
+      expect((await edit('First save', created.revision)).status).toBe(200)
+      const stale = await edit('Stale save', created.revision)
+
+      expect(stale.status).toBe(409)
+      expect(await errorCode(stale)).toBe('gateway_key_conflict')
+      expect((await inspected(created.id)).name).toBe('First save')
+    })
+
+    test('rejects unknown, revoked, and invalid edits without changing any field', async () => {
+      const created = await createKey({ name: 'Immutable', access: { mode: 'all' }, scope: undefined })
+      const invalid = await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision: created.revision, name: '', access: { mode: 'selected', providers: [] }, corsOrigins: ['not an origin'] }),
+        csrf,
+      })
+      expect(invalid.status).toBe(400)
+      expect(await inspected(created.id)).toMatchObject({ name: 'Immutable', revision: 1, access: { mode: 'all' }, corsOrigins: [] })
+
+      await iroha.fetch(`${BASE}/${created.id}/revoke`, { method: 'POST', csrf })
+      const revoked = await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision: created.revision, name: 'No', access: created.access, corsOrigins: [] }),
+        csrf,
+      })
+      expect(revoked.status).toBe(409)
+      expect(await errorCode(revoked)).toBe('gateway_key_revoked')
+
+      const unknown = await iroha.fetch(`${BASE}/gk_absent`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision: 1, name: 'No', access: { mode: 'all' }, corsOrigins: [] }),
+        csrf,
+      })
+      expect(unknown.status).toBe(404)
+      expect(await errorCode(unknown)).toBe('gateway_key_not_found')
+    })
+
+    test('records one safe audit event for a successful edit only', async () => {
+      const created = await createKey({ name: 'Before', access: { mode: 'all' }, scope: undefined })
+      await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision: 1, name: 'After', access: { mode: 'selected', providers: [] }, corsOrigins: ['https://private.example'] }),
+        csrf,
+      })
+
+      const events = (await iroha.database.audit.list()).filter((event) => event.action === 'gateway_key.updated')
+      expect(events).toHaveLength(1)
+      expect(events[0]?.detail).toEqual({
+        gatewayKeyId: created.id,
+        before: { name: 'Before', access: { mode: 'all' } },
+        after: { name: 'After', access: { mode: 'selected', providerCount: 0, restrictedProviderCount: 0 } },
+        revision: 2,
+      })
+      expect(JSON.stringify(events[0]?.detail)).not.toContain('private.example')
+      expect(JSON.stringify(events[0]?.detail)).not.toContain(created.secret)
+    })
+  })
+
   describe('revocation', () => {
     test('revokes a key permanently while keeping it listed', async () => {
       const created = await createKey()
@@ -313,6 +433,37 @@ describe('Gateway Key administration', () => {
   })
 
   describe('directory scope filtering', () => {
+    test('unrestricted access dynamically follows enabled, unarchived Providers', async () => {
+      const created = await createKey({ access: { mode: 'all' }, scope: undefined })
+      expect(await discoveredProviders(created.secret)).toEqual([])
+
+      const alpha = await createConnection('Created later')
+      await iroha.database.modelCatalog.addOwnerModel(alpha.id, 'future/model', iroha.clock.now())
+      expect((await discoveredProviders(created.secret)).map((provider) => provider.id)).toEqual([alpha.id])
+      expect((await discoveredProviders(created.secret))[0]?.models).toEqual(['future/model'])
+
+      await iroha.fetch(`/api/v1/admin/providers/${alpha.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+        csrf,
+      })
+      expect(await discoveredProviders(created.secret)).toEqual([])
+
+      await iroha.fetch(`/api/v1/admin/providers/${alpha.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: true }),
+        csrf,
+      })
+      expect((await discoveredProviders(created.secret)).map((provider) => provider.id)).toEqual([alpha.id])
+
+      await iroha.fetch(`/api/v1/admin/providers/${alpha.id}/archive`, { method: 'POST', csrf })
+      expect(await discoveredProviders(created.secret)).toEqual([])
+      await iroha.fetch(`/api/v1/admin/providers/${alpha.id}/restore`, { method: 'POST', csrf })
+      expect((await discoveredProviders(created.secret)).map((provider) => provider.id)).toEqual([alpha.id])
+    })
+
     test('returns only the Providers and models the key may use', async () => {
       const alpha = await createConnection('Alpha')
       const beta = await createConnection('Beta')

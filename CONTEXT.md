@@ -5,7 +5,7 @@ Iroha presents one self-hosted API through which its owner can use multiple AI i
 ## Language
 
 **Gateway**:
-The self-hosted API exposed by Iroha to its owner's applications. It surfaces two caller shapes under the provider-scoped prefix `/providers/{connection_id}/v1/`: the OpenAI-compatible `chat/completions`, `responses`, and `models` routes, and the Anthropic-compatible `messages` route. A caller picks the shape with the URL; the Provider Connection selected in the URL determines what reaches upstream. The OpenAI-compatible shape is forwarded or translated by the Provider Connection's Inference Adapter; the Anthropic-compatible shape is forwarded or translated by the same adapter with the round-trip inverted.
+The self-hosted API exposed by Iroha to its owner's applications. It offers provider-scoped surfaces for callers that select a Provider in the URL and global surfaces for callers that select a Provider with a Qualified Model ID; either surface accepts the OpenAI-compatible or Anthropic-compatible caller shape supported by its route.
 _Avoid_: Proxy, aggregator
 
 **Request**:
@@ -81,8 +81,12 @@ A secret created by the Owner that authorizes an application to call the Gateway
 _Avoid_: Upstream Key, virtual key, user key
 
 **Key Scope**:
-The Providers and optional Upstream Models that a Gateway Key permits its application to use and discover.
+The access policy that determines which Providers and Upstream Models a Gateway Key permits its application to use and discover. It is either unrestricted, dynamically covering every active Provider and model, or selected, covering only its listed Providers and optional models.
 _Avoid_: Role, permissions
+
+**Qualified Model ID**:
+A Gateway-facing model identifier in the form `<provider_id>/<model_id>` that selects both one Provider and one exact Upstream Model for a global API call. The first slash is the separator; every character after it belongs to the Upstream Model's exact ID.
+_Avoid_: Alias, virtual model, prefixed model
 
 **Key Health**:
 Iroha's durable knowledge of whether an Upstream Key is active, temporarily cooling down, invalid, exhausted, or disabled by the Owner.

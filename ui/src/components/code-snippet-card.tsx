@@ -22,12 +22,16 @@ import { type KeyView, type ProviderView } from '@/lib/providers'
  */
 declare const __IROHA_DEV_GATEWAY_URL__: string | undefined
 
-type SnippetLanguage = 'curl' | 'openai-js' | 'openai-py'
+type SnippetLanguage = 'curl' | 'openai-js' | 'openai-py' | 'curl-anthropic' | 'anthropic-js' | 'anthropic-py'
+type RoutingMode = 'global' | 'provider'
 
 const LANGUAGE_LABELS: Record<SnippetLanguage, string> = {
   curl: 'cURL',
   'openai-js': 'OpenAI JS SDK',
   'openai-py': 'OpenAI Python SDK',
+  'curl-anthropic': 'cURL (Anthropic)',
+  'anthropic-js': 'Anthropic JS SDK',
+  'anthropic-py': 'Anthropic Python SDK',
 }
 
 const GATEWAY_KEY_PLACEHOLDER = '<gateway-key>'
@@ -60,6 +64,7 @@ export function CodeSnippetCard({ provider }: CodeSnippetCardProps) {
   const [modelId, setModelId] = useState<string | null>(null)
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null)
   const [language, setLanguage] = useState<SnippetLanguage>('curl')
+  const [routingMode, setRoutingMode] = useState<RoutingMode>('global')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -127,6 +132,7 @@ export function CodeSnippetCard({ provider }: CodeSnippetCardProps) {
     origin: snippetOrigin(),
     providerId: provider.id,
     model: modelId ?? '',
+    routingMode,
   })
 
   const modelPlaceholder = (() => {
@@ -144,6 +150,26 @@ export function CodeSnippetCard({ provider }: CodeSnippetCardProps) {
           <h2 className="text-sm font-semibold tracking-tight">Code snippet</h2>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="code-snippet-routing"
+              className="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              Routing
+            </label>
+            <Select
+              value={routingMode}
+              onValueChange={(value) => setRoutingMode(value as RoutingMode)}
+            >
+              <SelectTrigger id="code-snippet-routing" className="h-8 w-32" size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="global">Global</SelectItem>
+                <SelectItem value="provider">Provider</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           {provider.keys.length > 0 && (
             <div className="flex items-center gap-2">
               <label
@@ -323,11 +349,14 @@ interface BuildSnippetInput {
   readonly origin: string
   readonly providerId: string
   readonly model: string
+  readonly routingMode: RoutingMode
 }
 
-function buildSnippet({ language, origin, providerId, model }: BuildSnippetInput): string {
-  const baseUrl = `${origin}/providers/${providerId}`
+function buildSnippet({ language, origin, providerId, model, routingMode }: BuildSnippetInput): string {
+  const baseUrl = routingMode === 'global' ? origin : `${origin}/providers/${providerId}`
+  const routedModel = routingMode === 'global' ? `${providerId}/${model}` : model
   const chatCompletionsUrl = `${baseUrl}/v1/chat/completions`
+  const messagesUrl = `${baseUrl}/v1/messages`
   switch (language) {
     case 'curl':
       return [
@@ -335,7 +364,7 @@ function buildSnippet({ language, origin, providerId, model }: BuildSnippetInput
         `  -H "Authorization: Bearer ${GATEWAY_KEY_PLACEHOLDER}" \\`,
         `  -H "Content-Type: application/json" \\`,
         `  -d '{`,
-        `    "model": "${escapeQuotes(model)}",`,
+        `    "model": "${escapeQuotes(routedModel)}",`,
         `    "messages": [{"role": "user", "content": "Hello"}]`,
         `  }'`,
       ].join('\n')
@@ -349,7 +378,7 @@ function buildSnippet({ language, origin, providerId, model }: BuildSnippetInput
         `})`,
         ``,
         `const completion = await client.chat.completions.create({`,
-        `  model: '${escapeQuotes(model)}',`,
+        `  model: '${escapeQuotes(routedModel)}',`,
         `  messages: [{ role: 'user', content: 'Hello' }]`,
         `})`,
         ``,
@@ -365,11 +394,57 @@ function buildSnippet({ language, origin, providerId, model }: BuildSnippetInput
         `)`,
         ``,
         `completion = client.chat.completions.create(`,
-        `    model='${escapeQuotes(model)}',`,
+        `    model='${escapeQuotes(routedModel)}',`,
         `    messages=[{'role': 'user', 'content': 'Hello'}]`,
         `)`,
         ``,
         `print(completion.choices[0].message.content)`,
+      ].join('\n')
+    case 'curl-anthropic':
+      return [
+        `curl -X POST ${messagesUrl} \\`,
+        `  -H "x-api-key: ${GATEWAY_KEY_PLACEHOLDER}" \\`,
+        `  -H "anthropic-version: 2023-06-01" \\`,
+        `  -H "Content-Type: application/json" \\`,
+        `  -d '{`,
+        `    "model": "${escapeQuotes(routedModel)}",`,
+        `    "max_tokens": 1024,`,
+        `    "messages": [{"role": "user", "content": "Hello"}]`,
+        `  }'`,
+      ].join('\n')
+    case 'anthropic-js':
+      return [
+        `import Anthropic from '@anthropic-ai/sdk'`,
+        ``,
+        `const client = new Anthropic({`,
+        `  apiKey: '${GATEWAY_KEY_PLACEHOLDER}',`,
+        `  baseURL: '${baseUrl}'`,
+        `})`,
+        ``,
+        `const message = await client.messages.create({`,
+        `  model: '${escapeQuotes(routedModel)}',`,
+        `  max_tokens: 1024,`,
+        `  messages: [{ role: 'user', content: 'Hello' }]`,
+        `})`,
+        ``,
+        `console.log(message.content)`,
+      ].join('\n')
+    case 'anthropic-py':
+      return [
+        `import anthropic`,
+        ``,
+        `client = anthropic.Anthropic(`,
+        `    api_key='${GATEWAY_KEY_PLACEHOLDER}',`,
+        `    base_url='${baseUrl}'`,
+        `)`,
+        ``,
+        `message = client.messages.create(`,
+        `    model='${escapeQuotes(routedModel)}',`,
+        `    max_tokens=1024,`,
+        `    messages=[{'role': 'user', 'content': 'Hello'}]`,
+        `)`,
+        ``,
+        `print(message.content)`,
       ].join('\n')
   }
 }
@@ -398,12 +473,18 @@ const KEYWORDS: Record<SnippetLanguage, ReadonlySet<string>> = {
   curl: new Set(['curl']),
   'openai-js': new Set(['import', 'from', 'const', 'let', 'var', 'await', 'new']),
   'openai-py': new Set(['from', 'import', 'print']),
+  'curl-anthropic': new Set(['curl']),
+  'anthropic-js': new Set(['import', 'from', 'const', 'let', 'var', 'await', 'new']),
+  'anthropic-py': new Set(['import', 'print']),
 }
 
 const BUILTINS: Record<SnippetLanguage, ReadonlySet<string>> = {
   curl: new Set(),
   'openai-js': new Set(['OpenAI', 'console']),
   'openai-py': new Set(['OpenAI']),
+  'curl-anthropic': new Set(),
+  'anthropic-js': new Set(['Anthropic', 'console']),
+  'anthropic-py': new Set(['anthropic']),
 }
 
 const TOKEN_REGEX: Record<SnippetLanguage, RegExp> = {
@@ -411,6 +492,10 @@ const TOKEN_REGEX: Record<SnippetLanguage, RegExp> = {
   'openai-js':
     /<\w+>|"[^"]*"|'[^']*'|`[^`]*`|\b(?:import|from|const|let|var|await|new)\b|\b(?:OpenAI|console)\b|\s+|\S/g,
   'openai-py': /<\w+>|"[^"]*"|'[^']*'|\b(?:from|import|print)\b|\bOpenAI\b|\s+|\S/g,
+  'curl-anthropic': /<\w+>|"[^"]*"|'[^']*'|curl|-{1,2}\w+|\s+|\S/g,
+  'anthropic-js':
+    /<\w+>|"[^"]*"|'[^']*'|`[^`]*`|\b(?:import|from|const|let|var|await|new)\b|\b(?:Anthropic|console)\b|\s+|\S/g,
+  'anthropic-py': /<\w+>|"[^"]*"|'[^']*'|\b(?:import|print)\b|\banthropic\b|\s+|\S/g,
 }
 
 function tokenize(text: string, language: SnippetLanguage): readonly Token[] {

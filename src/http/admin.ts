@@ -286,6 +286,32 @@ export function createAdminRoutes({
       },
     )
     .post(
+      '/providers/:id/restore',
+      async ({ params, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const result = await providers.restore(params.id)
+        if (!result.ok) {
+          const failure = toFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(200, toProviderDto(result.value))
+      },
+      {
+        detail: {
+          tags: ['Providers'],
+          summary: 'Restore a Provider',
+          description: 'Restores an archived Provider and enables it for subsequent Gateway requests.',
+        },
+        response: { 200: providerResponse, ...errorResponses },
+      },
+    )
+    .post(
       '/providers/:id/duplicate',
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
@@ -338,7 +364,7 @@ export function createAdminRoutes({
           tags: ['Providers'],
           summary: 'Purge a Provider',
           description:
-            'Permanently deletes an archived Provider and its Upstream Keys. Deletion is archive-first: a live Provider must be archived before it can be purged, and there is no restore.',
+            'Permanently deletes an archived Provider and its Upstream Keys. Deletion is archive-first; restore is possible only before purge.',
         },
         response: {
           204: t.Void(),
@@ -765,6 +791,7 @@ export function createAdminRoutes({
         const result = await gatewayKeys.create({
           name: input.name,
           scope: input.scope,
+          ...('access' in input ? { access: input.access } : {}),
           ...('corsOrigins' in input ? { corsOrigins: input.corsOrigins } : {}),
         })
 
@@ -818,6 +845,37 @@ export function createAdminRoutes({
         },
       },
     )
+    .patch(
+      '/gateway-keys/:id',
+      async ({ params, body, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+        const input = asObject(body)
+        const result = await gatewayKeys.update(params.id, {
+          revision: input.revision,
+          name: input.name,
+          access: input.access,
+          corsOrigins: input.corsOrigins,
+        })
+        if (!result.ok) {
+          const failure = toGatewayKeyFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(200, toGatewayKeyDto(result.value))
+      },
+      {
+        detail: {
+          tags: ['Gateway Keys'],
+          summary: 'Edit a Gateway Key',
+          description: 'Atomically replaces an active key’s name, access policy, and CORS origins when its revision is current.',
+        },
+        response: { 200: gatewayKeyResponse, ...errorResponses },
+      },
+    )
     .post(
       '/gateway-keys/:id/revoke',
       async ({ params, request, cookie, status }) => {
@@ -848,6 +906,32 @@ export function createAdminRoutes({
           200: gatewayKeyResponse,
           ...errorResponses,
         },
+      },
+    )
+    .delete(
+      '/gateway-keys/:id',
+      async ({ params, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
+        if ('response' in guardResult) {
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+
+        const result = await gatewayKeys.delete(params.id)
+        if (!result.ok) {
+          const failure = toGatewayKeyFailure(result.failure)
+          return status(failure.statusCode, failure.body)
+        }
+        return status(204, undefined)
+      },
+      {
+        detail: {
+          tags: ['Gateway Keys'],
+          summary: 'Delete a revoked Gateway Key',
+          description: 'Permanently removes a revoked credential while retaining safe historical identity snapshots.',
+        },
+        response: { 204: t.Void(), ...errorResponses },
       },
     )
     )
@@ -985,6 +1069,11 @@ const gatewayKeyResponse = t.Object({
   id: t.String(),
   name: t.String(),
   scope: t.Array(gatewayKeyScopeResponse),
+  access: t.Union([
+    t.Object({ mode: t.Literal('all') }),
+    t.Object({ mode: t.Literal('selected'), providers: t.Array(gatewayKeyScopeResponse) }),
+  ]),
+  revision: t.Integer({ minimum: 1 }),
   corsOrigins: t.Array(t.String()),
   createdAt: t.String(),
   lastUsedAt: t.Union([t.Null(), t.String()]),
@@ -1136,6 +1225,16 @@ function toGatewayKeyDto(key: GatewayKeyView): GatewayKeyDto {
       providerId: entry.providerId,
       models: entry.models === null ? null : [...entry.models],
     })),
+    access: key.access.mode === 'all'
+      ? { mode: 'all' }
+      : {
+          mode: 'selected',
+          providers: key.access.providers.map((entry) => ({
+            providerId: entry.providerId,
+            models: entry.models === null ? null : [...entry.models],
+          })),
+        },
+    revision: key.revision,
     corsOrigins: [...key.corsOrigins],
     createdAt: key.createdAt.toISOString(),
     lastUsedAt: key.lastUsedAt === null ? null : key.lastUsedAt.toISOString(),
@@ -1215,12 +1314,27 @@ function toFailure(failure: ProviderFailure): { statusCode: 400 | 404 | 409 | 50
   }
 }
 
-function toGatewayKeyFailure(failure: GatewayKeyFailure): { statusCode: 400 | 404; body: ErrorDto } {
+function toGatewayKeyFailure(failure: GatewayKeyFailure): { statusCode: 400 | 404 | 409; body: ErrorDto } {
   switch (failure.code) {
     case 'gateway_key_not_found':
       return {
         statusCode: 404,
         body: adminError('gateway_key_not_found', 'No such Gateway Key.'),
+      }
+    case 'gateway_key_active':
+      return {
+        statusCode: 409,
+        body: adminError('gateway_key_active', 'Revoke this Gateway Key before deleting it.'),
+      }
+    case 'gateway_key_revoked':
+      return {
+        statusCode: 409,
+        body: adminError('gateway_key_revoked', 'A revoked Gateway Key cannot be edited.'),
+      }
+    case 'gateway_key_conflict':
+      return {
+        statusCode: 409,
+        body: adminError('gateway_key_conflict', 'This Gateway Key changed since it was loaded.'),
       }
     case 'validation_failed':
       return { statusCode: 400, body: validationFailureBody(failure.problems) }

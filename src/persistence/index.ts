@@ -17,6 +17,7 @@ export type {
   BackgroundJobStatus,
   Database,
   GatewayKeyRecord,
+  GatewayKeyAccess,
   GatewayKeyRepository,
   GatewayKeyScopeEntry,
   KeyProbeVerdict,

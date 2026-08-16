@@ -157,6 +157,8 @@ export const gatewayKeys = sqliteTable('gateway_keys', {
   name: text('name').notNull(),
   secretHash: text('secret_hash').notNull(),
   scope: text('scope').notNull(),
+  accessMode: text('access_mode').notNull().default('selected'),
+  revision: integer('revision').notNull().default(1),
   /** JSON array of exact origin strings; empty means no CORS for this key. */
   corsOrigins: text('cors_origins').notNull().default('[]'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
@@ -242,6 +244,7 @@ export const requestEvents = sqliteTable('request_events', {
   model: text('model').notNull(),
   /** Public identity of the Gateway Key the application presented. */
   gatewayKeyId: text('gateway_key_id'),
+  gatewayKeyName: text('gateway_key_name'),
   /** Public identity of the Upstream Key the request actually used. */
   keyId: text('key_id'),
   /** Final HTTP status Iroha returned to the caller. */

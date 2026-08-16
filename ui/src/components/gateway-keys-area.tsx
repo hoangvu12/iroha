@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   KeyRound,
   MoreHorizontal,
+  Pencil,
   Plus,
   SlidersHorizontal,
   X,
@@ -33,10 +34,13 @@ import { StatusBadge } from '@/components/status-badge'
 import { cn } from '@/lib/utils'
 import {
   createGatewayKey,
+  deleteGatewayKey,
   fetchGatewayKeys,
   GatewayKeyError,
   revokeGatewayKey,
+  updateGatewayKey,
   type CreatedGatewayKey,
+  type GatewayKeyAccess,
   type GatewayKeyScopeEntry,
   type GatewayKeyView,
 } from '@/lib/gateway-keys'
@@ -121,8 +125,7 @@ export function GatewayKeysArea({
               one or more Providers with optional exact model restrictions.
             </DialogDescription>
           </DialogHeader>
-          {activeProviders.length > 0 ? (
-            <CreateGatewayKeyForm
+          <CreateGatewayKeyForm
               providers={activeProviders}
               csrfToken={csrfToken}
               onCreated={(created) => {
@@ -132,15 +135,6 @@ export function GatewayKeysArea({
               }}
               onFailure={setError}
             />
-          ) : (
-            <Alert role="status">
-              <AlertTitle>Create a Provider first</AlertTitle>
-              <AlertDescription>
-                Gateway Keys need at least one Provider to scope to. Add one in the
-                Providers area, then return here.
-              </AlertDescription>
-            </Alert>
-          )}
         </DialogContent>
       </Dialog>
 
@@ -192,6 +186,7 @@ function GatewayKeyRow({
   readonly onChanged: () => void
 }) {
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState<GatewayKeyError | null>(null)
 
   const runRevoke = async () => {
@@ -206,6 +201,20 @@ function GatewayKeyRow({
           ? cause
           : new GatewayKeyError('request_failed', 'That did not work.'),
       )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runDelete = async () => {
+    if (!window.confirm(`Permanently delete revoked Gateway Key "${keyView.name}"? Historical requests and audit events will remain.`)) return
+    setBusy(true)
+    setError(null)
+    try {
+      await deleteGatewayKey(keyView.id, csrfToken)
+      onChanged()
+    } catch (cause) {
+      setError(cause instanceof GatewayKeyError ? cause : new GatewayKeyError('request_failed', 'That did not work.'))
     } finally {
       setBusy(false)
     }
@@ -226,6 +235,7 @@ function GatewayKeyRow({
           label={keyView.revoked ? 'Revoked' : 'Active'}
         />
         <ScopeIcons
+          access={keyView.access}
           scope={keyView.scope}
           providers={providers}
           hasCorsOrigins={keyView.corsOrigins.length > 0}
@@ -246,6 +256,10 @@ function GatewayKeyRow({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onSelect={() => setEditing(true)}>
+                <Pencil className="size-4" aria-hidden />
+                Edit
+              </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={() => void runRevoke()}
@@ -256,7 +270,27 @@ function GatewayKeyRow({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+        {keyView.revoked && (
+          <Button type="button" variant="destructive" size="sm" disabled={busy} onClick={() => void runDelete()}>
+            {busy ? 'Deleting…' : 'Delete'}
+          </Button>
+        )}
       </div>
+
+      <Dialog open={editing} onOpenChange={setEditing}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Gateway Key</DialogTitle>
+            <DialogDescription>Changes apply to new Requests. Already admitted Requests may finish.</DialogDescription>
+          </DialogHeader>
+          <EditGatewayKeyForm
+            keyView={keyView}
+            providers={providers}
+            csrfToken={csrfToken}
+            onSaved={() => { setEditing(false); onChanged() }}
+          />
+        </DialogContent>
+      </Dialog>
 
       {error && (
         <Alert variant="destructive" role="alert" className="mt-2">
@@ -268,23 +302,124 @@ function GatewayKeyRow({
   )
 }
 
+function EditGatewayKeyForm({
+  keyView,
+  providers,
+  csrfToken,
+  onSaved,
+}: {
+  readonly keyView: GatewayKeyView
+  readonly providers: readonly ProviderView[]
+  readonly csrfToken: string
+  readonly onSaved: () => void
+}) {
+  const [name, setName] = useState(keyView.name)
+  const [accessMode, setAccessMode] = useState<'all' | 'selected'>(keyView.access.mode)
+  const initialProviders = keyView.access.mode === 'selected' ? keyView.access.providers : []
+  const [selected, setSelected] = useState<Record<string, { enabled: boolean; models: readonly string[] }>>(
+    () => Object.fromEntries(providers.map((provider) => {
+      const entry = initialProviders.find((candidate) => candidate.providerId === provider.id)
+      return [provider.id, { enabled: entry !== undefined, models: entry?.models ?? [] }]
+    })),
+  )
+  const [corsOrigins, setCorsOrigins] = useState(keyView.corsOrigins)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<GatewayKeyError | null>(null)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (busy) return
+    const scoped = providers.flatMap((provider) => {
+      const entry = selected[provider.id]
+      return entry?.enabled
+        ? [{ providerId: provider.id, models: entry.models.length === 0 ? null : entry.models }]
+        : []
+    })
+    setBusy(true)
+    setError(null)
+    try {
+      await updateGatewayKey(keyView.id, {
+        revision: keyView.revision,
+        name,
+        access: accessMode === 'all' ? { mode: 'all' } : { mode: 'selected', providers: scoped },
+        corsOrigins,
+      }, csrfToken)
+      onSaved()
+    } catch (cause) {
+      const failure = cause instanceof GatewayKeyError
+        ? cause
+        : new GatewayKeyError('request_failed', 'That request could not be completed.')
+      setError(failure.code === 'gateway_key_conflict'
+        ? new GatewayKeyError(failure.code, 'This key changed in another tab. Close this dialog, review the latest settings, and try again.')
+        : failure)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="flex flex-col gap-5" onSubmit={(event) => void submit(event)}>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`gateway-key-edit-name-${keyView.id}`}>Name</Label>
+        <Input id={`gateway-key-edit-name-${keyView.id}`} value={name} onChange={(event) => setName(event.target.value)} required />
+      </div>
+      <fieldset className="flex flex-col gap-2">
+        <legend className="text-sm font-medium">Access</legend>
+        <label className="border-border flex items-center gap-3 rounded-md border p-3">
+          <Checkbox checked={accessMode === 'all'} onCheckedChange={(value) => setAccessMode(value === true ? 'all' : 'selected')} />
+          <span className="text-sm font-medium">All Providers</span>
+        </label>
+        {accessMode === 'selected' && (
+          <ul className="border-border overflow-hidden rounded-md border">
+            {providers.map((provider, index) => {
+              const entry = selected[provider.id] ?? { enabled: false, models: [] }
+              return (
+                <li key={provider.id} className={cn('flex flex-col gap-2 p-3', index > 0 && 'border-border border-t')}>
+                  <label className="flex items-center gap-3">
+                    <Checkbox checked={entry.enabled} onCheckedChange={(value) => setSelected((current) => ({ ...current, [provider.id]: { ...entry, enabled: value === true } }))} />
+                    <span className="text-sm font-medium">{provider.displayName}</span>
+                  </label>
+                  {entry.enabled && <ModelListPicker providerId={provider.id} csrfToken={csrfToken} selected={entry.models} onChange={(models) => setSelected((current) => ({ ...current, [provider.id]: { ...entry, models } }))} />}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </fieldset>
+      <CorsOriginsField origins={corsOrigins} onChange={setCorsOrigins} />
+      {error && <Alert variant="destructive"><AlertTitle>Could not save</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>}
+      <div className="flex justify-end"><Button type="submit" size="sm" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</Button></div>
+    </form>
+  )
+}
+
 /**
  * A visual summary of a Gateway Key's scope: one small provider icon per
  * scoped provider (capped at four), a "+N" tile if more, plus a small marker
  * for model restrictions and one for CORS origins.
  */
 function ScopeIcons({
+  access,
   scope,
   providers,
   hasCorsOrigins,
   className,
 }: {
+  readonly access: GatewayKeyAccess
   readonly scope: readonly GatewayKeyScopeEntry[]
   readonly providers: readonly ProviderView[]
   readonly hasCorsOrigins: boolean
   readonly className?: string
 }) {
   const { brandFor } = useBrandByTemplateId()
+  if (access.mode === 'all') {
+    return (
+      <span className={cn('border-border bg-muted text-muted-foreground inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs', className)}>
+        <SlidersHorizontal className="size-3" aria-hidden strokeWidth={1.5} />
+        All Providers
+      </span>
+    )
+  }
   if (scope.length === 0) {
     return (
       <span
@@ -374,6 +509,7 @@ function CreateGatewayKeyForm({
   readonly onFailure: (error: GatewayKeyError) => void
 }) {
   const [name, setName] = useState('')
+  const [accessMode, setAccessMode] = useState<'all' | 'selected'>('all')
   const [selected, setSelected] = useState<
     Record<string, { enabled: boolean; models: readonly string[] }>
   >(() =>
@@ -396,14 +532,17 @@ function CreateGatewayKeyForm({
       return [{ providerId: provider.id, models: entry.models.length === 0 ? null : entry.models }]
     })
 
-    if (scope.length === 0) {
+    if (accessMode === 'selected' && scope.length === 0) {
       setError(new GatewayKeyError('validation_failed', 'Choose at least one Provider.'))
       return
     }
 
     setBusy(true)
     setError(null)
-    createGatewayKey({ name, scope, corsOrigins: [...corsOrigins] }, csrfToken)
+    const access: GatewayKeyAccess = accessMode === 'all'
+      ? { mode: 'all' }
+      : { mode: 'selected', providers: scope }
+    createGatewayKey({ name, access, corsOrigins: [...corsOrigins] }, csrfToken)
       .then((created) => onCreated(created))
       .catch((cause: unknown) => {
         const failure =
@@ -442,7 +581,17 @@ function CreateGatewayKeyForm({
             narrow further.
           </span>
         </legend>
-        <ul className="border-border overflow-hidden rounded-md border">
+        <label className="border-border flex items-center gap-3 rounded-md border p-3">
+          <Checkbox
+            checked={accessMode === 'all'}
+            onCheckedChange={(value) => setAccessMode(value === true ? 'all' : 'selected')}
+          />
+          <span className="flex flex-col">
+            <span className="text-sm font-medium">All Providers</span>
+            <span className="text-muted-foreground text-xs">Includes Providers created or restored later.</span>
+          </span>
+        </label>
+        {accessMode === 'selected' && <ul className="border-border overflow-hidden rounded-md border">
           {providers.map((provider, index) => {
             const entry = selected[provider.id] ?? { enabled: false, models: [] }
             return (
@@ -492,7 +641,7 @@ function CreateGatewayKeyForm({
               </li>
             )
           })}
-        </ul>
+        </ul>}
       </fieldset>
 
       <CorsOriginsField origins={corsOrigins} onChange={setCorsOrigins} />

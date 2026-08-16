@@ -646,6 +646,27 @@ export class ProviderRegistry {
     return { ok: true, value: await this.#viewOf(id) }
   }
 
+  /** Restores an archived Provider and returns it to owner-enabled routing. */
+  async restore(id: string): Promise<ProviderResult<ProviderView>> {
+    const provider = await this.#database.providers.getProvider(id)
+    if (provider === null) return failed({ code: 'provider_not_found' })
+
+    if (provider.archivedAt !== null) {
+      const at = this.#clock.now()
+      await this.#database.transaction(async (repositories) => {
+        await repositories.providers.updateProvider(id, { enabled: true, archivedAt: null }, at)
+        await repositories.audit.record({
+          action: 'provider.restored',
+          outcome: 'success',
+          detail: { providerId: id },
+          at,
+        })
+      })
+    }
+
+    return { ok: true, value: await this.#viewOf(id) }
+  }
+
   /**
    * Copies a connection under a brand-new identity. Keys are decrypted only
    * long enough to be re-encrypted, start Unverified again, and are tested

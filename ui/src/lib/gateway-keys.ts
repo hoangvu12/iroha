@@ -3,10 +3,16 @@ export interface GatewayKeyScopeEntry {
   readonly models: readonly string[] | null
 }
 
+export type GatewayKeyAccess =
+  | { readonly mode: 'all' }
+  | { readonly mode: 'selected'; readonly providers: readonly GatewayKeyScopeEntry[] }
+
 export interface GatewayKeyView {
   readonly id: string
   readonly name: string
   readonly scope: readonly GatewayKeyScopeEntry[]
+  readonly access: GatewayKeyAccess
+  readonly revision: number
   readonly corsOrigins: readonly string[]
   readonly createdAt: string
   readonly lastUsedAt: string | null
@@ -44,7 +50,7 @@ export async function fetchGatewayKeys(signal?: AbortSignal): Promise<readonly G
 export async function createGatewayKey(
   input: {
     name: string
-    scope: readonly GatewayKeyScopeEntry[]
+    access: GatewayKeyAccess
     corsOrigins: readonly string[]
   },
   csrfToken: string,
@@ -101,4 +107,19 @@ function toError(payload: unknown): GatewayKeyError {
     typeof error?.message === 'string' ? error.message : 'That request could not be completed.',
     Array.isArray(error?.problems) ? (error.problems as FieldProblem[]) : [],
   )
+}
+
+export async function updateGatewayKey(
+  id: string,
+  input: { revision: number; name: string; access: GatewayKeyAccess; corsOrigins: readonly string[] },
+  csrfToken: string,
+): Promise<GatewayKeyView> {
+  return await request<GatewayKeyView>('PATCH', `/gateway-keys/${encodeURIComponent(id)}`, {
+    body: input,
+    csrfToken,
+  })
+}
+
+export async function deleteGatewayKey(id: string, csrfToken: string): Promise<void> {
+  await request('DELETE', `/gateway-keys/${encodeURIComponent(id)}`, { csrfToken })
 }

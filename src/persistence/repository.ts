@@ -367,6 +367,10 @@ export interface GatewayKeyScopeEntry {
   readonly models: readonly string[] | null
 }
 
+export type GatewayKeyAccess =
+  | { readonly mode: 'all' }
+  | { readonly mode: 'selected'; readonly providers: readonly GatewayKeyScopeEntry[] }
+
 /**
  * One decrypted static header the adapter will merge into every upstream
  * request. `name` is canonicalised; `value` is the Owner's cleartext. The pair
@@ -391,6 +395,9 @@ export interface GatewayKeyRecord {
   readonly secretHash: string
   /** Which Providers the key may use and discover, and how. */
   readonly scope: readonly GatewayKeyScopeEntry[]
+  readonly access?: GatewayKeyAccess
+  /** Monotonic edit precondition; legacy rows start at one. */
+  readonly revision?: number
   /** Exact browser origins allowed to use this key; empty disables browser CORS. */
   readonly corsOrigins: readonly string[]
   readonly createdAt: Date
@@ -409,6 +416,20 @@ export interface GatewayKeyRepository {
   markUsed(id: string, at: Date): Promise<boolean>
   /** Revokes the key. Returns `null` when no such key exists. */
   revoke(id: string, at: Date): Promise<GatewayKeyRecord | null>
+  /** Permanently removes a revoked key. Returns false when it is active or absent. */
+  deleteRevoked(id: string): Promise<boolean>
+  /** Atomically edits an active key when its revision still matches. */
+  updateActive(
+    id: string,
+    expectedRevision: number,
+    patch: {
+      readonly name: string
+      readonly access: GatewayKeyAccess
+      readonly scope: readonly GatewayKeyScopeEntry[]
+      readonly corsOrigins: readonly string[]
+    },
+    at: Date,
+  ): Promise<GatewayKeyRecord | null>
   /** Replaces the per-key CORS origins. Returns `null` when no such key exists. */
   updateCorsOrigins(id: string, origins: readonly string[], at: Date): Promise<GatewayKeyRecord | null>
 }
@@ -535,6 +556,8 @@ export interface RequestEventRecord {
   readonly providerId: string
   readonly model: string
   readonly gatewayKeyId: string | null
+  /** Immutable display-name snapshot retained if the live Gateway Key is deleted. */
+  readonly gatewayKeyName?: string | null
   readonly keyId: string | null
   readonly status: number
   readonly outcome: RequestOutcome

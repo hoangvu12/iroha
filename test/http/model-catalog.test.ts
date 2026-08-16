@@ -233,6 +233,34 @@ describe('the Owner model catalog surface', () => {
     }
   }
 
+  test('a new templated Provider exposes its known models before discovery', async () => {
+    upstream.calls.length = 0
+    const created = await iroha.fetch('/api/v1/admin/providers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'OpenAI template example',
+        baseUrl: BASE_URL,
+        keys: [{ upstreamKey: UPSTREAM_KEY }],
+        templateId: 'openai',
+      }),
+      csrf,
+    })
+    expect(created.status).toBe(201)
+    const provider = (await created.json()) as { id: string }
+
+    const response = await iroha.fetch(`/api/v1/admin/providers/${provider.id}/catalog`)
+    expect(response.status).toBe(200)
+    const catalog = (await response.json()) as {
+      entries: { modelId: string; source: string }[]
+    }
+    expect(catalog.entries).toContainEqual(expect.objectContaining({
+      modelId: 'gpt-4o-mini',
+      source: 'template',
+    }))
+    expect(upstream.calls).toHaveLength(0)
+  })
+
   test('a successful refresh discovers models with provenance and freshness', async () => {
     const catalog = await refresh()
 

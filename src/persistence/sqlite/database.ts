@@ -1,7 +1,7 @@
 import { Database as BunSqlite } from 'bun:sqlite'
 import { dirname, join } from 'node:path'
 import { mkdirSync } from 'node:fs'
-import { and, asc, count, desc, eq, gte, inArray, like, lt, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, like, lt, lte, ne, sql } from 'drizzle-orm'
 import { drizzle, type BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import type { SqliteConfiguration } from '../../config/environment.ts'
@@ -649,6 +649,34 @@ class SqliteGatewayKeyRepository implements GatewayKeyRepository {
     return row ? toGatewayKey(row) : null
   }
 
+  async deleteRevoked(id: string): Promise<boolean> {
+    const rows = await this.handle
+      .delete(gatewayKeys)
+      .where(and(eq(gatewayKeys.id, id), isNotNull(gatewayKeys.revokedAt)))
+      .returning({ id: gatewayKeys.id })
+    return rows.length > 0
+  }
+
+  async updateActive(
+    id: string,
+    expectedRevision: number,
+    patch: { name: string; access: import('../repository.ts').GatewayKeyAccess; scope: readonly GatewayKeyScopeEntry[]; corsOrigins: readonly string[] },
+    _at: Date,
+  ): Promise<GatewayKeyRecord | null> {
+    const [row] = await this.handle
+      .update(gatewayKeys)
+      .set({
+        name: patch.name,
+        accessMode: patch.access.mode,
+        scope: JSON.stringify(patch.scope),
+        corsOrigins: JSON.stringify([...patch.corsOrigins]),
+        revision: expectedRevision + 1,
+      })
+      .where(and(eq(gatewayKeys.id, id), eq(gatewayKeys.revision, expectedRevision), isNull(gatewayKeys.revokedAt)))
+      .returning()
+    return row ? toGatewayKey(row) : null
+  }
+
   async updateCorsOrigins(
     id: string,
     origins: readonly string[],
@@ -671,6 +699,10 @@ function toGatewayKey(row: GatewayKeyRow): GatewayKeyRecord {
     name: row.name,
     secretHash: row.secretHash,
     scope: JSON.parse(row.scope) as readonly GatewayKeyScopeEntry[],
+    access: row.accessMode === 'all'
+      ? { mode: 'all' }
+      : { mode: 'selected', providers: JSON.parse(row.scope) as readonly GatewayKeyScopeEntry[] },
+    revision: row.revision,
     corsOrigins: decodeOrigins(row.corsOrigins),
     createdAt: row.createdAt,
     lastUsedAt: row.lastUsedAt,
@@ -684,6 +716,8 @@ function encodeGatewayKeyRow(key: GatewayKeyRecord): {
   name: string
   secretHash: string
   scope: string
+  accessMode: string
+  revision: number
   corsOrigins: string
   createdAt: Date
   lastUsedAt: Date | null
@@ -694,6 +728,8 @@ function encodeGatewayKeyRow(key: GatewayKeyRecord): {
     name: key.name,
     secretHash: key.secretHash,
     scope: JSON.stringify(key.scope),
+    accessMode: key.access?.mode ?? 'selected',
+    revision: key.revision ?? 1,
     corsOrigins: JSON.stringify([...key.corsOrigins]),
     createdAt: key.createdAt,
     lastUsedAt: key.lastUsedAt,
@@ -1231,6 +1267,7 @@ class SqliteRequestHistoryRepository implements RequestHistoryRepository {
         providerId: event.providerId,
         model: event.model,
         gatewayKeyId: event.gatewayKeyId,
+        gatewayKeyName: event.gatewayKeyName,
         keyId: event.keyId,
         status: event.status,
         outcome: event.outcome,
@@ -1249,6 +1286,7 @@ class SqliteRequestHistoryRepository implements RequestHistoryRepository {
           providerId: event.providerId,
           model: event.model,
           gatewayKeyId: event.gatewayKeyId,
+          gatewayKeyName: event.gatewayKeyName,
           keyId: event.keyId,
           status: event.status,
           outcome: event.outcome,
@@ -1431,6 +1469,7 @@ function toEvent(row: RequestEventRow): RequestEventRecord {
     providerId: row.providerId,
     model: row.model,
     gatewayKeyId: row.gatewayKeyId,
+    ...(row.gatewayKeyName === null ? {} : { gatewayKeyName: row.gatewayKeyName }),
     keyId: row.keyId,
     status: row.status,
     outcome: row.outcome as RequestOutcome,

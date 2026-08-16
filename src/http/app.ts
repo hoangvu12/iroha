@@ -26,12 +26,13 @@ import { createBrandLogoRoutes } from './brand-logos.ts'
 import { createCatalogRoutes } from './catalog.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
-import { createInferenceRoutes, DEFAULT_TRANSPORT, type StreamingTimeouts, type TransportDefaults } from './inference.ts'
+import { createGlobalInferenceRoutes, createInferenceRoutes, DEFAULT_TRANSPORT, type StreamingTimeouts, type TransportDefaults } from './inference.ts'
 import { createRequestHistoryRoutes } from './request-history.ts'
 import { ReadinessState } from './readiness.ts'
 import { createSettingsRoutes } from './settings.ts'
 import { createUsageRoutes } from './usage.ts'
 import { createMetricsRoutes } from './metrics.ts'
+import { createGlobalModelRoutes } from './global-models.ts'
 import { MetricsCollector, MetricsSettingsService } from '../metrics/metrics.ts'
 
 export interface AppOptions {
@@ -206,6 +207,7 @@ export function createApp(options: AppOptions) {
     .use(createAuthRoutes({ identity }))
     .use(createAdminRoutes({ identity, providers, gatewayKeys, adapterRegistry }))
     .use(createDirectoryRoutes({ gatewayKeys }))
+    .use(createGlobalModelRoutes({ gatewayKeys, database }))
     .use(createBrandLogoRoutes({ brandLogos: options.brandLogos ?? noBrandLogoService() }))
     .use(createCatalogRoutes({ identity, modelCatalog }))
     .use(
@@ -267,6 +269,17 @@ export function createApp(options: AppOptions) {
         ...(options.streamingTimeouts === undefined
           ? {}
           : { timeouts: options.streamingTimeouts }),
+        ...(options.retrySleep === undefined ? {} : { retrySleep: options.retrySleep }),
+      }),
+    )
+    .use(
+      createGlobalInferenceRoutes({
+        gatewayKeys, providers, inference, modelCatalog, adapterRegistry, database, requestHistory,
+        transportDefaults, usageService,
+        ...(options.timer === undefined ? {} : { timer: options.timer }),
+        ...(options.shutdown === undefined ? {} : { shutdown: options.shutdown }),
+        ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
+        ...(options.streamingTimeouts === undefined ? {} : { timeouts: options.streamingTimeouts }),
         ...(options.retrySleep === undefined ? {} : { retrySleep: options.retrySleep }),
       }),
     )

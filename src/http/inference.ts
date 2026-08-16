@@ -13,7 +13,7 @@ import {
   type InferenceForwardRequest,
   type InferenceForwardResult,
 } from '../inference/index.ts'
-import type { GatewayKeyRegistry } from '../keys/index.ts'
+import type { GatewayKeyRegistry, InferenceAuthorization } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
 import { ANTHROPIC_INFERENCE_ADAPTER_ID } from '../providers/templates.ts'
@@ -24,6 +24,8 @@ import type { InferenceActivity, ShutdownController } from '../runtime/shutdown.
 import { systemTimer, type Timer } from '../runtime/timer.ts'
 import type { UsageService } from '../usage/index.ts'
 import type { CapacityEvidence } from '../providers/provider-evidence.ts'
+import { authorizeQualifiedModel } from './qualified-model.ts'
+import { bearerToken } from './bearer-token.ts'
 
 /** The terminal shape of one attempt's outcome, what the recorder writes. */
 interface AttemptTerminal {
@@ -185,7 +187,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         const responseHeaders = { ...baseHeaders, ...cors }
 
         const token = bearerToken(request.headers)
-        const authorization = await gatewayKeys.authorizeConnection(params.providerId, token)
+        const authorization = await gatewayKeys.authorizeProvider(params.providerId, token)
         if (!authorization.ok) {
           const refusal = authorizationRefusal(authorization)
           return error(refusal.status, responseHeaders, refusal, correlationId)
@@ -322,6 +324,209 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
 
 export type InferenceRoutes = ReturnType<typeof createInferenceRoutes>
 
+/** Global Chat Completions delegates to the provider-scoped pipeline after deterministic qualification. */
+export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
+  const timer = options.timer ?? systemTimer
+  const retrySleep = options.retrySleep ?? sleepWithTimer(timer)
+  const transport = options.transportDefaults ?? DEFAULT_TRANSPORT
+
+  const admit = async (
+    request: Request,
+    errors: {
+      readonly internal: () => Response
+      readonly malformed: () => Response
+      readonly unauthorized: (code: 'gateway_key_invalid' | 'invalid_model_id' | 'provider_not_allowed' | 'model_not_allowed') => Response
+    },
+  ) => {
+    const database = options.database
+    if (database === undefined) return { ok: false as const, response: errors.internal() }
+    let input: Record<string, unknown>
+    try {
+      const parsed = await request.clone().json()
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('invalid body')
+      input = parsed as Record<string, unknown>
+    } catch {
+      return { ok: false as const, response: errors.malformed() }
+    }
+
+    const authorization = await authorizeQualifiedModel({
+      input: input.model,
+      token: bearerToken(request.headers),
+      gatewayKeys: options.gatewayKeys,
+      database,
+    })
+    if (!authorization.ok) return { ok: false as const, response: errors.unauthorized(authorization.code) }
+
+    const activity = options.shutdown?.beginInference(request.signal)
+    if (activity === null) return { ok: false as const, response: shuttingDownError() }
+    return {
+      ok: true as const,
+      requestedModel: input.model as string,
+      authorization,
+      database,
+      activity,
+      upstreamRequest: new Request(request, {
+        body: JSON.stringify({ ...input, model: authorization.modelId }),
+        signal: activity?.signal ?? request.signal,
+      }),
+    }
+  }
+
+  const forwardingOptions = (admission: Extract<Awaited<ReturnType<typeof admit>>, { readonly ok: true }>) => ({
+    request: admission.upstreamRequest,
+    providerId: admission.authorization.providerId,
+    gatewayKeys: options.gatewayKeys,
+    providers: options.providers,
+    modelCatalog: options.modelCatalog,
+    timer,
+    retrySleep,
+    transport,
+    adapterRegistry: options.adapterRegistry ?? null,
+    database: admission.database,
+    requestHistory: options.requestHistory,
+    authorization: {
+      ok: true as const,
+      keyId: admission.authorization.gatewayKeyId,
+      keyName: admission.authorization.gatewayKeyName,
+    },
+    ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
+    ...(options.timeouts === undefined ? {} : { timeouts: options.timeouts }),
+    ...(options.usageService === undefined ? {} : { usageService: options.usageService }),
+    ...(admission.activity === undefined ? {} : { requestActivity: admission.activity }),
+  })
+
+  const forward = async (request: Request, upstreamPath: '/chat/completions' | '/responses'): Promise<Response> => {
+    const admission = await admit(request, {
+      internal: () => globalError(500, 'internal_error', 'The request could not be completed.'),
+      malformed: () => globalError(400, 'invalid_model_id', 'A Qualified Model ID is required.'),
+      unauthorized: qualifiedAuthorizationError,
+    })
+    if (!admission.ok) return admission.response
+    const response = await forwardGeneration({
+      ...forwardingOptions(admission),
+      upstreamPath,
+      inference: options.inference,
+    })
+    if (!response.ok) return response
+    return await qualifyGlobalResponse(
+      response,
+      admission.authorization.providerId,
+      admission.requestedModel,
+      upstreamPath === '/responses' ? 'responses' : 'chat',
+    )
+  }
+
+  const forwardMessages = async (request: Request): Promise<Response> => {
+    const correlationId = newRequestId()
+    const headers = { 'content-type': 'application/json', 'x-request-id': correlationId }
+    const admission = await admit(request, {
+      internal: () => anthropicMessagesErrorResponse(500, 'internal_error', 'The request could not be completed.', headers, correlationId),
+      malformed: () => anthropicMessagesErrorResponse(400, 'invalid_model_id', 'A Qualified Model ID is required.', headers, correlationId),
+      unauthorized: (code) => qualifiedAnthropicAuthorizationError(code, headers, correlationId),
+    })
+    if (!admission.ok) return admission.response
+    const response = await forwardAnthropicMessages({
+      ...forwardingOptions(admission),
+    })
+    if (!response.ok) return response
+    return await qualifyGlobalResponse(response, admission.authorization.providerId, admission.requestedModel, 'messages')
+  }
+
+  return new Elysia({ name: 'iroha/global-inference' })
+    .post('/v1/chat/completions', ({ request }) => forward(request, '/chat/completions'), {
+      detail: { hide: true, summary: 'Create global Chat Completions' }, response: { 200: t.Unknown() },
+    })
+    .post('/v1/responses', ({ request }) => forward(request, '/responses'), {
+      detail: { hide: true, summary: 'Create global Responses' }, response: { 200: t.Unknown() },
+    })
+    .post('/v1/messages', ({ request }) => forwardMessages(request), {
+      detail: { hide: true, summary: 'Create global Anthropic Messages' }, response: { 200: t.Unknown() },
+    })
+}
+
+function qualifiedAuthorizationError(code: 'gateway_key_invalid' | 'invalid_model_id' | 'provider_not_allowed' | 'model_not_allowed'): Response {
+  switch (code) {
+    case 'gateway_key_invalid': return globalError(401, code, 'This Gateway Key is not valid.')
+    case 'invalid_model_id': return globalError(400, code, 'A Qualified Model ID must be <provider_id>/<model_id>.')
+    case 'provider_not_allowed': return globalError(403, code, 'This Gateway Key is not allowed to use that Provider.')
+    case 'model_not_allowed': return globalError(403, code, 'This Gateway Key is not allowed to request that model.')
+  }
+}
+
+function globalError(status: number, code: string, message: string): Response {
+  return Response.json({ error: { code, message } }, { status })
+}
+
+function qualifiedAnthropicAuthorizationError(
+  code: 'gateway_key_invalid' | 'invalid_model_id' | 'provider_not_allowed' | 'model_not_allowed',
+  headers: Record<string, string>,
+  correlationId: string,
+): Response {
+  switch (code) {
+    case 'gateway_key_invalid': return anthropicMessagesErrorResponse(401, code, 'This Gateway Key is not valid.', headers, correlationId)
+    case 'invalid_model_id': return anthropicMessagesErrorResponse(400, code, 'A Qualified Model ID must be <provider_id>/<model_id>.', headers, correlationId)
+    case 'provider_not_allowed': return anthropicMessagesErrorResponse(403, code, 'This Gateway Key is not allowed to use that Provider.', headers, correlationId)
+    case 'model_not_allowed': return anthropicMessagesErrorResponse(403, code, 'This Gateway Key is not allowed to request that model.', headers, correlationId)
+  }
+}
+
+async function qualifyGlobalResponse(response: Response, providerId: string, requestedModel: string, surface: 'chat' | 'responses' | 'messages'): Promise<Response> {
+  const headers = new Headers(response.headers)
+  if (headers.get('content-type')?.includes('text/event-stream') && response.body !== null) {
+    return new Response(response.body.pipeThrough(qualifySseModels(providerId, requestedModel, surface)), { status: response.status, headers })
+  }
+  return new Response(qualifyJsonModel(await response.text(), providerId, requestedModel, surface), { status: response.status, headers })
+}
+
+function qualifySseModels(providerId: string, requestedModel: string, surface: 'chat' | 'responses' | 'messages'): TransformStream<Uint8Array, Uint8Array> {
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+  let pending = ''
+  return new TransformStream({
+    transform(chunk, controller) {
+      pending += decoder.decode(chunk, { stream: true })
+      const lines = pending.split('\n')
+      pending = lines.pop() ?? ''
+      for (const line of lines) controller.enqueue(encoder.encode(`${qualifySseLine(line, providerId, requestedModel, surface)}\n`))
+    },
+    flush(controller) {
+      pending += decoder.decode()
+      if (pending !== '') controller.enqueue(encoder.encode(qualifySseLine(pending, providerId, requestedModel, surface)))
+    },
+  })
+}
+
+function qualifySseLine(line: string, providerId: string, requestedModel: string, surface: 'chat' | 'responses' | 'messages'): string {
+  if (!line.startsWith('data:')) return line
+  const data = line.slice(5).trimStart()
+  if (data === '[DONE]') return line
+  return `data: ${qualifyJsonModel(data, providerId, requestedModel, surface)}`
+}
+
+function qualifyJsonModel(body: string, providerId: string, requestedModel: string, surface: 'chat' | 'responses' | 'messages'): string {
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>
+    if (surface === 'responses' && typeof parsed.response === 'object' && parsed.response !== null) {
+      const nested = parsed.response as Record<string, unknown>
+      return JSON.stringify({ ...parsed, response: { ...nested, model: qualifiedModel(providerId, nested.model, requestedModel) } })
+    }
+    if (surface === 'responses' && !('model' in parsed) && typeof parsed.type === 'string') return body
+    if (surface === 'messages' && typeof parsed.message === 'object' && parsed.message !== null) {
+      const message = parsed.message as Record<string, unknown>
+      return JSON.stringify({ ...parsed, message: { ...message, model: qualifiedModel(providerId, message.model, requestedModel) } })
+    }
+    if (surface === 'messages' && !('model' in parsed)) return body
+    return JSON.stringify({ ...parsed, model: qualifiedModel(providerId, parsed.model, requestedModel) })
+  } catch {
+    return body
+  }
+}
+
+function qualifiedModel(providerId: string, upstream: unknown, requestedModel: string): string {
+  const upstreamModel = typeof upstream === 'string' && upstream !== '' ? upstream : requestedModel.slice(requestedModel.indexOf('/') + 1)
+  return `${providerId}/${upstreamModel}`
+}
+
 async function forwardGeneration(options: {
   request: Request
   providerId: string
@@ -342,6 +547,8 @@ async function forwardGeneration(options: {
   requestActivity?: InferenceActivity
   metrics?: MetricsCollector
   usageService?: UsageService | undefined
+  /** Authorization already captured by a global Qualified Model admission decision. */
+  authorization?: Extract<InferenceAuthorization, { readonly ok: true }>
 }): Promise<Response> {
   const {
     request,
@@ -398,7 +605,7 @@ async function forwardGeneration(options: {
   }
 
   const token = bearerToken(request.headers)
-  const authorization = await gatewayKeys.authorizeInference(providerId, envelope.model, token)
+  const authorization = options.authorization ?? await gatewayKeys.authorizeInference(providerId, envelope.model, token)
   if (!authorization.ok) {
     const refusal = authorizationRefusal(authorization)
     return error(refusal.status, responseHeaders, refusal, correlationId)
@@ -450,6 +657,7 @@ async function forwardGeneration(options: {
     providerId,
     model: envelope.model,
     gatewayKeyId: authorization.keyId,
+    gatewayKeyName: authorization.keyName,
   }) ?? null
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -887,6 +1095,8 @@ async function forwardAnthropicMessages(options: {
   requestActivity?: InferenceActivity
   metrics?: MetricsCollector
   usageService?: UsageService | undefined
+  /** Authorization already captured by a global Qualified Model admission decision. */
+  authorization?: Extract<InferenceAuthorization, { readonly ok: true }>
 }): Promise<Response> {
   const {
     request,
@@ -957,7 +1167,7 @@ async function forwardAnthropicMessages(options: {
     }
 
     const token = bearerToken(request.headers)
-    const authorization = await options.gatewayKeys.authorizeInference(providerId, envelope.model, token)
+    const authorization = options.authorization ?? await options.gatewayKeys.authorizeInference(providerId, envelope.model, token)
     if (!authorization.ok) {
       const refusal = authorizationRefusal(authorization)
       return anthropicMessagesErrorResponse(
@@ -1008,6 +1218,7 @@ async function forwardAnthropicMessages(options: {
       providerId,
       model: envelope.model,
       gatewayKeyId: authorization.keyId,
+      gatewayKeyName: authorization.keyName,
     }) ?? null
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -2080,15 +2291,6 @@ function errorType(status: number): string {
   if (status === 429) return 'rate_limit_error'
   if (status >= 500) return 'api_error'
   return 'invalid_request_error'
-}
-
-/** Elysia exposes headers as a string record; only the bearer is read. */
-function bearerToken(headers: Headers): string | null {
-  const value = headers.get('authorization')
-  if (value === null) return null
-
-  const match = /^Bearer (.+)$/i.exec(value.trim())
-  return match === null ? null : match[1]!.trim()
 }
 
 function headersOf(request: Request): Readonly<Record<string, string>> {

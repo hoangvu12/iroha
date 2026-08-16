@@ -24,6 +24,7 @@ interface RequestEventDto {
   providerId: string
   model: string
   gatewayKeyId: string | null
+  gatewayKeyName: string | null
   keyId: string | null
   status: number
   outcome: 'success' | 'failure'
@@ -166,6 +167,7 @@ describe('private request history and audit', () => {
       expect(event.providerId).toBe(connection.id)
       expect(event.model).toBe(MODEL)
       expect(event.gatewayKeyId).toBe(keyId)
+      expect(event.gatewayKeyName).toBe(GATEWAY_KEY_NAME)
       expect(event.keyId).toBe(upstreamKeyId)
       expect(event.outcome).toBe('success')
       expect(event.status).toBe(200)
@@ -175,6 +177,15 @@ describe('private request history and audit', () => {
       expect(event.errorCode).toBeNull()
       const raw = await response.text()
       expect(raw).not.toContain('sk-upstream-secret-value-for-tests')
+    })
+
+    test('retains the Gateway Key ID and name snapshot after the revoked key is deleted', async () => {
+      expect((await chat(keySecret, { model: MODEL, messages: [{ role: 'user', content: 'retain identity' }] })).status).toBe(200)
+      expect((await iroha.fetch(`/api/v1/admin/gateway-keys/${keyId}/revoke`, { method: 'POST', csrf })).status).toBe(200)
+      expect((await iroha.fetch(`/api/v1/admin/gateway-keys/${keyId}`, { method: 'DELETE', csrf })).status).toBe(204)
+
+      const body = (await (await iroha.fetch('/api/v1/admin/requests')).json()) as { events: RequestEventDto[] }
+      expect(body.events[0]).toMatchObject({ gatewayKeyId: keyId, gatewayKeyName: GATEWAY_KEY_NAME })
     })
 
     test('captures the retry trail across multiple Upstream Keys', async () => {

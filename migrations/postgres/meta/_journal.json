@@ -113,6 +113,27 @@
       "when": 1786904708430,
       "tag": "0015_drop_obsolete_anthropic_path_constraint",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786906641898,
+      "tag": "0016_careful_sphinx",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786907287430,
+      "tag": "0017_living_wolfsbane",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786907858759,
+      "tag": "0018_plain_vampiro",
+      "breakpoints": true
     }
   ]
 }

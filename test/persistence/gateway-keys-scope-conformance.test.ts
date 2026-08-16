@@ -37,6 +37,38 @@ for (const engine of availableEngines) {
       expect(created.ok).toBe(true)
     })
 
+    test('persists unrestricted access without requiring a Provider', async () => {
+      const created = await registry.create({ name: 'Future Providers', access: { mode: 'all' } })
+
+      expect(created.ok).toBe(true)
+      if (!created.ok) throw new Error('expected unrestricted key creation')
+      expect(created.value.key.access).toEqual({ mode: 'all' })
+      expect((await database.gatewayKeys.get(created.value.key.id))?.access).toEqual({ mode: 'all' })
+    })
+
+    test('atomically compares and increments the edit revision', async () => {
+      const created = await registry.create({ name: 'Before', access: { mode: 'all' } })
+      if (!created.ok) throw new Error('expected unrestricted key creation')
+      const id = created.value.key.id
+
+      const saved = await database.gatewayKeys.updateActive(
+        id,
+        1,
+        { name: 'After', access: { mode: 'selected', providers: [] }, scope: [], corsOrigins: ['https://app.example'] },
+        clock.now(),
+      )
+      expect(saved).toMatchObject({ name: 'After', revision: 2, access: { mode: 'selected', providers: [] } })
+
+      const stale = await database.gatewayKeys.updateActive(
+        id,
+        1,
+        { name: 'Stale', access: { mode: 'all' }, scope: [], corsOrigins: [] },
+        clock.now(),
+      )
+      expect(stale).toBeNull()
+      expect(await database.gatewayKeys.get(id)).toMatchObject({ name: 'After', revision: 2 })
+    })
+
     test('rejects a scope entry that names an unknown Provider', async () => {
       const created = await registry.create({
         name: 'Unknown key',

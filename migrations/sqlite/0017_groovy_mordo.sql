@@ -1,0 +1,1 @@
+ALTER TABLE `gateway_keys` ADD `revision` integer DEFAULT 1 NOT NULL;

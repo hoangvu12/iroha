@@ -410,7 +410,7 @@ describe('CORS behavior for inference', () => {
     if (keyResponse.status !== 201) {
       throw new Error(`Key create failed: ${keyResponse.status}: ${await keyResponse.text()}`)
     }
-    const key = (await keyResponse.json()) as { id: string; secret: string }
+    const key = (await keyResponse.json()) as { id: string; secret: string; revision: number; access: { mode: 'selected'; providers: unknown[] } }
     secret = key.secret
 
     const response = await iroha.fetch(path, {
@@ -428,6 +428,27 @@ describe('CORS behavior for inference', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('access-control-allow-origin')).toBe('https://browser.example')
+
+    const edited = await iroha.fetch(`/api/v1/admin/gateway-keys/${key.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ revision: key.revision, name: 'Browser app', access: key.access, corsOrigins: ['https://new-browser.example'] }),
+      csrf,
+    })
+    expect(edited.status).toBe(200)
+    const oldOrigin = await iroha.fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}`, origin: 'https://browser.example' },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }] }),
+    })
+    expect(oldOrigin.status).toBe(403)
+    const newOrigin = await iroha.fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}`, origin: 'https://new-browser.example' },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }] }),
+    })
+    expect(newOrigin.status).toBe(200)
+    expect(newOrigin.headers.get('access-control-allow-origin')).toBe('https://new-browser.example')
   })
 
   test('a CORS preflight replies with the allow-listed origin and the right methods', async () => {

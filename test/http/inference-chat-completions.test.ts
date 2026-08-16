@@ -72,6 +72,17 @@ describe('provider-scoped Chat Completions', () => {
     return (await response.json()) as { secret: string }
   }
 
+  const createAllKey = async (): Promise<{ id: string; secret: string; revision: number }> => {
+    const response = await iroha.fetch('/api/v1/admin/gateway-keys', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'All Providers', access: { mode: 'all' } }),
+      csrf,
+    })
+    if (response.status !== 201) throw new Error(`All-key create failed: ${await response.text()}`)
+    return (await response.json()) as { id: string; secret: string; revision: number }
+  }
+
   const connect = async (fields: Record<string, unknown> = {}, scope: unknown[] | null = null) => {
     connection = await createConnection(fields)
     path = `/providers/${connection.id}/v1/chat/completions`
@@ -101,6 +112,48 @@ describe('provider-scoped Chat Completions', () => {
   })
 
   describe('Gateway Key authentication and scope', () => {
+    test('unrestricted access reaches a later Provider and an unknown catalog model', async () => {
+      const key = await createAllKey()
+      connection = await createConnection()
+      path = `/providers/${connection.id}/v1/chat/completions`
+
+      const response = await chat(key.secret, completionBody('vendor/future-model'))
+
+      expect(response.status).toBe(200)
+      expect((await response.json()) as { model: string }).toMatchObject({ model: 'vendor/future-model' })
+      expect(JSON.parse(upstream.calls[0]?.body ?? '{}')).toMatchObject({ model: 'vendor/future-model' })
+    })
+
+    test('an edit affects new Requests without interrupting an admitted Request', async () => {
+      const key = await createAllKey()
+      connection = await createConnection()
+      path = `/providers/${connection.id}/v1/chat/completions`
+      let release!: () => void
+      upstream.respondWith(async () => {
+        await new Promise<void>((resolve) => { release = resolve })
+        return Response.json({
+          id: 'chatcmpl-admitted', object: 'chat.completion', created: 1,
+          model: MODEL, choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        })
+      })
+
+      const admitted = chat(key.secret, completionBody())
+      while (upstream.calls.length === 0) await Promise.resolve()
+      const edited = await iroha.fetch(`/api/v1/admin/gateway-keys/${key.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision: key.revision, name: 'Restricted', access: { mode: 'selected', providers: [] }, corsOrigins: [] }),
+        csrf,
+      })
+      expect(edited.status).toBe(200)
+
+      release()
+      expect((await admitted).status).toBe(200)
+      expect((await chat(key.secret, completionBody())).status).toBe(403)
+      expect(upstream.calls).toHaveLength(1)
+    })
+
     test('accepts a valid scoped key', async () => {
       const key = await connect()
       const response = await chat(key.secret, completionBody())

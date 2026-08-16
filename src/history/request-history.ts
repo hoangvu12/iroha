@@ -79,6 +79,7 @@ export interface InFlightRequest {
   readonly providerId: string
   readonly model: string
   readonly gatewayKeyId: string | null
+  readonly gatewayKeyName?: string | null
   readonly startedAt: Date
   startAttempt(input: {
     readonly attemptNumber: number
@@ -140,6 +141,7 @@ export class RequestHistoryService {
     readonly providerId: string
     readonly model: string
     readonly gatewayKeyId: string | null
+    readonly gatewayKeyName?: string | null
   }): InFlightRequest {
     const startedAt = this.#clock.now()
     const repository = this.#database.requestHistory
@@ -160,6 +162,7 @@ export class RequestHistoryService {
         providerId: input.providerId,
         model: input.model,
         gatewayKeyId: input.gatewayKeyId,
+        gatewayKeyName: input.gatewayKeyName ?? null,
         keyId: null,
         status: 0,
         outcome: 'failure',
@@ -185,6 +188,7 @@ export class RequestHistoryService {
       providerId: input.providerId,
       model: input.model,
       gatewayKeyId: input.gatewayKeyId,
+      gatewayKeyName: input.gatewayKeyName ?? null,
       startedAt,
 
       async startAttempt({ attemptNumber, keyId, at }) {
@@ -234,6 +238,7 @@ export class RequestHistoryService {
           providerId: input.providerId,
           model: input.model,
           gatewayKeyId: input.gatewayKeyId,
+          gatewayKeyName: input.gatewayKeyName ?? null,
           keyId: outcome.keyId ?? null,
           status: outcome.status,
           outcome: outcome.outcome,
@@ -263,6 +268,7 @@ export class RequestHistoryService {
           providerId: input.providerId,
           model: input.model,
           gatewayKeyId: input.gatewayKeyId,
+          gatewayKeyName: input.gatewayKeyName ?? null,
           keyId: null,
           status: 503,
           outcome: 'failure',
@@ -455,6 +461,7 @@ function noopRecorder(id: string): InFlightRequest {
     providerId: '',
     model: '',
     gatewayKeyId: null,
+    gatewayKeyName: null,
     startedAt: new Date(0),
     async startAttempt({ attemptNumber, keyId, at }) {
       return noopAttempt({ attemptNumber, keyId, startedAt: at })

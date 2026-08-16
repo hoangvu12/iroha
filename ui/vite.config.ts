@@ -28,6 +28,7 @@ const proxyToIroha: ProxyOptions = {
 }
 
 export default defineConfig(({ command }) => ({
+  envDir: '..',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },

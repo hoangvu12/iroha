@@ -1,5 +1,4 @@
 import { join } from 'node:path'
-import { BrandLogoService } from '../brand-logos/index.ts'
 import {
   ConfigurationError,
   loadConfiguration,
@@ -35,13 +34,6 @@ import { MetricsCollector, MetricsSettingsService } from '../metrics/metrics.ts'
 import type { Clock } from './clock.ts'
 
 const DEFAULT_FRONTEND_DIRECTORY = join(import.meta.dir, '../../ui/dist')
-
-/**
- * Where cached logo.dev images live on disk. Lives next to the SQLite file
- * the way the database itself does, so a single volume carries every piece
- * of state that has to survive a redeploy.
- */
-const DEFAULT_BRAND_LOGO_CACHE_DIRECTORY = './data/logos'
 
 export interface StartOptions {
   readonly environment?: EnvironmentSource
@@ -203,11 +195,6 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
 
   const metrics = new MetricsCollector()
   const metricsSettings = new MetricsSettingsService(database)
-  const brandLogos = new BrandLogoService({
-    token: configuration.logoDevToken,
-    cacheDirectory: DEFAULT_BRAND_LOGO_CACHE_DIRECTORY,
-    templates: adapterRegistry.listProviderTemplates(),
-  })
   const createAppFn = options.appFactory ?? createApp
   const app = createAppFn({
     database,
@@ -225,7 +212,6 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     shutdown,
     metrics,
     metricsSettings,
-    brandLogos,
   })
 
   const server = app.listen({ hostname: configuration.host, port: configuration.port })

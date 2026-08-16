@@ -84,18 +84,17 @@ export function AppShell({ children }: AppShellProps) {
 
 function Brand() {
   return (
-    <div className="border-sidebar-border flex h-12 items-center gap-2.5 border-b px-4">
-      <span
-        aria-hidden
-        className="relative inline-flex size-6 items-center justify-center rounded-full bg-[#1A1A1A]"
+    <div className="border-sidebar-border border-b p-2">
+      <Link
+        to="/"
+        aria-label="Go to overview"
+        className="focus-visible:ring-sidebar-ring block overflow-hidden rounded-lg focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
       >
-        <span className="absolute top-[7px] flex gap-[3px]">
-          <span className="size-[3px] rounded-full bg-white" />
-          <span className="size-[3px] rounded-full bg-white" />
-        </span>
-      </span>
-      <Link to="/" className="text-sidebar-foreground text-sm font-semibold tracking-tight">
-        Iroha
+        <img
+          src="/brand/iroha-sidebar-banner.jpg"
+          alt="Kazama Iroha resting beneath a tree"
+          className="h-20 w-full object-cover"
+        />
       </Link>
     </div>
   )

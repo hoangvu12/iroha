@@ -48,6 +48,7 @@ export interface CreatedGatewayKey {
 /** One Provider a calling Gateway Key is permitted to use. */
 export interface DirectoryProvider {
   readonly id: string
+  readonly handle: string
   readonly displayName: string
   /** The scoped inference URL relative to the installation. */
   readonly url: string
@@ -331,8 +332,9 @@ export class GatewayKeyRegistry {
         : entry.models ?? []
       providers.push({
         id: provider.id,
+        handle: provider.handle,
         displayName: provider.displayName,
-        url: `/providers/${provider.id}/v1`,
+        url: `/providers/${provider.handle}/v1`,
         // A scope allowing every model has nothing to enumerate until the model
         // catalog exists; exact scope models are returned verbatim.
         models,

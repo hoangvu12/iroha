@@ -7,6 +7,7 @@ export interface DirectoryRoutesOptions {
 
 const directoryProviderResponse = t.Object({
   id: t.String(),
+  handle: t.String(),
   displayName: t.String(),
   url: t.String(),
   models: t.Array(t.String()),
@@ -58,6 +59,7 @@ type DirectoryProviderDto = typeof directoryProviderResponse.static
 function toDirectoryProviderDto(provider: DirectoryProvider): DirectoryProviderDto {
   return {
     id: provider.id,
+    handle: provider.handle,
     displayName: provider.displayName,
     url: provider.url,
     models: [...provider.models],

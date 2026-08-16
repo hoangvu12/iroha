@@ -149,10 +149,12 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
 
   return new Elysia({ name: 'iroha/inference', prefix: '/providers' })
     .options(
-      '/:providerId/*',
+      '/:providerHandle/*',
       async ({ params, request }) => {
+        const resolved = await providers.resolveHandle(params.providerHandle)
+        if (!resolved.ok) return providerHandleError(resolved.code)
         return handleCors({
-          providerId: params.providerId,
+          providerId: resolved.providerId,
           gatewayKeys,
           database: options.database ?? null,
           transport,
@@ -169,7 +171,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       },
     )
     .get(
-      '/:providerId/v1/models',
+      '/:providerHandle/v1/models',
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
@@ -177,8 +179,11 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         const correlationId = newRequestId()
         const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
 
+        const resolved = await providers.resolveHandle(params.providerHandle)
+        if (!resolved.ok) return providerHandleError(resolved.code, correlationId)
+
         const cors = await buildCorsHeaders({
-          providerId: params.providerId,
+          providerId: resolved.providerId,
           gatewayKeys,
           database: options.database ?? null,
           transport,
@@ -187,13 +192,13 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         const responseHeaders = { ...baseHeaders, ...cors }
 
         const token = bearerToken(request.headers)
-        const authorization = await gatewayKeys.authorizeProvider(params.providerId, token)
+        const authorization = await gatewayKeys.authorizeProvider(resolved.providerId, token)
         if (!authorization.ok) {
           const refusal = authorizationRefusal(authorization)
           return error(refusal.status, responseHeaders, refusal, correlationId)
         }
 
-        const result = await modelCatalog.listForScope(params.providerId, authorization.models)
+        const result = await modelCatalog.listForScope(resolved.providerId, authorization.models)
         if (!result.ok) {
           const refusal = resolutionRefusal(result.failure)
           return error(refusal.status, responseHeaders, refusal, correlationId)
@@ -220,13 +225,18 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       },
     )
     .post(
-      '/:providerId/v1/chat/completions',
+      '/:providerHandle/v1/chat/completions',
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
+        const resolved = await providers.resolveHandle(params.providerHandle)
+        if (!resolved.ok) {
+          activity?.finish()
+          return providerHandleError(resolved.code)
+        }
         return await forwardGeneration({
           request,
-          providerId: params.providerId,
+          providerId: resolved.providerId,
           upstreamPath: '/chat/completions',
           gatewayKeys,
           providers,
@@ -254,13 +264,18 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       },
     )
     .post(
-      '/:providerId/v1/responses',
+      '/:providerHandle/v1/responses',
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
+        const resolved = await providers.resolveHandle(params.providerHandle)
+        if (!resolved.ok) {
+          activity?.finish()
+          return providerHandleError(resolved.code)
+        }
         return await forwardGeneration({
           request,
-          providerId: params.providerId,
+          providerId: resolved.providerId,
           upstreamPath: '/responses',
           gatewayKeys,
           providers,
@@ -288,13 +303,18 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       },
     )
     .post(
-      '/:providerId/v1/messages',
+      '/:providerHandle/v1/messages',
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
+        const resolved = await providers.resolveHandle(params.providerHandle)
+        if (!resolved.ok) {
+          activity?.finish()
+          return providerHandleError(resolved.code)
+        }
         return await forwardAnthropicMessages({
           request,
-          providerId: params.providerId,
+          providerId: resolved.providerId,
           gatewayKeys,
           providers,
           modelCatalog,
@@ -2027,8 +2047,8 @@ function authorizationRefusal(
     case 'connection_not_allowed':
       return {
         status: 403,
-        code: 'connection_not_allowed',
-        message: 'This Gateway Key is not allowed to use that Provider Connection.',
+        code: 'provider_not_allowed',
+        message: 'This Gateway Key is not allowed to use that Provider.',
       }
     case 'model_not_allowed':
       return {
@@ -2074,6 +2094,16 @@ function resolutionRefusal(failure: { readonly code: string }): Refusal {
         message: 'The request could not be completed.',
       }
   }
+}
+
+function providerHandleError(
+  code: 'invalid_provider_handle' | 'provider_not_allowed',
+  correlationId = newRequestId(),
+): Response {
+  const refusal = code === 'invalid_provider_handle'
+    ? { status: 400, code, message: 'The Provider Handle is invalid.' }
+    : { status: 403, code, message: 'This Gateway Key is not allowed to use that Provider.' }
+  return error(refusal.status, { 'content-type': 'application/json', 'x-request-id': correlationId }, refusal, correlationId)
 }
 
 /**

@@ -32,22 +32,15 @@ import {
 } from '@/components/key-health'
 import { fetchBackgroundJobs, type BackgroundJobView } from '@/lib/background'
 import { fetchProviders, type ProviderView } from '@/lib/providers'
-import { fetchRequests, type RequestEventView } from '@/lib/requests'
+import {
+  fetchRequestOverview,
+  type OverviewRange,
+  type RequestOverviewView,
+} from '@/lib/requests'
 import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 interface OverviewProps {
   readonly csrfToken: string
-}
-
-const HOUR_MS = 60 * 60 * 1000
-const BUCKET_HOURS = 12
-
-interface HourBucket {
-  date: Date
-  status2xx: number
-  status4xx: number
-  status5xx: number
-  latencies: number[]
 }
 
 interface VolumePoint {
@@ -95,24 +88,25 @@ interface SparklineBundle {
  */
 export function Overview(_props: OverviewProps) {
   const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
-  const [requests, setRequests] = useState<readonly RequestEventView[] | null>(null)
+  const [range, setRange] = useState<OverviewRange>('24h')
+  const [overview, setOverview] = useState<RequestOverviewView | null>(null)
   const [jobs, setJobs] = useState<readonly BackgroundJobView[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const reload = useCallback(async () => {
     try {
       const [list, page, jobList] = await Promise.all([
         fetchProviders(),
-        fetchRequests({}, { limit: 200 }),
+        fetchRequestOverview(range),
         fetchBackgroundJobs(),
       ])
       setProviders(list)
-      setRequests(page.events)
+      setOverview(page)
       setJobs(jobList)
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Overview could not be loaded.')
     }
-  }, [])
+  }, [range])
 
   useEffect(() => {
     void reload()
@@ -121,23 +115,21 @@ export function Overview(_props: OverviewProps) {
   const activeProviders = (providers ?? []).filter((p) => !p.archived)
   const allKeys = activeProviders.flatMap((p) => p.keys)
   const attentionCount = allKeys.filter(keyNeedsAttention).length
-  const requestCount = requests?.length ?? null
-  const metricsLoading = providers === null || requests === null
-  const recentFailures = (requests ?? [])
-    .filter((event) => event.outcome === 'failure')
-    .slice(0, 5)
+  const requestCount = overview?.requestCount ?? null
+  const metricsLoading = providers === null || overview === null
+  const recentFailures = overview?.recentFailures ?? []
   const failedJobs = (jobs ?? []).filter(
     (job) => job.lastOutcome === 'failure' || job.status === 'failed',
   )
 
   const { volumeData, latencyData, topModels, sparklines } = useMemo(
-    () => buildChartData(requests ?? []),
-    [requests],
+    () => buildChartData(overview),
+    [overview],
   )
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader />
+      <PageHeader range={range} onRangeChange={setRange} />
 
       {error && (
         <Alert variant="destructive" role="alert">
@@ -158,19 +150,19 @@ export function Overview(_props: OverviewProps) {
       <div className="grid gap-4 md:grid-cols-2">
         <Card
           title="Request volume"
-          loading={requests === null}
+          loading={overview === null}
           rightSlot={
-            requests !== null && (
+            overview !== null && (
               <span className="text-muted-foreground text-xs">
-                {requests.length} in last {BUCKET_HOURS}h
+                {overview.requestCount} in {rangeLabel(range).toLowerCase()}
               </span>
             )
           }
         >
-          {requests === null ? (
+          {overview === null ? (
             <Skeleton className="h-32 w-full" />
           ) : volumeData.every((row) => row['2xx'] + row['4xx'] + row['5xx'] === 0) ? (
-            <EmptyChartPlaceholder label="No traffic in the last 12 hours" />
+            <EmptyChartPlaceholder label={`No traffic in ${rangeLabel(range).toLowerCase()}`} />
           ) : (
             <AreaChart data={volumeData} status="ready" aspectRatio="16 / 9">
               <Grid horizontal />
@@ -206,16 +198,16 @@ export function Overview(_props: OverviewProps) {
 
         <Card
           title="Latency"
-          loading={requests === null}
+          loading={overview === null}
           rightSlot={
-            requests !== null && (
+            overview !== null && (
               <span className="text-muted-foreground text-xs">
                 p50 · p95 · p99 (ms)
               </span>
             )
           }
         >
-          {requests === null ? (
+          {overview === null ? (
             <Skeleton className="h-32 w-full" />
           ) : latencyData.every((row) => row.p50 + row.p95 + row.p99 === 0) ? (
             <EmptyChartPlaceholder label="No latency samples yet" />
@@ -234,17 +226,17 @@ export function Overview(_props: OverviewProps) {
 
       <Card
         title="Top models"
-        loading={requests === null}
+        loading={overview === null}
         rightSlot={
-          requests !== null && (
-            <span className="text-muted-foreground text-xs">{requests.length} requests</span>
+          overview !== null && (
+            <span className="text-muted-foreground text-xs">{overview.requestCount} requests</span>
           )
         }
       >
-        {requests === null ? (
+        {overview === null ? (
           <Skeleton className="h-24 w-full" />
         ) : topModels.length === 0 ? (
-          <EmptyChartPlaceholder label="No traffic in the last 200 requests" />
+          <EmptyChartPlaceholder label={`No traffic in ${rangeLabel(range).toLowerCase()}`} />
         ) : (
           <TopModelsList models={topModels} />
         )}
@@ -253,7 +245,7 @@ export function Overview(_props: OverviewProps) {
       <div className="grid gap-4 md:grid-cols-2">
         <Card
           title="Recent failures"
-          loading={requests === null}
+          loading={overview === null}
           rightSlot={
             <StatefulButton
               variant="ghost"
@@ -266,13 +258,13 @@ export function Overview(_props: OverviewProps) {
             </StatefulButton>
           }
         >
-          {requests === null ? (
+          {overview === null ? (
             <Skeleton className="h-32 w-full" />
           ) : recentFailures.length === 0 ? (
             <EmptyState
               icon={CheckCircle2}
               title="Nothing has failed recently"
-              description="The last 200 requests returned without an error. New failures will surface here."
+              description={`No completed requests failed in ${rangeLabel(range).toLowerCase()}. New failures will surface here.`}
               compact
             />
           ) : (
@@ -347,7 +339,10 @@ interface KpiRowProps {
   readonly sparklines: SparklineBundle
 }
 
-function PageHeader() {
+function PageHeader({ range, onRangeChange }: {
+  readonly range: OverviewRange
+  readonly onRangeChange: (range: OverviewRange) => void
+}) {
   return (
     <div className="flex items-start justify-between gap-4">
       <div>
@@ -365,16 +360,20 @@ function PageHeader() {
           Filter
           <Kbd>R</Kbd>
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="text-muted-foreground font-normal"
-        >
+        <label className="border-input bg-background text-muted-foreground flex h-8 items-center gap-2 rounded-md border px-3 text-sm">
           <Calendar className="size-3.5" aria-hidden />
-          Last 24 hours
+          <select
+            aria-label="Overview time range"
+            className="bg-transparent outline-none"
+            value={range}
+            onChange={(event) => onRangeChange(event.target.value as OverviewRange)}
+          >
+            <option value="12h">Last 12 hours</option>
+            <option value="24h">Last 24 hours</option>
+            <option value="7d">Last 7 days</option>
+          </select>
           <ChevronDown className="size-3.5" aria-hidden />
-        </Button>
+        </label>
         <KbdZx />
       </div>
     </div>
@@ -560,79 +559,41 @@ function EmptyChartPlaceholder({ label }: { readonly label: string }) {
   )
 }
 
-function buildChartData(events: readonly RequestEventView[]): {
+function buildChartData(overview: RequestOverviewView | null): {
   readonly volumeData: VolumePoint[]
   readonly latencyData: LatencyPoint[]
   readonly topModels: TopModelPoint[]
   readonly sparklines: SparklineBundle
 } {
-  const now = Date.now()
-  const currentBucketStart = Math.floor(now / HOUR_MS) * HOUR_MS
-  const buckets: HourBucket[] = []
-  for (let i = BUCKET_HOURS - 1; i >= 0; i--) {
-    buckets.push({
-      date: new Date(currentBucketStart - i * HOUR_MS),
-      status2xx: 0,
-      status4xx: 0,
-      status5xx: 0,
-      latencies: [],
-    })
-  }
-
-  for (const event of events) {
-    const ts = new Date(event.occurredAt).getTime()
-    if (Number.isNaN(ts)) continue
-    const eventBucketStart = Math.floor(ts / HOUR_MS) * HOUR_MS
-    const offset = Math.floor((currentBucketStart - eventBucketStart) / HOUR_MS)
-    if (offset < 0 || offset >= BUCKET_HOURS) continue
-    const bucket = buckets[BUCKET_HOURS - 1 - offset]
-    if (!bucket) continue
-    const status = event.status
-    if (status >= 200 && status < 300) {
-      bucket.status2xx++
-    } else if (status >= 400 && status < 500) {
-      bucket.status4xx++
-    } else if (status >= 500) {
-      bucket.status5xx++
-    }
-    bucket.latencies.push(event.latencyMs)
-  }
-
-  const volumeData: VolumePoint[] = buckets.map((b) => ({
-    date: b.date,
-    '2xx': b.status2xx,
-    '4xx': b.status4xx,
-    '5xx': b.status5xx,
+  const buckets = overview?.buckets ?? []
+  const volumeData: VolumePoint[] = buckets.map((bucket) => ({
+    date: new Date(bucket.at),
+    '2xx': bucket.status2xx,
+    '4xx': bucket.status4xx,
+    '5xx': bucket.status5xx,
   }))
 
-  const latencyData: LatencyPoint[] = buckets.map((b) => ({
-    date: b.date,
-    p50: percentile(b.latencies, 50),
-    p95: percentile(b.latencies, 95),
-    p99: percentile(b.latencies, 99),
+  const latencyData: LatencyPoint[] = buckets.map((bucket) => ({
+    date: new Date(bucket.at),
+    p50: bucket.p50,
+    p95: bucket.p95,
+    p99: bucket.p99,
   }))
 
-  const topModels = buildTopModels(events)
+  const topModels = [...(overview?.topModels ?? [])]
 
   const sparklines: SparklineBundle = {
-    providers: buckets.map((b) => b.status2xx + b.status4xx + b.status5xx),
-    keys: buckets.map((b) => b.status2xx),
-    attention: buckets.map((b) => b.status4xx + b.status5xx),
-    requests: buckets.map((b) => b.status2xx + b.status4xx + b.status5xx),
+    providers: buckets.map((bucket) => bucket.status2xx + bucket.status4xx + bucket.status5xx),
+    keys: buckets.map((bucket) => bucket.status2xx),
+    attention: buckets.map((bucket) => bucket.status4xx + bucket.status5xx),
+    requests: buckets.map((bucket) => bucket.status2xx + bucket.status4xx + bucket.status5xx),
   }
 
   return { volumeData, latencyData, topModels, sparklines }
 }
 
-function buildTopModels(events: readonly RequestEventView[]): TopModelPoint[] {
-  const counts = new Map<string, number>()
-  for (const event of events) {
-    counts.set(event.model, (counts.get(event.model) ?? 0) + 1)
-  }
-  return Array.from(counts.entries())
-    .map(([model, count]) => ({ model, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5)
+function rangeLabel(range: OverviewRange): string {
+  return range === '12h' ? 'Last 12 hours' : range === '24h' ? 'Last 24 hours' : 'Last 7 days'
 }
 
 function TopModelsList({ models }: { readonly models: readonly TopModelPoint[] }) {
@@ -654,18 +615,6 @@ function TopModelsList({ models }: { readonly models: readonly TopModelPoint[] }
       ))}
     </ul>
   )
-}
-
-function percentile(values: readonly number[], p: number): number {
-  if (values.length === 0) return 0
-  const sorted = [...values].sort((a, b) => a - b)
-  const rank = (p / 100) * (sorted.length - 1)
-  const lower = Math.floor(rank)
-  const upper = Math.ceil(rank)
-  const lowerValue = sorted[lower] ?? 0
-  const upperValue = sorted[upper] ?? 0
-  if (lower === upper) return lowerValue
-  return lowerValue + (upperValue - lowerValue) * (rank - lower)
 }
 
 function countByHealth(

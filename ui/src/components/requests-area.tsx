@@ -419,6 +419,11 @@ function RequestDetail({ detail }: { readonly detail: RequestEventDetail }) {
         <Detail label="Time">{formatTime(event.occurredAt)}</Detail>
         <Detail label="Provider">{event.providerId}</Detail>
         <Detail label="Model">{event.model}</Detail>
+        {detail.recovered && (
+          <Detail label="Recovery">
+            Recovered after {detail.attemptCount - 1} failed attempt{detail.attemptCount === 2 ? '' : 's'}
+          </Detail>
+        )}
         <Detail label="Status">
           {event.status} ({event.outcome}
           {event.errorCode === null ? '' : ` · ${event.errorCode}`})

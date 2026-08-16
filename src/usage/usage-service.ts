@@ -99,6 +99,8 @@ export interface UsageServiceOptions {
    * cadence. Defaults to 5 seconds.
    */
   readonly failureBackoffSeconds?: number
+  /** Maximum simultaneous per-Key entitlement reads for one Provider. */
+  readonly pollingConcurrency?: number
 }
 
 const DEFAULT_POLL_INTERVAL_SECONDS = 60
@@ -148,6 +150,7 @@ export class UsageService {
   readonly #clock: Clock
   readonly #pollIntervalMs: number
   readonly #failureBackoffMs: number
+  readonly #pollingConcurrency: number
   /** Tracks consecutive failures per connection to back the failure interval up. */
   readonly #failureStreak = new Map<string, number>()
 
@@ -159,6 +162,7 @@ export class UsageService {
     this.#clock = options.clock ?? systemClock
     this.#pollIntervalMs = (options.pollIntervalSeconds ?? DEFAULT_POLL_INTERVAL_SECONDS) * 1000
     this.#failureBackoffMs = (options.failureBackoffSeconds ?? DEFAULT_FAILURE_BACKOFF_SECONDS) * 1000
+    this.#pollingConcurrency = Math.max(1, Math.floor(options.pollingConcurrency ?? 4))
   }
 
   /**
@@ -220,8 +224,10 @@ export class UsageService {
     const adapter = this.#adapterFor(connection)
     const visibility = adapter.visibility
 
-    const polls = await Promise.all(
-      targets.value.map(async (target) => {
+    const polls = await mapWithConcurrency(
+      targets.value,
+      this.#pollingConcurrency,
+      async (target) => {
         const poll = await adapter.read({
           baseUrl: target.baseUrl,
           allowInsecureHttp: target.allowInsecureHttp,
@@ -229,7 +235,7 @@ export class UsageService {
           signal: null,
         })
         return { target, poll }
-      }),
+      },
     )
 
     const prior = await this.#database.usage.get(providerId)
@@ -272,30 +278,30 @@ export class UsageService {
     return next
   }
 
-  /** Tracks an in-flight post-inference refresh per Provider so concurrent request successes collapse into one poll. */
+  /** Tracks one in-flight capacity-failure refresh per Provider. */
   readonly #inflightRefresh = new Map<string, Promise<void>>()
 
   /**
-   * Called by the inference path after a successful request. Refreshes the
-   * Provider's usage snapshot right away so the Owner sees fresh capacity
+   * Called after a capacity-related inference failure. Refreshes the
+   * Provider's usage snapshot so routing can reconcile fresh capacity
    * without waiting for the next scheduled poll — but only when the Provider
    * actually has a Usage Adapter implemented. A Provider whose template
    * resolves to the reactive-only generic adapter has no usage to read, so
-   * the call is a no-op and a request success never triggers a pointless
+   * the call is a no-op and never triggers a pointless
    * poll.
    *
-   * Concurrent successes for one Provider collapse into a single poll: the
+   * Concurrent failure signals for one Provider collapse into a single poll: the
    * first caller runs the refresh and every caller after it awaits the same
    * in-flight promise, so a burst of requests cannot stack parallel polls
    * against the Provider's entitlement API.
    */
-  async refreshAfterInference(providerId: string): Promise<void> {
+  async refreshAfterCapacityFailure(providerId: string): Promise<void> {
     const existing = this.#inflightRefresh.get(providerId)
     if (existing !== undefined) {
       await existing
       return
     }
-    const run = this.#refreshAfterInferenceUnsafe(providerId)
+    const run = this.#refreshAfterCapacityFailureUnsafe(providerId)
     this.#inflightRefresh.set(providerId, run)
     try {
       await run
@@ -304,7 +310,7 @@ export class UsageService {
     }
   }
 
-  async #refreshAfterInferenceUnsafe(providerId: string): Promise<void> {
+  async #refreshAfterCapacityFailureUnsafe(providerId: string): Promise<void> {
     const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return
     const adapter = this.#adapterFor(connection)
@@ -759,4 +765,21 @@ function messageFor(failure: UsageFailure): string {
 
 function failed(failure: UsageServiceFailure): UsageServiceResult<never> {
   return { ok: false, failure }
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  visit: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (next < values.length) {
+      const index = next++
+      results[index] = await visit(values[index]!)
+    }
+  })
+  await Promise.all(workers)
+  return results
 }

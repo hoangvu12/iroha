@@ -5,4 +5,6 @@ export {
   type InFlightAttempt,
   type InFlightRequest,
   type RequestHistoryRetention,
+  type OverviewRange,
+  type RequestOverview,
 } from './request-history.ts'

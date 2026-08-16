@@ -228,6 +228,8 @@ export const usageSnapshots = pgTable('usage_snapshots', {
  */
 export const requestEvents = pgTable('request_events', {
   id: text('id').primaryKey(),
+  /** Internal lifecycle; only completed rows are Owner-visible. */
+  lifecycle: text('lifecycle').notNull().default('completed'),
   occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
   providerId: text('provider_id')
     .notNull()

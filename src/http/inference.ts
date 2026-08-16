@@ -718,9 +718,6 @@ async function forwardGeneration(options: {
         totalTokens: usage.totalTokens,
         errorCode: null,
       })
-      if (usageService !== undefined) {
-        void usageService.refreshAfterInference(providerId).catch(() => undefined)
-      }
       return new Response(lastUpstream.kind === 'stream' ? lastUpstream.stream : lastUpstream.body, {
         status: lastUpstream.status,
         headers: {
@@ -1299,9 +1296,6 @@ async function forwardAnthropicMessages(options: {
           totalTokens: null,
           errorCode: null,
         })
-        if (usageService !== undefined) {
-          void usageService.refreshAfterInference(providerId).catch(() => undefined)
-        }
         const responseHeadersWithContentType: Record<string, string> = {
           ...responseHeaders,
           'content-type': lastUpstream.headers['content-type'] ?? 'application/json',
@@ -1946,7 +1940,7 @@ async function reconcileInferenceCapacity(input: {
     60_000,
   )
   if (authoritative.length === 0) {
-    void input.usageService.refreshAfterInference(input.providerId).catch(() => undefined)
+    void input.usageService.refreshAfterCapacityFailure(input.providerId).catch(() => undefined)
     return false
   }
 

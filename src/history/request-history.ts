@@ -27,6 +27,25 @@ export interface RequestHistoryRetention {
 export const DEFAULT_RETENTION_DAYS = 30
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+const ABANDONED_REQUEST_AFTER_MS = 60 * 60 * 1000
+
+export type OverviewRange = '12h' | '24h' | '7d'
+
+export interface RequestOverview {
+  readonly range: OverviewRange
+  readonly requestCount: number
+  readonly buckets: readonly {
+    readonly at: Date
+    readonly status2xx: number
+    readonly status4xx: number
+    readonly status5xx: number
+    readonly p50: number
+    readonly p95: number
+    readonly p99: number
+  }[]
+  readonly topModels: readonly { readonly model: string; readonly count: number }[]
+  readonly recentFailures: readonly RequestEventRecord[]
+}
 
 /**
  * One attempt Iroha is about to make: which Upstream Key, when it started,
@@ -136,6 +155,7 @@ export class RequestHistoryService {
       if (!self.#retentionEnabled()) return
       const event: RequestEventRecord = {
         id: input.id,
+        lifecycle: 'in_progress',
         occurredAt: startedAt,
         providerId: input.providerId,
         model: input.model,
@@ -209,6 +229,7 @@ export class RequestHistoryService {
         if (!self.#retentionEnabled()) return
         const event: RequestEventRecord = {
           id: input.id,
+          lifecycle: 'completed',
           occurredAt: self.#clock.now(),
           providerId: input.providerId,
           model: input.model,
@@ -237,6 +258,7 @@ export class RequestHistoryService {
         if (eventWritten) return
         const event: RequestEventRecord = {
           id: input.id,
+          lifecycle: 'completed',
           occurredAt: at,
           providerId: input.providerId,
           model: input.model,
@@ -279,15 +301,65 @@ export class RequestHistoryService {
   }
 
   async listEvents(options?: RequestHistoryListOptions): Promise<RequestHistoryListResult> {
+    await this.#database.requestHistory.abandonRequests(
+      new Date(this.#clock.now().getTime() - ABANDONED_REQUEST_AFTER_MS),
+    )
     return await this.#database.requestHistory.listEvents(options)
   }
 
   async getEvent(id: string): Promise<RequestEventRecord | null> {
+    await this.#database.requestHistory.abandonRequests(
+      new Date(this.#clock.now().getTime() - ABANDONED_REQUEST_AFTER_MS),
+    )
     return await this.#database.requestHistory.getEvent(id)
   }
 
   async getAttempts(requestId: string): Promise<readonly RequestAttemptRecord[]> {
     return await this.#database.requestHistory.getAttempts(requestId)
+  }
+
+  async overview(range: OverviewRange): Promise<RequestOverview> {
+    const now = this.#clock.now()
+    const daily = range === '7d'
+    const bucketMs = daily ? MS_PER_DAY : 60 * 60 * 1000
+    const bucketCount = range === '12h' ? 12 : range === '24h' ? 24 : 7
+    const currentStart = Math.floor(now.getTime() / bucketMs) * bucketMs
+    const after = new Date(currentStart - (bucketCount - 1) * bucketMs)
+    const result = await this.listEvents({ filter: { after } })
+    const buckets = Array.from({ length: bucketCount }, (_, index) => ({
+      at: new Date(currentStart - (bucketCount - 1 - index) * bucketMs),
+      status2xx: 0,
+      status4xx: 0,
+      status5xx: 0,
+      latencies: [] as number[],
+    }))
+    const modelCounts = new Map<string, number>()
+    for (const event of result.events) {
+      const eventStart = Math.floor(event.occurredAt.getTime() / bucketMs) * bucketMs
+      const offset = Math.floor((currentStart - eventStart) / bucketMs)
+      const bucket = buckets[bucketCount - 1 - offset]
+      if (bucket === undefined) continue
+      if (event.status >= 200 && event.status < 300) bucket.status2xx++
+      else if (event.status >= 400 && event.status < 500) bucket.status4xx++
+      else if (event.status >= 500) bucket.status5xx++
+      bucket.latencies.push(event.latencyMs)
+      modelCounts.set(event.model, (modelCounts.get(event.model) ?? 0) + 1)
+    }
+    return {
+      range,
+      requestCount: result.total,
+      buckets: buckets.map(({ latencies, ...bucket }) => ({
+        ...bucket,
+        p50: percentile(latencies, 50),
+        p95: percentile(latencies, 95),
+        p99: percentile(latencies, 99),
+      })),
+      topModels: [...modelCounts.entries()]
+        .map(([model, count]) => ({ model, count }))
+        .sort((left, right) => right.count - left.count)
+        .slice(0, 5),
+      recentFailures: result.events.filter((event) => event.outcome === 'failure').slice(0, 5),
+    }
   }
 
   /**
@@ -364,6 +436,12 @@ export class RequestHistoryService {
     this.#cachedRetentionDays = DEFAULT_RETENTION_DAYS
     return { days: DEFAULT_RETENTION_DAYS }
   }
+}
+
+function percentile(values: readonly number[], requested: number): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((left, right) => left - right)
+  return sorted[Math.ceil((requested / 100) * sorted.length) - 1] ?? 0
 }
 
 function noopRecorder(id: string): InFlightRequest {

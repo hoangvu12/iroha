@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import type { RequestHistoryService } from '../history/index.ts'
+import type { OverviewRange, RequestHistoryService } from '../history/index.ts'
 import type { OwnerIdentity } from '../identity/index.ts'
 import type { RequestHistoryFilter, RequestHistoryListOptions } from '../persistence/index.ts'
 import { createOwnerGuard, type ManagementError } from './owner-guard.ts'
@@ -57,6 +57,30 @@ export function createRequestHistoryRoutes({ identity, requestHistory }: Request
       },
     )
     .get(
+      '/overview',
+      async ({ request, query, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
+        if ('response' in guardResult) {
+          return guardResult.response.status === 403
+            ? status(403, toErrorDto(guardResult.response.body))
+            : status(401, toErrorDto(guardResult.response.body))
+        }
+        const range = parseOverviewRange(query.range)
+        if (range === null) return status(400, managementError('invalid_request', 'range must be 12h, 24h, or 7d.'))
+        const overview = await requestHistory.overview(range)
+        return status(200, {
+          ...overview,
+          buckets: overview.buckets.map((bucket) => ({ ...bucket, at: bucket.at.toISOString() })),
+          topModels: overview.topModels.map((model) => ({ ...model })),
+          recentFailures: overview.recentFailures.map(toEventDto),
+        })
+      },
+      {
+        detail: { tags: ['Request History'], summary: 'Summarize completed requests for Overview' },
+        response: { 200: overviewResponse, 400: errorResponse, 401: errorResponse, 403: errorResponse },
+      },
+    )
+    .get(
       '/:id',
       async ({ request, params, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
@@ -75,6 +99,8 @@ export function createRequestHistoryRoutes({ identity, requestHistory }: Request
         return status(200, {
           event: toEventDto(event),
           attempts: attempts.map(toAttemptDto),
+          attemptCount: attempts.length,
+          recovered: event.outcome === 'success' && attempts.some((attempt) => attempt.outcome === 'failure'),
         })
       },
       {
@@ -149,6 +175,19 @@ const listResponse = t.Object({
 const detailResponse = t.Object({
   event: eventDto,
   attempts: t.Array(attemptDto),
+  attemptCount: t.Number(),
+  recovered: t.Boolean(),
+})
+
+const overviewResponse = t.Object({
+  range: t.Union([t.Literal('12h'), t.Literal('24h'), t.Literal('7d')]),
+  requestCount: t.Number(),
+  buckets: t.Array(t.Object({
+    at: t.String(), status2xx: t.Number(), status4xx: t.Number(), status5xx: t.Number(),
+    p50: t.Number(), p95: t.Number(), p99: t.Number(),
+  })),
+  topModels: t.Array(t.Object({ model: t.String(), count: t.Number() })),
+  recentFailures: t.Array(eventDto),
 })
 
 const errorResponse = t.Object({
@@ -289,4 +328,9 @@ function toErrorDto(body: ManagementError): ErrorDto {
           problems: problems.map((problem) => ({ field: problem.field, message: problem.message })),
         },
       }
+}
+
+function parseOverviewRange(value: unknown): OverviewRange | null {
+  if (value === undefined || value === '24h') return '24h'
+  return value === '12h' || value === '7d' ? value : null
 }

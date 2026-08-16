@@ -53,6 +53,26 @@ export interface RequestEventList {
 export interface RequestEventDetail {
   readonly event: RequestEventView
   readonly attempts: readonly RequestAttemptView[]
+  readonly attemptCount: number
+  readonly recovered: boolean
+}
+
+export type OverviewRange = '12h' | '24h' | '7d'
+
+export interface RequestOverviewView {
+  readonly range: OverviewRange
+  readonly requestCount: number
+  readonly buckets: readonly {
+    readonly at: string
+    readonly status2xx: number
+    readonly status4xx: number
+    readonly status5xx: number
+    readonly p50: number
+    readonly p95: number
+    readonly p99: number
+  }[]
+  readonly topModels: readonly { readonly model: string; readonly count: number }[]
+  readonly recentFailures: readonly RequestEventView[]
 }
 
 export interface RequestFilter {
@@ -111,6 +131,10 @@ export async function fetchRequestDetail(
   signal?: AbortSignal,
 ): Promise<RequestEventDetail> {
   return await request<RequestEventDetail>('GET', `/requests/${encodeURIComponent(id)}`, { signal })
+}
+
+export async function fetchRequestOverview(range: OverviewRange): Promise<RequestOverviewView> {
+  return await request<RequestOverviewView>('GET', `/requests/overview?range=${range}`)
 }
 
 async function request<T = unknown>(

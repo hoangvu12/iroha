@@ -652,6 +652,31 @@ describe('UsageService per-Upstream-Key polling', () => {
     expect(keyIds.length).toBe(2)
   })
 
+  test('bounds per-Provider key polling concurrency', async () => {
+    let active = 0
+    let maximum = 0
+    const boundedAdapter: UsageAdapter = {
+      visibility: 'authoritative',
+      async read() {
+        active += 1
+        maximum = Math.max(maximum, active)
+        await Promise.resolve()
+        active -= 1
+        return { ok: true, readings: [] }
+      },
+    }
+    const bounded = new UsageService({
+      database: fixture.opened.database,
+      cipher: createSecretCipher(TEST_MASTER_KEY),
+      adapter: boundedAdapter,
+      clock: fixture.clock,
+      pollingConcurrency: 1,
+    })
+    const result = await bounded.refresh(fixture.providerId)
+    expect(result.ok).toBe(true)
+    expect(maximum).toBe(1)
+  })
+
   test('provider-scoped readings from independent keys recover only the key with capacity', async () => {
     adapter.respondWith((request) => ({
       ok: true,
@@ -738,12 +763,12 @@ describe('UsageService input validation', () => {
   })
 })
 
-describe('UsageService post-inference refresh', () => {
+describe('UsageService capacity-failure refresh', () => {
   test('is a no-op for a Provider with no Usage Adapter implemented', async () => {
     const built = await buildFixture(createGenericUsageAdapter())
     const service = built.service
 
-    await service.refreshAfterInference(built.fixture.providerId)
+    await service.refreshAfterCapacityFailure(built.fixture.providerId)
 
     const stored = await built.fixture.opened.database.usage.get(built.fixture.providerId)
     expect(stored).toBeNull()
@@ -756,7 +781,7 @@ describe('UsageService post-inference refresh', () => {
     const built = await buildFixture(adapter)
     const service = built.service
 
-    await service.refreshAfterInference(built.fixture.providerId)
+    await service.refreshAfterCapacityFailure(built.fixture.providerId)
 
     const view = await service.view(built.fixture.providerId)
     if (!view.ok) throw new Error(view.failure.code)
@@ -768,7 +793,7 @@ describe('UsageService post-inference refresh', () => {
     await built.dispose()
   })
 
-  test('concurrent successes collapse into a single poll', async () => {
+  test('concurrent failure signals collapse into a single poll', async () => {
     const built = await buildFixture(createGenericUsageAdapter())
     const fixture = built.fixture
 
@@ -790,8 +815,8 @@ describe('UsageService post-inference refresh', () => {
       clock: fixture.clock,
     })
 
-    const first = typed.refreshAfterInference(fixture.providerId)
-    const second = typed.refreshAfterInference(fixture.providerId)
+    const first = typed.refreshAfterCapacityFailure(fixture.providerId)
+    const second = typed.refreshAfterCapacityFailure(fixture.providerId)
     release!()
     await Promise.all([first, second])
 

@@ -218,7 +218,7 @@ describe('private request history and audit', () => {
       const body = (await list.json()) as { events: RequestEventDto[]; total: number; }
       const detailPromises = body.events.map(async (event) => {
         const detail = await iroha.fetch(`/api/v1/admin/requests/${event.id}`)
-        return (await detail.json()) as { event: RequestEventDto; attempts: RequestAttemptDto[] }
+        return (await detail.json()) as { event: RequestEventDto; attempts: RequestAttemptDto[]; attemptCount: number; recovered: boolean }
       })
       const details = await Promise.all(detailPromises)
 
@@ -232,6 +232,7 @@ describe('private request history and audit', () => {
       )
       expect(successfulWithFailure).toBeDefined()
       expect(successfulWithFailure!.attempts.some((a) => a.status === 401)).toBe(true)
+      expect(successfulWithFailure).toMatchObject({ recovered: true, attemptCount: 2 })
     })
 
     for (const recovered of [
@@ -276,7 +277,7 @@ describe('private request history and audit', () => {
 
         const detail = await iroha.fetch(`/api/v1/admin/requests/${requestId}`)
         expect(detail.status).toBe(200)
-        const body = (await detail.json()) as { event: RequestEventDto; attempts: RequestAttemptDto[] }
+        const body = (await detail.json()) as { event: RequestEventDto; attempts: RequestAttemptDto[]; attemptCount: number; recovered: boolean }
         expect(body.event).toMatchObject({
           id: requestId,
           status: 200,
@@ -288,8 +289,29 @@ describe('private request history and audit', () => {
           { status: recovered.failedStatus, outcome: 'failure' },
           { status: 200, outcome: 'success' },
         ])
+        expect(body).toMatchObject({ attemptCount: 2, recovered: true })
       })
     }
+
+    test('returns server-side Overview buckets for the selected range', async () => {
+      await chat(keySecret, { model: MODEL, messages: [{ role: 'user', content: 'overview' }] })
+      const response = await iroha.fetch('/api/v1/admin/requests/overview?range=24h')
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as {
+        range: string
+        requestCount: number
+        buckets: { status2xx: number }[]
+        topModels: { model: string; count: number }[]
+      }
+      expect(body.range).toBe('24h')
+      expect(body.requestCount).toBe(1)
+      expect(body.buckets).toHaveLength(24)
+      expect(body.buckets.reduce((sum, bucket) => sum + bucket.status2xx, 0)).toBe(1)
+      expect(body.topModels[0]).toEqual({ model: MODEL, count: 1 })
+
+      const invalid = await iroha.fetch('/api/v1/admin/requests/overview?range=30d')
+      expect(invalid.status).toBe(400)
+    })
 
     test('records a no-eligible-key failure with the Iroha code', async () => {
       // Disable every key so no eligible Upstream Key remains.

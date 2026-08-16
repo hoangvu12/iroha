@@ -1094,6 +1094,7 @@ for (const engine of availableEngines) {
         providerId: string,
         overrides: Partial<{
           occurredAt: Date
+          lifecycle: 'in_progress' | 'completed' | 'abandoned'
           model: string
           gatewayKeyId: string | null
           keyId: string | null
@@ -1108,6 +1109,7 @@ for (const engine of availableEngines) {
         }> = {},
       ) => ({
         id,
+        lifecycle: 'completed' as const,
         occurredAt: at,
         providerId,
         model: 'gpt-4o-mini',
@@ -1180,6 +1182,7 @@ for (const engine of availableEngines) {
         await database.providers.insertProvider(connection('pc_rh'))
         await database.requestHistory.recordEvent(
           event('req_one', 'pc_rh', {
+            lifecycle: 'in_progress',
             status: 0,
             outcome: 'failure',
             latencyMs: 0,

@@ -520,6 +520,7 @@ export interface UsageRepository {
 }
 
 export type RequestOutcome = 'success' | 'failure'
+export type RequestLifecycle = 'in_progress' | 'completed' | 'abandoned'
 
 /**
  * The persistent shape of one inference call. No prompts, no responses, no
@@ -528,6 +529,8 @@ export type RequestOutcome = 'success' | 'failure'
  */
 export interface RequestEventRecord {
   readonly id: string
+  /** Internal lifecycle. Owner-facing reads expose completed Requests only. */
+  readonly lifecycle?: RequestLifecycle
   readonly occurredAt: Date
   readonly providerId: string
   readonly model: string
@@ -661,6 +664,9 @@ export interface RequestHistoryRepository {
    * requests happened in the same millisecond.
    */
   listEvents(options?: RequestHistoryListOptions): Promise<RequestHistoryListResult>
+
+  /** Marks unfinished Requests older than the cutoff as abandoned. */
+  abandonRequests(before: Date): Promise<number>
 
   /** Removes events that occurred strictly before `before`. */
   pruneEvents(before: Date): Promise<number>

@@ -1,0 +1,3 @@
+# Capacity polling is scheduled and evidence-triggered
+
+Authoritative Usage Adapters poll every eligible Upstream Key independently on the configured schedule, with a bounded per-Provider concurrency of four; ordinary inference success does not trigger an entitlement refresh. A capacity-related failure may request one deduplicated refresh when cached authoritative evidence is absent or stale. We rejected post-success polling because sequential inference can create one full key-fleet poll per request, and rejected Upstream Account batching because that grouping is legacy and independent credentials cannot safely be assumed to share capacity.

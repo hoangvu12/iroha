@@ -8,6 +8,14 @@ Iroha presents one self-hosted API through which its owner can use multiple AI i
 The self-hosted API exposed by Iroha to its owner's applications. It surfaces two caller shapes under the provider-scoped prefix `/providers/{connection_id}/v1/`: the OpenAI-compatible `chat/completions`, `responses`, and `models` routes, and the Anthropic-compatible `messages` route. A caller picks the shape with the URL; the Provider Connection selected in the URL determines what reaches upstream. The OpenAI-compatible shape is forwarded or translated by the Provider Connection's Inference Adapter; the Anthropic-compatible shape is forwarded or translated by the same adapter with the round-trip inverted.
 _Avoid_: Proxy, aggregator
 
+**Request**:
+One complete caller-visible exchange with the Gateway. Its outcome, HTTP status, latency, and usage describe what the caller ultimately received, even when reaching that result required multiple Attempts.
+_Avoid_: Attempt, upstream request
+
+**Attempt**:
+One transmission from the Gateway to a Provider within a Request. Each Attempt retains its own outcome, HTTP status, Upstream Key, timing, and bounded diagnostics so retries remain independently observable.
+_Avoid_: Request, retry request
+
 **Provider**:
 The owner-managed entity through which the Gateway reaches one upstream AI inference service. It has a stable ID, a base URL, and holds Upstream Keys. Each Upstream Key may declare its own base URL override; when unset, the key uses the Provider's base URL. The Provider owns every transport, authentication, retry, timeout, capability, and idempotency setting the Gateway uses to reach the upstream. It is seeded by a Provider Template that identifies the upstream brand.
 _Avoid_: Vendor, backend, account, integration, provider connection
@@ -17,7 +25,7 @@ A secret issued by a Provider and attached to one Provider for upstream inferenc
 _Avoid_: Gateway Key, token, credential
 
 **Upstream Account**:
-An optional grouping of Upstream Keys that share the same Provider billing account or capacity limits. A limit known to affect the account makes every key in that group temporarily or durably ineligible.
+A legacy grouping of Upstream Keys believed to share one Provider billing account or capacity limit. It is planned for removal; new Gateway behavior must treat each Upstream Key independently rather than depend on this grouping.
 _Avoid_: Owner, key pool
 
 **Capacity Scope**:

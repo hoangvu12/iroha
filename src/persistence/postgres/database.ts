@@ -1171,6 +1171,7 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
     const updated = await this.handle
       .update(requestEvents)
       .set({
+        lifecycle: event.lifecycle ?? 'completed',
         occurredAt: event.occurredAt,
         providerId: event.providerId,
         model: event.model,
@@ -1194,6 +1195,7 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
       .insert(requestEvents)
       .values({
         id: event.id,
+        lifecycle: event.lifecycle ?? 'completed',
         occurredAt: event.occurredAt,
         providerId: event.providerId,
         model: event.model,
@@ -1261,7 +1263,7 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
     const [row] = await this.handle
       .select()
       .from(requestEvents)
-      .where(eq(requestEvents.id, id))
+      .where(and(eq(requestEvents.id, id), eq(requestEvents.lifecycle, 'completed'), ne(requestEvents.status, 0)))
       .limit(1)
     return row ? toEvent(row) : null
   }
@@ -1298,6 +1300,15 @@ class PostgresRequestHistoryRepository implements RequestHistoryRepository {
           : await query.limit(options.limit).offset(options.offset)
 
     return { events: limited.map(toEvent), total }
+  }
+
+  async abandonRequests(before: Date): Promise<number> {
+    const rows = await this.handle
+      .update(requestEvents)
+      .set({ lifecycle: 'abandoned' })
+      .where(and(eq(requestEvents.lifecycle, 'in_progress'), lt(requestEvents.occurredAt, before)))
+      .returning({ id: requestEvents.id })
+    return rows.length
   }
 
   async pruneEvents(before: Date): Promise<number> {
@@ -1364,6 +1375,7 @@ type RequestAttemptRow = typeof requestAttempts.$inferSelect
 function toEvent(row: RequestEventRow): RequestEventRecord {
   return {
     id: row.id,
+    lifecycle: row.lifecycle as 'in_progress' | 'completed' | 'abandoned',
     occurredAt: row.occurredAt,
     providerId: row.providerId,
     model: row.model,
@@ -1397,7 +1409,7 @@ function toAttempt(row: RequestAttemptRow): RequestAttemptRecord {
 }
 
 function eventFilter(filter: RequestHistoryFilter) {
-  const conditions = []
+  const conditions = [eq(requestEvents.lifecycle, 'completed'), ne(requestEvents.status, 0)]
   if (filter.providerId !== undefined) {
     conditions.push(eq(requestEvents.providerId, filter.providerId))
   }
@@ -1416,7 +1428,7 @@ function eventFilter(filter: RequestHistoryFilter) {
   if (filter.before !== undefined) {
     conditions.push(lt(requestEvents.occurredAt, filter.before))
   }
-  return conditions.length === 0 ? undefined : and(...conditions)
+  return and(...conditions)
 }
 
 function auditFilter(filter: AuditFilter) {

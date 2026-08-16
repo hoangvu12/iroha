@@ -1,0 +1,1 @@
+ALTER TABLE `request_events` ADD `lifecycle` text DEFAULT 'completed' NOT NULL;

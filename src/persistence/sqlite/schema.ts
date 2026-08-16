@@ -233,6 +233,8 @@ export const usageSnapshots = sqliteTable('usage_snapshots', {
  */
 export const requestEvents = sqliteTable('request_events', {
   id: text('id').primaryKey(),
+  /** Internal lifecycle; only completed rows are Owner-visible. */
+  lifecycle: text('lifecycle').notNull().default('completed'),
   occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(),
   providerId: text('provider_id')
     .notNull()

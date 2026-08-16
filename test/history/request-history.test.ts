@@ -65,6 +65,8 @@ describe('RequestHistoryService', () => {
 
     const startedAt = new Date('2026-01-01T00:00:00.000Z')
     const attempt = await recorder.startAttempt({ attemptNumber: 1, keyId: 'uk_one', at: startedAt })
+    expect(await service.getEvent('req_one')).toBeNull()
+    expect((await service.listEvents()).total).toBe(0)
     await attempt.finalize({
       status: 200,
       outcome: 'success',

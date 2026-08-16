@@ -63,6 +63,7 @@ export const auditEvents = sqliteTable('audit_events', {
  */
 export const providers = sqliteTable('providers', {
   id: text('id').primaryKey(),
+  handle: text('handle').notNull().unique(),
   displayName: text('display_name').notNull(),
   baseUrl: text('base_url').notNull(),
   allowInsecureHttp: integer('allow_insecure_http', { mode: 'boolean' }).notNull(),

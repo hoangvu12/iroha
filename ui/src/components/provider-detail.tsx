@@ -279,7 +279,8 @@ function ProviderHeader({
               </span>
             )}
           </div>
-          <span className="text-muted-foreground font-mono text-xs">{provider.id}</span>
+          <span className="font-mono text-sm">{provider.handle}</span>
+          <span className="text-muted-foreground font-mono text-xs">Internal ID: {provider.id}</span>
         </div>
       </div>
     </div>
@@ -1512,6 +1513,8 @@ function ProviderDetailsCard({ provider }: { readonly provider: ProviderView }) 
     <section className="bg-card rounded-xl border p-5">
       <h3 className="text-sm font-semibold tracking-tight">Provider details</h3>
       <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+        <DetailRow label="Provider Handle"><span className="font-mono">{provider.handle}</span></DetailRow>
+        <DetailRow label="Internal ID"><span className="text-muted-foreground font-mono">{provider.id}</span></DetailRow>
         <DetailRow label="Base URL">
           <span className="font-mono break-all">{provider.baseUrl}</span>
         </DetailRow>

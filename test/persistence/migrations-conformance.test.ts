@@ -256,6 +256,43 @@ describe('SQLite forward migration from every released schema version', () => {
     }
   })
 
+  test('backfills transliterated, length-safe deterministic Provider Handles', () => {
+    const file = freshSqliteFile('provider-handles-backfill')
+    const client = new BunSqlite(file, { create: true })
+    try {
+      buildSeededBaseline(migrations, 17).applySqlite((statement) => client.exec(statement))
+      const insert = client.query(`insert into providers (
+        id, display_name, base_url, allow_insecure_http, enabled, retry_max_attempts,
+        retry_ambiguous_network, archived_at, template_id, capabilities, auth_header,
+        auth_prefix, static_headers_encrypted, redirect_allow_same_origin,
+        connection_timeout_ms, first_byte_timeout_ms, non_streaming_total_timeout_ms,
+        streaming_idle_timeout_ms, total_retry_timeout_ms, idempotency_header, created_at, updated_at
+      ) values (?, ?, 'https://example.test/v1', 0, 1, 3, 0, null, null, '{}',
+        'authorization', 'Bearer ', '[]', 0, 10000, 20000, 120000, 30000, 30000,
+        'Idempotency-Key', ?, ?)`)
+      const long = 'a'.repeat(63)
+      insert.run('pr_a', 'CAFÉ', 1, 1)
+      insert.run('pr_b', 'CAFÉ', 2, 2)
+      insert.run('pr_c', `${long}x`, 3, 3)
+      insert.run('pr_d', `${long}y`, 4, 4)
+      insert.run('pr_e', 'Foo', 5, 5)
+      insert.run('pr_f', 'Foo', 6, 6)
+      insert.run('pr_g', 'Foo 2', 7, 7)
+      for (const statement of statementsOf(migrations[18]!.sql)) client.exec(statement)
+      expect(client.query('select id, handle from providers order by created_at, id').all()).toEqual([
+        { id: 'pr_a', handle: 'cafe' },
+        { id: 'pr_b', handle: 'cafe-2' },
+        { id: 'pr_c', handle: long },
+        { id: 'pr_d', handle: `${'a'.repeat(61)}-2` },
+        { id: 'pr_e', handle: 'foo' },
+        { id: 'pr_f', handle: 'foo-2' },
+        { id: 'pr_g', handle: 'foo-2-2' },
+      ])
+    } finally {
+      client.close()
+    }
+  })
+
   for (const baseline of [-1, ...migrations.map((migration) => migration.idx)]) {
     const label = baseline === -1 ? 'an empty database' : migrations[baseline]!.tag
 
@@ -337,6 +374,41 @@ if (POSTGRES_URL) {
     test('the released journal covers every migration in strict index order', () => {
       const indices = migrations.map((migration) => migration.idx).sort((a, b) => a - b)
       expect(indices).toEqual([...Array(migrations.length).keys()])
+    })
+
+    test('backfills transliterated, length-safe deterministic Provider Handles', async () => {
+      const pool = new Pool({ connectionString: POSTGRES_URL })
+      try {
+        await pool.query('drop schema if exists public cascade')
+        await pool.query('create schema public')
+        await pool.query('drop schema if exists drizzle cascade')
+        await buildSeededBaseline(migrations, 18).applyPostgres((statement) => pool.query(statement).then(() => undefined))
+        const long = 'a'.repeat(63)
+        for (const [id, name, time] of [
+          ['pr_a', 'CAFÉ', 1], ['pr_b', 'CAFÉ', 2], ['pr_c', `${long}x`, 3], ['pr_d', `${long}y`, 4],
+          ['pr_e', 'Foo', 5], ['pr_f', 'Foo', 6], ['pr_g', 'Foo 2', 7],
+        ] as const) {
+          await pool.query(`insert into providers (
+            id, display_name, base_url, allow_insecure_http, enabled, retry_max_attempts,
+            retry_ambiguous_network, archived_at, template_id, capabilities, auth_header,
+            auth_prefix, static_headers_encrypted, redirect_allow_same_origin,
+            connection_timeout_ms, first_byte_timeout_ms, non_streaming_total_timeout_ms,
+            streaming_idle_timeout_ms, total_retry_timeout_ms, idempotency_header, created_at, updated_at
+          ) values ($1, $2, 'https://example.test/v1', false, true, 3, false, null, null, '{}',
+            'authorization', 'Bearer ', '[]', false, 10000, 20000, 120000, 30000, 30000,
+            'Idempotency-Key', to_timestamp($3), to_timestamp($3))`, [id, name, time])
+        }
+        for (const statement of statementsOf(migrations[19]!.sql)) await pool.query(statement)
+        const result = await pool.query('select id, handle from providers order by created_at, id')
+        expect(result.rows).toEqual([
+          { id: 'pr_a', handle: 'cafe' }, { id: 'pr_b', handle: 'cafe-2' },
+          { id: 'pr_c', handle: long }, { id: 'pr_d', handle: `${'a'.repeat(61)}-2` },
+          { id: 'pr_e', handle: 'foo' }, { id: 'pr_f', handle: 'foo-2' },
+          { id: 'pr_g', handle: 'foo-2-2' },
+        ])
+      } finally {
+        await pool.end()
+      }
     })
 
     for (const baseline of [-1, ...migrations.map((migration) => migration.idx)]) {

@@ -6,6 +6,7 @@ import {
   type ProviderRegistry,
   type ProviderTemplate,
   type ProviderView,
+  suggestAvailableProviderHandle,
   type UpstreamAccountView,
 } from '../providers/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
@@ -117,6 +118,7 @@ export function createAdminRoutes({
 
         const input = asObject(body)
         const result = await providers.create({
+          handle: input.handle,
           displayName: input.displayName,
           baseUrl: input.baseUrl,
           keys: input.keys,
@@ -156,6 +158,17 @@ export function createAdminRoutes({
             "Creates one OpenAI-compatible Provider with an immutable ID and one or more Upstream Keys. Each key is encrypted with the installation master key, saved as Unverified, and tested once with a low-cost probe; a usable test activates it, any other outcome keeps the key with the reason. Each key may carry an optional `baseUrl` override; when omitted the key inherits the Provider's default. Supplying a templateId prefills safe defaults; omitting it seeds the Generic OpenAI-compatible default; the Owner may override every field.",
         },
         response: { 201: providerResponse, ...errorResponses },
+      },
+    )
+    .get(
+      '/providers/handles/:handle/availability',
+      async ({ params, request, cookie, status }) => {
+        const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
+        if ('response' in guardResult) return status(guardResult.response.status, toErrorDto(guardResult.response.body))
+        const all = await providers.listProviders()
+        const used = new Set(all.map((provider) => provider.handle))
+        if (!used.has(params.handle)) return status(200, { available: true, suggestion: null })
+        return status(200, { available: false, suggestion: suggestAvailableProviderHandle(params.handle, used) })
       },
     )
     .get(
@@ -997,6 +1010,7 @@ const staticHeaderNameResponse = t.Object({
 
 const providerResponse = t.Object({
   id: t.String(),
+  handle: t.String(),
   displayName: t.String(),
   baseUrl: t.String(),
   allowInsecureHttp: t.Boolean(),
@@ -1138,6 +1152,7 @@ type GatewayKeyDto = typeof gatewayKeyResponse.static
 function toProviderDto(view: ProviderView): ProviderDto {
   return {
     id: view.id,
+    handle: view.handle,
     displayName: view.displayName,
     baseUrl: view.baseUrl,
     allowInsecureHttp: view.allowInsecureHttp,
@@ -1301,6 +1316,11 @@ function toFailure(failure: ProviderFailure): { statusCode: 400 | 404 | 409 | 50
           'stored_key_unreadable',
           'A stored Upstream Key could not be read. The installation master key may have changed.',
         ),
+      }
+    case 'handle_already_exists':
+      return {
+        statusCode: 409,
+        body: { error: { code: 'handle_already_exists', message: 'This Provider Handle is already in use.', problems: failure.problems.map((problem) => ({ ...problem })) } },
       }
     case 'validation_failed':
       return { statusCode: 400, body: validationFailureBody(failure.problems) }

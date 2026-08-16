@@ -18,6 +18,7 @@ const KEY_BASE_URL = 'https://key.example.com/v1'
 
 interface ProviderBody {
   id: string
+  handle: string
   displayName: string
   baseUrl: string
   allowInsecureHttp: boolean
@@ -52,29 +53,34 @@ describe('Provider administration', () => {
   let iroha: TestApp
   let probe: FakeKeyProbe
   let csrf: string
+  let handleSequence = 0
 
   beforeEach(async () => {
     probe = fakeKeyProbe()
     iroha = await createTestApp({ upstreamKeyProbe: probe })
     csrf = (await completeSetup(iroha)).csrf
+    handleSequence = 0
   })
 
   afterEach(async () => {
     await iroha.dispose()
   })
 
-  const createRequest = (fields: Record<string, unknown> = {}) =>
-    iroha.fetch(BASE, {
+  const createRequest = (fields: Record<string, unknown> = {}) => {
+    handleSequence += 1
+    return iroha.fetch(BASE, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         displayName: 'Example',
+        handle: `example-${handleSequence}`,
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
         ...fields,
       }),
       csrf,
     })
+  }
 
   const createProvider = async (fields: Record<string, unknown> = {}): Promise<ProviderBody> => {
     const response = await createRequest(fields)
@@ -154,6 +160,39 @@ describe('Provider administration', () => {
   })
 
   describe('creation', () => {
+    test('requires and returns the exact immutable Provider Handle', async () => {
+      const missing = await createRequest({ handle: undefined })
+      expect(missing.status).toBe(400)
+      expect(await problemsOf(missing)).toContainEqual({ field: 'handle', message: 'is required' })
+
+      const created = await createProvider({ handle: 'my-provider' })
+      expect(created.handle).toBe('my-provider')
+      const patched = await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: body({ displayName: 'Renamed', handle: 'different' }), csrf,
+      })
+      expect(patched.status).toBe(200)
+      expect(((await patched.json()) as ProviderBody).handle).toBe('my-provider')
+    })
+
+    test('validates Handle syntax without normalizing the submitted value', async () => {
+      for (const handle of ['Uppercase', 'two--hyphens', '-leading', 'trailing-', 'a'.repeat(64)]) {
+        const response = await createRequest({ handle })
+        expect(response.status).toBe(400)
+        expect((await problemsOf(response)).some((problem) => problem.field === 'handle')).toBe(true)
+      }
+    })
+
+    test('reserves a Handle across archived Providers', async () => {
+      const created = await createProvider({ handle: 'reserved' })
+      expect((await iroha.fetch(`${BASE}/${created.id}/archive`, { method: 'POST', csrf })).status).toBe(200)
+      const conflict = await createRequest({ handle: 'reserved' })
+      expect(conflict.status).toBe(409)
+      const conflictBody = await conflict.json() as { error: { code: string; problems: { field: string; message: string }[] } }
+      expect(conflictBody.error.code).toBe('handle_already_exists')
+      expect(conflictBody.error.problems).toContainEqual({ field: 'handle', message: 'is already in use' })
+    })
+
     test('creates a Provider with an immutable ID and one encrypted key', async () => {
       const created = await createProvider()
 
@@ -276,7 +315,7 @@ describe('Provider administration', () => {
         const response = await app.fetch(BASE, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: body({ displayName: 'Example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
+          body: body({ displayName: 'Example', handle: 'example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
           csrf: signedIn.csrf,
         })
 
@@ -339,6 +378,7 @@ describe('Provider administration', () => {
       expect(problems.map((problem) => problem.field).sort()).toEqual([
         'baseUrl',
         'displayName',
+        'handle',
         'keys[0].upstreamKey',
       ])
       expect(problems.map((problem) => problem.message).join(' ')).not.toContain(UPSTREAM_KEY)

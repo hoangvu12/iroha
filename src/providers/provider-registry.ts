@@ -41,6 +41,7 @@ export type ProviderFailure =
   | { readonly code: 'not_archived' }
   /** Encrypted material could not be read; the master key likely changed. */
   | { readonly code: 'stored_key_unreadable' }
+  | { readonly code: 'handle_already_exists'; readonly problems: readonly FieldProblem[] }
   | { readonly code: 'validation_failed'; readonly problems: readonly FieldProblem[] }
 
 export type ProviderResult<T> =
@@ -132,6 +133,7 @@ export interface InferenceTarget {
 
 export interface ProviderView {
   readonly id: string
+  readonly handle: string
   readonly displayName: string
   readonly baseUrl: string
   readonly allowInsecureHttp: boolean
@@ -179,6 +181,7 @@ export interface ProviderRegistryOptions {
 }
 
 const DISPLAY_NAME_MAXIMUM = 128
+const PROVIDER_HANDLE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const BASE_URL_MAXIMUM = 2048
 const UPSTREAM_KEY_MAXIMUM = 2048
 const AUTH_HEADER_MAXIMUM = 128
@@ -269,6 +272,7 @@ export class ProviderRegistry {
    * to the hand-configured defaults.
    */
   async create(input: {
+    handle?: unknown
     displayName: unknown
     baseUrl: unknown
     keys: unknown
@@ -299,6 +303,7 @@ export class ProviderRegistry {
     const redirectAllowSameOrigin = input.redirectAllowSameOrigin === true
 
     const problems: FieldProblem[] = []
+    problems.push(...providerHandleProblems(input.handle))
     problems.push(...displayNameProblems(input.displayName))
     problems.push(...baseUrlProblems(input.baseUrl, allowInsecureHttp))
     // Per-Key URL overrides need the Provider's base URL for http-vs-https
@@ -342,6 +347,7 @@ export class ProviderRegistry {
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
     const displayName = (input.displayName as string).trim()
+    const handle = input.handle as string
     const baseUrl = (input.baseUrl as string).trim()
     const authHeaderName = (input.authHeader === undefined && template !== null
       ? template.authHeader
@@ -391,9 +397,11 @@ export class ProviderRegistry {
       })),
     )
 
+    try {
     await this.#database.transaction(async (repositories) => {
       await repositories.providers.insertProvider({
         id: providerId,
+        handle,
         displayName,
         baseUrl,
         allowInsecureHttp,
@@ -438,6 +446,13 @@ export class ProviderRegistry {
         })
       }
     })
+
+    } catch (cause) {
+      if (isUniqueConstraintFailure(cause)) {
+        return failed({ code: 'handle_already_exists', problems: [{ field: 'handle', message: 'is already in use' }] })
+      }
+      throw cause
+    }
 
     await this.#probeConnectionKeys(providerId)
 
@@ -679,6 +694,10 @@ export class ProviderRegistry {
     const sourceKeys = await this.#database.providers.listKeys(id)
     const at = this.#clock.now()
     const providerId = newId('pr')
+    const duplicateHandle = suggestAvailableProviderHandle(
+      source.handle,
+      new Set((await this.#database.providers.listProviders()).map((provider) => provider.handle)),
+    )
 
     const material: { keyId: string; plaintext: string }[] = []
     try {
@@ -693,6 +712,7 @@ export class ProviderRegistry {
     await this.#database.transaction(async (repositories) => {
       await repositories.providers.insertProvider({
         id: providerId,
+        handle: duplicateHandle,
         displayName: copiedName(source.displayName),
         baseUrl: source.baseUrl,
         allowInsecureHttp: source.allowInsecureHttp,
@@ -1788,6 +1808,7 @@ function probedPatch(
 
 function summaryOf(connection: {
   id: string
+  handle: string
   displayName: string
   baseUrl: string
   allowInsecureHttp: boolean
@@ -1811,6 +1832,7 @@ function summaryOf(connection: {
 }): Omit<ProviderView, 'keys' | 'accounts' | 'staticHeaders' | 'warnings'> {
   return {
     id: connection.id,
+    handle: connection.handle,
     displayName: connection.displayName,
     baseUrl: connection.baseUrl,
     allowInsecureHttp: connection.allowInsecureHttp,
@@ -1843,6 +1865,19 @@ function displayNameProblems(input: unknown): readonly FieldProblem[] {
   }
 
   return []
+}
+
+function providerHandleProblems(input: unknown): readonly FieldProblem[] {
+  if (typeof input !== 'string' || input.length === 0) return [{ field: 'handle', message: 'is required' }]
+  if (input.length > 63) return [{ field: 'handle', message: 'must be at most 63 characters' }]
+  return PROVIDER_HANDLE_PATTERN.test(input)
+    ? []
+    : [{ field: 'handle', message: 'must contain lowercase letters, numbers, and single hyphens only' }]
+}
+
+function isUniqueConstraintFailure(cause: unknown): boolean {
+  const error = cause as { message?: string; code?: string }
+  return /providers_handle_unique|providers\.handle/i.test(`${error?.message ?? cause} ${error?.code ?? ''}`)
 }
 
 function baseUrlProblems(input: unknown, allowInsecureHttp: boolean): readonly FieldProblem[] {
@@ -2341,6 +2376,14 @@ function copiedName(displayName: string): string {
   const suffix = ' (copy)'
   const stem = displayName.slice(0, DISPLAY_NAME_MAXIMUM - suffix.length)
   return `${stem}${suffix}`
+}
+
+export function suggestAvailableProviderHandle(source: string, used: ReadonlySet<string>): string {
+  for (let number = 2; ; number++) {
+    const suffix = `-${number}`
+    const candidate = `${source.slice(0, 63 - suffix.length).replace(/-+$/, '')}${suffix}`
+    if (!used.has(candidate)) return candidate
+  }
 }
 
 /**

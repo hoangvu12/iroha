@@ -117,6 +117,8 @@ export interface AuditRepository {
  */
 export interface ProviderRecord {
   readonly id: string
+  /** Immutable public routing identity. */
+  readonly handle: string
   readonly displayName: string
   /** The Provider's default OpenAI-compatible base URL, exactly as the Owner gave it. */
   readonly baseUrl: string

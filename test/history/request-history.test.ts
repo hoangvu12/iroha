@@ -33,6 +33,7 @@ describe('RequestHistoryService', () => {
     const service = createService()
     await database.providers.insertProvider({
       id: 'pc_one',
+      handle: 'pc-one',
       displayName: 'Example',
       baseUrl: 'https://api.example.com/v1',
       allowInsecureHttp: false,
@@ -104,7 +105,7 @@ describe('RequestHistoryService', () => {
     const secret = 'sk-provider-secret-must-not-survive'
     const service = createService()
     await database.providers.insertProvider({
-      id: 'pc_diagnostics', displayName: 'Diagnostics', baseUrl: 'https://api.example.com/v1',
+      id: 'pc_diagnostics', handle: 'diagnostics', displayName: 'Diagnostics', baseUrl: 'https://api.example.com/v1',
       allowInsecureHttp: false, enabled: true, retryMaxAttempts: 3,
       retryAmbiguousNetwork: false, archivedAt: null, templateId: null,
       capabilities: { chat: true, streaming: true, tools: false, structuredOutput: false, responses: false },
@@ -145,6 +146,7 @@ describe('RequestHistoryService', () => {
     const service = createService()
     await database.providers.insertProvider({
       id: 'pc_recovered',
+      handle: 'recovered',
       displayName: 'Recovered',
       baseUrl: 'https://api.example.com/v1',
       allowInsecureHttp: false,
@@ -250,6 +252,7 @@ describe('RequestHistoryService', () => {
     const service = createService()
     await database.providers.insertProvider({
       id: 'pc_one',
+      handle: 'pc-one',
       displayName: 'Example',
       baseUrl: 'https://api.example.com/v1',
       allowInsecureHttp: false,
@@ -302,6 +305,7 @@ describe('RequestHistoryService', () => {
     const service = createService()
     await database.providers.insertProvider({
       id: 'pc_one',
+      handle: 'pc-one',
       displayName: 'Example',
       baseUrl: 'https://api.example.com/v1',
       allowInsecureHttp: false,

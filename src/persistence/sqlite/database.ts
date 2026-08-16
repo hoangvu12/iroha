@@ -748,6 +748,7 @@ type KeyRow = typeof upstreamKeys.$inferSelect
 function toProvider(row: ProviderRow): ProviderRecord {
   return {
     id: row.id,
+    handle: row.handle,
     displayName: row.displayName,
     baseUrl: row.baseUrl,
     allowInsecureHttp: row.allowInsecureHttp,
@@ -781,6 +782,7 @@ function toProvider(row: ProviderRow): ProviderRecord {
  */
 function encodeProviderRow(provider: ProviderRecord): {
   id: string
+  handle: string
   displayName: string
   baseUrl: string
   allowInsecureHttp: boolean
@@ -805,6 +807,7 @@ function encodeProviderRow(provider: ProviderRecord): {
 } {
   return {
     id: provider.id,
+    handle: provider.handle,
     displayName: provider.displayName,
     baseUrl: provider.baseUrl,
     allowInsecureHttp: provider.allowInsecureHttp,

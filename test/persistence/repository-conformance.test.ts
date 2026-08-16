@@ -359,6 +359,7 @@ for (const engine of availableEngines) {
         overrides: Partial<ProviderRecord> = {},
       ): ProviderRecord => ({
         id,
+        handle: id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
         allowInsecureHttp: false,
@@ -434,6 +435,17 @@ for (const engine of availableEngines) {
 
         expect(created).toEqual(connection('pc_one'))
         expect(await database.providers.getProvider('pc_one')).toEqual(connection('pc_one'))
+      })
+
+      test('enforces globally unique immutable Provider Handles', async () => {
+        await database.providers.insertProvider(connection('pc_one', { handle: 'shared' }))
+        expect(database.providers.insertProvider(connection('pc_two', { handle: 'shared' }))).rejects.toThrow()
+
+        expect(database.providers.updateProvider(
+          'pc_one',
+          { handle: 'different' } as never,
+          new Date('2026-02-01T00:00:00.000Z'),
+        )).rejects.toThrow()
       })
 
       test('preserves booleans and a null archive', async () => {
@@ -774,6 +786,7 @@ for (const engine of availableEngines) {
         overrides: Partial<ProviderRecord> = {},
       ): ProviderRecord => ({
         id,
+        handle: id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
         allowInsecureHttp: false,
@@ -887,6 +900,7 @@ for (const engine of availableEngines) {
         overrides: Partial<ProviderRecord> = {},
       ): ProviderRecord => ({
         id,
+        handle: id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
         allowInsecureHttp: false,
@@ -1059,6 +1073,7 @@ for (const engine of availableEngines) {
         overrides: Partial<ProviderRecord> = {},
       ): ProviderRecord => ({
         id,
+        handle: id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
         allowInsecureHttp: false,

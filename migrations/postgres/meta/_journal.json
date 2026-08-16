@@ -134,6 +134,13 @@
       "when": 1786907858759,
       "tag": "0018_plain_vampiro",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786911844594,
+      "tag": "0019_smart_sunspot",
+      "breakpoints": true
     }
   ]
 }

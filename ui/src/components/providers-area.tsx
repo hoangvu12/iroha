@@ -45,6 +45,7 @@ import { BulkKeyInput } from '@/components/bulk-key-input'
 import { describeProviderStatus } from '@/lib/provider-status'
 import {
   archiveProvider,
+  checkProviderHandleAvailability,
   createProvider,
   duplicateProvider,
   fetchProviders,
@@ -286,6 +287,7 @@ function ProviderRow({
           <span className="truncate text-sm font-medium tracking-tight">
             {provider.displayName}
           </span>
+          <span className="truncate font-mono text-xs">{provider.handle}</span>
           <span
             className="text-muted-foreground truncate font-mono text-xs"
             title={provider.baseUrl || 'No default base URL set'}
@@ -414,6 +416,9 @@ function CreateProviderForm({
   readonly onCancel: () => void
 }) {
   const [displayName, setDisplayName] = useState('')
+  const [handle, setHandle] = useState('provider')
+  const [handleCustomized, setHandleCustomized] = useState(false)
+  const [handleSuggestion, setHandleSuggestion] = useState<string | null>(null)
   const [keys, setKeys] = useState<readonly CreateProviderKeyRow[]>(() => [
     { rowId: makeRowId(), upstreamKey: '', baseUrl: '' },
   ])
@@ -432,6 +437,20 @@ function CreateProviderForm({
     GENERIC_PROVIDER_TEMPLATE,
   ])
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(handle) || handle.length > 63) {
+      setHandleSuggestion(null)
+      return
+    }
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      checkProviderHandleAvailability(handle, controller.signal)
+        .then((result) => setHandleSuggestion(result.available ? null : result.suggestion))
+        .catch(() => undefined)
+    }, 300)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [handle])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -516,6 +535,7 @@ function CreateProviderForm({
     await createProvider(
       {
         displayName,
+        handle,
         baseUrl,
         keys:
           keyInputMode === 'bulk'
@@ -537,9 +557,27 @@ function CreateProviderForm({
         id="new-display-name"
         label="Display name"
         value={displayName}
-        onChange={setDisplayName}
+        onChange={(value) => {
+          setDisplayName(value)
+          if (!handleCustomized) setHandle(proposeProviderHandle(value))
+        }}
         problem={form.problemFor('displayName')}
       />
+
+      <div className="flex flex-col gap-1.5">
+        <Field
+          id="new-provider-handle"
+          label="Provider Handle"
+          value={handle}
+          onChange={(value) => { setHandle(value); setHandleCustomized(true) }}
+          hint="Used in public inference URLs. It can never be renamed after creation."
+          problem={form.problemFor('handle')}
+        />
+        <Button type="button" variant="ghost" size="xs" className="self-start" onClick={() => { setHandle(proposeProviderHandle(displayName)); setHandleCustomized(false) }}>
+          Regenerate from display name
+        </Button>
+        {handleSuggestion !== null && <button type="button" className="text-muted-foreground self-start text-xs underline" onClick={() => { setHandle(handleSuggestion); setHandleCustomized(true) }}>Use available {handleSuggestion}</button>}
+      </div>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="new-provider-template">Provider template</Label>
@@ -761,6 +799,23 @@ let createProviderRowCounter = 0
 function makeRowId(): string {
   createProviderRowCounter += 1
   return `${Date.now().toString(36)}-${createProviderRowCounter.toString(36)}`
+}
+
+function proposeProviderHandle(displayName: string): string {
+  const proposed = displayName
+    .toLowerCase()
+    .replace(/[àáâãäåāăąạảấầẩẫậắằẳẵặ]/g, 'a')
+    .replace(/[èéêëēėęẹẻẽếềểễệ]/g, 'e')
+    .replace(/[ìíîïīįịỉĩ]/g, 'i')
+    .replace(/[òóôõöøōőọỏốồổỗộớờởỡợ]/g, 'o')
+    .replace(/[ùúûüūűųụủũứừửữự]/g, 'u')
+    .replace(/[ýÿỳỵỷỹ]/g, 'y')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63)
+    .replace(/-+$/, '')
+  return proposed || 'provider'
 }
 
 function ProviderSparkline({

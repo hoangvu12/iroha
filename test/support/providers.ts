@@ -17,6 +17,7 @@ export function providerRecord(
 ): ProviderRecord {
   return {
     id,
+    handle: id,
     displayName: 'Example',
     baseUrl: PROVIDER_DEFAULT_BASE_URL,
     allowInsecureHttp: false,

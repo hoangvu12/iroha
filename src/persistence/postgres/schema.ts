@@ -63,6 +63,7 @@ export const auditEvents = pgTable('audit_events', {
  */
 export const providers = pgTable('providers', {
   id: text('id').primaryKey(),
+  handle: text('handle').notNull().unique(),
   displayName: text('display_name').notNull(),
   baseUrl: text('base_url').notNull(),
   allowInsecureHttp: boolean('allow_insecure_http').notNull(),

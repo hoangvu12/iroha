@@ -38,6 +38,7 @@ export interface UpstreamAccountView {
 
 export interface ProviderView {
   readonly id: string
+  readonly handle: string
   readonly displayName: string
   readonly baseUrl: string
   readonly allowInsecureHttp: boolean
@@ -159,6 +160,10 @@ export async function fetchProviders(signal?: AbortSignal): Promise<readonly Pro
   return body.providers
 }
 
+export async function checkProviderHandleAvailability(handle: string, signal?: AbortSignal): Promise<{ available: boolean; suggestion: string | null }> {
+  return await request('GET', `/providers/handles/${encodeURIComponent(handle)}/availability`, { signal })
+}
+
 export async function fetchProviderTemplates(
   signal?: AbortSignal,
 ): Promise<readonly ProviderTemplateView[]> {
@@ -172,6 +177,7 @@ export async function fetchProviderTemplates(
 
 export async function createProvider(
   input: {
+    handle: string
     displayName: string
     baseUrl: string
     keys: readonly { readonly upstreamKey: string; readonly baseUrl?: string }[]
@@ -181,6 +187,7 @@ export async function createProvider(
   csrfToken: string,
 ): Promise<ProviderView> {
   const body: Record<string, unknown> = {
+    handle: input.handle,
     displayName: input.displayName,
     baseUrl: input.baseUrl,
     keys: input.keys.map((entry) => {

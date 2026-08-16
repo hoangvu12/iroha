@@ -23,9 +23,9 @@ describe('provider-scoped Responses API', () => {
     upstream = mockUpstreamTransport()
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
-    const connection = await createConnection(iroha, csrf)
-    path = `/providers/${connection.handle}/v1/responses`
-    secret = await createGatewayKey(iroha, csrf, connection.id)
+    const provider = await createProvider(iroha, csrf)
+    path = `/providers/${provider.handle}/v1/responses`
+    secret = await createGatewayKey(iroha, csrf, provider.id)
   })
 
   afterEach(async () => {
@@ -151,7 +151,7 @@ describe('provider-scoped Responses API', () => {
   })
 })
 
-async function createConnection(iroha: TestApp, csrf: string): Promise<{ id: string; handle: string }> {
+async function createProvider(iroha: TestApp, csrf: string): Promise<{ id: string; handle: string }> {
   const response = await iroha.fetch('/api/v1/admin/providers', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -163,7 +163,7 @@ async function createConnection(iroha: TestApp, csrf: string): Promise<{ id: str
     }),
     csrf,
   })
-  if (response.status !== 201) throw new Error(`Connection create failed: ${await response.text()}`)
+  if (response.status !== 201) throw new Error(`Provider create failed: ${await response.text()}`)
   return (await response.json()) as { id: string; handle: string }
 }
 

@@ -21,3 +21,4 @@
 - Added HTTP-seam coverage for all scoped caller shapes, nested exact model forwarding, streaming cancellation, directory output, internal-ID scope authorization, legacy-ID rejection, and indistinguishable inaccessible Provider states.
 - Updated scoped code snippets and the Provider Directory to emit Handle-based URLs. No DOM harness was added per `docs/agents/ui-testing.md`.
 - Verification: focused HTTP suite, server/UI type checking, and UI production build pass. PostgreSQL conformance was not run because `IROHA_TEST_POSTGRES_URL` is not configured; Ticket 02 has no schema changes.
+- Review follow-up migrated the established scoped HTTP and official-SDK callers from Provider IDs to Handles, retained explicit legacy-ID rejection coverage, centralized scoped Handle admission and privacy errors, and updated stale state expectations to the sanitized contract. The combined routing suite passes 178 tests.

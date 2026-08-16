@@ -28,6 +28,7 @@ describe('the official OpenAI SDK through the Models surface', () => {
   let csrf: string
   let client: OpenAI
   let providerId: string
+  let providerHandle: string
   let upstream: ReturnType<typeof mockUpstreamTransport>
 
   beforeEach(async () => {
@@ -43,11 +44,12 @@ describe('the official OpenAI SDK through the Models surface', () => {
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
     providerId = await createConnection()
+    providerHandle = (await iroha.database.providers.getProvider(providerId))!.handle
     await refreshCatalog()
     const secret = await createGatewayKey([{ providerId }])
     client = new OpenAI({
       apiKey: secret,
-      baseURL: `http://iroha.test/providers/${providerId}/v1`,
+      baseURL: `http://iroha.test/providers/${providerHandle}/v1`,
       fetch: appFetch(iroha.app),
       maxRetries: 0,
       dangerouslyAllowBrowser: true,
@@ -73,7 +75,7 @@ describe('the official OpenAI SDK through the Models surface', () => {
     const emptyKey = await createGatewayKey([])
     const otherClient = new OpenAI({
       apiKey: emptyKey,
-      baseURL: `http://iroha.test/providers/${providerId}/v1`,
+      baseURL: `http://iroha.test/providers/${providerHandle}/v1`,
       fetch: appFetch(iroha.app),
       maxRetries: 0,
       dangerouslyAllowBrowser: true,
@@ -93,6 +95,7 @@ describe('the official OpenAI SDK through the Models surface', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'SDK models example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],

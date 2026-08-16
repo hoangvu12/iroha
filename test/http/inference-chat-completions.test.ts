@@ -18,6 +18,7 @@ const OTHER_MODEL = 'gpt-4o'
 
 interface ConnectionBody {
   id: string
+  handle: string
   displayName: string
   keys: { id: string; health: string }[]
 }
@@ -46,6 +47,7 @@ describe('provider-scoped Chat Completions', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -85,7 +87,7 @@ describe('provider-scoped Chat Completions', () => {
 
   const connect = async (fields: Record<string, unknown> = {}, scope: unknown[] | null = null) => {
     connection = await createConnection(fields)
-    path = `/providers/${connection.id}/v1/chat/completions`
+    path = `/providers/${connection.handle}/v1/chat/completions`
     const scoped = scope === null ? [{ providerId: connection.id }] : scope
     return await createKey(scoped)
   }
@@ -115,7 +117,7 @@ describe('provider-scoped Chat Completions', () => {
     test('unrestricted access reaches a later Provider and an unknown catalog model', async () => {
       const key = await createAllKey()
       connection = await createConnection()
-      path = `/providers/${connection.id}/v1/chat/completions`
+      path = `/providers/${connection.handle}/v1/chat/completions`
 
       const response = await chat(key.secret, completionBody('vendor/future-model'))
 
@@ -127,7 +129,7 @@ describe('provider-scoped Chat Completions', () => {
     test('an edit affects new Requests without interrupting an admitted Request', async () => {
       const key = await createAllKey()
       connection = await createConnection()
-      path = `/providers/${connection.id}/v1/chat/completions`
+      path = `/providers/${connection.handle}/v1/chat/completions`
       let release!: () => void
       upstream.respondWith(async () => {
         await new Promise<void>((resolve) => { release = resolve })
@@ -202,7 +204,7 @@ describe('provider-scoped Chat Completions', () => {
       const response = await chat(key.secret, completionBody())
 
       expect(response.status).toBe(403)
-      expect((await openError(response)).error.code).toBe('connection_not_allowed')
+      expect((await openError(response)).error.code).toBe('provider_not_allowed')
       expect(upstream.calls).toHaveLength(0)
     })
 
@@ -433,8 +435,8 @@ describe('provider-scoped Chat Completions', () => {
     })
   })
 
-  describe('connection state', () => {
-    test('reports an archived connection', async () => {
+  describe('Provider state privacy', () => {
+    test('sanitizes an archived Provider', async () => {
       const key = await connect()
       await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
         method: 'POST',
@@ -443,12 +445,12 @@ describe('provider-scoped Chat Completions', () => {
 
       const response = await chat(key.secret, completionBody())
 
-      expect(response.status).toBe(409)
-      expect((await openError(response)).error.code).toBe('provider_archived')
+      expect(response.status).toBe(403)
+      expect((await openError(response)).error.code).toBe('provider_not_allowed')
       expect(upstream.calls).toHaveLength(0)
     })
 
-    test('reports a disabled connection', async () => {
+    test('sanitizes a disabled Provider', async () => {
       const key = await connect()
       await iroha.fetch(`/api/v1/admin/providers/${connection.id}`, {
         method: 'PATCH',
@@ -459,12 +461,12 @@ describe('provider-scoped Chat Completions', () => {
 
       const response = await chat(key.secret, completionBody())
 
-      expect(response.status).toBe(409)
-      expect((await openError(response)).error.code).toBe('provider_disabled')
+      expect(response.status).toBe(403)
+      expect((await openError(response)).error.code).toBe('provider_not_allowed')
       expect(upstream.calls).toHaveLength(0)
     })
 
-    test('reports a purged connection', async () => {
+    test('sanitizes a purged Provider Handle', async () => {
       const key = await connect()
       await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
         method: 'POST',
@@ -477,8 +479,8 @@ describe('provider-scoped Chat Completions', () => {
 
       const response = await chat(key.secret, completionBody())
 
-      expect(response.status).toBe(404)
-      expect((await openError(response)).error.code).toBe('provider_not_found')
+      expect(response.status).toBe(403)
+      expect((await openError(response)).error.code).toBe('provider_not_allowed')
     })
 
     test('a stale connection ID in the URL is refused, never silently routed', async () => {
@@ -501,13 +503,13 @@ describe('provider-scoped Chat Completions', () => {
       // The Gateway Key is scoped to the real Provider, so the scope check
       // refuses the stale ID first; what matters is that the route answers
       // with a refusal and never a 2xx or a redirect.
-      expect(response.status).toBe(403)
-      expect((await openError(response)).error.code).toBe('connection_not_allowed')
+      expect(response.status).toBe(400)
+      expect((await openError(response)).error.code).toBe('invalid_provider_handle')
       expect(response.headers.get('location')).toBeNull()
       expect(upstream.calls).toHaveLength(0)
     })
 
-    test('a stale connection ID scoped into the Gateway Key reaches the resolver and 404s', async () => {
+    test('a stale Provider ID scoped into the Gateway Key is rejected as an invalid Handle', async () => {
       // The scope check is a string match, not a Provider lookup: a Key
       // whose scope names a stale `pc_*` ID still passes authorization. The
       // resolver then has to surface a `provider_not_found` 404. The
@@ -535,12 +537,12 @@ describe('provider-scoped Chat Completions', () => {
         body: JSON.stringify(completionBody()),
       })
 
-      expect(response.status).toBe(404)
-      expect((await openError(response)).error.code).toBe('provider_not_found')
+      expect(response.status).toBe(400)
+      expect((await openError(response)).error.code).toBe('invalid_provider_handle')
       expect(upstream.calls).toHaveLength(0)
     })
 
-    test('a Provider whose ID was purged is reported as 404, not routed to a similar one', async () => {
+    test('a purged Provider Handle is sanitized and not routed to a similar one', async () => {
       // The Gateway Key scope check is a string match, not a lookup: a Key
       // whose scope entry names a Provider that has since been purged still
       // passes authorization. Inference then reaches the resolver, which
@@ -568,14 +570,14 @@ describe('provider-scoped Chat Completions', () => {
         csrf,
       })
 
-      const response = await iroha.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+      const response = await iroha.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
         body: JSON.stringify(completionBody()),
       })
 
-      expect(response.status).toBe(404)
-      expect((await openError(response)).error.code).toBe('provider_not_found')
+      expect(response.status).toBe(403)
+      expect((await openError(response)).error.code).toBe('provider_not_allowed')
       expect(upstream.calls).toHaveLength(0)
     })
 
@@ -591,6 +593,7 @@ describe('provider-scoped Chat Completions', () => {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
+            handle: crypto.randomUUID(),
             displayName: 'Untested',
             baseUrl: BASE_URL,
             keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -611,7 +614,7 @@ describe('provider-scoped Chat Completions', () => {
         })
         const { secret } = (await key.json()) as { secret: string }
 
-        const completion = await app.fetch(`/providers/${untested.id}/v1/chat/completions`, {
+        const completion = await app.fetch(`/providers/${untested.handle}/v1/chat/completions`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
           body: JSON.stringify(completionBody()),

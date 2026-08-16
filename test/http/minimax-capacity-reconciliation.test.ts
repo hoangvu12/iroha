@@ -9,6 +9,7 @@ const MODEL = 'MiniMax-M3'
 
 interface ProviderBody {
   id: string
+  handle: string
   keys: Array<{ id: string; health: string; healthReason: string | null }>
 }
 
@@ -57,6 +58,7 @@ describe('MiniMax capacity reconciliation through the assembled HTTP application
     const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'MiniMax capacity fixture',
         baseUrl: 'https://api.minimax.io/v1',
         keys: [{ upstreamKey: KEY_ZERO }, { upstreamKey: KEY_NEGATIVE }],
@@ -128,6 +130,7 @@ describe('MiniMax capacity reconciliation through the assembled HTTP application
       const created = await iroha.fetch('/api/v1/admin/providers', {
         method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
         body: JSON.stringify({
+          handle: crypto.randomUUID(),
           templateId: 'MiniMax', displayName: `MiniMax ${status}`,
           baseUrl: 'https://api.minimax.io/v1',
           keys: [{ upstreamKey: 'sk-minimax-first' }, { upstreamKey: 'sk-minimax-alternate' }],
@@ -141,7 +144,7 @@ describe('MiniMax capacity reconciliation through the assembled HTTP application
       })
       const { secret: gatewaySecret } = await gatewayKey.json() as { secret: string }
 
-      const inference = await iroha.fetch(`/providers/${provider.id}/v1/chat/completions`, {
+      const inference = await iroha.fetch(`/providers/${provider.handle}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${gatewaySecret}` },
         body: JSON.stringify({

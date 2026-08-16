@@ -15,6 +15,7 @@ const BASE_URL = 'https://api.anthropic.com/v1'
 
 interface ConnectionBody {
   id: string
+  handle: string
   displayName: string
   templateId: string | null
 }
@@ -81,7 +82,7 @@ describe('Anthropic Inference Adapter — non-streaming Chat Completions', () =>
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
     connection = await createAnthropicConnection()
-    path = `/providers/${connection.id}/v1/chat/completions`
+    path = `/providers/${connection.handle}/v1/chat/completions`
   })
 
   afterEach(async () => {
@@ -93,6 +94,7 @@ describe('Anthropic Inference Adapter — non-streaming Chat Completions', () =>
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Anthropic',
         baseUrl: BASE_URL,
         templateId: 'anthropic',

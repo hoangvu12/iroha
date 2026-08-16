@@ -19,6 +19,7 @@ const MODEL = 'anthropic-opus-5'
 
 interface ConnectionBody {
   id: string
+  handle: string
   displayName: string
   templateId: string | null
 }
@@ -160,8 +161,8 @@ describe('Anthropic-compatible /v1/messages public surface', () => {
     csrf = (await completeSetup(iroha)).csrf
     anthropicConnection = await createAnthropicConnection()
     openAiConnection = await createOpenAiConnection()
-    anthropicPath = `/providers/${anthropicConnection.id}/v1/messages`
-    openAiPath = `/providers/${openAiConnection.id}/v1/messages`
+    anthropicPath = `/providers/${anthropicConnection.handle}/v1/messages`
+    openAiPath = `/providers/${openAiConnection.handle}/v1/messages`
   })
 
   afterEach(async () => {
@@ -173,6 +174,7 @@ describe('Anthropic-compatible /v1/messages public surface', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Anthropic',
         baseUrl: ANTHROPIC_BASE_URL,
         templateId: 'anthropic',
@@ -191,6 +193,7 @@ describe('Anthropic-compatible /v1/messages public surface', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'OpenAI',
         baseUrl: OPENAI_BASE_URL,
         templateId: 'openai',

@@ -22,6 +22,7 @@ describe('the official OpenAI SDK streaming through the Responses surface', () =
   let csrf: string
   let client: OpenAI
   let providerId: string
+  let providerHandle: string
   let upstream: ReturnType<typeof mockUpstreamTransport>
 
   beforeEach(async () => {
@@ -29,10 +30,11 @@ describe('the official OpenAI SDK streaming through the Responses surface', () =
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
     providerId = await createConnection()
+    providerHandle = (await iroha.database.providers.getProvider(providerId))!.handle
     const secret = await createGatewayKey([{ providerId }])
     client = new OpenAI({
       apiKey: secret,
-      baseURL: `http://iroha.test/providers/${providerId}/v1`,
+      baseURL: `http://iroha.test/providers/${providerHandle}/v1`,
       fetch: appFetch(iroha.app),
       maxRetries: 0,
       dangerouslyAllowBrowser: true,
@@ -163,6 +165,7 @@ describe('the official OpenAI SDK streaming through the Responses surface', () =
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'SDK Responses stream example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],

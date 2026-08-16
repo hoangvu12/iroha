@@ -14,6 +14,7 @@ const GATEWAY_KEY_NAME = 'App credential'
 
 interface ConnectionBody {
   id: string
+  handle: string
   displayName: string
   keys: { id: string; health: string }[]
 }
@@ -79,6 +80,7 @@ describe('private request history and audit', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -109,7 +111,7 @@ describe('private request history and audit', () => {
     body: Record<string, unknown>,
     headers: Record<string, string> = {},
   ) =>
-    iroha.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+    iroha.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

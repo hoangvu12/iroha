@@ -42,6 +42,7 @@ function chunk(): string {
 
 interface ConnectionBody {
   id: string
+  handle: string
   displayName: string
   keys: { id: string; health: string }[]
 }
@@ -55,6 +56,7 @@ async function createConnection(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
+      handle: crypto.randomUUID(),
       displayName: 'Security example',
       baseUrl: BASE_URL,
       keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -98,7 +100,7 @@ describe('provider transport security boundaries', () => {
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
     connection = await createConnection(iroha, csrf)
-    path = `/providers/${connection.id}/v1/chat/completions`
+    path = `/providers/${connection.handle}/v1/chat/completions`
     const key = await createKey(iroha, csrf, [{ providerId: connection.id }])
     secret = key.secret
   })
@@ -159,6 +161,7 @@ describe('provider transport security boundaries', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Static headers',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -173,7 +176,7 @@ describe('provider transport security boundaries', () => {
     const key = await createKey(iroha, csrf, [{ providerId: created2.id }])
     const localSecret = key.secret
 
-    await iroha.fetch(`/providers/${created2.id}/v1/chat/completions`, {
+    await iroha.fetch(`/providers/${created2.handle}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -242,7 +245,7 @@ describe('provider transport security boundaries', () => {
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
     const created = await createConnection(iroha, csrf, { redirectAllowSameOrigin: true })
-    path = `/providers/${created.id}/v1/chat/completions`
+    path = `/providers/${created.handle}/v1/chat/completions`
     const key = await createKey(iroha, csrf, [{ providerId: created.id }])
     secret = key.secret
 
@@ -305,7 +308,7 @@ describe('CORS behavior for inference', () => {
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
     connection = await createConnection(iroha, csrf)
-    path = `/providers/${connection.id}/v1/chat/completions`
+    path = `/providers/${connection.handle}/v1/chat/completions`
     const key = await createKey(iroha, csrf, [{ providerId: connection.id }])
     secret = key.secret
   })
@@ -368,7 +371,7 @@ describe('CORS behavior for inference', () => {
     })
     csrf = (await completeSetup(iroha)).csrf
     connection = await createConnection(iroha, csrf)
-    path = `/providers/${connection.id}/v1/chat/completions`
+    path = `/providers/${connection.handle}/v1/chat/completions`
     const key = await createKey(iroha, csrf, [{ providerId: connection.id }])
     secret = key.secret
 
@@ -396,7 +399,7 @@ describe('CORS behavior for inference', () => {
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
     connection = await createConnection(iroha, csrf)
-    path = `/providers/${connection.id}/v1/chat/completions`
+    path = `/providers/${connection.handle}/v1/chat/completions`
     const keyResponse = await iroha.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -467,7 +470,7 @@ describe('CORS behavior for inference', () => {
     })
     csrf = (await completeSetup(iroha)).csrf
     connection = await createConnection(iroha, csrf)
-    path = `/providers/${connection.id}/v1/chat/completions`
+    path = `/providers/${connection.handle}/v1/chat/completions`
 
     const preflight = await iroha.fetch(path, {
       method: 'OPTIONS',
@@ -522,6 +525,7 @@ describe('advanced transport configuration validation', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Bad auth header',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -540,6 +544,7 @@ describe('advanced transport configuration validation', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Custom auth header',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -557,6 +562,7 @@ describe('advanced transport configuration validation', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Bad auth prefix',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -575,6 +581,7 @@ describe('advanced transport configuration validation', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Tiny timeout',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -593,6 +600,7 @@ describe('advanced transport configuration validation', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Plain HTTP',
         baseUrl: 'http://api.example.com/v1',
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -610,6 +618,7 @@ describe('advanced transport configuration validation', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Local vLLM',
         baseUrl: 'http://localhost:8000/v1',
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -628,6 +637,7 @@ describe('advanced transport configuration validation', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Static headers',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -670,6 +680,7 @@ describe('per-connection transport overrides reach the runtime', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Streaming override',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -680,7 +691,8 @@ describe('per-connection transport overrides reach the runtime', () => {
     if (created.status !== 201) {
       throw new Error(`Create failed: ${created.status}: ${await created.text()}`)
     }
-    providerId = ((await created.json()) as ConnectionBody).id
+    const provider = (await created.json()) as ConnectionBody
+    providerId = provider.id
     const key = await iroha.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -691,7 +703,7 @@ describe('per-connection transport overrides reach the runtime', () => {
       throw new Error(`Key create failed: ${key.status}: ${await key.text()}`)
     }
     secret = ((await key.json()) as { secret: string }).secret
-    path = `/providers/${providerId}/v1/chat/completions`
+    path = `/providers/${provider.handle}/v1/chat/completions`
   })
 
   afterEach(async () => {

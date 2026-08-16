@@ -15,6 +15,7 @@ const OTHER_MODEL = 'gpt-4o'
 
 interface ConnectionBody {
   id: string
+  handle: string
   keys: { id: string; health: string; accountId: string | null; baseUrl: string | null }[]
 }
 
@@ -41,6 +42,7 @@ describe('round-robin key selection on the inference path', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -117,7 +119,7 @@ describe('round-robin key selection on the inference path', () => {
 
   const connect = async () => {
     connection = await createConnection()
-    path = `/providers/${connection.id}/v1/chat/completions`
+    path = `/providers/${connection.handle}/v1/chat/completions`
     const created = await iroha.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

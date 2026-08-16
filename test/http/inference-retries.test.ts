@@ -12,6 +12,7 @@ describe('scoped inference retries', () => {
   let upstream: ReturnType<typeof mockUpstreamTransport>
   let csrf: string
   let providerId: string
+  let providerHandle: string
   let secret: string
 
   beforeEach(async () => {
@@ -22,6 +23,7 @@ describe('scoped inference retries', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         templateId: 'dashscope',
         displayName: 'Retry',
         baseUrl: BASE_URL,
@@ -29,7 +31,9 @@ describe('scoped inference retries', () => {
       }),
       csrf,
     })
-    providerId = ((await created.json()) as { id: string }).id
+    const provider = (await created.json()) as { id: string; handle: string }
+    providerId = provider.id
+    providerHandle = provider.handle
     await iroha.fetch(`/api/v1/admin/providers/${providerId}/keys`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -50,7 +54,7 @@ describe('scoped inference retries', () => {
   })
 
   const chat = () =>
-    iroha.fetch(`/providers/${providerId}/v1/chat/completions`, {
+    iroha.fetch(`/providers/${providerHandle}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
       body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }] }),
@@ -144,10 +148,12 @@ describe('scoped inference retries', () => {
     const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Retry delay', baseUrl: BASE_URL, keys: [{ upstreamKey: FIRST_KEY }] }),
+      body: JSON.stringify({ handle: crypto.randomUUID(), displayName: 'Retry delay', baseUrl: BASE_URL, keys: [{ upstreamKey: FIRST_KEY }] }),
       csrf,
     })
-    providerId = ((await created.json()) as { id: string }).id
+    const provider = (await created.json()) as { id: string; handle: string }
+    providerId = provider.id
+    providerHandle = provider.handle
     const key = await iroha.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -175,6 +181,7 @@ describe('scoped inference retries', () => {
     const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         templateId: 'MiniMax', displayName: 'MiniMax capacity', baseUrl: BASE_URL,
         keys: [{ upstreamKey: 'sk-minimax-first' }],
       }),
@@ -205,7 +212,8 @@ describe('scoped inference retries', () => {
       error: { code: 'insufficient_balance', type: 'payment_required', message: 'do not persist me' },
     }, { status: 402 }))
 
-    const response = await iroha.fetch(`/providers/${minimaxId}/v1/chat/completions`, {
+    const minimaxHandle = (await iroha.database.providers.getProvider(minimaxId))!.handle
+    const response = await iroha.fetch(`/providers/${minimaxHandle}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${minimaxSecret}` },
       body: JSON.stringify({ model: 'MiniMax-M3', messages: [{ role: 'user', content: 'Hello' }] }),
@@ -231,7 +239,8 @@ describe('scoped inference retries', () => {
         : Response.json(completion()),
     )
 
-    const response = await iroha.fetch(`/providers/${providerId}/v1/chat/completions`, {
+    const handle = (await iroha.database.providers.getProvider(providerId))!.handle
+    const response = await iroha.fetch(`/providers/${handle}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
       body: JSON.stringify({

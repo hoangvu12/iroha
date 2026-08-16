@@ -20,6 +20,7 @@ const MODEL = 'gpt-4o-mini'
 
 interface ConnectionBody {
   id: string
+  handle: string
   displayName: string
   keys: { id: string; health: string }[]
 }
@@ -76,7 +77,7 @@ describe('provider-scoped streaming Chat Completions', () => {
     })
     csrf = (await completeSetup(iroha)).csrf
     ;({ connection, key } = await connect())
-    path = `/providers/${connection.id}/v1/chat/completions`
+    path = `/providers/${connection.handle}/v1/chat/completions`
   })
 
   afterEach(async () => {
@@ -88,6 +89,7 @@ describe('provider-scoped streaming Chat Completions', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Streaming example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],

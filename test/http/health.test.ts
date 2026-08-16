@@ -149,7 +149,7 @@ describe('readiness and Provider outages', () => {
         body: JSON.stringify({ displayName: 'Outage example', baseUrl: 'https://api.example.com/v1', keys: [{ upstreamKey: 'upstream-secret' }] }),
         csrf: signedIn.csrf,
       })
-      const connection = (await connectionResponse.json()) as { id: string }
+      const connection = (await connectionResponse.json()) as { id: string; handle: string }
       const keyResponse = await test.fetch('/api/v1/admin/gateway-keys', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -158,7 +158,7 @@ describe('readiness and Provider outages', () => {
       })
       const key = (await keyResponse.json()) as { secret: string }
 
-      const inference = await test.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+      const inference = await test.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key.secret}` },
         body: JSON.stringify({ model: 'model-a', messages: [{ role: 'user', content: 'hello' }] }),

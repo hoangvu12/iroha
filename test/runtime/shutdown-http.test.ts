@@ -34,10 +34,10 @@ describe('HTTP shutdown lifecycle', () => {
     const connectionResponse = await test.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Shutdown example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
+      body: JSON.stringify({ handle: crypto.randomUUID(), displayName: 'Shutdown example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
       csrf: signedIn.csrf,
     })
-    const connection = (await connectionResponse.json()) as { id: string }
+    const connection = (await connectionResponse.json()) as { id: string; handle: string }
     const keyResponse = await test.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -53,7 +53,7 @@ describe('HTTP shutdown lifecycle', () => {
       release = resolve
     }))
 
-    const first = test.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+    const first = test.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key.secret}` },
       body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'hello' }] }),
@@ -78,7 +78,7 @@ describe('HTTP shutdown lifecycle', () => {
     await draining
     expect(drained).toBe(true)
 
-    const afterShutdown = await test.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+    const afterShutdown = await test.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key.secret}` },
       body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'again' }] }),
@@ -99,10 +99,10 @@ describe('HTTP shutdown lifecycle', () => {
     const connectionResponse = await test.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Streaming shutdown example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
+      body: JSON.stringify({ handle: crypto.randomUUID(), displayName: 'Streaming shutdown example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
       csrf: signedIn.csrf,
     })
-    const connection = (await connectionResponse.json()) as { id: string }
+    const connection = (await connectionResponse.json()) as { id: string; handle: string }
     const keyResponse = await test.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -117,7 +117,7 @@ describe('HTTP shutdown lifecycle', () => {
       return new Response(stream.stream, { status: 200, headers: { 'content-type': 'text/event-stream' } })
     })
 
-    const responsePromise = test.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+    const responsePromise = test.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key.secret}` },
       body: JSON.stringify({ model: MODEL, stream: true, messages: [{ role: 'user', content: 'hello' }] }),

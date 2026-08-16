@@ -30,6 +30,7 @@ interface CreatedKeyBody extends GatewayKeyBody {
 
 interface ConnectionBody {
   id: string
+  handle: string
   displayName: string
 }
 
@@ -51,6 +52,7 @@ describe('Gateway Key administration', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName,
         baseUrl: 'https://api.example.com/v1',
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -494,7 +496,7 @@ describe('Gateway Key administration', () => {
       )
       expect(providers.find((provider) => provider.id === alpha.id)).toMatchObject({
         displayName: 'Alpha',
-        url: `/providers/${alpha.id}/v1`,
+        url: `/providers/${alpha.handle}/v1`,
         models: ['gpt-4o', 'gpt-4o-mini'],
         capabilities: {},
       })
@@ -547,7 +549,7 @@ describe('Gateway Key administration', () => {
       expect(response.status).toBe(200)
 
       const { providers } = (await response.json()) as {
-        providers: { id: string; displayName: string; url: string; models: string[] }[]
+        providers: { id: string; handle: string; displayName: string; url: string; models: string[] }[]
       }
 
       // For every entry the directory lists, hit `/v1/models` with the listed
@@ -566,7 +568,7 @@ describe('Gateway Key administration', () => {
         expect(stored).not.toBeNull()
         expect(provider.displayName).toBe(stored!.displayName)
         expect(provider.models).toEqual(provider.models.sort())
-        expect(provider.id).toBe(provider.url.replace(/^\/providers\//, '').replace(/\/v1$/, ''))
+        expect(provider.handle).toBe(provider.url.replace(/^\/providers\//, '').replace(/\/v1$/, ''))
       }
 
       // A Provider listed in the directory but not in the key's scope must
@@ -576,7 +578,7 @@ describe('Gateway Key administration', () => {
       const listedIds = new Set(providers.map((provider) => provider.id))
       expect(listedIds.has(gamma.id)).toBe(false)
 
-      const unreachable = await iroha.fetch(`/providers/${gamma.id}/v1/models`, {
+      const unreachable = await iroha.fetch(`/providers/${gamma.handle}/v1/models`, {
         headers: { authorization: `Bearer ${created.secret}` },
       })
       expect(unreachable.status).toBe(403)
@@ -598,6 +600,7 @@ describe('Gateway Key administration', () => {
       expect(Object.keys(body.providers[0]!).sort()).toEqual([
         'capabilities',
         'displayName',
+        'handle',
         'id',
         'models',
         'url',

@@ -12,6 +12,7 @@ const MODEL = 'gpt-4o-mini'
 
 interface ConnectionBody {
   id: string
+  handle: string
   displayName: string
   keys: { id: string; health: string }[]
 }
@@ -46,6 +47,7 @@ describe('the provider-scoped Models API', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Catalog example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -72,7 +74,7 @@ describe('the provider-scoped Models API', () => {
   }
 
   const listModels = (token: string | null) =>
-    iroha.fetch(`/providers/${connection.id}/v1/models`, {
+    iroha.fetch(`/providers/${connection.handle}/v1/models`, {
       method: 'GET',
       headers: token === null ? {} : { authorization: `Bearer ${token}` },
     })
@@ -111,6 +113,7 @@ describe('the provider-scoped Models API', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Catalog override',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: 'sk-override-discovery-key', baseUrl: overrideUrl }],
@@ -209,6 +212,7 @@ describe('the Owner model catalog surface', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Catalog example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -239,6 +243,7 @@ describe('the Owner model catalog surface', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'OpenAI template example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -385,7 +390,7 @@ describe('the Owner model catalog surface', () => {
     const key = await createKey([{ providerId: connection.id }])
     const callsBefore = upstream.calls.length
 
-    const response = await iroha.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+    const response = await iroha.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'hi' }] }),

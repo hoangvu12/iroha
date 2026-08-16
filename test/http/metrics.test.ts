@@ -33,7 +33,7 @@ describe('optional metrics', () => {
       body: JSON.stringify({ displayName: 'Metrics example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
       csrf: signedIn.csrf,
     })
-    const connection = (await connectionResponse.json()) as { id: string }
+    const connection = (await connectionResponse.json()) as { id: string; handle: string }
     const keyResponse = await test.fetch('/api/v1/admin/gateway-keys', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -54,7 +54,7 @@ describe('optional metrics', () => {
     expect(enable.status).toBe(200)
     expect(await enable.json()).toEqual({ enabled: true })
 
-    const inference = await test.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+    const inference = await test.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key.secret}` },
       body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'hello' }] }),

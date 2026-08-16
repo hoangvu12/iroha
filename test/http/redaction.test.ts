@@ -34,11 +34,12 @@ describe('secret redaction across the Owner surface', () => {
     await iroha.dispose()
   })
 
-  const createConnection = async (): Promise<{ id: string }> => {
+  const createConnection = async (): Promise<{ id: string; handle: string }> => {
     const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
@@ -48,7 +49,7 @@ describe('secret redaction across the Owner surface', () => {
     if (response.status !== 201) {
       throw new Error(`Connection create failed with ${response.status}: ${await response.text()}`)
     }
-    return (await response.json()) as { id: string }
+    return (await response.json()) as { id: string; handle: string }
   }
 
   const createKey = async (providerId: string): Promise<{ secret: string; id: string }> => {
@@ -78,7 +79,7 @@ describe('secret redaction across the Owner surface', () => {
       )
     })
 
-    const response = await iroha.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+    const response = await iroha.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -137,7 +138,7 @@ describe('secret redaction across the Owner surface', () => {
       }),
     )
 
-    const response = await iroha.fetch(`/providers/${connection.id}/v1/chat/completions`, {
+    const response = await iroha.fetch(`/providers/${connection.handle}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -181,6 +182,7 @@ describe('secret redaction across the Owner surface', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Example',
         baseUrl: 'not-a-url',
         keys: [{ upstreamKey: maliciousKey }],

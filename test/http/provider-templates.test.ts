@@ -153,6 +153,7 @@ describe('creating a Provider Connection from a template', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Hand-configured',
         baseUrl: 'https://api.example.com/v1',
         keys: [{ upstreamKey: 'sk-test-hand-key' }],
@@ -170,6 +171,7 @@ describe('creating a Provider Connection from a template', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'OpenAI via template',
         baseUrl: 'https://api.openai.com/v1',
         keys: [{ upstreamKey: 'sk-test-template-openai' }],
@@ -197,6 +199,7 @@ describe('creating a Provider Connection from a template', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Unknown template',
         baseUrl: 'https://api.example.com/v1',
         keys: [{ upstreamKey: 'sk-test-unknown-template' }],
@@ -214,6 +217,7 @@ describe('creating a Provider Connection from a template', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName: 'Templated',
         baseUrl: 'https://api.openai.com/v1',
         keys: [{ upstreamKey: 'sk-test-list-template' }],

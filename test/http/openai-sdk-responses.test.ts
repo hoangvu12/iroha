@@ -18,10 +18,11 @@ describe('the official OpenAI SDK through the Responses surface', () => {
     iroha = await createTestApp({ upstreamTransport: upstream.fetch })
     csrf = (await completeSetup(iroha)).csrf
     const providerId = await createConnection(iroha, csrf)
+    const providerHandle = (await iroha.database.providers.getProvider(providerId))!.handle
     const secret = await createGatewayKey(iroha, csrf, providerId)
     client = new OpenAI({
       apiKey: secret,
-      baseURL: `http://iroha.test/providers/${providerId}/v1`,
+      baseURL: `http://iroha.test/providers/${providerHandle}/v1`,
       fetch: appFetch(iroha.app),
       maxRetries: 0,
       dangerouslyAllowBrowser: true,
@@ -203,7 +204,7 @@ async function createConnection(iroha: TestApp, csrf: string): Promise<string> {
   const response = await iroha.fetch('/api/v1/admin/providers', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ displayName: 'SDK Responses', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
+    body: JSON.stringify({ handle: crypto.randomUUID(), displayName: 'SDK Responses', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
     csrf,
   })
   if (response.status !== 201) throw new Error(`Connection create failed: ${await response.text()}`)

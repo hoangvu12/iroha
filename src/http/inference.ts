@@ -146,13 +146,23 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
   const retrySleep = options.retrySleep ?? sleepWithTimer(timer)
   const transport = options.transportDefaults ?? DEFAULT_TRANSPORT
   const requestHistory = options.requestHistory
+  const resolveScopedProvider = async (
+    providerHandle: string,
+    activity?: InferenceActivity,
+    correlationId?: string,
+  ): Promise<{ readonly ok: true; readonly providerId: string } | { readonly ok: false; readonly response: Response }> => {
+    const resolved = await providers.resolveHandle(providerHandle)
+    if (resolved.ok) return resolved
+    activity?.finish()
+    return { ok: false, response: providerHandleError(resolved.code, correlationId) }
+  }
 
   return new Elysia({ name: 'iroha/inference', prefix: '/providers' })
     .options(
       '/:providerHandle/*',
       async ({ params, request }) => {
-        const resolved = await providers.resolveHandle(params.providerHandle)
-        if (!resolved.ok) return providerHandleError(resolved.code)
+        const resolved = await resolveScopedProvider(params.providerHandle)
+        if (!resolved.ok) return resolved.response
         return handleCors({
           providerId: resolved.providerId,
           gatewayKeys,
@@ -179,8 +189,8 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         const correlationId = newRequestId()
         const baseHeaders = { 'content-type': 'application/json', 'x-request-id': correlationId }
 
-        const resolved = await providers.resolveHandle(params.providerHandle)
-        if (!resolved.ok) return providerHandleError(resolved.code, correlationId)
+        const resolved = await resolveScopedProvider(params.providerHandle, activity, correlationId)
+        if (!resolved.ok) return resolved.response
 
         const cors = await buildCorsHeaders({
           providerId: resolved.providerId,
@@ -229,11 +239,8 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
-        const resolved = await providers.resolveHandle(params.providerHandle)
-        if (!resolved.ok) {
-          activity?.finish()
-          return providerHandleError(resolved.code)
-        }
+        const resolved = await resolveScopedProvider(params.providerHandle, activity)
+        if (!resolved.ok) return resolved.response
         return await forwardGeneration({
           request,
           providerId: resolved.providerId,
@@ -268,11 +275,8 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
-        const resolved = await providers.resolveHandle(params.providerHandle)
-        if (!resolved.ok) {
-          activity?.finish()
-          return providerHandleError(resolved.code)
-        }
+        const resolved = await resolveScopedProvider(params.providerHandle, activity)
+        if (!resolved.ok) return resolved.response
         return await forwardGeneration({
           request,
           providerId: resolved.providerId,
@@ -307,11 +311,8 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
       async ({ request, params }) => {
         const activity = shutdown === undefined ? undefined : shutdown.beginInference(request.signal)
         if (activity === null) return shuttingDownError()
-        const resolved = await providers.resolveHandle(params.providerHandle)
-        if (!resolved.ok) {
-          activity?.finish()
-          return providerHandleError(resolved.code)
-        }
+        const resolved = await resolveScopedProvider(params.providerHandle, activity)
+        if (!resolved.ok) return resolved.response
         return await forwardAnthropicMessages({
           request,
           providerId: resolved.providerId,
@@ -2045,11 +2046,7 @@ function authorizationRefusal(
     case 'gateway_key_invalid':
       return { status: 401, code: 'gateway_key_invalid', message: 'This Gateway Key is not valid.' }
     case 'connection_not_allowed':
-      return {
-        status: 403,
-        code: 'provider_not_allowed',
-        message: 'This Gateway Key is not allowed to use that Provider.',
-      }
+      return providerNotAllowedRefusal()
     case 'model_not_allowed':
       return {
         status: 403,
@@ -2102,8 +2099,12 @@ function providerHandleError(
 ): Response {
   const refusal = code === 'invalid_provider_handle'
     ? { status: 400, code, message: 'The Provider Handle is invalid.' }
-    : { status: 403, code, message: 'This Gateway Key is not allowed to use that Provider.' }
+    : providerNotAllowedRefusal()
   return error(refusal.status, { 'content-type': 'application/json', 'x-request-id': correlationId }, refusal, correlationId)
+}
+
+function providerNotAllowedRefusal(): Refusal {
+  return { status: 403, code: 'provider_not_allowed', message: 'This Gateway Key is not allowed to use that Provider.' }
 }
 
 /**

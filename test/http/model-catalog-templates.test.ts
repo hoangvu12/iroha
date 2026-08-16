@@ -49,6 +49,7 @@ describe('Provider Template contribution to the model catalog', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        handle: crypto.randomUUID(),
         displayName,
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],

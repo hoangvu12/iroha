@@ -441,6 +441,11 @@ class SqliteProviderRepository implements ProviderRepository {
     return row ? toProvider(row) : null
   }
 
+  async getProviderByHandle(providerHandle: string): Promise<ProviderRecord | null> {
+    const [row] = await this.handle.select().from(providers).where(eq(providers.handle, providerHandle)).limit(1)
+    return row ? toProvider(row) : null
+  }
+
   async insertProvider(provider: ProviderRecord): Promise<ProviderRecord> {
     const encoded = encodeProviderRow(provider)
     const [row] = await this.handle.insert(providers).values(encoded).returning()

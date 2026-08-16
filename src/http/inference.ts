@@ -24,7 +24,7 @@ import type { InferenceActivity, ShutdownController } from '../runtime/shutdown.
 import { systemTimer, type Timer } from '../runtime/timer.ts'
 import type { UsageService } from '../usage/index.ts'
 import type { CapacityEvidence } from '../providers/provider-evidence.ts'
-import { authorizeQualifiedModel } from './qualified-model.ts'
+import { authorizeQualifiedModel, type QualifiedModelFailure } from './qualified-model.ts'
 import { bearerToken } from './bearer-token.ts'
 
 /** The terminal shape of one attempt's outcome, what the recorder writes. */
@@ -356,7 +356,7 @@ export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
     errors: {
       readonly internal: () => Response
       readonly malformed: () => Response
-      readonly unauthorized: (code: 'gateway_key_invalid' | 'invalid_model_id' | 'provider_not_allowed' | 'model_not_allowed') => Response
+      readonly unauthorized: (code: QualifiedModelFailure) => Response
     },
   ) => {
     const database = options.database
@@ -431,7 +431,7 @@ export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
     if (!response.ok) return response
     return await qualifyGlobalResponse(
       response,
-      admission.authorization.providerId,
+      admission.authorization.providerHandle,
       admission.requestedModel,
       upstreamPath === '/responses' ? 'responses' : 'chat',
     )
@@ -450,7 +450,7 @@ export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
       ...forwardingOptions(admission),
     })
     if (!response.ok) return response
-    return await qualifyGlobalResponse(response, admission.authorization.providerId, admission.requestedModel, 'messages')
+    return await qualifyGlobalResponse(response, admission.authorization.providerHandle, admission.requestedModel, 'messages')
   }
 
   return new Elysia({ name: 'iroha/global-inference' })
@@ -465,13 +465,17 @@ export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
     })
 }
 
-function qualifiedAuthorizationError(code: 'gateway_key_invalid' | 'invalid_model_id' | 'provider_not_allowed' | 'model_not_allowed'): Response {
-  switch (code) {
-    case 'gateway_key_invalid': return globalError(401, code, 'This Gateway Key is not valid.')
-    case 'invalid_model_id': return globalError(400, code, 'A Qualified Model ID must be <provider_id>/<model_id>.')
-    case 'provider_not_allowed': return globalError(403, code, 'This Gateway Key is not allowed to use that Provider.')
-    case 'model_not_allowed': return globalError(403, code, 'This Gateway Key is not allowed to request that model.')
-  }
+const qualifiedFailureMetadata: Record<QualifiedModelFailure, { readonly status: number; readonly message: string }> = {
+  gateway_key_invalid: { status: 401, message: 'This Gateway Key is not valid.' },
+  invalid_model_id: { status: 400, message: 'A Qualified Model ID must be <provider_handle>/<model_id>.' },
+  invalid_provider_handle: { status: 400, message: 'The Provider Handle is invalid.' },
+  provider_not_allowed: { status: 403, message: 'This Gateway Key is not allowed to use that Provider.' },
+  model_not_allowed: { status: 403, message: 'This Gateway Key is not allowed to request that model.' },
+}
+
+function qualifiedAuthorizationError(code: QualifiedModelFailure): Response {
+  const failure = qualifiedFailureMetadata[code]
+  return globalError(failure.status, code, failure.message)
 }
 
 function globalError(status: number, code: string, message: string): Response {
@@ -479,16 +483,12 @@ function globalError(status: number, code: string, message: string): Response {
 }
 
 function qualifiedAnthropicAuthorizationError(
-  code: 'gateway_key_invalid' | 'invalid_model_id' | 'provider_not_allowed' | 'model_not_allowed',
+  code: QualifiedModelFailure,
   headers: Record<string, string>,
   correlationId: string,
 ): Response {
-  switch (code) {
-    case 'gateway_key_invalid': return anthropicMessagesErrorResponse(401, code, 'This Gateway Key is not valid.', headers, correlationId)
-    case 'invalid_model_id': return anthropicMessagesErrorResponse(400, code, 'A Qualified Model ID must be <provider_id>/<model_id>.', headers, correlationId)
-    case 'provider_not_allowed': return anthropicMessagesErrorResponse(403, code, 'This Gateway Key is not allowed to use that Provider.', headers, correlationId)
-    case 'model_not_allowed': return anthropicMessagesErrorResponse(403, code, 'This Gateway Key is not allowed to request that model.', headers, correlationId)
-  }
+  const failure = qualifiedFailureMetadata[code]
+  return anthropicMessagesErrorResponse(failure.status, code, failure.message, headers, correlationId)
 }
 
 async function qualifyGlobalResponse(response: Response, providerId: string, requestedModel: string, surface: 'chat' | 'responses' | 'messages'): Promise<Response> {

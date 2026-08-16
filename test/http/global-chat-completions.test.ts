@@ -5,6 +5,7 @@ import { controlledSse, mockUpstreamTransport, sseDone, sseEvent, sseResponse } 
 
 const BASE_URL = 'https://api.example.com/v1'
 const UPSTREAM_KEY = 'sk-global-chat-test'
+const PROVIDER_HANDLE = 'global-chat'
 
 describe('global Chat Completions', () => {
   let iroha: TestApp
@@ -31,9 +32,9 @@ describe('global Chat Completions', () => {
     const client = new OpenAI({ apiKey: secret, baseURL: 'http://iroha.test/v1', fetch: appFetch(iroha.app), maxRetries: 0 })
 
     const completion = await client.chat.completions.create({
-      model: `${providerId}/openai/gpt-4o`, messages: [{ role: 'user', content: 'Hello' }],
+      model: `${PROVIDER_HANDLE}/openai/gpt-4o`, messages: [{ role: 'user', content: 'Hello' }],
     })
-    expect(completion.model).toBe(`${providerId}/served/alias`)
+    expect(completion.model).toBe(`${PROVIDER_HANDLE}/served/alias`)
     const forwarded = JSON.parse(upstream.calls[0]!.body ?? '{}') as { model: string }
     expect(forwarded.model).toBe('openai/gpt-4o')
     expect(upstream.calls[0]!.url).toBe(`${BASE_URL}/chat/completions`)
@@ -42,7 +43,7 @@ describe('global Chat Completions', () => {
 
   test('falls back to the requested Qualified Model ID when upstream omits model', async () => {
     upstream.respondWith(() => Response.json({ id: 'chatcmpl-fallback', object: 'chat.completion', choices: [] }))
-    const requested = `${providerId}/vendor/future-model`
+    const requested = `${PROVIDER_HANDLE}/vendor/future-model`
     const response = await chat({ model: requested, messages: [] })
     expect(response.status).toBe(200)
     expect(((await response.json()) as { model: string }).model).toBe(requested)
@@ -54,10 +55,10 @@ describe('global Chat Completions', () => {
       sseEvent(JSON.stringify({ id: 'two', object: 'chat.completion.chunk', choices: [] })),
       sseDone(),
     ]))
-    const requested = `${providerId}/nested/requested`
+    const requested = `${PROVIDER_HANDLE}/nested/requested`
     const response = await chat({ model: requested, messages: [], stream: true })
     const text = await response.text()
-    expect(text).toContain(`"model":"${providerId}/served-model"`)
+    expect(text).toContain(`"model":"${PROVIDER_HANDLE}/served-model"`)
     expect(text).toContain(`"model":"${requested}"`)
     expect(text).toContain('data: [DONE]')
   })
@@ -68,10 +69,10 @@ describe('global Chat Completions', () => {
       sseDone(),
     ]))
     const client = new OpenAI({ apiKey: secret, baseURL: 'http://iroha.test/v1', fetch: appFetch(iroha.app), maxRetries: 0 })
-    const stream = await client.chat.completions.create({ model: `${providerId}/nested/model`, messages: [], stream: true })
+    const stream = await client.chat.completions.create({ model: `${PROVIDER_HANDLE}/nested/model`, messages: [], stream: true })
     const chunks = []
     for await (const chunk of stream) chunks.push(chunk)
-    expect(chunks[0]?.model).toBe(`${providerId}/served-stream`)
+    expect(chunks[0]?.model).toBe(`${PROVIDER_HANDLE}/served-stream`)
     expect(chunks[0]?.choices[0]?.delta.content).toBe('Hi')
   })
 
@@ -83,7 +84,7 @@ describe('global Chat Completions', () => {
         ? new Response('{"error":{"message":"temporary"}}', { status: 503 })
         : Response.json({ id: 'recovered', object: 'chat.completion', model: 'recovered-model', choices: [] })
     })
-    const response = await chat({ model: `${providerId}/nested/retry`, messages: [] })
+    const response = await chat({ model: `${PROVIDER_HANDLE}/nested/retry`, messages: [] })
     expect(response.status).toBe(200)
     expect(upstream.calls).toHaveLength(2)
     const requestId = response.headers.get('x-request-id')
@@ -99,7 +100,7 @@ describe('global Chat Completions', () => {
       return new Response(held.stream, { headers: { 'content-type': 'text/event-stream' } })
     })
     const controller = new AbortController()
-    const response = await chat({ model: `${providerId}/nested/cancel`, messages: [], stream: true }, secret, controller.signal)
+    const response = await chat({ model: `${PROVIDER_HANDLE}/nested/cancel`, messages: [], stream: true }, secret, controller.signal)
     const reading = response.text()
     await Bun.sleep(0)
     expect(upstream.calls[0]?.signal?.aborted).toBe(false)
@@ -113,15 +114,26 @@ describe('global Chat Completions', () => {
     expect(malformed.status).toBe(400)
     expect(((await malformed.json()) as { error: { code: string } }).error.code).toBe('invalid_model_id')
 
-    const invalid = await chat({ model: `${providerId}/model`, messages: [] }, 'gk_absent.wrong')
+    const invalidHandle = await chat({ model: 'INVALID/model', messages: [] })
+    expect(invalidHandle.status).toBe(400)
+    expect(((await invalidHandle.json()) as { error: { code: string } }).error.code).toBe('invalid_provider_handle')
+
+    const invalid = await chat({ model: `${PROVIDER_HANDLE}/model`, messages: [] }, 'gk_absent.wrong')
     expect(invalid.status).toBe(401)
 
-    const absent = await chat({ model: 'pr_absent/model', messages: [] })
+    const invalidKeyAbsentHandle = await chat({ model: 'absent/model', messages: [] }, 'gk_absent.wrong')
+    expect(invalidKeyAbsentHandle.status).toBe(401)
+
+    const absent = await chat({ model: 'absent/model', messages: [] })
     expect(absent.status).toBe(403)
     expect(((await absent.json()) as { error: { code: string } }).error.code).toBe('provider_not_allowed')
 
+    const legacyId = await chat({ model: `${providerId}/model`, messages: [] })
+    expect(legacyId.status).toBe(400)
+    expect(((await legacyId.json()) as { error: { code: string } }).error.code).toBe('invalid_provider_handle')
+
     const restricted = await createKey([{ providerId, models: ['allowed'] }])
-    const denied = await chat({ model: `${providerId}/denied`, messages: [] }, restricted)
+    const denied = await chat({ model: `${PROVIDER_HANDLE}/denied`, messages: [] }, restricted)
     expect(denied.status).toBe(403)
     expect(((await denied.json()) as { error: { code: string } }).error.code).toBe('model_not_allowed')
     expect(upstream.calls).toHaveLength(0)
@@ -130,7 +142,7 @@ describe('global Chat Completions', () => {
   async function createProvider(): Promise<string> {
     const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Global chat', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }), csrf,
+      body: JSON.stringify({ displayName: 'Global chat', handle: PROVIDER_HANDLE, baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }), csrf,
     })
     return ((await response.json()) as { id: string }).id
   }

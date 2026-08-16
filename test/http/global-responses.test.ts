@@ -5,6 +5,7 @@ import { controlledSse, mockUpstreamTransport, sseDone, sseEvent, sseResponse } 
 
 const BASE_URL = 'https://api.example.com/v1'
 const UPSTREAM_KEY = 'sk-global-responses'
+const PROVIDER_HANDLE = 'global-responses'
 
 describe('global Responses', () => {
   let iroha: TestApp
@@ -26,12 +27,12 @@ describe('global Responses', () => {
     upstream.respondWith(() => Response.json(responseBody('served/response')))
     const client = new OpenAI({ apiKey: secret, baseURL: 'http://iroha.test/v1', fetch: appFetch(iroha.app), maxRetries: 0 })
     const response = await client.responses.create({
-      model: `${providerId}/openai/gpt-4o`, input: 'Hello',
+      model: `${PROVIDER_HANDLE}/openai/gpt-4o`, input: 'Hello',
       tools: [{ type: 'function', name: 'weather', parameters: { type: 'object', properties: {} }, strict: true }],
       text: { format: { type: 'json_schema', name: 'answer', schema: { type: 'object' }, strict: true } },
       vendor_extension: { retained: true },
     } as never)
-    expect(response.model).toBe(`${providerId}/served/response`)
+    expect(response.model).toBe(`${PROVIDER_HANDLE}/served/response`)
     const sent = JSON.parse(upstream.calls[0]!.body ?? '{}') as Record<string, unknown>
     expect(sent.model).toBe('openai/gpt-4o')
     expect(sent.tools).toBeDefined()
@@ -42,7 +43,7 @@ describe('global Responses', () => {
 
   test('uses the requested Qualified Model ID when a buffered response omits model', async () => {
     upstream.respondWith(() => Response.json({ ...responseBody('unused'), model: undefined }))
-    const requested = `${providerId}/nested/fallback`
+    const requested = `${PROVIDER_HANDLE}/nested/fallback`
     const response = await call({ model: requested, input: 'Hello' })
     expect(((await response.json()) as { model: string }).model).toBe(requested)
   })
@@ -54,12 +55,12 @@ describe('global Responses', () => {
       sseEvent(JSON.stringify({ type: 'response.completed', response: { ...responseBody('unused'), model: undefined }, sequence_number: 2 })),
       sseDone(),
     ]))
-    const requested = `${providerId}/nested/requested`
+    const requested = `${PROVIDER_HANDLE}/nested/requested`
     const client = new OpenAI({ apiKey: secret, baseURL: 'http://iroha.test/v1', fetch: appFetch(iroha.app), maxRetries: 0 })
     const stream = await client.responses.create({ model: requested, input: 'Hello', stream: true })
     const events: unknown[] = []
     for await (const event of stream) events.push(event)
-    expect((events[0] as { response: { model: string } }).response.model).toBe(`${providerId}/served-stream`)
+    expect((events[0] as { response: { model: string } }).response.model).toBe(`${PROVIDER_HANDLE}/served-stream`)
     expect((events[1] as Record<string, unknown>)).not.toHaveProperty('model')
     expect((events[2] as { response: { model: string } }).response.model).toBe(requested)
   })
@@ -67,7 +68,7 @@ describe('global Responses', () => {
   test('retries through the shared pipeline and retains request history', async () => {
     let count = 0
     upstream.respondWith(() => ++count === 1 ? new Response('temporary', { status: 503 }) : Response.json(responseBody('recovered')))
-    const response = await call({ model: `${providerId}/nested/retry`, input: 'Hello' })
+    const response = await call({ model: `${PROVIDER_HANDLE}/nested/retry`, input: 'Hello' })
     expect(response.status).toBe(200)
     expect(upstream.calls).toHaveLength(2)
     const history = await iroha.fetch(`/api/v1/admin/requests/${response.headers.get('x-request-id')}`)
@@ -76,7 +77,7 @@ describe('global Responses', () => {
 
   test('retains existing adapter error translation after authorization', async () => {
     upstream.respondWith(() => new Response('{"error":{"message":"unsafe detail"}}', { status: 400 }))
-    const response = await call({ model: `${providerId}/model`, input: 'Hello' })
+    const response = await call({ model: `${PROVIDER_HANDLE}/model`, input: 'Hello' })
     expect(response.status).toBe(400)
     const text = await response.text()
     expect(text).toContain('upstream_bad_request')
@@ -91,7 +92,7 @@ describe('global Responses', () => {
       return new Response(held.stream, { headers: { 'content-type': 'text/event-stream' } })
     })
     const controller = new AbortController()
-    const response = await call({ model: `${providerId}/model`, input: 'Hello', stream: true }, secret, controller.signal)
+    const response = await call({ model: `${PROVIDER_HANDLE}/model`, input: 'Hello', stream: true }, secret, controller.signal)
     const reading = response.text()
     await Bun.sleep(0)
     controller.abort()
@@ -101,15 +102,15 @@ describe('global Responses', () => {
 
   test('rejects malformed, unauthorized, inaccessible, and model-denied requests before upstream', async () => {
     expect((await call({ model: 'bad', input: 'x' })).status).toBe(400)
-    expect((await call({ model: `${providerId}/ok`, input: 'x' }, 'gk_absent.wrong')).status).toBe(401)
-    expect((await call({ model: 'pr_absent/ok', input: 'x' })).status).toBe(403)
+    expect((await call({ model: `${PROVIDER_HANDLE}/ok`, input: 'x' }, 'gk_absent.wrong')).status).toBe(401)
+    expect((await call({ model: 'absent/ok', input: 'x' })).status).toBe(403)
     const restricted = await createKey([{ providerId, models: ['allowed'] }])
-    expect((await call({ model: `${providerId}/denied`, input: 'x' }, restricted)).status).toBe(403)
+    expect((await call({ model: `${PROVIDER_HANDLE}/denied`, input: 'x' }, restricted)).status).toBe(403)
     expect(upstream.calls).toHaveLength(0)
   })
 
   async function createProvider(): Promise<string> {
-    const response = await iroha.fetch('/api/v1/admin/providers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: 'Global Responses', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }), csrf })
+    const response = await iroha.fetch('/api/v1/admin/providers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: 'Global Responses', handle: PROVIDER_HANDLE, baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }), csrf })
     return ((await response.json()) as { id: string }).id
   }
   async function createKey(scope: unknown[]): Promise<string> {

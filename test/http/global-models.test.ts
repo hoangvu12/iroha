@@ -28,7 +28,7 @@ describe('global Qualified Model discovery', () => {
     const client = new OpenAI({ apiKey: secret, baseURL: 'http://iroha.test/v1', fetch: appFetch(iroha.app), maxRetries: 0 })
     const ids: string[] = []
     for await (const model of await client.models.list()) ids.push(model.id)
-    expect(ids).toEqual([`${alpha}/openai/gpt-4o`, `${alpha}/zeta`, `${beta}/claude-3`].sort())
+    expect(ids).toEqual(['alpha/openai/gpt-4o', 'alpha/zeta', 'beta/claude-3'].sort())
 
     const providerScoped = await iroha.fetch(`/providers/${alpha}/v1/models`, { headers: { authorization: `Bearer ${secret}` } })
     expect(((await providerScoped.json()) as { data: { id: string }[] }).data.map((model) => model.id).sort()).toEqual(['openai/gpt-4o', 'zeta'])
@@ -38,7 +38,7 @@ describe('global Qualified Model discovery', () => {
     const alpha = await createProvider('Alpha')
     await addModel(alpha, 'nested/model')
     const secret = await createKey({ mode: 'all' })
-    expect(await listIds(secret)).toEqual([`${alpha}/nested/model`])
+    expect(await listIds(secret)).toEqual(['alpha/nested/model'])
 
     await iroha.fetch(`/api/v1/admin/providers/${alpha}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: false }), csrf,
@@ -47,28 +47,29 @@ describe('global Qualified Model discovery', () => {
   })
 
   test('parses nested model IDs and normalizes malformed IDs and Provider privacy failures', async () => {
-    expect(parseQualifiedModelId('pr_example/openai/gpt-4o')).toEqual({ ok: true, providerId: 'pr_example', modelId: 'openai/gpt-4o' })
+    expect(parseQualifiedModelId('example/openai/gpt-4o')).toEqual({ ok: true, providerHandle: 'example', modelId: 'openai/gpt-4o' })
     for (const malformed of ['gpt-4o', '/gpt-4o', 'pr_example/']) {
       expect(parseQualifiedModelId(malformed)).toEqual({ ok: false, code: 'invalid_model_id' })
     }
+    expect(parseQualifiedModelId('INVALID/model')).toEqual({ ok: false, code: 'invalid_provider_handle' })
 
     const providerId = await createProvider('Private')
     const selected = await createKey({ mode: 'selected', providers: [{ providerId, models: ['known', 'unknown/nested'] }] })
-    expect(await authorizeQualifiedModel({ input: `${providerId}/unknown/nested`, token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toMatchObject({ ok: true, providerId, modelId: 'unknown/nested' })
-    expect(await authorizeQualifiedModel({ input: `${providerId}/denied`, token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'model_not_allowed' })
-    expect(await authorizeQualifiedModel({ input: 'pr_absent/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'private/unknown/nested', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toMatchObject({ ok: true, providerId, providerHandle: 'private', modelId: 'unknown/nested' })
+    expect(await authorizeQualifiedModel({ input: 'private/denied', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'model_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'absent/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
     const inaccessible = await createProvider('Inaccessible')
-    expect(await authorizeQualifiedModel({ input: `${inaccessible}/known`, token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'inaccessible/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
 
     await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: false }), csrf,
     })
-    expect(await authorizeQualifiedModel({ input: `${providerId}/known`, token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'private/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
     await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true }), csrf,
     })
     await iroha.fetch(`/api/v1/admin/providers/${providerId}/archive`, { method: 'POST', csrf })
-    expect(await authorizeQualifiedModel({ input: `${providerId}/known`, token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
+    expect(await authorizeQualifiedModel({ input: 'private/known', token: selected, gatewayKeys: iroha.gatewayKeys, database: iroha.database })).toEqual({ ok: false, code: 'provider_not_allowed' })
   })
 
   test('rejects invalid Gateway Keys without catalog or upstream traffic', async () => {
@@ -80,7 +81,7 @@ describe('global Qualified Model discovery', () => {
   async function createProvider(displayName: string): Promise<string> {
     const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName, baseUrl: 'https://api.example.com/v1', keys: [{ upstreamKey: `sk-${displayName}` }] }), csrf,
+      body: JSON.stringify({ displayName, handle: displayName.toLowerCase(), baseUrl: 'https://api.example.com/v1', keys: [{ upstreamKey: `sk-${displayName}` }] }), csrf,
     })
     return ((await response.json()) as { id: string }).id
   }

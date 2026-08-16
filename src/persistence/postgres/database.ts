@@ -413,6 +413,11 @@ class PostgresProviderRepository implements ProviderRepository {
     return row ? toProvider(row) : null
   }
 
+  async getProviderByHandle(providerHandle: string): Promise<ProviderRecord | null> {
+    const [row] = await this.handle.select().from(providers).where(eq(providers.handle, providerHandle)).limit(1)
+    return row ? toProvider(row) : null
+  }
+
   async insertProvider(
     connection: ProviderRecord,
   ): Promise<ProviderRecord> {

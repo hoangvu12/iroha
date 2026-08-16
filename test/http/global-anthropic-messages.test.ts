@@ -4,6 +4,8 @@ import { controlledSse, mockUpstreamTransport, sseResponse } from '../support/in
 
 const ANTHROPIC_BASE = 'https://api.anthropic.com/v1'
 const OPENAI_BASE = 'https://api.openai.com/v1'
+const ANTHROPIC_HANDLE = 'anthropic'
+const OPENAI_HANDLE = 'openai'
 
 function anthropicEvent(name: string, payload: Record<string, unknown>): string {
   return `event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`
@@ -35,9 +37,9 @@ describe('global Anthropic Messages', () => {
       usage: { input_tokens: 2, output_tokens: 1 },
     }))
 
-    const response = await messages({ model: `${anthropicId}/claude/nested`, max_tokens: 64, messages: [{ role: 'user', content: 'hello' }] })
+    const response = await messages({ model: `${ANTHROPIC_HANDLE}/claude/nested`, max_tokens: 64, messages: [{ role: 'user', content: 'hello' }] })
     expect(response.status).toBe(200)
-    expect(((await response.json()) as { model: string }).model).toBe(`${anthropicId}/served/alias`)
+    expect(((await response.json()) as { model: string }).model).toBe(`${ANTHROPIC_HANDLE}/served/alias`)
     expect(JSON.parse(upstream.calls[0]!.body ?? '{}')).toMatchObject({ model: 'claude/nested' })
     expect(upstream.calls[0]!.url).toBe(`${ANTHROPIC_BASE}/messages`)
   })
@@ -48,7 +50,7 @@ describe('global Anthropic Messages', () => {
       choices: [{ index: 0, message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
     }))
-    const requested = `${openAiId}/vendor/future/model`
+    const requested = `${OPENAI_HANDLE}/vendor/future/model`
 
     const response = await messages({ model: requested, max_tokens: 64, messages: [{ role: 'user', content: 'hello' }] })
     expect(response.status).toBe(200)
@@ -68,10 +70,10 @@ describe('global Anthropic Messages', () => {
           'data: [DONE]\n\n',
         ]))
 
-    const direct = await messages({ model: `${anthropicId}/nested/direct`, max_tokens: 64, messages: [], stream: true })
-    expect(await direct.text()).toContain(`"model":"${anthropicId}/served/direct"`)
-    const translated = await messages({ model: `${openAiId}/nested/translated`, max_tokens: 64, messages: [], stream: true })
-    expect(await translated.text()).toContain(`"model":"${openAiId}/served/translated"`)
+    const direct = await messages({ model: `${ANTHROPIC_HANDLE}/nested/direct`, max_tokens: 64, messages: [], stream: true })
+    expect(await direct.text()).toContain(`"model":"${ANTHROPIC_HANDLE}/served/direct"`)
+    const translated = await messages({ model: `${OPENAI_HANDLE}/nested/translated`, max_tokens: 64, messages: [], stream: true })
+    expect(await translated.text()).toContain(`"model":"${OPENAI_HANDLE}/served/translated"`)
   })
 
   test('uses Anthropic error envelopes and sends no upstream traffic for invalid or unauthorized routing', async () => {
@@ -79,16 +81,16 @@ describe('global Anthropic Messages', () => {
     expect(malformed.status).toBe(400)
     expect(await malformed.json()).toMatchObject({ type: 'error', error: { type: 'invalid_model_id' } })
 
-    const invalidKey = await messages({ model: `${anthropicId}/model`, max_tokens: 1, messages: [] }, 'gk_absent.wrong')
+    const invalidKey = await messages({ model: `${ANTHROPIC_HANDLE}/model`, max_tokens: 1, messages: [] }, 'gk_absent.wrong')
     expect(invalidKey.status).toBe(401)
     expect(await invalidKey.json()).toMatchObject({ type: 'error', error: { type: 'gateway_key_invalid' } })
 
-    const absent = await messages({ model: 'pr_absent/model', max_tokens: 1, messages: [] })
+    const absent = await messages({ model: 'absent/model', max_tokens: 1, messages: [] })
     expect(absent.status).toBe(403)
     expect(await absent.json()).toMatchObject({ type: 'error', error: { type: 'provider_not_allowed' } })
 
     const restricted = await createKey([{ providerId: anthropicId, models: ['allowed'] }])
-    const denied = await messages({ model: `${anthropicId}/denied`, max_tokens: 1, messages: [] }, restricted)
+    const denied = await messages({ model: `${ANTHROPIC_HANDLE}/denied`, max_tokens: 1, messages: [] }, restricted)
     expect(denied.status).toBe(403)
     expect(upstream.calls).toHaveLength(0)
   })
@@ -118,7 +120,7 @@ describe('global Anthropic Messages', () => {
       })
     })
     const response = await messages({
-      model: `${openAiId}/nested/tools`, max_tokens: 64,
+      model: `${OPENAI_HANDLE}/nested/tools`, max_tokens: 64,
       messages: [{ role: 'user', content: 'weather?' }],
       tools: [{ name: 'get_weather', description: 'Weather', input_schema: { type: 'object', properties: { city: { type: 'string' } } } }],
       tool_choice: { type: 'tool', name: 'get_weather' },
@@ -127,7 +129,7 @@ describe('global Anthropic Messages', () => {
 
     expect(response.status).toBe(200)
     const body = (await response.json()) as { model: string; stop_reason: string; content: Array<Record<string, unknown>>; usage: Record<string, number> }
-    expect(body.model).toBe(`${openAiId}/served/tool-model`)
+    expect(body.model).toBe(`${OPENAI_HANDLE}/served/tool-model`)
     expect(body.stop_reason).toBe('tool_use')
     expect(body.content[0]).toMatchObject({ type: 'tool_use', id: 'toolu_weather', name: 'get_weather', input: { city: 'Paris' } })
     expect(body.usage).toMatchObject({ input_tokens: 7, output_tokens: 3 })
@@ -151,7 +153,7 @@ describe('global Anthropic Messages', () => {
     const controller = new AbortController()
     const response = await iroha.fetch('/v1/messages', {
       method: 'POST', headers: headers(secret), signal: controller.signal,
-      body: JSON.stringify({ model: `${anthropicId}/nested/cancel`, max_tokens: 8, messages: [], stream: true }),
+      body: JSON.stringify({ model: `${ANTHROPIC_HANDLE}/nested/cancel`, max_tokens: 8, messages: [], stream: true }),
     })
     const reading = response.text()
     await Bun.sleep(0)
@@ -164,7 +166,7 @@ describe('global Anthropic Messages', () => {
   async function createProvider(name: string, templateId: string, baseUrl: string, upstreamKey: string): Promise<string> {
     const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: name, templateId, baseUrl, keys: [{ upstreamKey }] }), csrf,
+      body: JSON.stringify({ displayName: name, handle: name.toLowerCase(), templateId, baseUrl, keys: [{ upstreamKey }] }), csrf,
     })
     if (response.status !== 201) throw new Error(`Provider create failed: ${await response.text()}`)
     return ((await response.json()) as { id: string }).id

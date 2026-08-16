@@ -25,7 +25,7 @@ export function createGlobalModelRoutes(options: { readonly gatewayKeys: Gateway
       for (const modelId of candidates) {
         const entry = effective.get(modelId)
         if (entry === undefined) continue
-        models.push({ id: `${provider.id}/${modelId}`, object: 'model', created: Math.floor(entry.createdAt.getTime() / 1000) })
+        models.push({ id: `${provider.handle}/${modelId}`, object: 'model', created: Math.floor(entry.createdAt.getTime() / 1000) })
       }
     }
     models.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)

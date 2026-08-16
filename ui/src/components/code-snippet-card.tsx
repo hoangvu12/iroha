@@ -356,7 +356,7 @@ interface BuildSnippetInput {
 
 function buildSnippet({ language, origin, providerId, providerHandle, model, routingMode }: BuildSnippetInput): string {
   const baseUrl = routingMode === 'global' ? origin : `${origin}/providers/${providerHandle}`
-  const routedModel = routingMode === 'global' ? `${providerId}/${model}` : model
+  const routedModel = routingMode === 'global' ? `${providerHandle}/${model}` : model
   const chatCompletionsUrl = `${baseUrl}/v1/chat/completions`
   const messagesUrl = `${baseUrl}/v1/messages`
   switch (language) {

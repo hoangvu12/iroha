@@ -312,6 +312,8 @@ export interface ProviderRepository {
   /** Every Provider, most recently created first, archived ones included. */
   listProviders(): Promise<readonly ProviderRecord[]>
   getProvider(id: string): Promise<ProviderRecord | null>
+  /** Resolves the immutable public routing identity to its Provider. */
+  getProviderByHandle(handle: string): Promise<ProviderRecord | null>
   insertProvider(provider: ProviderRecord): Promise<ProviderRecord>
   /** Applies only the supplied fields and moves `updatedAt`. Null when unknown. */
   updateProvider(

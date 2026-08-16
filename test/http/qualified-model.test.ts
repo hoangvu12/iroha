@@ -3,9 +3,9 @@ import { parseQualifiedModelId } from '../../src/http/qualified-model.ts'
 
 describe('Qualified Model ID parsing', () => {
   test('splits only at the first slash and preserves the exact upstream remainder', () => {
-    expect(parseQualifiedModelId('pr_openrouter/openai/gpt-4o')).toEqual({
+    expect(parseQualifiedModelId('openrouter/openai/gpt-4o')).toEqual({
       ok: true,
-      providerId: 'pr_openrouter',
+      providerHandle: 'openrouter',
       modelId: 'openai/gpt-4o',
     })
   })

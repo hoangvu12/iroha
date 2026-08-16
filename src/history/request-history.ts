@@ -140,7 +140,7 @@ export class RequestHistoryService {
   beginRequest(input: {
     readonly id: string
     readonly providerId: string
-    readonly providerHandle?: string | null
+    readonly providerHandle: string
     readonly model: string
     readonly gatewayKeyId: string | null
     readonly gatewayKeyName?: string | null

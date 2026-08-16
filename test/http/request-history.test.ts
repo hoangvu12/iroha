@@ -189,6 +189,13 @@ describe('private request history and audit', () => {
       const afterRename = await iroha.fetch(`/api/v1/admin/requests/${requestId}`)
       const historical = (await afterRename.json()) as { event: RequestEventDto }
       expect(historical.event.providerHandle).toBe(connection.handle)
+      const archived = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/archive`, {
+        method: 'POST', csrf,
+      })
+      expect(archived.status).toBe(200)
+      const afterArchive = await iroha.fetch(`/api/v1/admin/requests/${requestId}`)
+      expect(((await afterArchive.json()) as { event: RequestEventDto }).event.providerHandle)
+        .toBe(connection.handle)
       const raw = await response.text()
       expect(raw).not.toContain('sk-upstream-secret-value-for-tests')
     })
@@ -325,6 +332,7 @@ describe('private request history and audit', () => {
           outcome: 'success',
           isStreaming: recovered.stream,
           errorCode: null,
+          providerHandle: connection.handle,
         })
         expect(body.attempts.map((attempt) => ({ status: attempt.status, outcome: attempt.outcome }))).toEqual([
           { status: recovered.failedStatus, outcome: 'failure' },
@@ -373,6 +381,7 @@ describe('private request history and audit', () => {
       expect(body.events[0]!.outcome).toBe('failure')
       expect(body.events[0]!.errorCode).toBe('upstream_credentials_unavailable')
       expect(body.events[0]!.id).toBe(requestId)
+      expect(body.events[0]!.providerHandle).toBe(connection.handle)
     })
 
     test('filters by connection, model, and outcome', async () => {

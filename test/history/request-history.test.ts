@@ -60,6 +60,7 @@ describe('RequestHistoryService', () => {
     const recorder = service.beginRequest({
       id: 'req_one',
       providerId: 'pc_one',
+      providerHandle: 'example-provider',
       model: 'gpt-4o-mini',
       gatewayKeyId: 'gk_one',
     })
@@ -116,7 +117,7 @@ describe('RequestHistoryService', () => {
       createdAt: new Date(), updatedAt: new Date(),
     })
     const recorder = service.beginRequest({
-      id: 'req_diagnostics', providerId: 'pc_diagnostics', model: 'MiniMax-M3', gatewayKeyId: null,
+      id: 'req_diagnostics', providerId: 'pc_diagnostics', providerHandle: 'minimax', model: 'MiniMax-M3', gatewayKeyId: null,
     })
     const attempt = await recorder.startAttempt({ attemptNumber: 1, keyId: 'uk_one', at: new Date() })
     await attempt.finalize({
@@ -173,6 +174,7 @@ describe('RequestHistoryService', () => {
     const recorder = service.beginRequest({
       id: 'req_recovered',
       providerId: 'pc_recovered',
+      providerHandle: 'example-provider',
       model: 'gpt-4o-mini',
       gatewayKeyId: null,
     })
@@ -228,6 +230,7 @@ describe('RequestHistoryService', () => {
     const recorder = service.beginRequest({
       id: 'req_off',
       providerId: 'pc_one',
+      providerHandle: 'example-provider',
       model: 'gpt-4o-mini',
       gatewayKeyId: null,
     })
@@ -282,6 +285,7 @@ describe('RequestHistoryService', () => {
     const old = service.beginRequest({
       id: 'req_old',
       providerId: 'pc_one',
+      providerHandle: 'example-provider',
       model: 'gpt-4o-mini',
       gatewayKeyId: null,
     })
@@ -291,6 +295,7 @@ describe('RequestHistoryService', () => {
     const recent = service.beginRequest({
       id: 'req_new',
       providerId: 'pc_one',
+      providerHandle: 'example-provider',
       model: 'gpt-4o-mini',
       gatewayKeyId: null,
     })
@@ -332,6 +337,7 @@ describe('RequestHistoryService', () => {
     const recorder = service.beginRequest({
       id: 'req_skip',
       providerId: 'pc_one',
+      providerHandle: 'example-provider',
       model: 'gpt-4o-mini',
       gatewayKeyId: 'gk_one',
     })

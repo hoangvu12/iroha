@@ -207,7 +207,6 @@ export type CapacityScopeKind = 'key' | 'account' | 'connection_model' | 'provid
 export interface UpstreamAccountRecord {
   readonly id: string
   readonly providerId: string
-  /** Immutable public routing identity captured when the Request is admitted. */
   readonly displayName: string
   readonly createdAt: Date
   readonly updatedAt: Date

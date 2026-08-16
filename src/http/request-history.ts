@@ -127,6 +127,7 @@ const eventDto = t.Object({
   id: t.String(),
   occurredAt: t.String(),
   providerId: t.String(),
+  providerHandle: t.Union([t.Null(), t.String()]),
   model: t.String(),
   gatewayKeyId: t.Union([t.Null(), t.String()]),
   gatewayKeyName: t.Union([t.Null(), t.String()]),
@@ -212,6 +213,7 @@ function toEventDto(event: {
   id: string
   occurredAt: Date
   providerId: string
+  providerHandle?: string | null
   model: string
   gatewayKeyId: string | null
   gatewayKeyName?: string | null
@@ -229,6 +231,7 @@ function toEventDto(event: {
     id: event.id,
     occurredAt: event.occurredAt.toISOString(),
     providerId: event.providerId,
+    providerHandle: event.providerHandle ?? null,
     model: event.model,
     gatewayKeyId: event.gatewayKeyId,
     gatewayKeyName: event.gatewayKeyName ?? null,

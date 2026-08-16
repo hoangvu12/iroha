@@ -150,7 +150,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
     providerHandle: string,
     activity?: InferenceActivity,
     correlationId?: string,
-  ): Promise<{ readonly ok: true; readonly providerId: string } | { readonly ok: false; readonly response: Response }> => {
+  ): Promise<{ readonly ok: true; readonly providerId: string; readonly providerHandle: string } | { readonly ok: false; readonly response: Response }> => {
     const resolved = await providers.resolveHandle(providerHandle)
     if (resolved.ok) return resolved
     activity?.finish()
@@ -244,6 +244,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         return await forwardGeneration({
           request,
           providerId: resolved.providerId,
+          providerHandle: resolved.providerHandle,
           upstreamPath: '/chat/completions',
           gatewayKeys,
           providers,
@@ -280,6 +281,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         return await forwardGeneration({
           request,
           providerId: resolved.providerId,
+          providerHandle: resolved.providerHandle,
           upstreamPath: '/responses',
           gatewayKeys,
           providers,
@@ -316,6 +318,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         return await forwardAnthropicMessages({
           request,
           providerId: resolved.providerId,
+          providerHandle: resolved.providerHandle,
           gatewayKeys,
           providers,
           modelCatalog,
@@ -397,6 +400,7 @@ export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
   const forwardingOptions = (admission: Extract<Awaited<ReturnType<typeof admit>>, { readonly ok: true }>) => ({
     request: admission.upstreamRequest,
     providerId: admission.authorization.providerId,
+    providerHandle: admission.authorization.providerHandle,
     gatewayKeys: options.gatewayKeys,
     providers: options.providers,
     modelCatalog: options.modelCatalog,
@@ -552,6 +556,7 @@ function qualifiedModel(providerId: string, upstream: unknown, requestedModel: s
 async function forwardGeneration(options: {
   request: Request
   providerId: string
+  providerHandle: string
   upstreamPath: '/chat/completions' | '/responses'
   database?: Database | null
   gatewayKeys: GatewayKeyRegistry
@@ -575,6 +580,7 @@ async function forwardGeneration(options: {
   const {
     request,
     providerId,
+    providerHandle,
     upstreamPath,
     gatewayKeys,
     providers,
@@ -677,6 +683,7 @@ async function forwardGeneration(options: {
   const history = requestHistory?.beginRequest({
     id: correlationId,
     providerId,
+    providerHandle,
     model: envelope.model,
     gatewayKeyId: authorization.keyId,
     gatewayKeyName: authorization.keyName,
@@ -1104,6 +1111,7 @@ await history?.finalize({
 async function forwardAnthropicMessages(options: {
   request: Request
   providerId: string
+  providerHandle: string
   database?: Database | null
   gatewayKeys: GatewayKeyRegistry
   providers: ProviderRegistry
@@ -1123,6 +1131,7 @@ async function forwardAnthropicMessages(options: {
   const {
     request,
     providerId,
+    providerHandle,
     providers,
     modelCatalog,
     timer,
@@ -1238,6 +1247,7 @@ async function forwardAnthropicMessages(options: {
     const history = requestHistory?.beginRequest({
       id: correlationId,
       providerId,
+      providerHandle,
       model: envelope.model,
       gatewayKeyId: authorization.keyId,
       gatewayKeyName: authorization.keyName,

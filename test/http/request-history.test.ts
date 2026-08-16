@@ -23,6 +23,7 @@ interface RequestEventDto {
   id: string
   occurredAt: string
   providerId: string
+  providerHandle: string | null
   model: string
   gatewayKeyId: string | null
   gatewayKeyName: string | null
@@ -167,6 +168,7 @@ describe('private request history and audit', () => {
       const event = body.events[0]!
       expect(event.id).toBe(requestId!)
       expect(event.providerId).toBe(connection.id)
+      expect(event.providerHandle).toBe(connection.handle)
       expect(event.model).toBe(MODEL)
       expect(event.gatewayKeyId).toBe(keyId)
       expect(event.gatewayKeyName).toBe(GATEWAY_KEY_NAME)
@@ -177,8 +179,34 @@ describe('private request history and audit', () => {
       expect(event.completionTokens).toBe(5)
       expect(event.totalTokens).toBe(10)
       expect(event.errorCode).toBeNull()
+      const renamed = await iroha.fetch(`/api/v1/admin/providers/${connection.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ displayName: 'Renamed after request' }),
+        csrf,
+      })
+      expect(renamed.status).toBe(200)
+      const afterRename = await iroha.fetch(`/api/v1/admin/requests/${requestId}`)
+      const historical = (await afterRename.json()) as { event: RequestEventDto }
+      expect(historical.event.providerHandle).toBe(connection.handle)
       const raw = await response.text()
       expect(raw).not.toContain('sk-upstream-secret-value-for-tests')
+    })
+
+    test('snapshots the Provider Handle for a global request', async () => {
+      const response = await iroha.fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${keySecret}` },
+        body: JSON.stringify({ model: `${connection.handle}/${MODEL}`, messages: [{ role: 'user', content: 'hi' }] }),
+      })
+      expect(response.status).toBe(200)
+      const requestId = response.headers.get('x-request-id')
+
+      const detail = await iroha.fetch(`/api/v1/admin/requests/${requestId}`)
+      expect(detail.status).toBe(200)
+      const body = (await detail.json()) as { event: RequestEventDto }
+      expect(body.event.providerId).toBe(connection.id)
+      expect(body.event.providerHandle).toBe(connection.handle)
     })
 
     test('retains the Gateway Key ID and name snapshot after the revoked key is deleted', async () => {

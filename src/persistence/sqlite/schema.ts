@@ -242,6 +242,7 @@ export const requestEvents = sqliteTable('request_events', {
   providerId: text('provider_id')
     .notNull()
     .references(() => providers.id, { onDelete: 'cascade' }),
+  providerHandle: text('provider_handle'),
   model: text('model').notNull(),
   /** Public identity of the Gateway Key the application presented. */
   gatewayKeyId: text('gateway_key_id'),

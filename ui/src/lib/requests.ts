@@ -32,6 +32,7 @@ export interface RequestEventView {
   readonly id: string
   readonly occurredAt: string
   readonly providerId: string
+  readonly providerHandle: string | null
   readonly model: string
   readonly gatewayKeyId: string | null
   readonly gatewayKeyName: string | null

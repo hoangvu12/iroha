@@ -207,6 +207,7 @@ export type CapacityScopeKind = 'key' | 'account' | 'connection_model' | 'provid
 export interface UpstreamAccountRecord {
   readonly id: string
   readonly providerId: string
+  /** Immutable public routing identity captured when the Request is admitted. */
   readonly displayName: string
   readonly createdAt: Date
   readonly updatedAt: Date
@@ -558,6 +559,8 @@ export interface RequestEventRecord {
   readonly lifecycle?: RequestLifecycle
   readonly occurredAt: Date
   readonly providerId: string
+  /** Immutable public routing identity captured when the Request is admitted. */
+  readonly providerHandle?: string | null
   readonly model: string
   readonly gatewayKeyId: string | null
   /** Immutable display-name snapshot retained if the live Gateway Key is deleted. */

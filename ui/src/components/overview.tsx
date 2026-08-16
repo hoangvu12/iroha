@@ -277,7 +277,7 @@ export function Overview(_props: OverviewProps) {
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="truncate font-medium">{event.model}</span>
                     <span className="text-muted-foreground shrink-0 text-xs">
-                      · {event.providerId}
+                      · {event.providerHandle ?? event.providerId}
                     </span>
                   </div>
                   <span className="text-status-danger text-xs font-medium">

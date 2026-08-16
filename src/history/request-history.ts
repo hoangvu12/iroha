@@ -77,6 +77,7 @@ export interface InFlightAttempt {
 export interface InFlightRequest {
   readonly id: string
   readonly providerId: string
+  readonly providerHandle: string | null
   readonly model: string
   readonly gatewayKeyId: string | null
   readonly gatewayKeyName?: string | null
@@ -139,6 +140,7 @@ export class RequestHistoryService {
   beginRequest(input: {
     readonly id: string
     readonly providerId: string
+    readonly providerHandle?: string | null
     readonly model: string
     readonly gatewayKeyId: string | null
     readonly gatewayKeyName?: string | null
@@ -160,6 +162,7 @@ export class RequestHistoryService {
         lifecycle: 'in_progress',
         occurredAt: startedAt,
         providerId: input.providerId,
+        providerHandle: input.providerHandle ?? null,
         model: input.model,
         gatewayKeyId: input.gatewayKeyId,
         gatewayKeyName: input.gatewayKeyName ?? null,
@@ -186,6 +189,7 @@ export class RequestHistoryService {
     return {
       id: input.id,
       providerId: input.providerId,
+      providerHandle: input.providerHandle ?? null,
       model: input.model,
       gatewayKeyId: input.gatewayKeyId,
       gatewayKeyName: input.gatewayKeyName ?? null,
@@ -236,6 +240,7 @@ export class RequestHistoryService {
           lifecycle: 'completed',
           occurredAt: self.#clock.now(),
           providerId: input.providerId,
+          providerHandle: input.providerHandle ?? null,
           model: input.model,
           gatewayKeyId: input.gatewayKeyId,
           gatewayKeyName: input.gatewayKeyName ?? null,
@@ -266,6 +271,7 @@ export class RequestHistoryService {
           lifecycle: 'completed',
           occurredAt: at,
           providerId: input.providerId,
+          providerHandle: input.providerHandle ?? null,
           model: input.model,
           gatewayKeyId: input.gatewayKeyId,
           gatewayKeyName: input.gatewayKeyName ?? null,
@@ -459,6 +465,7 @@ function noopRecorder(id: string): InFlightRequest {
   return {
     id,
     providerId: '',
+    providerHandle: null,
     model: '',
     gatewayKeyId: null,
     gatewayKeyName: null,

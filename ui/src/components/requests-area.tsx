@@ -375,7 +375,7 @@ function RequestRow({
             <div className="flex items-center gap-2">
               <span className="truncate font-mono text-sm">{event.model}</span>
               <span className="text-muted-foreground font-mono text-xs">
-                · {event.providerId}
+                · {event.providerHandle ?? event.providerId}
               </span>
             </div>
             <div className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -417,7 +417,7 @@ function RequestDetail({ detail }: { readonly detail: RequestEventDetail }) {
       </DialogHeader>
       <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
         <Detail label="Time">{formatTime(event.occurredAt)}</Detail>
-        <Detail label="Provider">{event.providerId}</Detail>
+        <Detail label="Provider">{event.providerHandle ?? event.providerId}</Detail>
         <Detail label="Model">{event.model}</Detail>
         {detail.recovered && (
           <Detail label="Recovery">

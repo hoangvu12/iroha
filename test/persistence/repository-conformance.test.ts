@@ -1110,6 +1110,7 @@ for (const engine of availableEngines) {
         overrides: Partial<{
           occurredAt: Date
           lifecycle: 'in_progress' | 'completed' | 'abandoned'
+          providerHandle: string | null
           model: string
           gatewayKeyId: string | null
           keyId: string | null
@@ -1127,6 +1128,7 @@ for (const engine of availableEngines) {
         lifecycle: 'completed' as const,
         occurredAt: at,
         providerId,
+        providerHandle: null,
         model: 'gpt-4o-mini',
         gatewayKeyId: 'gw_one',
         keyId: 'uk_one',
@@ -1171,6 +1173,20 @@ for (const engine of availableEngines) {
             errorCode: 'upstream_credentials_unavailable',
           }),
         )
+      })
+
+      test('preserves a nullable Provider Handle snapshot without changing Provider ID identity', async () => {
+        await database.providers.insertProvider(connection('pc_rh', { handle: 'public-provider' }))
+        await database.requestHistory.recordEvent(
+          event('req_with_handle', 'pc_rh', { providerHandle: 'public-provider' }),
+        )
+        await database.requestHistory.recordEvent(event('req_before_handles', 'pc_rh'))
+
+        expect(await database.requestHistory.getEvent('req_with_handle')).toEqual(
+          event('req_with_handle', 'pc_rh', { providerHandle: 'public-provider' }),
+        )
+        expect((await database.requestHistory.getEvent('req_before_handles'))?.providerHandle).toBeNull()
+        expect((await database.requestHistory.listEvents({ filter: { providerId: 'pc_rh' } })).total).toBe(2)
       })
 
       test('overwrites an event with the same id so streaming can update usage', async () => {

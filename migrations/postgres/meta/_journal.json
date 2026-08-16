@@ -141,6 +141,13 @@
       "when": 1786911844594,
       "tag": "0019_smart_sunspot",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786914980843,
+      "tag": "0020_superb_lockheed",
+      "breakpoints": true
     }
   ]
 }

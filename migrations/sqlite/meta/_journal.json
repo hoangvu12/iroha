@@ -134,6 +134,13 @@
       "when": 1786911843864,
       "tag": "0018_amusing_elektra",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1786914979894,
+      "tag": "0019_true_mad_thinker",
+      "breakpoints": true
     }
   ]
 }

@@ -241,7 +241,7 @@ export class ProviderRegistry {
     | { readonly ok: true; readonly providerId: string; readonly providerHandle: string }
     | { readonly ok: false; readonly code: 'invalid_provider_handle' | 'provider_not_allowed' }
   > {
-    if (handle.length === 0 || handle.length > 63 || !PROVIDER_HANDLE_PATTERN.test(handle)) {
+    if (!isProviderHandle(handle)) {
       return { ok: false, code: 'invalid_provider_handle' }
     }
 
@@ -250,6 +250,13 @@ export class ProviderRegistry {
       return { ok: false, code: 'provider_not_allowed' }
     }
     return { ok: true, providerId: provider.id, providerHandle: provider.handle }
+  }
+
+  async checkHandleAvailability(handle: string): Promise<{ readonly available: boolean; readonly suggestion: string | null }> {
+    const existing = await this.#database.providers.getProviderByHandle(handle)
+    if (existing === null) return { available: true, suggestion: null }
+    const used = new Set((await this.#database.providers.listProviders()).map((provider) => provider.handle))
+    return { available: false, suggestion: suggestAvailableProviderHandle(handle, used) }
   }
 
   /** Every connection, archived ones included, most recently created first. */
@@ -703,18 +710,17 @@ export class ProviderRegistry {
    * long enough to be re-encrypted, start Unverified again, and are tested
    * like the originals.
    */
-  async duplicate(id: string): Promise<ProviderResult<ProviderView>> {
+  async duplicate(id: string, handleInput: unknown): Promise<ProviderResult<ProviderView>> {
     const source = await this.#database.providers.getProvider(id)
     if (source === null) return failed({ code: 'provider_not_found' })
+
+    const problems = providerHandleProblems(handleInput)
+    if (problems.length > 0) return failed({ code: 'validation_failed', problems })
+    const handle = handleInput as string
 
     const sourceKeys = await this.#database.providers.listKeys(id)
     const at = this.#clock.now()
     const providerId = newId('pr')
-    const duplicateHandle = suggestAvailableProviderHandle(
-      source.handle,
-      new Set((await this.#database.providers.listProviders()).map((provider) => provider.handle)),
-    )
-
     const material: { keyId: string; plaintext: string }[] = []
     try {
       for (const key of sourceKeys) {
@@ -725,10 +731,11 @@ export class ProviderRegistry {
       throw cause
     }
 
+    try {
     await this.#database.transaction(async (repositories) => {
       await repositories.providers.insertProvider({
         id: providerId,
-        handle: duplicateHandle,
+        handle,
         displayName: copiedName(source.displayName),
         baseUrl: source.baseUrl,
         allowInsecureHttp: source.allowInsecureHttp,
@@ -783,6 +790,12 @@ export class ProviderRegistry {
         at,
       })
     })
+    } catch (cause) {
+      if (isUniqueConstraintFailure(cause)) {
+        return failed({ code: 'handle_already_exists', problems: [{ field: 'handle', message: 'is already in use' }] })
+      }
+      throw cause
+    }
 
     await this.#probeConnectionKeys(providerId)
 
@@ -1822,7 +1835,7 @@ function probedPatch(
   }
 }
 
-function summaryOf(connection: {
+function summaryOf(provider: {
   id: string
   handle: string
   displayName: string
@@ -1847,27 +1860,27 @@ function summaryOf(connection: {
   updatedAt: Date
 }): Omit<ProviderView, 'keys' | 'accounts' | 'staticHeaders' | 'warnings'> {
   return {
-    id: connection.id,
-    handle: connection.handle,
-    displayName: connection.displayName,
-    baseUrl: connection.baseUrl,
-    allowInsecureHttp: connection.allowInsecureHttp,
-    enabled: connection.enabled,
-    retryMaxAttempts: connection.retryMaxAttempts,
-    retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
-    archived: connection.archivedAt !== null,
-    templateId: connection.templateId,
-    authHeader: connection.authHeader,
-    authPrefix: connection.authPrefix,
-    redirectAllowSameOrigin: connection.redirectAllowSameOrigin,
-    connectionTimeoutMs: connection.connectionTimeoutMs,
-    firstByteTimeoutMs: connection.firstByteTimeoutMs,
-    nonStreamingTotalTimeoutMs: connection.nonStreamingTotalTimeoutMs,
-    streamingIdleTimeoutMs: connection.streamingIdleTimeoutMs,
-    totalRetryTimeoutMs: connection.totalRetryTimeoutMs,
-    idempotencyHeader: connection.idempotencyHeader,
-    createdAt: connection.createdAt,
-    updatedAt: connection.updatedAt,
+    id: provider.id,
+    handle: provider.handle,
+    displayName: provider.displayName,
+    baseUrl: provider.baseUrl,
+    allowInsecureHttp: provider.allowInsecureHttp,
+    enabled: provider.enabled,
+    retryMaxAttempts: provider.retryMaxAttempts,
+    retryAmbiguousNetwork: provider.retryAmbiguousNetwork,
+    archived: provider.archivedAt !== null,
+    templateId: provider.templateId,
+    authHeader: provider.authHeader,
+    authPrefix: provider.authPrefix,
+    redirectAllowSameOrigin: provider.redirectAllowSameOrigin,
+    connectionTimeoutMs: provider.connectionTimeoutMs,
+    firstByteTimeoutMs: provider.firstByteTimeoutMs,
+    nonStreamingTotalTimeoutMs: provider.nonStreamingTotalTimeoutMs,
+    streamingIdleTimeoutMs: provider.streamingIdleTimeoutMs,
+    totalRetryTimeoutMs: provider.totalRetryTimeoutMs,
+    idempotencyHeader: provider.idempotencyHeader,
+    createdAt: provider.createdAt,
+    updatedAt: provider.updatedAt,
   }
 }
 
@@ -1889,6 +1902,10 @@ function providerHandleProblems(input: unknown): readonly FieldProblem[] {
   return PROVIDER_HANDLE_PATTERN.test(input)
     ? []
     : [{ field: 'handle', message: 'must contain lowercase letters, numbers, and single hyphens only' }]
+}
+
+export function isProviderHandle(input: string): boolean {
+  return input.length >= 1 && input.length <= 63 && PROVIDER_HANDLE_PATTERN.test(input)
 }
 
 function isUniqueConstraintFailure(cause: unknown): boolean {

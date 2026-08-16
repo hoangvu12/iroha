@@ -50,11 +50,13 @@ describe('Upstream Key pools and Upstream Accounts', () => {
   let iroha: TestApp
   let probe: FakeKeyProbe
   let csrf: string
+  let providerSequence: number
 
   beforeEach(async () => {
     probe = fakeKeyProbe()
     iroha = await createTestApp({ upstreamKeyProbe: probe })
     csrf = (await completeSetup(iroha)).csrf
+    providerSequence = 0
   })
 
   afterEach(async () => {
@@ -67,6 +69,7 @@ describe('Upstream Key pools and Upstream Accounts', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         displayName: 'Example',
+        handle: `example-${++providerSequence}`,
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
       }),
@@ -482,6 +485,7 @@ describe('Upstream Key pools and Upstream Accounts', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           displayName: 'Second',
+          handle: 'second',
           baseUrl: BASE_URL,
           keys: [{ upstreamKey: UPSTREAM_KEY }],
         }),

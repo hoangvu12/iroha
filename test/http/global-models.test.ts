@@ -51,7 +51,7 @@ describe('global Qualified Model discovery', () => {
     for (const malformed of ['gpt-4o', '/gpt-4o', 'pr_example/']) {
       expect(parseQualifiedModelId(malformed)).toEqual({ ok: false, code: 'invalid_model_id' })
     }
-    expect(parseQualifiedModelId('INVALID/model')).toEqual({ ok: false, code: 'invalid_provider_handle' })
+    expect(parseQualifiedModelId('INVALID/model')).toEqual({ ok: false, code: 'invalid_model_id' })
 
     const providerId = await createProvider('Private')
     const selected = await createKey({ mode: 'selected', providers: [{ providerId, models: ['known', 'unknown/nested'] }] })

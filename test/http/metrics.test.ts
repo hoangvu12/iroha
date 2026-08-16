@@ -30,7 +30,7 @@ describe('optional metrics', () => {
     const connectionResponse = await test.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Metrics example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
+      body: JSON.stringify({ displayName: 'Metrics example', handle: 'metrics-example', baseUrl: BASE_URL, keys: [{ upstreamKey: UPSTREAM_KEY }] }),
       csrf: signedIn.csrf,
     })
     const connection = (await connectionResponse.json()) as { id: string; handle: string }

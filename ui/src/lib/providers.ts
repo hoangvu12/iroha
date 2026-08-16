@@ -237,11 +237,11 @@ export async function archiveProvider(id: string, csrfToken: string): Promise<Pr
   )
 }
 
-export async function duplicateProvider(id: string, csrfToken: string): Promise<ProviderView> {
+export async function duplicateProvider(id: string, handle: string, csrfToken: string): Promise<ProviderView> {
   return await request<ProviderView>(
     'POST',
     `/providers/${encodeURIComponent(id)}/duplicate`,
-    { csrfToken },
+    { body: { handle }, csrfToken },
   )
 }
 

@@ -102,6 +102,9 @@ describe('global Responses', () => {
 
   test('rejects malformed, unauthorized, inaccessible, and model-denied requests before upstream', async () => {
     expect((await call({ model: 'bad', input: 'x' })).status).toBe(400)
+    const invalidHandle = await call({ model: 'INVALID/model', input: 'x' })
+    expect(invalidHandle.status).toBe(400)
+    expect(((await invalidHandle.json()) as { error: { code: string } }).error.code).toBe('invalid_model_id')
     expect((await call({ model: `${PROVIDER_HANDLE}/ok`, input: 'x' }, 'gk_absent.wrong')).status).toBe(401)
     expect((await call({ model: 'absent/ok', input: 'x' })).status).toBe(403)
     const restricted = await createKey([{ providerId, models: ['allowed'] }])

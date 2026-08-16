@@ -319,7 +319,11 @@ function ProviderRow({
               void run('archive', () => archiveProvider(provider.id, csrfToken))
             }
             onDuplicate={() =>
-              void run('duplicate', () => duplicateProvider(provider.id, csrfToken))
+              void run('duplicate', async () => {
+                const handle = window.prompt('Choose the immutable Handle for the duplicated Provider:', `${provider.handle}-2`)
+                if (handle === null) return provider
+                return await duplicateProvider(provider.id, handle, csrfToken)
+              })
             }
             onPurge={() => void run('purge', () => purgeProvider(provider.id, csrfToken))}
           />

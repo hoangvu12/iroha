@@ -68,6 +68,7 @@ describe('Provider Connection templates', () => {
   test('omitting templateId seeds the Generic OpenAI-compatible default', async () => {
     const created = await registry.create({
       displayName: 'Hand-configured',
+      handle: 'hand-configured',
       baseUrl: 'https://api.example.com/v1',
       keys: [{ upstreamKey: 'sk-test-hand-key' }],
     })
@@ -80,6 +81,7 @@ describe('Provider Connection templates', () => {
   test('a known templateId prefills the connection defaults', async () => {
     const created = await registry.create({
       displayName: 'OpenAI connection',
+      handle: 'openai-connection',
       baseUrl: OPENAI_BASE_URL,
       keys: [{ upstreamKey: 'sk-test-openai-key' }],
       templateId: 'openai',
@@ -93,6 +95,7 @@ describe('Provider Connection templates', () => {
   test('the Owner may override every field the template prefills', async () => {
     const created = await registry.create({
       displayName: 'OpenAI on a private deployment',
+      handle: 'openai-private-deployment',
       baseUrl: 'https://proxy.example.internal/openai',
       keys: [{ upstreamKey: 'sk-test-internal-key' }],
       templateId: 'openai',
@@ -110,6 +113,7 @@ describe('Provider Connection templates', () => {
   test('an unknown templateId is a validation failure, never a silent fallback', async () => {
     const result = await registry.create({
       displayName: 'Wrong template',
+      handle: 'wrong-template',
       baseUrl: OPENAI_BASE_URL,
       keys: [{ upstreamKey: 'sk-test-missing-template' }],
       templateId: 'not-a-real-template',
@@ -125,6 +129,7 @@ describe('Provider Connection templates', () => {
   test('a blank templateId is a validation failure', async () => {
     const result = await registry.create({
       displayName: 'Blank template',
+      handle: 'blank-template',
       baseUrl: OPENAI_BASE_URL,
       keys: [{ upstreamKey: 'sk-test-blank-template' }],
       templateId: '   ',
@@ -138,6 +143,7 @@ describe('Provider Connection templates', () => {
   test('a non-string templateId is a validation failure', async () => {
     const result = await registry.create({
       displayName: 'Number template',
+      handle: 'number-template',
       baseUrl: OPENAI_BASE_URL,
       keys: [{ upstreamKey: 'sk-test-numeric-template' }],
       templateId: 42,
@@ -151,6 +157,7 @@ describe('Provider Connection templates', () => {
   test('an explicit null templateId behaves like omitting it', async () => {
     const created = await registry.create({
       displayName: 'Explicit null template',
+      handle: 'explicit-null-template',
       baseUrl: OPENAI_BASE_URL,
       keys: [{ upstreamKey: 'sk-test-null-template' }],
       templateId: null,
@@ -197,6 +204,7 @@ describe('Provider Connection templates', () => {
       })
       const created = await customRegistry.create({
         displayName: 'Experimental',
+        handle: 'experimental',
         baseUrl: OPENAI_BASE_URL,
         keys: [{ upstreamKey: 'sk-test-experimental' }],
         templateId: 'experimental',
@@ -214,13 +222,14 @@ describe('Provider Connection templates', () => {
   test('duplicating a templated connection preserves the templateId', async () => {
     const created = await registry.create({
       displayName: 'OpenAI original',
+      handle: 'openai-original',
       baseUrl: OPENAI_BASE_URL,
       keys: [{ upstreamKey: 'sk-test-dup-original' }],
       templateId: 'openai',
     })
     if (!created.ok) throw new Error(created.failure.code)
 
-    const dup = await registry.duplicate(created.value.id)
+    const dup = await registry.duplicate(created.value.id, 'openai-original-copy')
     if (!dup.ok) throw new Error(dup.failure.code)
     expect(dup.value.templateId).toBe('openai')
   })
@@ -231,6 +240,7 @@ describe('Provider Connection templates', () => {
     // carry the Upstream Key, so the audit row must not echo it.
     const created = await registry.create({
       displayName: 'Template safety',
+      handle: 'template-safety',
       baseUrl: OPENAI_BASE_URL,
       keys: [{ upstreamKey: 'sk-test-template-safety-key' }],
       templateId: 'openai',

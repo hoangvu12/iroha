@@ -87,6 +87,7 @@ describe('POST /providers/:id/keys/bulk', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         displayName: 'Example',
+        handle: 'example',
         baseUrl: BASE_URL,
         keys: [{ upstreamKey: 'sk-initial-upstream-key' }],
       }),

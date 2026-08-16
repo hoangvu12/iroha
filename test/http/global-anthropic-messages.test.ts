@@ -81,6 +81,10 @@ describe('global Anthropic Messages', () => {
     expect(malformed.status).toBe(400)
     expect(await malformed.json()).toMatchObject({ type: 'error', error: { type: 'invalid_model_id' } })
 
+    const invalidHandle = await messages({ model: 'INVALID/model', max_tokens: 1, messages: [] })
+    expect(invalidHandle.status).toBe(400)
+    expect(await invalidHandle.json()).toMatchObject({ type: 'error', error: { type: 'invalid_model_id' } })
+
     const invalidKey = await messages({ model: `${ANTHROPIC_HANDLE}/model`, max_tokens: 1, messages: [] }, 'gk_absent.wrong')
     expect(invalidKey.status).toBe(401)
     expect(await invalidKey.json()).toMatchObject({ type: 'error', error: { type: 'gateway_key_invalid' } })

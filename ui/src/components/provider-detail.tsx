@@ -436,7 +436,9 @@ function ProviderActions({
           size="sm"
           successLabel="Duplicated"
           onClick={async () => {
-            await duplicateProvider(provider.id, csrfToken)
+            const handle = window.prompt('Choose the immutable Handle for the duplicated Provider:', `${provider.handle}-2`)
+            if (handle === null) return
+            await duplicateProvider(provider.id, handle, csrfToken)
             onChanged()
           }}
         >

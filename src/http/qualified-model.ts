@@ -1,6 +1,6 @@
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { Database } from '../persistence/index.ts'
-import type { ProviderRegistry } from '../providers/index.ts'
+import { isProviderHandle, type ProviderRegistry } from '../providers/index.ts'
 
 export type QualifiedModelFailure =
   | 'gateway_key_invalid'
@@ -16,13 +16,13 @@ export type QualifiedModelResult =
 /** Splits only the first slash; the exact remaining upstream model ID is opaque. */
 export function parseQualifiedModelId(input: unknown):
   | { readonly ok: true; readonly providerHandle: string; readonly modelId: string }
-  | { readonly ok: false; readonly code: 'invalid_model_id' | 'invalid_provider_handle' } {
+  | { readonly ok: false; readonly code: 'invalid_model_id' } {
   if (typeof input !== 'string') return { ok: false, code: 'invalid_model_id' }
   const separator = input.indexOf('/')
   if (separator <= 0 || separator === input.length - 1) return { ok: false, code: 'invalid_model_id' }
   const providerHandle = input.slice(0, separator)
-  if (providerHandle.length > 63 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(providerHandle)) {
-    return { ok: false, code: 'invalid_provider_handle' }
+  if (!isProviderHandle(providerHandle)) {
+    return { ok: false, code: 'invalid_model_id' }
   }
   return { ok: true, providerHandle, modelId: input.slice(separator + 1) }
 }

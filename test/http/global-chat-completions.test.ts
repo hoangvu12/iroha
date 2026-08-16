@@ -116,7 +116,7 @@ describe('global Chat Completions', () => {
 
     const invalidHandle = await chat({ model: 'INVALID/model', messages: [] })
     expect(invalidHandle.status).toBe(400)
-    expect(((await invalidHandle.json()) as { error: { code: string } }).error.code).toBe('invalid_provider_handle')
+    expect(((await invalidHandle.json()) as { error: { code: string } }).error.code).toBe('invalid_model_id')
 
     const invalid = await chat({ model: `${PROVIDER_HANDLE}/model`, messages: [] }, 'gk_absent.wrong')
     expect(invalid.status).toBe(401)
@@ -130,7 +130,7 @@ describe('global Chat Completions', () => {
 
     const legacyId = await chat({ model: `${providerId}/model`, messages: [] })
     expect(legacyId.status).toBe(400)
-    expect(((await legacyId.json()) as { error: { code: string } }).error.code).toBe('invalid_provider_handle')
+    expect(((await legacyId.json()) as { error: { code: string } }).error.code).toBe('invalid_model_id')
 
     const restricted = await createKey([{ providerId, models: ['allowed'] }])
     const denied = await chat({ model: `${PROVIDER_HANDLE}/denied`, messages: [] }, restricted)

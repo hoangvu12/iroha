@@ -33,6 +33,7 @@ describe('ProviderRegistry: per-Upstream-Key base URL override', () => {
     })
     const created = await registry.create({
       displayName: 'Multi-endpoint Provider',
+      handle: 'multi-endpoint-provider',
       baseUrl: DEFAULT_URL,
       keys: [{ upstreamKey: DEFAULT_KEY }, { upstreamKey: OVERRIDE_KEY, baseUrl: OVERRIDE_URL }],
     })
@@ -111,6 +112,7 @@ describe('ProviderRegistry: bulkAddKeys', () => {
     })
     const created = await registry.create({
       displayName: 'Bulk Import Provider',
+      handle: 'bulk-import-provider',
       baseUrl: DEFAULT_URL,
       keys: [{ upstreamKey: 'sk-initial-upstream-key' }],
     })

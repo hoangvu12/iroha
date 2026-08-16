@@ -732,7 +732,7 @@ function toProvider(row: ProviderRow): ProviderRecord {
  * `insertProvider` and for supplying `staticHeadersEncrypted` on the patch
  * passed to `updateProvider`.
  */
-function encodeProviderRow(connection: ProviderRecord): {
+function encodeProviderRow(provider: ProviderRecord): {
   id: string
   handle: string
   displayName: string
@@ -758,29 +758,29 @@ function encodeProviderRow(connection: ProviderRecord): {
   updatedAt: Date
 } {
   return {
-    id: connection.id,
-    handle: connection.handle,
-    displayName: connection.displayName,
-    baseUrl: connection.baseUrl,
-    allowInsecureHttp: connection.allowInsecureHttp,
-    enabled: connection.enabled,
-    retryMaxAttempts: connection.retryMaxAttempts,
-    retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
-    archivedAt: connection.archivedAt,
-    templateId: connection.templateId,
-    capabilities: JSON.stringify(connection.capabilities),
-    authHeader: connection.authHeader,
-    authPrefix: connection.authPrefix,
-    staticHeadersEncrypted: connection.staticHeadersEncrypted,
-    redirectAllowSameOrigin: connection.redirectAllowSameOrigin,
-    connectionTimeoutMs: connection.connectionTimeoutMs,
-    firstByteTimeoutMs: connection.firstByteTimeoutMs,
-    nonStreamingTotalTimeoutMs: connection.nonStreamingTotalTimeoutMs,
-    streamingIdleTimeoutMs: connection.streamingIdleTimeoutMs,
-    totalRetryTimeoutMs: connection.totalRetryTimeoutMs,
-    idempotencyHeader: connection.idempotencyHeader,
-    createdAt: connection.createdAt,
-    updatedAt: connection.updatedAt,
+    id: provider.id,
+    handle: provider.handle,
+    displayName: provider.displayName,
+    baseUrl: provider.baseUrl,
+    allowInsecureHttp: provider.allowInsecureHttp,
+    enabled: provider.enabled,
+    retryMaxAttempts: provider.retryMaxAttempts,
+    retryAmbiguousNetwork: provider.retryAmbiguousNetwork,
+    archivedAt: provider.archivedAt,
+    templateId: provider.templateId,
+    capabilities: JSON.stringify(provider.capabilities),
+    authHeader: provider.authHeader,
+    authPrefix: provider.authPrefix,
+    staticHeadersEncrypted: provider.staticHeadersEncrypted,
+    redirectAllowSameOrigin: provider.redirectAllowSameOrigin,
+    connectionTimeoutMs: provider.connectionTimeoutMs,
+    firstByteTimeoutMs: provider.firstByteTimeoutMs,
+    nonStreamingTotalTimeoutMs: provider.nonStreamingTotalTimeoutMs,
+    streamingIdleTimeoutMs: provider.streamingIdleTimeoutMs,
+    totalRetryTimeoutMs: provider.totalRetryTimeoutMs,
+    idempotencyHeader: provider.idempotencyHeader,
+    createdAt: provider.createdAt,
+    updatedAt: provider.updatedAt,
   }
 }
 

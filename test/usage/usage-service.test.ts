@@ -41,6 +41,7 @@ async function buildFixture(
   })
   const created = await registry.create({
     displayName: 'Usage test',
+    handle: 'usage-test',
     baseUrl: 'https://api.example.com/v1',
     keys: [{ upstreamKey: 'sk-upstream-for-usage' }],
   })
@@ -972,6 +973,7 @@ describe('UsageService snapshot JSON roundtrip', () => {
     })
     const created = await registry.create({
       displayName: 'Usage override',
+      handle: 'usage-override',
       baseUrl: 'https://api.example.com/v1',
       keys: [
         { upstreamKey: 'sk-default-url-key' },

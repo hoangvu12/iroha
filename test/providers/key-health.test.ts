@@ -27,6 +27,7 @@ describe('durable scoped Key Health', () => {
     })
     const created = await registry.create({
       displayName: 'Health test',
+      handle: 'health-test',
       baseUrl: 'https://api.example.com/v1',
       keys: [{ upstreamKey: 'sk-first-health-key' }],
     })
@@ -166,6 +167,7 @@ describe('durable scoped Key Health', () => {
     })
     const created = await local.create({
       displayName: 'Override probe',
+      handle: 'override-probe',
       baseUrl: 'https://api.example.com/v1',
       keys: [{ upstreamKey: 'sk-override-key', baseUrl: 'https://override.example.com/v1' }],
     })

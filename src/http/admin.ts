@@ -6,7 +6,6 @@ import {
   type ProviderRegistry,
   type ProviderTemplate,
   type ProviderView,
-  suggestAvailableProviderHandle,
   type UpstreamAccountView,
 } from '../providers/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
@@ -165,10 +164,7 @@ export function createAdminRoutes({
       async ({ params, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
         if ('response' in guardResult) return status(guardResult.response.status, toErrorDto(guardResult.response.body))
-        const all = await providers.listProviders()
-        const used = new Set(all.map((provider) => provider.handle))
-        if (!used.has(params.handle)) return status(200, { available: true, suggestion: null })
-        return status(200, { available: false, suggestion: suggestAvailableProviderHandle(params.handle, used) })
+        return status(200, await providers.checkHandleAvailability(params.handle))
       },
     )
     .get(
@@ -326,7 +322,7 @@ export function createAdminRoutes({
     )
     .post(
       '/providers/:id/duplicate',
-      async ({ params, request, cookie, status }) => {
+      async ({ params, body, request, cookie, status }) => {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) {
           // The status is split into its literals: a unioned code would type the
@@ -336,7 +332,7 @@ export function createAdminRoutes({
             : status(401, toErrorDto(guardResult.response.body))
         }
 
-        const result = await providers.duplicate(params.id)
+        const result = await providers.duplicate(params.id, body.handle)
         if (!result.ok) {
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
@@ -348,8 +344,9 @@ export function createAdminRoutes({
           tags: ['Providers'],
           summary: 'Duplicate a Provider',
           description:
-            'Copies a Provider under a new immutable ID without touching the original. Copied keys start Unverified again and are tested once.',
+            'Copies a Provider under a new immutable ID and the exact new immutable Handle supplied by the Owner. Copied keys start Unverified again and are tested once.',
         },
+        body: t.Object({ handle: t.Unknown() }),
         response: { 201: providerResponse, ...errorResponses },
       },
     )

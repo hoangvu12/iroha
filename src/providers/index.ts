@@ -12,6 +12,7 @@ export {
 } from './adapter-registry.ts'
 export {
   ProviderRegistry,
+  isProviderHandle,
   suggestAvailableProviderHandle,
   type FieldProblem,
   type InferenceTarget,

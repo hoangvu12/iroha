@@ -895,11 +895,46 @@ describe('Provider administration', () => {
   })
 
   describe('duplication', () => {
+    test('requires the Owner to submit the exact new immutable Handle', async () => {
+      const created = await createProvider({ displayName: 'Original' })
+
+      const missing = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: body({}), csrf,
+      })
+      expect(missing.status).toBe(400)
+      expect(await missing.json()).toMatchObject({
+        error: { code: 'validation_failed', problems: [{ field: 'handle' }] },
+      })
+
+      const invalid = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: body({ handle: 'Not Normalized' }), csrf,
+      })
+      expect(invalid.status).toBe(400)
+      expect(await invalid.json()).toMatchObject({
+        error: { code: 'validation_failed', problems: [{ field: 'handle' }] },
+      })
+    })
+
+    test('returns a field-level Handle conflict when duplicating to a reserved Handle', async () => {
+      const created = await createProvider({ displayName: 'Original' })
+      await createProvider({ displayName: 'Reserved', handle: 'reserved-copy' })
+
+      const response = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: body({ handle: 'reserved-copy' }), csrf,
+      })
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({
+        error: { code: 'handle_already_exists', problems: [{ field: 'handle' }] },
+      })
+    })
+
     test('duplicates under a new identity without touching the original', async () => {
       const created = await createProvider({ displayName: 'Original' })
 
       const response = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
         method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ handle: 'original-copy' }),
         csrf,
       })
 
@@ -922,7 +957,9 @@ describe('Provider administration', () => {
     test('re-encrypts the copied key freshly while keeping the same material', async () => {
       const created = await createProvider()
 
-      await iroha.fetch(`${BASE}/${created.id}/duplicate`, { method: 'POST', csrf })
+      await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: body({ handle: 'copied-key' }), csrf,
+      })
 
       const providers = await iroha.database.providers.listProviders()
       expect(providers).toHaveLength(2)
@@ -947,6 +984,8 @@ describe('Provider administration', () => {
 
       const response = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
         method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ handle: 'inconclusive-copy' }),
         csrf,
       })
 
@@ -961,6 +1000,8 @@ describe('Provider administration', () => {
 
       const response = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
         method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ handle: 'archived-copy' }),
         csrf,
       })
 
@@ -998,7 +1039,9 @@ describe('Provider administration', () => {
         await iroha.fetch(`${BASE}/${created.id}/keys/${keyId}/activate`, { method: 'POST', csrf }),
       )
       responses.push(await iroha.fetch(`${BASE}/${created.id}/archive`, { method: 'POST', csrf }))
-      responses.push(await iroha.fetch(`${BASE}/${created.id}/duplicate`, { method: 'POST', csrf }))
+      responses.push(await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: body({ handle: 'secret-copy' }), csrf,
+      }))
       responses.push(await iroha.fetch(`${BASE}/${created.id}/purge`, { method: 'POST', csrf }))
 
       for (const response of responses) {
@@ -1150,6 +1193,8 @@ describe('Provider administration', () => {
       // provider.duplicated. The duplicate's first key writes key.created.
       const duplicateResponse = await iroha.fetch(`${BASE}/${providerId}/duplicate`, {
         method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body({ handle: 'audit-copy' }),
         csrf,
       })
       expect(duplicateResponse.status).toBe(201)

@@ -260,7 +260,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     ],
     inferenceAdapterId: DASHSCOPE_INFERENCE_ADAPTER_ID,
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
-    brand: { domain: 'aliyun.com', accentColor: '#FF6A00' },
+    brand: { domain: 'alibabacloudmail.com', accentColor: '#FF6A00' },
   },
   {
     id: 'MiniMax',

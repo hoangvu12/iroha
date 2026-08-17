@@ -13,6 +13,7 @@ describe('Provider Logo Domain migration', () => {
       database.exec('create table providers (id text primary key, template_id text, base_url text not null)')
       const insert = database.prepare('insert into providers (id, template_id, base_url) values (?, ?, ?)')
       insert.run('branded', 'openai', 'not-a-url')
+      insert.run('dashscope', 'dashscope', 'not-a-url')
       insert.run('generic', 'generic-openai-compatible', 'https://API.Example.com:8443/v1')
       insert.run('invalid', 'generic-openai-compatible', 'not-a-url')
 
@@ -20,6 +21,7 @@ describe('Provider Logo Domain migration', () => {
 
       expect(database.query('select id, logo_domain as logoDomain from providers order by id').all()).toEqual([
         { id: 'branded', logoDomain: 'openai.com' },
+        { id: 'dashscope', logoDomain: 'alibabacloudmail.com' },
         { id: 'generic', logoDomain: 'api.example.com' },
         { id: 'invalid', logoDomain: null },
       ])
@@ -32,6 +34,7 @@ describe('Provider Logo Domain migration', () => {
     const sql = await readFile(POSTGRES_MIGRATION, 'utf8')
     expect(sql).toContain("WHEN 'openai' THEN 'openai.com'")
     expect(sql).toContain("WHEN 'anthropic' THEN 'anthropic.com'")
+    expect(sql).toContain("WHEN 'dashscope' THEN 'alibabacloudmail.com'")
     expect(sql).toContain("regexp_replace(base_url, '^https?://', '', 'i')")
     expect(sql).toContain('SET logo_domain = valid_base_hosts.hostname')
   })

@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: complete
 
 # Configurable Provider Logos
 

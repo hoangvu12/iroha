@@ -43,7 +43,7 @@ UPDATE providers
 SET logo_domain = CASE template_id
   WHEN 'openai' THEN 'openai.com'
   WHEN 'openrouter' THEN 'openrouter.ai'
-  WHEN 'dashscope' THEN 'aliyun.com'
+  WHEN 'dashscope' THEN 'alibabacloudmail.com'
   WHEN 'MiniMax' THEN 'minimax.io'
   WHEN 'anthropic' THEN 'anthropic.com'
   WHEN 'zai' THEN 'z.ai'

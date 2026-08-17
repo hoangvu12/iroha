@@ -145,6 +145,10 @@ describe('the built-in Provider Templates', () => {
     expect(openai.capabilities.responses).toBe(true)
   })
 
+  test('the DashScope template uses the Alibaba Cloud Mail Logo Domain', () => {
+    expect(findBuiltInTemplate('dashscope')?.brand?.domain).toBe('alibabacloudmail.com')
+  })
+
   test('the Anthropic template authenticates with x-api-key and advertises every capability', () => {
     const anthropic = findBuiltInTemplate('anthropic') as ProviderTemplate
     expect(anthropic.authHeader).toBe('x-api-key')

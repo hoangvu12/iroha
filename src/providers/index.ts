@@ -55,6 +55,7 @@ export {
   findBuiltInTemplate,
   GENERIC_INFERENCE_ADAPTER_ID,
   MINIMAX_USAGE_ADAPTER_ID,
+  ZAI_USAGE_ADAPTER_ID,
   REACTIVE_ONLY_USAGE_ADAPTER_ID,
   type ProviderTemplate,
   type ProviderTemplateBrand,

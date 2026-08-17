@@ -11,6 +11,12 @@ export {
   type MinimaxUsageAdapterOptions,
 } from './minimax-usage-adapter.ts'
 export {
+  createZaiUsageAdapter,
+  zaiCapacityEvidenceOf,
+  zaiUsageReadings,
+  type ZaiUsageAdapterOptions,
+} from './zai-usage-adapter.ts'
+export {
   createMockCreditUsageAdapter,
   type MockCreditUsageAdapter,
   type MockCreditUsageAdapterOptions,

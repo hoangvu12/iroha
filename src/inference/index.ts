@@ -32,3 +32,4 @@ export {
 } from './anthropic-adapter.ts'
 export { createDashscopeInferenceAdapter } from './dashscope-adapter.ts'
 export { createMinimaxInferenceAdapter } from './minimax-adapter.ts'
+export { createZaiInferenceAdapter } from './zai-adapter.ts'

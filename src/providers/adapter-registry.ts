@@ -1,6 +1,7 @@
 import {
   createGenericInferenceAdapter,
   createMinimaxInferenceAdapter,
+  createZaiInferenceAdapter,
   type InferenceAdapter,
 } from '../inference/index.ts'
 import { createAnthropicInferenceAdapter } from '../inference/anthropic-adapter.ts'
@@ -8,6 +9,7 @@ import { createDashscopeInferenceAdapter } from '../inference/dashscope-adapter.
 import {
   createGenericUsageAdapter,
   createMinimaxUsageAdapter,
+  createZaiUsageAdapter,
   type UsageAdapter,
 } from '../usage/index.ts'
 import {
@@ -18,6 +20,8 @@ import {
   MINIMAX_USAGE_ADAPTER_ID,
   MINIMAX_INFERENCE_ADAPTER_ID,
   REACTIVE_ONLY_USAGE_ADAPTER_ID,
+  ZAI_INFERENCE_ADAPTER_ID,
+  ZAI_USAGE_ADAPTER_ID,
   type ProviderTemplate,
 } from './templates.ts'
 
@@ -241,6 +245,8 @@ export interface BuiltInAdapterRegistryOptions {
   readonly dashscopeInferenceAdapter?: InferenceAdapter
   /** Replaces the typed MiniMax adapter in transport-focused tests. */
   readonly minimaxInferenceAdapter?: InferenceAdapter
+  /** Replaces the typed Z.ai adapter in transport-focused tests. */
+  readonly zaiInferenceAdapter?: InferenceAdapter
 }
 
 /**
@@ -259,10 +265,12 @@ export function createBuiltInAdapterRegistry(
       [ANTHROPIC_INFERENCE_ADAPTER_ID]: options.anthropicInferenceAdapter ?? createAnthropicInferenceAdapter(),
       [DASHSCOPE_INFERENCE_ADAPTER_ID]: options.dashscopeInferenceAdapter ?? createDashscopeInferenceAdapter(),
       [MINIMAX_INFERENCE_ADAPTER_ID]: options.minimaxInferenceAdapter ?? createMinimaxInferenceAdapter(),
+      [ZAI_INFERENCE_ADAPTER_ID]: options.zaiInferenceAdapter ?? createZaiInferenceAdapter(),
     }),
     usageAdapters: usageAdapters({
       [REACTIVE_ONLY_USAGE_ADAPTER_ID]: createGenericUsageAdapter(),
       [MINIMAX_USAGE_ADAPTER_ID]: createMinimaxUsageAdapter(),
+      [ZAI_USAGE_ADAPTER_ID]: createZaiUsageAdapter(),
     }),
   })
 }

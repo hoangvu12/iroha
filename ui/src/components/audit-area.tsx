@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ClipboardList, SearchX } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -14,11 +14,10 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/empty-state'
 import { Dot } from '@/components/dot'
-import { ApiError } from '@/lib/api-client'
-import { clearAudit, fetchAudit, type AuditEventView, type AuditFilter } from '@/lib/audit'
+import { toApiError } from '@/lib/api-client'
+import type { AuditEventView, AuditFilter } from '@/lib/audit'
+import { AUDIT_PAGE_SIZE, useAuditPage, useClearAudit } from '@/lib/use-audit'
 import { formatTime } from '@/lib/time'
-
-const PAGE_SIZE = 25
 
 /**
  * The Audit area. Lists every administrative change retained by Iroha, with
@@ -26,41 +25,19 @@ const PAGE_SIZE = 25
  * clear is itself audited.
  */
 export function AuditArea({ csrfToken }: { readonly csrfToken: string }) {
-  const [list, setList] = useState<{
-    events: readonly AuditEventView[]
-    total: number
-  } | null>(null)
+  // The filter and the page are the Owner's choices; both are part of the key of
+  // the page they select, so going back to one already read costs no fetch.
   const [filter, setFilter] = useState<AuditFilter>({})
   const [offset, setOffset] = useState(0)
-  const [error, setError] = useState<ApiError | null>(null)
 
-  const reload = useCallback(
-    async (currentFilter: AuditFilter, currentOffset: number) => {
-      try {
-        const page = await fetchAudit(currentFilter, { limit: PAGE_SIZE, offset: currentOffset })
-        setList({ events: page.events, total: page.total })
-        setError(null)
-      } catch (cause) {
-        setError(cause instanceof ApiError ? cause : new ApiError('request_failed', 'Load failed.'))
-      }
-    },
-    [],
-  )
+  const page = useAuditPage(filter, offset)
+  const clear = useClearAudit(csrfToken)
 
-  useEffect(() => {
-    void reload(filter, 0)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const list = page.data ?? null
+  const error = page.error === null ? null : toApiError(page.error)
 
   const applyFilter = (next: AuditFilter) => {
     setFilter(next)
-    setOffset(0)
-    void reload(next, 0)
-  }
-
-  const doClear = async () => {
-    await clearAudit(csrfToken)
-    await reload(filter, 0)
     setOffset(0)
   }
 
@@ -82,16 +59,11 @@ export function AuditArea({ csrfToken }: { readonly csrfToken: string }) {
             disabled={list === null || list.total === 0}
             successLabel="Cleared"
             onClick={async () => {
-              try {
-                await doClear()
-              } catch (cause) {
-                setError(
-                  cause instanceof ApiError
-                    ? cause
-                    : new ApiError('request_failed', 'Could not clear the audit feed.'),
-                )
-                throw cause
-              }
+              // `mutateAsync` rather than `mutate`: the button's own error state
+              // needs the rejection, and the mutation raises the toast.
+              await clear.mutateAsync()
+              // Nothing is left to be on page two of.
+              setOffset(0)
             }}
           >
             Clear feed
@@ -131,15 +103,7 @@ export function AuditArea({ csrfToken }: { readonly csrfToken: string }) {
           />
         )
       ) : (
-        <AuditList
-          events={list.events}
-          total={list.total}
-          offset={offset}
-          onPage={(next) => {
-            setOffset(next)
-            void reload(filter, next)
-          }}
-        />
+        <AuditList events={list.events} total={list.total} offset={offset} onPage={setOffset} />
       )}
     </div>
   )
@@ -232,7 +196,7 @@ function AuditList({
             size="xs"
             variant="ghost"
             disabled={!hasPrev}
-            onClick={() => onPage(Math.max(0, offset - PAGE_SIZE))}
+            onClick={() => onPage(Math.max(0, offset - AUDIT_PAGE_SIZE))}
           >
             Previous
           </Button>
@@ -241,7 +205,7 @@ function AuditList({
             size="xs"
             variant="ghost"
             disabled={!hasNext}
-            onClick={() => onPage(offset + PAGE_SIZE)}
+            onClick={() => onPage(offset + AUDIT_PAGE_SIZE)}
           >
             Next
           </Button>

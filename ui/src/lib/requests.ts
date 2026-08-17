@@ -120,6 +120,9 @@ export async function fetchRequestDetail(
   return await request<RequestEventDetail>('GET', `/requests/${encodeURIComponent(id)}`, { signal })
 }
 
-export async function fetchRequestOverview(range: OverviewRange): Promise<RequestOverviewView> {
-  return await request<RequestOverviewView>('GET', `/requests/overview?range=${range}`)
+export async function fetchRequestOverview(
+  range: OverviewRange,
+  signal?: AbortSignal,
+): Promise<RequestOverviewView> {
+  return await request<RequestOverviewView>('GET', `/requests/overview?range=${range}`, { signal })
 }

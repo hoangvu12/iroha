@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Activity, SearchX } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -20,22 +20,17 @@ import {
 } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/empty-state'
 import { Dot } from '@/components/dot'
-import { ApiError } from '@/lib/api-client'
-import {
-  fetchProviders,
-  type ProviderView,
-} from '@/lib/providers'
-import {
-  fetchRequestDetail,
-  fetchRequests,
-  type RequestAttemptView,
-  type RequestEventDetail,
-  type RequestEventView,
-  type RequestFilter,
+import { toApiError } from '@/lib/api-client'
+import type { ProviderView } from '@/lib/providers'
+import type {
+  RequestAttemptView,
+  RequestEventDetail,
+  RequestEventView,
+  RequestFilter,
 } from '@/lib/requests'
+import { useProviders } from '@/lib/use-providers'
+import { REQUEST_PAGE_SIZE, useRequestDetail, useRequestPage } from '@/lib/use-requests'
 import { formatTime } from '@/lib/time'
-
-const PAGE_SIZE = 25
 
 /**
  * The Requests area. Shows recent inference metadata, paginates, and lets the
@@ -43,66 +38,37 @@ const PAGE_SIZE = 25
  * prompts, responses, or Upstream Key material.
  */
 export function RequestsArea() {
-  const [list, setList] = useState<{
-    events: readonly RequestEventView[]
-    total: number
-  } | null>(null)
-  const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
-  const [error, setError] = useState<ApiError | null>(null)
+  // The filter, the page and the open row are the Owner's choices; the pages and
+  // details they select live in the cache under keys that carry all three.
   const [filter, setFilter] = useState<RequestFilter>({})
   const [offset, setOffset] = useState(0)
-  const [selected, setSelected] = useState<RequestEventDetail | null>(null)
-  const [loadingDetail, setLoadingDetail] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  const reload = useCallback(
-    async (currentFilter: RequestFilter, currentOffset: number) => {
-      try {
-        const [page, list] = await Promise.all([
-          fetchRequests(currentFilter, { limit: PAGE_SIZE, offset: currentOffset }),
-          providers === null ? fetchProviders() : Promise.resolve(providers),
-        ])
-        setList({ events: page.events, total: page.total })
-        if (providers === null) setProviders(list)
-        setError(null)
-      } catch (cause) {
-        setError(
-          cause instanceof ApiError
-            ? cause
-            : new ApiError('request_failed', 'Request history could not be loaded.'),
-        )
-      }
-    },
-    [providers],
-  )
+  const page = useRequestPage(filter, offset)
+  // The filter bar names Providers; this screen is only another reader of the
+  // entry the Providers area writes.
+  const providersQuery = useProviders()
+  const detail = useRequestDetail(selectedId)
 
-  useEffect(() => {
-    void reload(filter, 0)
-    setOffset(0)
-    // We intentionally omit `reload` and `filter` so this only fires once;
-    // user-initiated filter changes call `reload` explicitly below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const list = page.data ?? null
+  const providers = providersQuery.data ?? null
+  // The page, the Provider list and the open Request used to share one error
+  // slot, and so does the Alert that reports them.
+  const failure = page.error ?? providersQuery.error ?? detail.error
+  const error = failure === null ? null : toApiError(failure)
+
+  // The dialog opens on the detail, not on the click: a row shows a busy state
+  // while its Request loads and the dialog appears with content in it. Reopening
+  // a row already read is served from the cache, so it opens at once.
+  const selected = selectedId === null ? null : (detail.data ?? null)
+  const loadingDetailId = detail.isFetching ? selectedId : null
 
   const applyFilter = (next: RequestFilter) => {
     setFilter(next)
-    setSelected(null)
-    void reload(next, 0)
-  }
-
-  const open = async (id: string) => {
-    setLoadingDetail(id)
-    try {
-      setSelected(await fetchRequestDetail(id))
-      setError(null)
-    } catch (cause) {
-      setError(
-        cause instanceof ApiError
-          ? cause
-          : new ApiError('request_failed', 'Could not load that request.'),
-      )
-    } finally {
-      setLoadingDetail(null)
-    }
+    // A filter selects a different set of Requests, so the page the Owner was on
+    // and the row they had open no longer mean anything.
+    setOffset(0)
+    setSelectedId(null)
   }
 
   const total = list?.total ?? null
@@ -158,16 +124,13 @@ export function RequestsArea() {
           events={list.events}
           total={list.total}
           offset={offset}
-          loadingId={loadingDetail}
-          onPage={(next) => {
-            setOffset(next)
-            void reload(filter, next)
-          }}
-          onOpen={open}
+          loadingId={loadingDetailId}
+          onPage={setOffset}
+          onOpen={setSelectedId}
         />
       )}
 
-      <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
+      <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
         {selected && <RequestDetail detail={selected} />}
       </Dialog>
     </div>
@@ -290,7 +253,7 @@ function RequestsList({
   readonly offset: number
   readonly loadingId: string | null
   readonly onPage: (next: number) => void
-  readonly onOpen: (id: string) => Promise<void> | void
+  readonly onOpen: (id: string) => void
 }) {
   const hasPrev = offset > 0
   const hasNext = offset + events.length < total
@@ -303,7 +266,7 @@ function RequestsList({
             key={event.id}
             event={event}
             busy={loadingId === event.id}
-            onOpen={() => void onOpen(event.id)}
+            onOpen={() => onOpen(event.id)}
           />
         ))}
       </ul>
@@ -317,7 +280,7 @@ function RequestsList({
             size="xs"
             variant="ghost"
             disabled={!hasPrev}
-            onClick={() => onPage(Math.max(0, offset - PAGE_SIZE))}
+            onClick={() => onPage(Math.max(0, offset - REQUEST_PAGE_SIZE))}
           >
             Previous
           </Button>
@@ -326,7 +289,7 @@ function RequestsList({
             size="xs"
             variant="ghost"
             disabled={!hasNext}
-            onClick={() => onPage(offset + PAGE_SIZE)}
+            onClick={() => onPage(offset + REQUEST_PAGE_SIZE)}
           >
             Next
           </Button>

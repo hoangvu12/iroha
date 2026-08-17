@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Activity,
   Calendar,
@@ -30,13 +30,12 @@ import {
   healthTone,
   keyNeedsAttention,
 } from '@/components/key-health'
-import { fetchBackgroundJobs, type BackgroundJobView } from '@/lib/background'
-import { fetchProviders, type ProviderView } from '@/lib/providers'
-import {
-  fetchRequestOverview,
-  type OverviewRange,
-  type RequestOverviewView,
-} from '@/lib/requests'
+import { toApiError } from '@/lib/api-client'
+import type { ProviderView } from '@/lib/providers'
+import type { OverviewRange, RequestOverviewView } from '@/lib/requests'
+import { useBackgroundJobs } from '@/lib/use-background'
+import { useProviders } from '@/lib/use-providers'
+import { useRequestOverview } from '@/lib/use-requests'
 import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 interface OverviewProps {
@@ -87,30 +86,27 @@ interface SparklineBundle {
  * (warning), and p50 (healthy) over the same window.
  */
 export function Overview(_props: OverviewProps) {
-  const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
+  // The chosen range is the Owner's, not the server's, so it stays local — and
+  // it is part of the aggregate's key, so switching back to a range already
+  // looked at costs no fetch.
   const [range, setRange] = useState<OverviewRange>('24h')
-  const [overview, setOverview] = useState<RequestOverviewView | null>(null)
-  const [jobs, setJobs] = useState<readonly BackgroundJobView[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const reload = useCallback(async () => {
-    try {
-      const [list, page, jobList] = await Promise.all([
-        fetchProviders(),
-        fetchRequestOverview(range),
-        fetchBackgroundJobs(),
-      ])
-      setProviders(list)
-      setOverview(page)
-      setJobs(jobList)
-      setError(null)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Overview could not be loaded.')
-    }
-  }, [range])
+  // The Provider list is the same cache entry the Providers area reads; this
+  // screen used to hold a private copy of it.
+  const providersQuery = useProviders()
+  const overviewQuery = useRequestOverview(range)
+  const jobsQuery = useBackgroundJobs()
 
-  useEffect(() => {
-    void reload()
-  }, [reload])
+  // The three reads used to land together or not at all, and every branch below
+  // still keys off "have I got this yet" rather than off a query's status.
+  const providers = providersQuery.data ?? null
+  const overview = overviewQuery.data ?? null
+  const jobs = jobsQuery.data ?? null
+  const failure = providersQuery.error ?? overviewQuery.error ?? jobsQuery.error
+  const error = failure === null ? null : toApiError(failure).message
+
+  const refresh = async () => {
+    await Promise.all([providersQuery.refetch(), overviewQuery.refetch(), jobsQuery.refetch()])
+  }
 
   const activeProviders = (providers ?? []).filter((p) => !p.archived)
   const allKeys = activeProviders.flatMap((p) => p.keys)
@@ -252,7 +248,7 @@ export function Overview(_props: OverviewProps) {
               size="xs"
               successLabel="Refreshed"
               aria-label="Refresh overview"
-              onClick={() => void reload()}
+              onClick={refresh}
             >
               <RefreshCcw className="size-3" aria-hidden /> Refresh
             </StatefulButton>

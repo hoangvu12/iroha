@@ -589,7 +589,6 @@ async function forwardGeneration(options: {
     timer,
     retrySleep,
     transport,
-    adapterRegistry,
     timeouts,
     requestHistory,
     requestActivity,
@@ -650,20 +649,18 @@ async function forwardGeneration(options: {
 
   const attemptedKeys: string[] = []
   const startedAt = timer.now()
-  const retryPolicy = await providers.getProvider(providerId)
-  const maxAttempts = retryPolicy?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
-  const retryAmbiguousNetwork = retryPolicy?.retryAmbiguousNetwork ?? false
-  const totalRetryBudgetMs = retryPolicy?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
-  // The route picks one Inference Adapter per Provider Connection. The
-  // dispatch falls back to the single inference the route was assembled with
-  // when no Adapter Registry is supplied (older callers and tests that build
-  // a registry manually still get the same behaviour), and to the generic
-  // adapter when the Provider's template id names no typed adapter.
-  const providerAdapter = resolveAdapterForProvider({
-    registry: adapterRegistry ?? null,
-    templateId: retryPolicy?.templateId ?? null,
-    fallback: inference,
-  })
+  // Resolve the Provider once per Request, before an Upstream Key is selected:
+  // which Inference Adapter speaks for it and its retry settings. The Provider
+  // Registry owns the single resolution the entitlement path also resolves
+  // through, so no two callers can disagree about a Provider's adapter. A
+  // Provider with no template, or one whose template names no typed adapter,
+  // resolves to the generic adapter inside that resolution; `inference` remains
+  // only as the last resort for a Provider that vanished mid-Request.
+  const resolved = await providers.resolveProvider(providerId)
+  const maxAttempts = resolved?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
+  const retryAmbiguousNetwork = resolved?.retryAmbiguousNetwork ?? false
+  const totalRetryBudgetMs = resolved?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
+  const providerAdapter = resolved?.inferenceAdapter ?? inference
   const providerAdapterCapabilities = providerAdapter.capabilities
   let alternateUsed = false
   let sameKeyRetries = 0
@@ -1220,19 +1217,16 @@ async function forwardAnthropicMessages(options: {
       )
     }
 
-    const retryPolicy = await providers.getProvider(providerId)
-    const templateId = retryPolicy?.templateId ?? null
-    // The Provider Template declares the body shape its upstream speaks
-    // (ADR-0020). Pass the caller's Anthropic-shape body through only when that
-    // wire shape is Anthropic; a Provider with no Provider Template, or one
-    // whose Template is unknown, is treated as the OpenAI shape and translated.
-    const providerTemplate = templateId === null
-      ? null
-      : adapterRegistry?.providerTemplate(templateId) ?? null
-    const passthrough = providerTemplate?.wireFormat === 'anthropic'
-    const maxAttempts = retryPolicy?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
-    const retryAmbiguousNetwork = retryPolicy?.retryAmbiguousNetwork ?? false
-    const totalRetryBudgetMs = retryPolicy?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
+    // Resolve the Provider once, before an Upstream Key is selected. The wire
+    // shape its upstream speaks decides passthrough versus translation, and its
+    // retry settings bound the attempt loop. Read from the resolved value so the
+    // route never looks up the Provider Template itself (ADR-0020); a Provider
+    // with no template, or an unknown one, resolves to the OpenAI shape.
+    const resolved = await providers.resolveProvider(providerId)
+    const passthrough = resolved?.wireFormat === 'anthropic'
+    const maxAttempts = resolved?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
+    const retryAmbiguousNetwork = resolved?.retryAmbiguousNetwork ?? false
+    const totalRetryBudgetMs = resolved?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
 
     const attemptedKeys: string[] = []
     const startedAt = timer.now()
@@ -2812,36 +2806,6 @@ async function handleCors(options: {
       },
     },
   )
-}
-
-/**
- * Picks the Inference Adapter that should handle one Provider Connection's
- * request. The dispatch order is:
- *
- *   1. the Adapter Registry the route was assembled with (when supplied),
- *      looking up the Provider Template's `inferenceAdapterId`;
- *   2. when the template names the generic adapter (or the connection has no
- *      template), the fallback the route was assembled with (the same one the
- *      single-adapter era passed in directly);
- *   3. the fallback outright when no registry is supplied, which preserves
- *      the pre-registry behaviour for older tests and external callers.
- *
- * The dispatch never throws and never returns null: the fallback is the
- * route's guarantee that every request reaches an adapter.
- */
-function resolveAdapterForProvider(options: {
-  registry: AdapterRegistry | null
-  templateId: string | null
-  fallback: InferenceAdapter
-}): InferenceAdapter {
-  const { registry, templateId, fallback } = options
-  if (registry === null) return fallback
-  if (templateId === null) return fallback
-  const template = registry.providerTemplate(templateId)
-  if (template === null) return fallback
-  const adapter = registry.inferenceAdapter(template.inferenceAdapterId)
-  if (adapter === null) return fallback
-  return adapter
 }
 
 /**

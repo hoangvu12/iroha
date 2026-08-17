@@ -168,17 +168,14 @@ export class UsageService {
   /**
    * Resolves the Usage Adapter for one Provider. When an `adapterRegistry`
    * is configured and the Provider's template names a registered adapter,
-   * that adapter is returned. Otherwise the default `adapter` is returned
-   * — the reactive-only reading stays honest about its lack of authority.
+   * that typed adapter is returned; otherwise the default `adapter` is
+   * returned — the reactive-only reading stays honest about its lack of
+   * authority. The template-to-adapter walk lives in the Adapter Registry,
+   * the single mechanism the inference path resolves through too, so the two
+   * paths cannot disagree about a Provider's adapters.
    */
   #adapterFor(provider: ProviderRecord): UsageAdapter {
-    if (this.#adapterRegistry === null) return this.#adapter
-    if (provider.templateId === null) return this.#adapter
-    const template = this.#adapterRegistry.providerTemplate(provider.templateId)
-    if (template === null) return this.#adapter
-    if (template.usageAdapterId === null) return this.#adapter
-    const typed = this.#adapterRegistry.usageAdapter(template.usageAdapterId)
-    return typed ?? this.#adapter
+    return this.#adapterRegistry?.typedUsageAdapter(provider.templateId) ?? this.#adapter
   }
 
   /** The view the Owner sees for one connection: reading, freshness, last error. */

@@ -21,6 +21,7 @@ export {
   type ProviderRegistryOptions,
   type ProviderResult,
   type ProviderView,
+  type ResolvedProvider,
   type UpstreamAccountView,
 } from './provider-registry.ts'
 export { RoundRobinSelector } from './round-robin.ts'

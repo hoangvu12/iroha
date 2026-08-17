@@ -23,6 +23,7 @@ import {
   ZAI_INFERENCE_ADAPTER_ID,
   ZAI_USAGE_ADAPTER_ID,
   type ProviderTemplate,
+  type ProviderWireFormat,
 } from './templates.ts'
 
 /**
@@ -204,6 +205,47 @@ export class AdapterRegistry {
   /** The provider template with this id, or null when no such template exists. */
   providerTemplate(id: string): ProviderTemplate | null {
     return this.#templates.get(id) ?? null
+  }
+
+  /**
+   * The wire shape the Provider Template with this id declares — the body
+   * shape its upstream speaks. A Provider with no template, or one whose
+   * template is unknown, is read as the OpenAI shape, the safe default. This
+   * is the single place the templateId-to-wire-shape decision is made, so the
+   * inference and entitlement paths cannot disagree about it.
+   */
+  resolveWireFormat(templateId: string | null): ProviderWireFormat {
+    if (templateId === null) return 'openai'
+    return this.#templates.get(templateId)?.wireFormat ?? 'openai'
+  }
+
+  /**
+   * The Inference Adapter a Provider with this template id should use. A
+   * Provider with no template, an unknown template, or a template whose named
+   * adapter is missing resolves to the generic Inference Adapter — the same
+   * defaulting the route-local resolver used before, now in one place so two
+   * callers can never disagree about which adapter a Provider uses.
+   */
+  resolveInferenceAdapter(templateId: string | null): InferenceAdapter | null {
+    const generic = this.#inference.get(GENERIC_INFERENCE_ADAPTER_ID) ?? null
+    if (templateId === null) return generic
+    const template = this.#templates.get(templateId)
+    if (template === undefined) return generic
+    return this.#inference.get(template.inferenceAdapterId) ?? generic
+  }
+
+  /**
+   * The typed Usage Adapter a Provider with this template id names, or null
+   * when the template is absent, unknown, names no Usage Adapter, or names one
+   * that is not registered. The entitlement polling path pairs this with its
+   * own honest reactive-only default, so the reading never claims an authority
+   * the template did not promise.
+   */
+  typedUsageAdapter(templateId: string | null): UsageAdapter | null {
+    if (templateId === null) return null
+    const template = this.#templates.get(templateId)
+    if (template === undefined || template.usageAdapterId === null) return null
+    return this.#usage.get(template.usageAdapterId) ?? null
   }
 
   /**

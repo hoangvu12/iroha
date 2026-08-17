@@ -12,7 +12,7 @@ import type {
   UpstreamKeyPatch,
   UpstreamKeyRecord,
 } from '../persistence/index.ts'
-import type { InferenceFailureClassification } from '../inference/index.ts'
+import type { InferenceAdapter, InferenceFailureClassification } from '../inference/index.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
 import type { UsageRecoveryEvidence } from '../usage/adapter.ts'
 import type { AdapterRegistry } from './adapter-registry.ts'
@@ -20,7 +20,7 @@ import type { UpstreamKeyProbe } from './key-probe.ts'
 import { RoundRobinSelector } from './round-robin.ts'
 import { reconcileCapacity } from './capacity-reconciliation.ts'
 import type { CapacityEvidence, CredentialEvidence } from './provider-evidence.ts'
-import { GENERIC_PROVIDER_TEMPLATE_ID, type ProviderTemplate } from './templates.ts'
+import { GENERIC_PROVIDER_TEMPLATE_ID, type ProviderTemplate, type ProviderWireFormat } from './templates.ts'
 import { normalizeLogoDomainInput } from '../brand-logos/index.ts'
 
 export interface FieldProblem {
@@ -168,6 +168,32 @@ export interface ProviderView {
   readonly accounts: readonly UpstreamAccountView[]
 }
 
+/**
+ * What one Request needs to know about a Provider once, before an Upstream Key
+ * is selected: which Inference Adapter speaks for it, the wire shape its
+ * upstream speaks, its retry settings, and the Provider Template id that seeded
+ * it. Produced by {@link ProviderRegistry.resolveProvider} so the inference and
+ * entitlement paths cannot disagree about a Provider's adapters.
+ *
+ * This is implementation, not domain language, and deliberately absent from the
+ * glossary — its shape is free to change and no test should assert it.
+ */
+export interface ResolvedProvider {
+  /** The Provider Template that seeded the connection, or null when built by hand. */
+  readonly templateId: string | null
+  /** The body shape the upstream speaks; `openai` for a template-less Provider. */
+  readonly wireFormat: ProviderWireFormat
+  /**
+   * The Inference Adapter that speaks for this Provider. Null only when the
+   * Adapter Registry carries no generic adapter to fall back to, which a
+   * built-in registry never does.
+   */
+  readonly inferenceAdapter: InferenceAdapter | null
+  readonly retryMaxAttempts: number
+  readonly retryAmbiguousNetwork: boolean
+  readonly totalRetryTimeoutMs: number
+}
+
 export interface ProviderRegistryOptions {
   readonly database: Database
   readonly cipher: SecretCipher
@@ -276,6 +302,27 @@ export class ProviderRegistry {
     const connection = await this.#database.providers.getProvider(id)
     if (connection === null) return null
     return await this.#viewOf(id)
+  }
+
+  /**
+   * Resolves a Provider once per Request, before an Upstream Key is selected,
+   * into the Inference Adapter that speaks for it, the wire shape its upstream
+   * speaks, and its retry settings. Both the inference path and the entitlement
+   * polling path resolve a Provider's adapters through the Adapter Registry's
+   * one resolution, so no two callers can disagree about which adapter a
+   * Provider uses. Returns null when no such Provider exists.
+   */
+  async resolveProvider(id: string): Promise<ResolvedProvider | null> {
+    const view = await this.getProvider(id)
+    if (view === null) return null
+    return {
+      templateId: view.templateId,
+      wireFormat: this.#adapterRegistry.resolveWireFormat(view.templateId),
+      inferenceAdapter: this.#adapterRegistry.resolveInferenceAdapter(view.templateId),
+      retryMaxAttempts: view.retryMaxAttempts,
+      retryAmbiguousNetwork: view.retryAmbiguousNetwork,
+      totalRetryTimeoutMs: view.totalRetryTimeoutMs,
+    }
   }
 
   /**

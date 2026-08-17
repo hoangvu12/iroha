@@ -7,15 +7,15 @@ import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/empty-state'
+import { ApiError } from '@/lib/api-client'
 import {
-  AuthError,
   fetchSessions,
   revokeAllSessions,
   revokeSession,
   type AuthState,
   type SessionSummary,
 } from '@/lib/auth'
-import { fetchRetention, updateRetention, SettingsError, type RetentionView } from '@/lib/settings'
+import { fetchRetention, updateRetention, type RetentionView } from '@/lib/settings'
 import { formatTime } from '@/lib/time'
 
 interface AccountSettingsProps {
@@ -33,7 +33,7 @@ interface AccountSettingsProps {
 export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
   const csrfToken = state.session?.csrfToken ?? ''
   const [sessions, setSessions] = useState<readonly SessionSummary[] | null>(null)
-  const [sessionsError, setSessionsError] = useState<AuthError | null>(null)
+  const [sessionsError, setSessionsError] = useState<ApiError | null>(null)
   const [retention, setRetention] = useState<RetentionView | null>(null)
   const [retentionDraft, setRetentionDraft] = useState<string>('30')
   const [retentionError, setRetentionError] = useState<string | null>(null)
@@ -44,13 +44,11 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
       setSessions(await fetchSessions())
       setSessionsError(null)
     } catch (cause) {
-      if (cause instanceof AuthError && cause.code === 'authentication_required') {
-        onSignedOut()
-        return
-      }
-      setSessionsError(cause instanceof AuthError ? cause : new AuthError('request_failed', 'Load failed.'))
+      setSessionsError(
+        cause instanceof ApiError ? cause : new ApiError('request_failed', 'Load failed.'),
+      )
     }
-  }, [onSignedOut])
+  }, [])
 
   useEffect(() => {
     void reloadSessions()
@@ -67,7 +65,7 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
       .catch((cause: unknown) => {
         if (cancelled) return
         setRetentionError(
-          cause instanceof SettingsError ? cause.message : 'Retention could not be loaded.',
+          cause instanceof ApiError ? cause.message : 'Retention could not be loaded.',
         )
       })
     return () => {
@@ -102,7 +100,7 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
       })
       .catch((cause: unknown) => {
         setRetentionError(
-          cause instanceof SettingsError ? cause.message : 'Retention could not be saved.',
+          cause instanceof ApiError ? cause.message : 'Retention could not be saved.',
         )
       })
       .finally(() => setRetentionBusy(false))
@@ -146,9 +144,9 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
                 await revokeEverything()
               } catch (cause) {
                 setSessionsError(
-                  cause instanceof AuthError
+                  cause instanceof ApiError
                     ? cause
-                    : new AuthError('request_failed', 'Revoke failed.'),
+                    : new ApiError('request_failed', 'Revoke failed.'),
                 )
                 throw cause
               }
@@ -190,9 +188,9 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
                     await revokeOne(session)
                   } catch (cause) {
                     setSessionsError(
-                      cause instanceof AuthError
+                      cause instanceof ApiError
                         ? cause
-                        : new AuthError('request_failed', 'Revoke failed.'),
+                        : new ApiError('request_failed', 'Revoke failed.'),
                     )
                     throw cause
                   }

@@ -14,13 +14,8 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/empty-state'
 import { Dot } from '@/components/dot'
-import {
-  AuditError,
-  clearAudit,
-  fetchAudit,
-  type AuditEventView,
-  type AuditFilter,
-} from '@/lib/audit'
+import { ApiError } from '@/lib/api-client'
+import { clearAudit, fetchAudit, type AuditEventView, type AuditFilter } from '@/lib/audit'
 import { formatTime } from '@/lib/time'
 
 const PAGE_SIZE = 25
@@ -30,20 +25,14 @@ const PAGE_SIZE = 25
  * pagination, action-prefix filtering, and an explicit clear action. The
  * clear is itself audited.
  */
-export function AuditArea({
-  csrfToken,
-  onSignedOut,
-}: {
-  readonly csrfToken: string
-  readonly onSignedOut: () => void
-}) {
+export function AuditArea({ csrfToken }: { readonly csrfToken: string }) {
   const [list, setList] = useState<{
     events: readonly AuditEventView[]
     total: number
   } | null>(null)
   const [filter, setFilter] = useState<AuditFilter>({})
   const [offset, setOffset] = useState(0)
-  const [error, setError] = useState<AuditError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   const reload = useCallback(
     async (currentFilter: AuditFilter, currentOffset: number) => {
@@ -52,16 +41,10 @@ export function AuditArea({
         setList({ events: page.events, total: page.total })
         setError(null)
       } catch (cause) {
-        if (cause instanceof AuditError && cause.code === 'authentication_required') {
-          onSignedOut()
-          return
-        }
-        setError(
-          cause instanceof AuditError ? cause : new AuditError('request_failed', 'Load failed.'),
-        )
+        setError(cause instanceof ApiError ? cause : new ApiError('request_failed', 'Load failed.'))
       }
     },
-    [onSignedOut],
+    [],
   )
 
   useEffect(() => {
@@ -103,9 +86,9 @@ export function AuditArea({
                 await doClear()
               } catch (cause) {
                 setError(
-                  cause instanceof AuditError
+                  cause instanceof ApiError
                     ? cause
-                    : new AuditError('request_failed', 'Could not clear the audit feed.'),
+                    : new ApiError('request_failed', 'Could not clear the audit feed.'),
                 )
                 throw cause
               }

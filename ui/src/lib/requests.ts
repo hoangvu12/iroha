@@ -1,3 +1,5 @@
+import { request } from './api-client.ts'
+
 export interface RequestAttemptView {
   readonly id: number
   readonly attemptNumber: number
@@ -84,23 +86,6 @@ export interface RequestFilter {
   readonly keyId?: string
 }
 
-export interface FieldProblem {
-  readonly field: string
-  readonly message: string
-}
-
-export class RequestHistoryError extends Error {
-  readonly code: string
-  readonly problems: readonly FieldProblem[]
-
-  constructor(code: string, message: string, problems: readonly FieldProblem[] = []) {
-    super(message)
-    this.name = 'RequestHistoryError'
-    this.code = code
-    this.problems = problems
-  }
-}
-
 export async function fetchRequests(
   filter: RequestFilter = {},
   options: { limit?: number; offset?: number; signal?: AbortSignal } = {},
@@ -137,52 +122,4 @@ export async function fetchRequestDetail(
 
 export async function fetchRequestOverview(range: OverviewRange): Promise<RequestOverviewView> {
   return await request<RequestOverviewView>('GET', `/requests/overview?range=${range}`)
-}
-
-async function request<T = unknown>(
-  method: string,
-  path: string,
-  options: { body?: unknown; csrfToken?: string; signal?: AbortSignal } = {},
-): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`/api/v1/admin${path}`, {
-      method,
-      credentials: 'same-origin',
-      ...(options.signal ? { signal: options.signal } : {}),
-      headers: {
-        accept: 'application/json',
-        ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(options.csrfToken === undefined ? {} : { 'x-iroha-csrf': options.csrfToken }),
-      },
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch {
-    throw new RequestHistoryError(
-      'unreachable',
-      'Iroha did not answer. Check that the gateway is running.',
-    )
-  }
-
-  if (response.status === 204) return undefined as T
-
-  let payload: unknown = null
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  if (!response.ok) throw toError(payload)
-  return payload as T
-}
-
-function toError(payload: unknown): RequestHistoryError {
-  const error = (payload as { error?: { code?: unknown; message?: unknown; problems?: unknown } })
-    ?.error
-  return new RequestHistoryError(
-    typeof error?.code === 'string' ? error.code : 'request_failed',
-    typeof error?.message === 'string' ? error.message : 'That request could not be completed.',
-    Array.isArray(error?.problems) ? (error.problems as FieldProblem[]) : [],
-  )
 }

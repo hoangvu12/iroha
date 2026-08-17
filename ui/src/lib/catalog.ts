@@ -1,3 +1,5 @@
+import { request } from './api-client.ts'
+
 export interface CatalogOverrides {
   readonly chat?: boolean
   readonly streaming?: boolean
@@ -25,16 +27,6 @@ export interface CatalogSyncView {
 export interface CatalogView {
   readonly sync: CatalogSyncView
   readonly entries: readonly CatalogEntryView[]
-}
-
-export class CatalogError extends Error {
-  readonly code: string
-
-  constructor(code: string, message: string) {
-    super(message)
-    this.name = 'CatalogError'
-    this.code = code
-  }
 }
 
 export async function fetchCatalog(
@@ -106,48 +98,5 @@ export async function removeOwnerModel(
     'DELETE',
     `/providers/${encodeURIComponent(providerId)}/catalog/models/${encodeURIComponent(modelId)}`,
     { csrfToken },
-  )
-}
-
-async function request<T = unknown>(
-  method: string,
-  path: string,
-  options: { body?: unknown; csrfToken?: string; signal?: AbortSignal } = {},
-): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`/api/v1/admin${path}`, {
-      method,
-      credentials: 'same-origin',
-      ...(options.signal ? { signal: options.signal } : {}),
-      headers: {
-        accept: 'application/json',
-        ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(options.csrfToken === undefined ? {} : { 'x-iroha-csrf': options.csrfToken }),
-      },
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch {
-    throw new CatalogError('unreachable', 'Iroha did not answer. Check that the gateway is running.')
-  }
-
-  if (response.status === 204) return undefined as T
-
-  let payload: unknown = null
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  if (!response.ok) throw toError(payload)
-  return payload as T
-}
-
-function toError(payload: unknown): CatalogError {
-  const error = (payload as { error?: { code?: unknown; message?: unknown } })?.error
-  return new CatalogError(
-    typeof error?.code === 'string' ? error.code : 'request_failed',
-    typeof error?.message === 'string' ? error.message : 'That request could not be completed.',
   )
 }

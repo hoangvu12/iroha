@@ -32,11 +32,11 @@ import { ModelListPicker } from '@/components/model-list-picker'
 import { ProviderIcon } from '@/components/provider-icon'
 import { StatusBadge } from '@/components/status-badge'
 import { cn } from '@/lib/utils'
+import { ApiError } from '@/lib/api-client'
 import {
   createGatewayKey,
   deleteGatewayKey,
   fetchGatewayKeys,
-  GatewayKeyError,
   revokeGatewayKey,
   updateGatewayKey,
   type CreatedGatewayKey,
@@ -51,16 +51,10 @@ import { fetchProviders, type ProviderView } from '@/lib/providers'
  * state, and creates a new key when the Owner asks for one. The usable secret
  * is shown once on creation; this view never re-renders it.
  */
-export function GatewayKeysArea({
-  csrfToken,
-  onSignedOut,
-}: {
-  readonly csrfToken: string
-  readonly onSignedOut: () => void
-}) {
+export function GatewayKeysArea({ csrfToken }: { readonly csrfToken: string }) {
   const [keys, setKeys] = useState<readonly GatewayKeyView[] | null>(null)
   const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
-  const [error, setError] = useState<GatewayKeyError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
   const [creating, setCreating] = useState(false)
   const [issued, setIssued] = useState<CreatedGatewayKey | null>(null)
 
@@ -71,15 +65,9 @@ export function GatewayKeysArea({
       setProviders(list)
       setError(null)
     } catch (cause: unknown) {
-      if (cause instanceof GatewayKeyError && cause.code === 'authentication_required') {
-        onSignedOut()
-        return
-      }
-      setError(
-        cause instanceof GatewayKeyError ? cause : new GatewayKeyError('request_failed', 'Load failed.'),
-      )
+      setError(cause instanceof ApiError ? cause : new ApiError('request_failed', 'Load failed.'))
     }
-  }, [onSignedOut])
+  }, [])
 
   useEffect(() => {
     void reload()
@@ -186,7 +174,7 @@ function GatewayKeyRow({
 }) {
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [error, setError] = useState<GatewayKeyError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   const runRevoke = async () => {
     setBusy(true)
@@ -196,9 +184,9 @@ function GatewayKeyRow({
       onChanged()
     } catch (cause) {
       setError(
-        cause instanceof GatewayKeyError
+        cause instanceof ApiError
           ? cause
-          : new GatewayKeyError('request_failed', 'That did not work.'),
+          : new ApiError('request_failed', 'That did not work.'),
       )
     } finally {
       setBusy(false)
@@ -213,7 +201,7 @@ function GatewayKeyRow({
       await deleteGatewayKey(keyView.id, csrfToken)
       onChanged()
     } catch (cause) {
-      setError(cause instanceof GatewayKeyError ? cause : new GatewayKeyError('request_failed', 'That did not work.'))
+      setError(cause instanceof ApiError ? cause : new ApiError('request_failed', 'That did not work.'))
     } finally {
       setBusy(false)
     }
@@ -323,7 +311,7 @@ function EditGatewayKeyForm({
   )
   const [corsOrigins, setCorsOrigins] = useState(keyView.corsOrigins)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<GatewayKeyError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -345,11 +333,11 @@ function EditGatewayKeyForm({
       }, csrfToken)
       onSaved()
     } catch (cause) {
-      const failure = cause instanceof GatewayKeyError
+      const failure = cause instanceof ApiError
         ? cause
-        : new GatewayKeyError('request_failed', 'That request could not be completed.')
+        : new ApiError('request_failed', 'That request could not be completed.')
       setError(failure.code === 'gateway_key_conflict'
-        ? new GatewayKeyError(failure.code, 'This key changed in another tab. Close this dialog, review the latest settings, and try again.')
+        ? new ApiError(failure.code, 'This key changed in another tab. Close this dialog, review the latest settings, and try again.')
         : failure)
     } finally {
       setBusy(false)
@@ -501,7 +489,7 @@ function CreateGatewayKeyForm({
   readonly providers: readonly ProviderView[]
   readonly csrfToken: string
   readonly onCreated: (created: CreatedGatewayKey) => void
-  readonly onFailure: (error: GatewayKeyError) => void
+  readonly onFailure: (error: ApiError) => void
 }) {
   const [name, setName] = useState('')
   const [accessMode, setAccessMode] = useState<'all' | 'selected'>('all')
@@ -514,7 +502,7 @@ function CreateGatewayKeyForm({
   )
   const [corsOrigins, setCorsOrigins] = useState<readonly string[]>([])
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<GatewayKeyError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -527,7 +515,7 @@ function CreateGatewayKeyForm({
     })
 
     if (accessMode === 'selected' && scope.length === 0) {
-      setError(new GatewayKeyError('validation_failed', 'Choose at least one Provider.'))
+      setError(new ApiError('validation_failed', 'Choose at least one Provider.'))
       return
     }
 
@@ -540,9 +528,9 @@ function CreateGatewayKeyForm({
       .then((created) => onCreated(created))
       .catch((cause: unknown) => {
         const failure =
-          cause instanceof GatewayKeyError
+          cause instanceof ApiError
             ? cause
-            : new GatewayKeyError('request_failed', 'That request could not be completed.')
+            : new ApiError('request_failed', 'That request could not be completed.')
         setError(failure)
         onFailure(failure)
       })

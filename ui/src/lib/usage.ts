@@ -1,3 +1,5 @@
+import { request } from './api-client.ts'
+
 export interface UsageScope {
   readonly kind: 'key' | 'account' | 'connection_model' | 'provider' | 'unknown'
   readonly keyId?: string
@@ -45,18 +47,6 @@ export interface UsageView {
   } | null
 }
 
-export class UsageError extends Error {
-  readonly code: string
-  readonly retryAfterSeconds: number | null
-
-  constructor(code: string, message: string, retryAfterSeconds: number | null = null) {
-    super(message)
-    this.name = 'UsageError'
-    this.code = code
-    this.retryAfterSeconds = retryAfterSeconds
-  }
-}
-
 export async function fetchUsage(
   providerId: string,
   signal?: AbortSignal,
@@ -76,52 +66,5 @@ export async function refreshUsage(
     'POST',
     `/providers/${encodeURIComponent(providerId)}/usage/refresh`,
     { csrfToken },
-  )
-}
-
-async function request<T = unknown>(
-  method: string,
-  path: string,
-  options: { body?: unknown; csrfToken?: string; signal?: AbortSignal } = {},
-): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`/api/v1/admin${path}`, {
-      method,
-      credentials: 'same-origin',
-      ...(options.signal ? { signal: options.signal } : {}),
-      headers: {
-        accept: 'application/json',
-        ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(options.csrfToken === undefined ? {} : { 'x-iroha-csrf': options.csrfToken }),
-      },
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch {
-    throw new UsageError('unreachable', 'Iroha did not answer. Check that the gateway is running.')
-  }
-
-  if (response.status === 204) return undefined as T
-
-  let payload: unknown = null
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  if (!response.ok) throw toError(response, payload)
-  return payload as T
-}
-
-function toError(response: Response, payload: unknown): UsageError {
-  const error = (payload as { error?: { code?: unknown; message?: unknown } })?.error
-  const retryAfter = Number(response.headers.get('retry-after'))
-  const message =
-    typeof error?.message === 'string' ? error.message : 'That request could not be completed.'
-  return new UsageError(
-    typeof error?.code === 'string' ? error.code : 'request_failed',
-    message,
-    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null,
   )
 }

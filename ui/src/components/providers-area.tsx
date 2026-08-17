@@ -39,10 +39,10 @@ import {
   Failure,
   Field,
   EditProviderForm,
-  toManagementError,
   useSubmission,
 } from '@/components/edit-provider-form'
 import { BulkKeyInput } from '@/components/bulk-key-input'
+import { ApiError, toApiError } from '@/lib/api-client'
 import { describeProviderStatus } from '@/lib/provider-status'
 import {
   archiveProvider,
@@ -54,7 +54,6 @@ import {
   GENERIC_PROVIDER_TEMPLATE,
   GENERIC_PROVIDER_TEMPLATE_BASE_URL,
   GENERIC_PROVIDER_TEMPLATE_ID,
-  ManagementError,
   purgeProvider,
   type ProviderTemplateView,
   type ProviderView,
@@ -65,7 +64,6 @@ import { logoDomainFromBaseUrl, normalizeLogoDomainInput } from '@/lib/logo-doma
 
 interface ProvidersAreaProps {
   readonly csrfToken: string
-  readonly onSignedOut: () => void
 }
 
 interface ProviderTraffic {
@@ -76,10 +74,10 @@ interface ProviderTraffic {
 const HOUR_MS = 60 * 60 * 1000
 const TRAFFIC_HOURS = 12
 
-export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
+export function ProvidersArea({ csrfToken }: ProvidersAreaProps) {
   const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
   const [traffic, setTraffic] = useState<ReadonlyMap<string, ProviderTraffic>>(new Map())
-  const [error, setError] = useState<ManagementError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
   const [creating, setCreating] = useState(false)
   const navigate = useNavigate()
 
@@ -93,13 +91,9 @@ export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
       setTraffic(buildTrafficByProvider(page.events))
       setError(null)
     } catch (cause) {
-      if (cause instanceof ManagementError && cause.code === 'authentication_required') {
-        onSignedOut()
-        return
-      }
-      setError(toManagementError(cause))
+      setError(toApiError(cause))
     }
-  }, [onSignedOut])
+  }, [])
 
   useEffect(() => {
     void reload()
@@ -148,7 +142,6 @@ export function ProvidersArea({ csrfToken, onSignedOut }: ProvidersAreaProps) {
               setCreating(false)
               void reload()
             }}
-            onFailure={setError}
             onCancel={() => setCreating(false)}
           />
         </DialogContent>
@@ -228,7 +221,7 @@ function ProviderRow({
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
-  const [rowError, setRowError] = useState<ManagementError | null>(null)
+  const [rowError, setRowError] = useState<ApiError | null>(null)
   const status = describeProviderStatus(provider.keys)
 
   const run = async (action: string, perform: () => Promise<unknown>) => {
@@ -238,7 +231,7 @@ function ProviderRow({
       await perform()
       onChanged()
     } catch (cause) {
-      setRowError(toManagementError(cause))
+      setRowError(toApiError(cause))
     } finally {
       setBusy(null)
     }
@@ -412,12 +405,10 @@ interface CreateProviderKeyRow {
 function CreateProviderForm({
   csrfToken,
   onCreated,
-  onFailure,
   onCancel,
 }: {
   readonly csrfToken: string
   readonly onCreated: () => void
-  readonly onFailure: (error: ManagementError) => void
   readonly onCancel: () => void
 }) {
   const [displayName, setDisplayName] = useState('')
@@ -480,7 +471,7 @@ function CreateProviderForm({
         if (controller.signal.aborted) return
         setTemplates([])
         setLoadError(
-          cause instanceof ManagementError ? cause.message : 'Could not load provider templates.',
+          cause instanceof ApiError ? cause.message : 'Could not load provider templates.',
         )
       })
     return () => controller.abort()
@@ -568,7 +559,7 @@ function CreateProviderForm({
   const form = useSubmission(async () => {
     const normalizedLogoDomain = normalizeLogoDomainInput(logoDomain)
     if (logoDomain.trim() !== '' && normalizedLogoDomain === null) {
-      throw new ManagementError('validation_failed', 'Check the highlighted field.', [
+      throw new ApiError('validation_failed', 'Check the highlighted field.', [
         { field: 'logoDomain', message: 'Enter a valid hostname or HTTP(S) URL.' },
       ])
     }
@@ -590,7 +581,7 @@ function CreateProviderForm({
       csrfToken,
     )
     onCreated()
-  }, onFailure)
+  })
 
   const topLevelKeysProblem = form.problemFor('keys')
 

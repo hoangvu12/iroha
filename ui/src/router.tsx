@@ -31,8 +31,8 @@ function OverviewRoute() {
 }
 
 function ProvidersAreaRoute() {
-  const { csrfToken, onSignedOut } = useCsrf()
-  return <ProvidersArea csrfToken={csrfToken} onSignedOut={onSignedOut} />
+  const { csrfToken } = useCsrf()
+  return <ProvidersArea csrfToken={csrfToken} />
 }
 
 function ProviderDetailRoute() {
@@ -62,18 +62,17 @@ function ProviderDetailRoute() {
 }
 
 function GatewayKeysRoute() {
-  const { csrfToken, onSignedOut } = useCsrf()
-  return <GatewayKeysArea csrfToken={csrfToken} onSignedOut={onSignedOut} />
+  const { csrfToken } = useCsrf()
+  return <GatewayKeysArea csrfToken={csrfToken} />
 }
 
 function RequestsRoute() {
-  const { onSignedOut } = useCsrf()
-  return <RequestsArea onSignedOut={onSignedOut} />
+  return <RequestsArea />
 }
 
 function AuditRoute() {
-  const { csrfToken, onSignedOut } = useCsrf()
-  return <AuditArea csrfToken={csrfToken} onSignedOut={onSignedOut} />
+  const { csrfToken } = useCsrf()
+  return <AuditArea csrfToken={csrfToken} />
 }
 
 function SettingsRoute() {

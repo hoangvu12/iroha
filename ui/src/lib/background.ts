@@ -1,3 +1,5 @@
+import { request } from './api-client.ts'
+
 export interface BackgroundJobView {
   readonly jobId: string
   readonly label: string
@@ -30,20 +32,12 @@ export interface BackgroundScheduleView {
   }
 }
 
-export class BackgroundError extends Error {
-  readonly code: string
-
-  constructor(code: string, message: string) {
-    super(message)
-    this.name = 'BackgroundError'
-    this.code = code
-  }
-}
+const BACKGROUND_JOBS = '/background-jobs'
 
 export async function fetchBackgroundJobs(
   signal?: AbortSignal,
 ): Promise<readonly BackgroundJobView[]> {
-  const body = await request<BackgroundJobList>('GET', '/', { signal })
+  const body = await request<BackgroundJobList>('GET', `${BACKGROUND_JOBS}/`, { signal })
   return body.jobs
 }
 
@@ -51,59 +45,23 @@ export async function triggerBackgroundJob(
   jobId: string,
   csrfToken: string,
 ): Promise<BackgroundJobView> {
-  return await request<BackgroundJobView>('POST', `/${encodeURIComponent(jobId)}/run`, { csrfToken })
+  return await request<BackgroundJobView>(
+    'POST',
+    `${BACKGROUND_JOBS}/${encodeURIComponent(jobId)}/run`,
+    { csrfToken },
+  )
 }
 
 export async function fetchBackgroundSchedule(signal?: AbortSignal): Promise<BackgroundScheduleView> {
-  return await request<BackgroundScheduleView>('GET', '/settings', { signal })
+  return await request<BackgroundScheduleView>('GET', `${BACKGROUND_JOBS}/settings`, { signal })
 }
 
 export async function updateBackgroundSchedule(
   schedule: BackgroundScheduleView,
   csrfToken: string,
 ): Promise<BackgroundScheduleView> {
-  return await request<BackgroundScheduleView>('PUT', '/settings', { body: schedule, csrfToken })
-}
-
-async function request<T = unknown>(
-  method: string,
-  path: string,
-  options: { body?: unknown; csrfToken?: string; signal?: AbortSignal } = {},
-): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`/api/v1/admin/background-jobs${path}`, {
-      method,
-      credentials: 'same-origin',
-      ...(options.signal ? { signal: options.signal } : {}),
-      headers: {
-        accept: 'application/json',
-        ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(options.csrfToken === undefined ? {} : { 'x-iroha-csrf': options.csrfToken }),
-      },
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch {
-    throw new BackgroundError('unreachable', 'Iroha did not answer. Check that the gateway is running.')
-  }
-
-  if (response.status === 204) return undefined as T
-
-  let payload: unknown = null
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  if (!response.ok) throw toError(payload)
-  return payload as T
-}
-
-function toError(payload: unknown): BackgroundError {
-  const error = (payload as { error?: { code?: unknown; message?: unknown } })?.error
-  return new BackgroundError(
-    typeof error?.code === 'string' ? error.code : 'request_failed',
-    typeof error?.message === 'string' ? error.message : 'That request could not be completed.',
-  )
+  return await request<BackgroundScheduleView>('PUT', `${BACKGROUND_JOBS}/settings`, {
+    body: schedule,
+    csrfToken,
+  })
 }

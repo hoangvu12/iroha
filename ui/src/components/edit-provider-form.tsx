@@ -6,7 +6,8 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { LogoDomainField } from '@/components/logo-domain-field'
 import { logoDomainFromBaseUrl, normalizeLogoDomainInput } from '@/lib/logo-domain'
-import { GENERIC_PROVIDER_TEMPLATE_ID, ManagementError, updateProvider, type ProviderView } from '@/lib/providers'
+import { ApiError, toApiError } from '@/lib/api-client'
+import { GENERIC_PROVIDER_TEMPLATE_ID, updateProvider, type ProviderView } from '@/lib/providers'
 
 export function EditProviderForm({
   provider,
@@ -34,7 +35,7 @@ export function EditProviderForm({
   const form = useSubmission(async () => {
     const normalizedLogoDomain = normalizeLogoDomainInput(logoDomain)
     if (logoDomain.trim() !== '' && normalizedLogoDomain === null) {
-      throw new ManagementError('validation_failed', 'Check the highlighted field.', [
+      throw new ApiError('validation_failed', 'Check the highlighted field.', [
         { field: 'logoDomain', message: 'Enter a valid hostname or HTTP(S) URL.' },
       ])
     }
@@ -205,7 +206,7 @@ export function Field({
   )
 }
 
-export function Failure({ error }: { error: ManagementError | null }) {
+export function Failure({ error }: { error: ApiError | null }) {
   if (error === null) return null
 
   return (
@@ -222,19 +223,12 @@ export const TITLES: Record<string, string> = {
   key_not_found: 'Key not found',
   provider_archived: 'Provider archived',
   stored_key_unreadable: 'Stored key unreadable',
-  authentication_required: 'Signed out',
   unreachable: 'Gateway unreachable',
 }
 
-export function toManagementError(cause: unknown): ManagementError {
-  return cause instanceof ManagementError
-    ? cause
-    : new ManagementError('request_failed', 'That request could not be completed.')
-}
-
-export function useSubmission(run: () => Promise<void>, onFatal?: (error: ManagementError) => void) {
+export function useSubmission(run: () => Promise<void>) {
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<ManagementError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   return {
     busy,
@@ -252,14 +246,7 @@ export function useSubmission(run: () => Promise<void>, onFatal?: (error: Manage
       setError(null)
 
       void run()
-        .catch((cause: unknown) => {
-          const failure = toManagementError(cause)
-          if (failure.code === 'authentication_required' && onFatal) {
-            onFatal(failure)
-            return
-          }
-          setError(failure)
-        })
+        .catch((cause: unknown) => setError(toApiError(cause)))
         .finally(() => setBusy(false))
     },
   }

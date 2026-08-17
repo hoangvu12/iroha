@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { AuthError, recoverAccess, setupOwner, signIn, type AuthState } from '@/lib/auth'
+import { ApiError } from '@/lib/api-client'
+import { recoverAccess, setupOwner, signIn, type AuthState } from '@/lib/auth'
 
 export type AuthMode = 'setup' | 'sign-in' | 'recover'
 
@@ -288,7 +289,7 @@ function Field({
   )
 }
 
-function Failure({ error }: { error: AuthError | null }) {
+function Failure({ error }: { error: ApiError | null }) {
   if (error === null) return null
 
   return (
@@ -315,7 +316,7 @@ const TITLES: Record<string, string> = {
 /** Form submission state shared by the three forms: one attempt at a time. */
 function useSubmission(run: () => Promise<void>) {
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<AuthError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   return {
     busy,
@@ -335,9 +336,9 @@ function useSubmission(run: () => Promise<void>) {
       void run()
         .catch((cause: unknown) => {
           setError(
-            cause instanceof AuthError
+            cause instanceof ApiError
               ? cause
-              : new AuthError('request_failed', 'That request could not be completed.'),
+              : new ApiError('request_failed', 'That request could not be completed.'),
           )
         })
         .finally(() => setBusy(false))

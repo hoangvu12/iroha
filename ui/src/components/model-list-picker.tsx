@@ -3,12 +3,8 @@ import { Loader2, Plus, RefreshCcw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatefulButton } from '@/components/ui/stateful-button'
 import { Input } from '@/components/ui/input'
-import {
-  fetchCatalog,
-  refreshCatalog,
-  CatalogError,
-  type CatalogView,
-} from '@/lib/catalog'
+import { ApiError } from '@/lib/api-client'
+import { fetchCatalog, refreshCatalog, type CatalogView } from '@/lib/catalog'
 import { cn } from '@/lib/utils'
 
 /** Sentinel height for the chip area so the input row below doesn't jump. */
@@ -50,7 +46,7 @@ export function ModelListPicker({
     try {
       setCatalog(await fetchCatalog(providerId))
     } catch (cause) {
-      setError(cause instanceof CatalogError ? cause.message : 'Could not load models.')
+      setError(cause instanceof ApiError ? cause.message : 'Could not load models.')
     } finally {
       setLoading(false)
     }
@@ -116,7 +112,7 @@ export function ModelListPicker({
                 try {
                   await load()
                 } catch (cause) {
-                  throw cause instanceof CatalogError ? cause : new Error('Could not load models.')
+                  throw cause instanceof ApiError ? cause : new Error('Could not load models.')
                 }
               }}
             >
@@ -184,7 +180,7 @@ export function ModelListPicker({
                 try {
                   await refresh()
                 } catch (cause) {
-                  throw cause instanceof CatalogError ? cause : new Error('Could not refresh models.')
+                  throw cause instanceof ApiError ? cause : new Error('Could not refresh models.')
                 }
               }}
             >

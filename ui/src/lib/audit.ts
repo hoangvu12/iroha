@@ -1,3 +1,5 @@
+import { request } from './api-client.ts'
+
 export interface AuditEventView {
   readonly id: number
   readonly occurredAt: string
@@ -14,16 +16,6 @@ export interface AuditEventList {
 export interface AuditFilter {
   readonly actionPrefix?: string
   readonly outcome?: 'success' | 'failure'
-}
-
-export class AuditError extends Error {
-  readonly code: string
-
-  constructor(code: string, message: string) {
-    super(message)
-    this.name = 'AuditError'
-    this.code = code
-  }
 }
 
 export async function fetchAudit(
@@ -46,47 +38,4 @@ export async function fetchAudit(
 export async function clearAudit(csrfToken: string): Promise<number> {
   const body = await request<{ removed: number }>('DELETE', '/audit', { csrfToken })
   return body.removed
-}
-
-async function request<T = unknown>(
-  method: string,
-  path: string,
-  options: { body?: unknown; csrfToken?: string; signal?: AbortSignal } = {},
-): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`/api/v1/admin${path}`, {
-      method,
-      credentials: 'same-origin',
-      ...(options.signal ? { signal: options.signal } : {}),
-      headers: {
-        accept: 'application/json',
-        ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(options.csrfToken === undefined ? {} : { 'x-iroha-csrf': options.csrfToken }),
-      },
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch {
-    throw new AuditError('unreachable', 'Iroha did not answer. Check that the gateway is running.')
-  }
-
-  if (response.status === 204) return undefined as T
-
-  let payload: unknown = null
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  if (!response.ok) throw toError(payload)
-  return payload as T
-}
-
-function toError(payload: unknown): AuditError {
-  const error = (payload as { error?: { code?: unknown; message?: unknown } })?.error
-  return new AuditError(
-    typeof error?.code === 'string' ? error.code : 'request_failed',
-    typeof error?.message === 'string' ? error.message : 'That request could not be completed.',
-  )
 }

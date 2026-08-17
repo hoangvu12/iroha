@@ -1,9 +1,13 @@
 import { Component, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
 import { AuthScreen } from '@/components/auth-screen'
+import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { registerOwnerSignOut } from '@/lib/api-client'
 import { CsrfContext } from '@/lib/csrf-context'
 import { fetchAuthState, signOut, type AuthState } from '@/lib/auth'
+import { queryClient } from '@/lib/query-client'
 import { router } from '@/router'
 
 class ErrorBoundary extends Component<
@@ -41,6 +45,16 @@ class ErrorBoundary extends Component<
 }
 
 export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <OwnerSession />
+      {/* Outside the router so a toast raised by a navigation survives it. */}
+      <Toaster position="bottom-right" />
+    </QueryClientProvider>
+  )
+}
+
+function OwnerSession() {
   const [auth, setAuth] = useState<AuthState | null>(null)
 
   const reloadAuth = useCallback(async () => {
@@ -61,6 +75,22 @@ export default function App() {
     void reloadAuth()
   }, [reloadAuth])
 
+  const csrfToken = auth?.session?.csrfToken ?? ''
+
+  const handleSignedOut = useCallback(async () => {
+    try {
+      await signOut(csrfToken)
+    } finally {
+      await reloadAuth()
+      void router.navigate({ to: '/' })
+    }
+  }, [csrfToken, reloadAuth])
+
+  // The API client and both query caches notice an expired Owner Session from
+  // module scope, where this component's state is out of reach; registering the
+  // handler here is the seam between the two. See `registerOwnerSignOut`.
+  useEffect(() => registerOwnerSignOut(() => void handleSignedOut()), [handleSignedOut])
+
   if (auth === null) {
     return (
       <div className="bg-canvas flex min-h-full items-center justify-center p-10">
@@ -71,17 +101,6 @@ export default function App() {
 
   if (!auth.authenticated) {
     return <AuthScreen state={auth} onAuthenticated={setAuth} />
-  }
-
-  const csrfToken = auth.session?.csrfToken ?? ''
-
-  const handleSignedOut = async () => {
-    try {
-      await signOut(csrfToken)
-    } finally {
-      await reloadAuth()
-      void router.navigate({ to: '/' })
-    }
   }
 
   return (

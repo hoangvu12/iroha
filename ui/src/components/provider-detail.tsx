@@ -53,6 +53,7 @@ import {
 } from '@/components/key-health'
 import { Dot } from '@/components/dot'
 import { LineChart, Line } from '@/components/charts/line-chart'
+import { ApiError } from '@/lib/api-client'
 import { describeProviderStatus } from '@/lib/provider-status'
 import {
   activateKey,
@@ -62,7 +63,6 @@ import {
   disableKey,
   duplicateProvider,
   fetchProviders,
-  ManagementError,
   purgeProvider,
   removeKey,
   revealKey,
@@ -112,29 +112,23 @@ export function ProviderDetail({
   const [analytics, setAnalytics] = useState<ProviderAnalytics | null>(null)
   const [usage, setUsage] = useState<UsageView | null>(null)
   const [usageDialogReadings, setUsageDialogReadings] = useState<readonly UsageReadingView[] | null>(null)
-  const [error, setError] = useState<ManagementError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   const reload = useCallback(async () => {
     try {
       const all = await fetchProviders()
       const match = all.find((c) => c.id === providerId)
       if (match === undefined) {
-        setError(new ManagementError('provider_not_found', 'No such Provider.'))
+        setError(new ApiError('provider_not_found', 'No such Provider.'))
         setProvider(null)
         return
       }
       setProvider(match)
       setError(null)
     } catch (cause) {
-      if (cause instanceof ManagementError && cause.code === 'authentication_required') {
-        onBack()
-        return
-      }
-      setError(
-        cause instanceof ManagementError ? cause : new ManagementError('request_failed', 'Load failed.'),
-      )
+      setError(cause instanceof ApiError ? cause : new ApiError('request_failed', 'Load failed.'))
     }
-  }, [providerId, onBack])
+  }, [providerId])
 
   useEffect(() => {
     void reload()
@@ -525,7 +519,7 @@ function UpstreamKeysCard({
   const [adding, setAdding] = useState(false)
   const [configuring, setConfiguring] = useState<KeyView | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<ManagementError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   const run = async (label: string, perform: () => Promise<unknown>) => {
     setBusy(label)
@@ -535,9 +529,9 @@ function UpstreamKeysCard({
       onChanged()
     } catch (cause) {
       setError(
-        cause instanceof ManagementError
+        cause instanceof ApiError
           ? cause
-          : new ManagementError('request_failed', 'That did not work.'),
+          : new ApiError('request_failed', 'That did not work.'),
       )
     } finally {
       setBusy(null)
@@ -685,7 +679,7 @@ function AddKeyDialog({
     }[]
   } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<ManagementError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   const trimmedBaseUrl = baseUrl.trim()
   const explicitOverride = trimmedBaseUrl !== '' && trimmedBaseUrl !== defaultBaseUrl
@@ -719,9 +713,9 @@ function AddKeyDialog({
         })
         .catch((cause: unknown) =>
           setError(
-            cause instanceof ManagementError
+            cause instanceof ApiError
               ? cause
-              : new ManagementError('request_failed', 'Could not save.'),
+              : new ApiError('request_failed', 'Could not save.'),
           ),
         )
         .finally(() => setBusy(false))
@@ -746,9 +740,9 @@ function AddKeyDialog({
       })
       .catch((cause: unknown) =>
         setError(
-          cause instanceof ManagementError
+          cause instanceof ApiError
             ? cause
-            : new ManagementError('request_failed', 'Could not save.'),
+            : new ApiError('request_failed', 'Could not save.'),
         ),
       )
       .finally(() => setBusy(false))
@@ -950,7 +944,7 @@ function ConfigureKeyDialog({
   const [allowedModels, setAllowedModels] = useState<readonly string[]>(keyView.allowedModels ?? [])
   const [deniedModels, setDeniedModels] = useState<readonly string[]>(keyView.deniedModels ?? [])
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<ManagementError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   const trimmedBaseUrl = baseUrl.trim()
   const explicitOverride = trimmedBaseUrl !== '' && trimmedBaseUrl !== defaultBaseUrl
@@ -975,9 +969,9 @@ function ConfigureKeyDialog({
       .then(() => onDone())
       .catch((cause: unknown) =>
         setError(
-          cause instanceof ManagementError
+          cause instanceof ApiError
             ? cause
-            : new ManagementError('request_failed', 'Could not save.'),
+            : new ApiError('request_failed', 'Could not save.'),
         ),
       )
       .finally(() => setBusy(false))
@@ -1233,7 +1227,7 @@ function UpstreamKeyRow({
     readonly value: string
   } | null>(null)
   const [revealing, setRevealing] = useState(false)
-  const [revealError, setRevealError] = useState<ManagementError | null>(null)
+  const [revealError, setRevealError] = useState<ApiError | null>(null)
   const [copied, setCopied] = useState(false)
 
   const onReveal = async () => {
@@ -1244,9 +1238,9 @@ function UpstreamKeyRow({
       setReveal({ value: result.value })
     } catch (cause) {
       setRevealError(
-        cause instanceof ManagementError
+        cause instanceof ApiError
           ? cause
-          : new ManagementError('request_failed', 'Could not reveal the key.'),
+          : new ApiError('request_failed', 'Could not reveal the key.'),
       )
     } finally {
       setRevealing(false)

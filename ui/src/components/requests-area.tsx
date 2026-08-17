@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/empty-state'
 import { Dot } from '@/components/dot'
+import { ApiError } from '@/lib/api-client'
 import {
   fetchProviders,
   type ProviderView,
@@ -27,7 +28,6 @@ import {
 import {
   fetchRequestDetail,
   fetchRequests,
-  RequestHistoryError,
   type RequestAttemptView,
   type RequestEventDetail,
   type RequestEventView,
@@ -42,13 +42,13 @@ const PAGE_SIZE = 25
  * Owner filter by provider, outcome, model, or key. Nothing here surfaces
  * prompts, responses, or Upstream Key material.
  */
-export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void }) {
+export function RequestsArea() {
   const [list, setList] = useState<{
     events: readonly RequestEventView[]
     total: number
   } | null>(null)
   const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
-  const [error, setError] = useState<RequestHistoryError | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
   const [filter, setFilter] = useState<RequestFilter>({})
   const [offset, setOffset] = useState(0)
   const [selected, setSelected] = useState<RequestEventDetail | null>(null)
@@ -65,18 +65,14 @@ export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void
         if (providers === null) setProviders(list)
         setError(null)
       } catch (cause) {
-        if (cause instanceof RequestHistoryError && cause.code === 'authentication_required') {
-          onSignedOut()
-          return
-        }
         setError(
-          cause instanceof RequestHistoryError
+          cause instanceof ApiError
             ? cause
-            : new RequestHistoryError('request_failed', 'Request history could not be loaded.'),
+            : new ApiError('request_failed', 'Request history could not be loaded.'),
         )
       }
     },
-    [providers, onSignedOut],
+    [providers],
   )
 
   useEffect(() => {
@@ -100,9 +96,9 @@ export function RequestsArea({ onSignedOut }: { readonly onSignedOut: () => void
       setError(null)
     } catch (cause) {
       setError(
-        cause instanceof RequestHistoryError
+        cause instanceof ApiError
           ? cause
-          : new RequestHistoryError('request_failed', 'Could not load that request.'),
+          : new ApiError('request_failed', 'Could not load that request.'),
       )
     } finally {
       setLoadingDetail(null)

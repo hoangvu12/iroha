@@ -22,6 +22,22 @@
 import type { ProviderCapabilities } from '../persistence/index.ts'
 
 /**
+ * The body shape a Provider's upstream speaks on the inference wire: either the
+ * OpenAI Chat Completions shape or the Anthropic Messages shape.
+ *
+ * This is Provider Template data, read at request time by the Anthropic
+ * messages surface to decide whether a caller's Anthropic-shape body passes
+ * through unchanged (`anthropic`) or is translated to the OpenAI shape and the
+ * answer translated back (`openai`). It is **not** persisted per Provider — a
+ * Provider with no Provider Template is treated as the OpenAI shape — and it is
+ * **not** an Inference Adapter capability. Per ADR-0020 the wire shape
+ * describes the upstream a Provider points at, not a capability of the adapter
+ * translating for it, so ADR-0010 stands and no adapter must declare which
+ * caller shapes it accepts.
+ */
+export type ProviderWireFormat = 'openai' | 'anthropic'
+
+/**
  * The well-known Inference Adapter id the generic Inference Adapter is
  * registered under. Built-in templates reference it; the Adapter Registry
  * asserts it exists at startup.
@@ -112,6 +128,19 @@ export interface ProviderTemplateBrand {
  */
 export interface ProviderTemplate {
   readonly id: string
+  /**
+   * The body shape this template's upstream speaks on the inference wire. Read
+   * at request time by the Anthropic messages surface to choose passthrough
+   * (`anthropic`) over translation (`openai`); Provider Template data, never
+   * persisted per Provider and never an Inference Adapter capability. See
+   * ADR-0020.
+   *
+   * Optional so a Provider Template that names no upstream shape — and any
+   * caller that omits it — is read as the OpenAI shape, the safe default for a
+   * service Iroha does not know by brand. Every built-in declares it
+   * explicitly.
+   */
+  readonly wireFormat?: ProviderWireFormat
   /** A short Owner-facing label shown in the connection picker. */
   readonly displayName: string
   /** A short description shown alongside the label. Never carries a URL with credentials. */
@@ -146,6 +175,7 @@ export interface ProviderTemplate {
 export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
   {
     id: GENERIC_PROVIDER_TEMPLATE_ID,
+    wireFormat: 'openai',
     displayName: 'Generic OpenAI-compatible',
     description:
       'A safe default for any OpenAI-shaped service Iroha does not know by brand. Bearer authentication, no inferred capability defaults, and reactive-only entitlement visibility.',
@@ -166,6 +196,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
   },
   {
     id: 'generic-anthropic-compatible',
+    wireFormat: 'anthropic',
     displayName: 'Generic Anthropic-compatible',
     description:
       'A safe default for any Anthropic-shaped service Iroha does not know by brand. x-api-key authentication, no inferred capability defaults, and reactive-only entitlement visibility.',
@@ -186,6 +217,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
   },
   {
     id: 'openai',
+    wireFormat: 'openai',
     displayName: 'OpenAI',
     description:
       'OpenAI’s public OpenAI-compatible surface. Bearer authentication and the full capability set Iroha knows OpenAI supports.',
@@ -217,6 +249,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
   },
   {
     id: 'openrouter',
+    wireFormat: 'openai',
     displayName: 'OpenRouter',
     description:
       'OpenRouter’s OpenAI-compatible surface. Bearer authentication; the catalog merges whatever OpenRouter reports on refresh.',
@@ -237,6 +270,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
   },
   {
     id: 'dashscope',
+    wireFormat: 'openai',
     displayName: 'DashScope',
     description:
       'Alibaba Cloud DashScope international OpenAI-compatible endpoint with bounded recovery from intermittent content-inspection failures.',
@@ -264,6 +298,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
   },
   {
     id: 'MiniMax',
+    wireFormat: 'openai',
     displayName: 'MiniMax',
     description:
       'MiniMax’s OpenAI-compatible endpoint. Bearer authentication; supports chat completions, streaming, tools, and the OpenAI Responses API. Entitlement polls chain the MiniMax coding-plan and credit endpoints.',
@@ -293,6 +328,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
   },
   {
     id: 'anthropic',
+    wireFormat: 'anthropic',
     displayName: 'Anthropic',
     description:
       'Anthropic’s first-party API. Authentication uses the `x-api-key` header; the typed Anthropic Inference Adapter translates OpenAI-shape requests and responses to and from the Anthropic Messages envelope.',
@@ -329,6 +365,7 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
   },
   {
     id: 'zai',
+    wireFormat: 'openai',
     displayName: 'Z.ai / BigModel',
     description:
       'Zhipu AI GLM Coding Plan via Z.ai. Override the base URL with https://open.bigmodel.cn/api/coding/paas/v4 for a mainland BigModel key; subscription quota is read per key, while pay-as-you-go credit remains unavailable.',

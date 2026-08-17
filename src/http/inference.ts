@@ -1222,7 +1222,14 @@ async function forwardAnthropicMessages(options: {
 
     const retryPolicy = await providers.getProvider(providerId)
     const templateId = retryPolicy?.templateId ?? null
-    const passthrough = templateId === 'anthropic'
+    // The Provider Template declares the body shape its upstream speaks
+    // (ADR-0020). Pass the caller's Anthropic-shape body through only when that
+    // wire shape is Anthropic; a Provider with no Provider Template, or one
+    // whose Template is unknown, is treated as the OpenAI shape and translated.
+    const providerTemplate = templateId === null
+      ? null
+      : adapterRegistry?.providerTemplate(templateId) ?? null
+    const passthrough = providerTemplate?.wireFormat === 'anthropic'
     const maxAttempts = retryPolicy?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
     const retryAmbiguousNetwork = retryPolicy?.retryAmbiguousNetwork ?? false
     const totalRetryBudgetMs = retryPolicy?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs

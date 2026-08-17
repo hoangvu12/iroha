@@ -208,7 +208,7 @@ export function createApp(options: AppOptions) {
     .use(createAdminRoutes({ identity, providers, gatewayKeys, adapterRegistry }))
     .use(createDirectoryRoutes({ gatewayKeys }))
     .use(createGlobalModelRoutes({ gatewayKeys, database }))
-    .use(createBrandLogoRoutes({ brandLogos: options.brandLogos ?? noBrandLogoService() }))
+    .use(createBrandLogoRoutes({ brandLogos: options.brandLogos ?? noBrandLogoService(), identity }))
     .use(createCatalogRoutes({ identity, modelCatalog }))
     .use(
       createUsageRoutes({

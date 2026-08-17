@@ -21,6 +21,7 @@ interface ProviderBody {
   handle: string
   displayName: string
   baseUrl: string
+  logoDomain: string | null
   allowInsecureHttp: boolean
   enabled: boolean
   archived: boolean
@@ -199,6 +200,7 @@ describe('Provider administration', () => {
       expect(created.id).toMatch(/^pr_/)
       expect(created.displayName).toBe('Example')
       expect(created.baseUrl).toBe(BASE_URL)
+      expect(created.logoDomain).toBe('api.example.com')
       expect(created.allowInsecureHttp).toBe(false)
       expect(created.enabled).toBe(true)
       expect(created.archived).toBe(false)
@@ -214,6 +216,23 @@ describe('Provider administration', () => {
       await createProvider()
 
       expect(probe.calls).toEqual([{ baseUrl: BASE_URL, upstreamKey: UPSTREAM_KEY }])
+    })
+
+    test('distinguishes an omitted Logo Domain from explicit null', async () => {
+      const branded = await createProvider({ templateId: 'openai', baseUrl: 'https://proxy.example.com/v1' })
+      expect(branded.logoDomain).toBe('openai.com')
+
+      const disabled = await createProvider({ templateId: 'openai', logoDomain: null })
+      expect(disabled.logoDomain).toBeNull()
+
+      const cleared = await createProvider({ templateId: 'openai', logoDomain: '   ' })
+      expect(cleared.logoDomain).toBeNull()
+
+      const listed = await iroha.fetch(BASE)
+      expect(listed.status).toBe(200)
+      const providers = ((await listed.json()) as { providers: ProviderBody[] }).providers
+      expect(providers.find((provider) => provider.id === branded.id)?.logoDomain).toBe('openai.com')
+      expect(providers.find((provider) => provider.id === disabled.id)?.logoDomain).toBeNull()
     })
 
     test('creates a Provider with two keys, each tested against its own base URL', async () => {
@@ -506,6 +525,73 @@ describe('Provider administration', () => {
   })
 
   describe('editing', () => {
+    test('normalizes, clears, and preserves omitted Logo Domain updates', async () => {
+      const created = await createProvider({ logoDomain: 'initial.example' })
+
+      const replaced = await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: body({ logoDomain: 'HTTPS://Brand.Example.:443/path?ignored=yes' }), csrf,
+      })
+      expect(replaced.status).toBe(200)
+      expect(((await replaced.json()) as ProviderBody).logoDomain).toBe('brand.example')
+
+      const omitted = await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: body({ displayName: 'Still branded' }), csrf,
+      })
+      expect(((await omitted.json()) as ProviderBody).logoDomain).toBe('brand.example')
+
+      const cleared = await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: body({ logoDomain: '' }), csrf,
+      })
+      expect(cleared.status).toBe(200)
+      expect(((await cleared.json()) as ProviderBody).logoDomain).toBeNull()
+
+      const explicitlyDisabled = await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: body({ logoDomain: null }), csrf,
+      })
+      expect(explicitlyDisabled.status).toBe(200)
+      expect(((await explicitlyDisabled.json()) as ProviderBody).logoDomain).toBeNull()
+    })
+
+    test('rejects an invalid non-empty Logo Domain', async () => {
+      const created = await createProvider()
+      const response = await iroha.fetch(`${BASE}/${created.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: body({ logoDomain: 'not a hostname' }), csrf,
+      })
+
+      expect(response.status).toBe(400)
+      expect(await problemsOf(response)).toContainEqual({
+        field: 'logoDomain', message: 'must be a valid hostname or HTTP(S) URL',
+      })
+    })
+
+    test('follows a generic Base URL only while its saved Logo Domain matches the old host', async () => {
+      const automatic = await createProvider()
+      const followed = await iroha.fetch(`${BASE}/${automatic.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: body({ baseUrl: 'https://new.example.net/v1' }), csrf,
+      })
+      expect(((await followed.json()) as ProviderBody).logoDomain).toBe('new.example.net')
+
+      const custom = await createProvider({ logoDomain: 'brand.example' })
+      const preserved = await iroha.fetch(`${BASE}/${custom.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: body({ baseUrl: 'https://elsewhere.example/v1' }), csrf,
+      })
+      expect(((await preserved.json()) as ProviderBody).logoDomain).toBe('brand.example')
+
+      const disabled = await createProvider({ logoDomain: null })
+      const stillDisabled = await iroha.fetch(`${BASE}/${disabled.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: body({ baseUrl: 'https://third.example/v1' }), csrf,
+      })
+      expect(((await stillDisabled.json()) as ProviderBody).logoDomain).toBeNull()
+    })
+
     test('edits the display name and base URL without touching the ID', async () => {
       const created = await createProvider()
       iroha.clock.advance(30)
@@ -603,7 +689,7 @@ describe('Provider administration', () => {
 
       expect(updated?.detail).toEqual({
         providerId: created.id,
-        fields: ['displayName', 'baseUrl'],
+        fields: ['displayName', 'baseUrl', 'logoDomain'],
       })
     })
   })
@@ -828,6 +914,7 @@ describe('Provider administration', () => {
       expect(archived.archived).toBe(true)
       expect(archived.enabled).toBe(false)
       expect(archived.keys).toEqual(created.keys)
+      expect(archived.logoDomain).toBe(created.logoDomain)
     })
 
     test('archiving twice changes nothing the second time', async () => {
@@ -945,6 +1032,7 @@ describe('Provider administration', () => {
       expect(copy.id).toMatch(/^pr_/)
       expect(copy.displayName).toBe('Original (copy)')
       expect(copy.baseUrl).toBe(created.baseUrl)
+      expect(copy.logoDomain).toBe(created.logoDomain)
       expect(copy.archived).toBe(false)
       expect(copy.enabled).toBe(true)
       expect(copy.keys[0]?.id).not.toBe(created.keys[0]?.id)
@@ -952,6 +1040,17 @@ describe('Provider administration', () => {
 
       const original = (await (await iroha.fetch(`${BASE}/${created.id}`)).json()) as ProviderBody
       expect(original.displayName).toBe('Original')
+    })
+
+    test('duplicates a disabled Logo Domain without deriving a replacement', async () => {
+      const created = await createProvider({ logoDomain: null })
+      const response = await iroha.fetch(`${BASE}/${created.id}/duplicate`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: body({ handle: 'no-logo-copy' }), csrf,
+      })
+
+      expect(response.status).toBe(201)
+      expect(((await response.json()) as ProviderBody).logoDomain).toBeNull()
     })
 
     test('re-encrypts the copied key freshly while keeping the same material', async () => {

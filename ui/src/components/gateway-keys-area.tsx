@@ -45,7 +45,6 @@ import {
   type GatewayKeyView,
 } from '@/lib/gateway-keys'
 import { fetchProviders, type ProviderView } from '@/lib/providers'
-import { useBrandByTemplateId } from '@/lib/use-provider-templates'
 
 /**
  * The Gateway Keys area. Lists every key with its name, scope, and revocation
@@ -411,7 +410,6 @@ function ScopeIcons({
   readonly hasCorsOrigins: boolean
   readonly className?: string
 }) {
-  const { brandFor } = useBrandByTemplateId()
   if (access.mode === 'all') {
     return (
       <span className={cn('border-border bg-muted text-muted-foreground inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs', className)}>
@@ -459,10 +457,7 @@ function ScopeIcons({
               className="ring-card inline-flex ring-2"
             >
               <ProviderIcon
-                brand={brandFor(provider?.templateId ?? null)}
-                {...(provider?.templateId === undefined || provider.templateId === null
-                  ? {}
-                  : { templateId: provider.templateId })}
+                logoDomain={provider?.logoDomain ?? null}
                 size="sm"
               />
             </span>
@@ -520,7 +515,6 @@ function CreateGatewayKeyForm({
   const [corsOrigins, setCorsOrigins] = useState<readonly string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<GatewayKeyError | null>(null)
-  const { brandFor } = useBrandByTemplateId()
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -614,10 +608,7 @@ function CreateGatewayKeyForm({
                     }
                   />
                   <ProviderIcon
-                    brand={brandFor(provider.templateId)}
-                    {...(provider.templateId === null
-                      ? {}
-                      : { templateId: provider.templateId })}
+                    logoDomain={provider.logoDomain}
                     size="sm"
                   />
                   <span className="truncate text-sm font-medium">

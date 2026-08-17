@@ -76,6 +76,7 @@ describe('Provider Connection templates', () => {
 
     expect(created.value.templateId).toBe('generic-openai-compatible')
     expect(created.value.baseUrl).toBe('https://api.example.com/v1')
+    expect(created.value.logoDomain).toBe('api.example.com')
   })
 
   test('a known templateId prefills the connection defaults', async () => {
@@ -90,6 +91,7 @@ describe('Provider Connection templates', () => {
 
     expect(created.value.templateId).toBe('openai')
     expect(created.value.baseUrl).toBe(OPENAI_BASE_URL)
+    expect(created.value.logoDomain).toBe('openai.com')
   })
 
   test('the Owner may override every field the template prefills', async () => {

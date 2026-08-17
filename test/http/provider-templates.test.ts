@@ -72,24 +72,27 @@ describe('the Provider Templates admin endpoint', () => {
     const response = await iroha.fetch(BASE)
     const body = (await response.json()) as TemplateListBody
     for (const template of body.templates) {
-      // The Anthropic template points at its typed adapter; every other
-      // built-in template uses the generic one.
-      if (template.id === 'anthropic') {
+      // The Anthropic and Generic Anthropic-compatible templates point at the
+      // typed Anthropic adapter; every other built-in template uses the
+      // generic one (except DashScope and MiniMax which have their own).
+      if (template.id === 'anthropic' || template.id === 'generic-anthropic-compatible') {
         expect(template.inferenceAdapterId).toBe('anthropic-inference-adapter')
       } else if (template.id === 'dashscope') {
         expect(template.inferenceAdapterId).toBe('dashscope-inference-adapter')
       } else if (template.id === 'MiniMax') {
         expect(template.inferenceAdapterId).toBe('minimax-inference-adapter')
+      } else if (template.id === 'zai') {
+        expect(template.inferenceAdapterId).toBe('zai-inference-adapter')
       } else {
         expect(template.inferenceAdapterId).toBe('generic-inference-adapter')
       }
       expect(template.usageAdapterId).not.toBe('')
     }
-    // MiniMax is the only built-in template that ships a typed Usage Adapter
-    // because MiniMax exposes a documented entitlement API.
+    // MiniMax and Z.ai ship typed Usage Adapters for their subscription APIs.
     const minimax = body.templates.find((template) => template.id === 'MiniMax')
     expect(minimax?.usageAdapterId).toBe('minimax-usage-adapter')
-    const other = body.templates.filter((template) => template.id !== 'MiniMax')
+    expect(body.templates.find((template) => template.id === 'zai')?.usageAdapterId).toBe('zai-usage-adapter')
+    const other = body.templates.filter((template) => template.id !== 'MiniMax' && template.id !== 'zai')
     for (const template of other) {
       expect(template.usageAdapterId).toBe('reactive-only-usage-adapter')
     }

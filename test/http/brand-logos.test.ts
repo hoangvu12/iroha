@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { BrandLogoService } from '../../src/brand-logos/index.ts'
-import { createTestApp, type TestApp } from '../support/app.ts'
+import { completeSetup, createTestApp, type TestApp } from '../support/app.ts'
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02])
 
@@ -298,5 +298,53 @@ describe('GET /api/v1/brand-logos/:templateId with no logo.dev token', () => {
     // The point of this test is to confirm the route no longer hard-404s on
     // missing token alone — it tries an upstream first.
     expect(response.status === 200 || response.status === 404).toBe(true)
+  })
+})
+
+describe('GET /api/v1/admin/brand-logos/resolve', () => {
+  let iroha: TestApp
+  let fetchStub: { fetch: typeof fetch; calls: FetchCall[] }
+
+  beforeEach(async () => {
+    fetchStub = stubbedFetch(new Map([[OPENAI_LOGO_URL + '&theme=dark', openaiLogo()]]))
+    const brandLogos = new BrandLogoService({
+      token: 'tok',
+      cacheDirectory: './data/test-brand-logos-' + crypto.randomUUID(),
+      templates: [],
+      fetch: fetchStub.fetch,
+    })
+    iroha = await createTestApp({ brandLogos })
+  })
+
+  afterEach(async () => {
+    await iroha.dispose()
+  })
+
+  test('requires an Owner Session', async () => {
+    const response = await iroha.fetch('/api/v1/admin/brand-logos/resolve?domain=openai.com&theme=dark')
+    expect(response.status).toBe(401)
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe('authentication_required')
+    expect(fetchStub.calls).toHaveLength(0)
+  })
+
+  test('resolves an exact normalized hostname and preserves browser caching', async () => {
+    await completeSetup(iroha)
+    const response = await iroha.fetch('/api/v1/admin/brand-logos/resolve?domain=OpenAI.COM.&theme=dark')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('private, max-age=86400')
+    expect(fetchStub.calls.map((call) => call.url)).toEqual([OPENAI_LOGO_URL + '&theme=dark'])
+  })
+
+  test('returns bounded validation errors without making an external request', async () => {
+    await completeSetup(iroha)
+    for (const path of [
+      '/api/v1/admin/brand-logos/resolve?domain=https%3A%2F%2Fopenai.com&theme=dark',
+      '/api/v1/admin/brand-logos/resolve?domain=openai.com&theme=auto',
+    ]) {
+      const response = await iroha.fetch(path)
+      expect(response.status).toBe(400)
+      expect(((await response.json()) as { error: { code: string } }).error.code).toBe('invalid_request')
+    }
+    expect(fetchStub.calls).toHaveLength(0)
   })
 })

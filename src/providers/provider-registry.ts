@@ -21,6 +21,7 @@ import { RoundRobinSelector } from './round-robin.ts'
 import { reconcileCapacity } from './capacity-reconciliation.ts'
 import type { CapacityEvidence, CredentialEvidence } from './provider-evidence.ts'
 import { GENERIC_PROVIDER_TEMPLATE_ID, type ProviderTemplate } from './templates.ts'
+import { normalizeLogoDomainInput } from '../brand-logos/index.ts'
 
 export interface FieldProblem {
   readonly field: string
@@ -136,6 +137,7 @@ export interface ProviderView {
   readonly handle: string
   readonly displayName: string
   readonly baseUrl: string
+  readonly logoDomain: string | null
   readonly allowInsecureHttp: boolean
   readonly enabled: boolean
   readonly retryMaxAttempts: number
@@ -298,6 +300,7 @@ export class ProviderRegistry {
     handle?: unknown
     displayName: unknown
     baseUrl: unknown
+    logoDomain?: unknown
     keys: unknown
     /**
      * Provider Template id, or null/omitted to seed the Generic
@@ -372,6 +375,14 @@ export class ProviderRegistry {
     const displayName = (input.displayName as string).trim()
     const handle = input.handle as string
     const baseUrl = (input.baseUrl as string).trim()
+    let logoDomain: string | null
+    if (input.logoDomain === undefined) {
+      logoDomain = template?.brand?.domain ?? logoDomainFromBaseUrl(baseUrl)
+    } else {
+      const read = readLogoDomainInput(input.logoDomain)
+      if (!read.ok) return failed({ code: 'validation_failed', problems: [read.problem] })
+      logoDomain = read.value
+    }
     const authHeaderName = (input.authHeader === undefined && template !== null
       ? template.authHeader
       : (authHeader as string).trim())
@@ -427,6 +438,7 @@ export class ProviderRegistry {
         handle,
         displayName,
         baseUrl,
+        logoDomain,
         allowInsecureHttp,
         enabled: true,
         retryMaxAttempts: 3,
@@ -489,6 +501,7 @@ export class ProviderRegistry {
     patch: {
       displayName?: unknown
       baseUrl?: unknown
+      logoDomain?: unknown
       allowInsecureHttp?: unknown
       enabled?: unknown
       retryMaxAttempts?: unknown
@@ -512,6 +525,7 @@ export class ProviderRegistry {
     const changes: {
       displayName?: string
       baseUrl?: string
+      logoDomain?: string | null
       allowInsecureHttp?: boolean
       enabled?: boolean
       retryMaxAttempts?: number
@@ -545,6 +559,18 @@ export class ProviderRegistry {
       )
       if (problems.length > 0) return failed({ code: 'validation_failed', problems })
       changes.baseUrl = (patch.baseUrl as string).trim()
+    }
+
+    if (patch.logoDomain !== undefined) {
+      const read = readLogoDomainInput(patch.logoDomain)
+      if (!read.ok) return failed({ code: 'validation_failed', problems: [read.problem] })
+      changes.logoDomain = read.value
+    } else if (
+      changes.baseUrl !== undefined &&
+      connection.templateId === GENERIC_PROVIDER_TEMPLATE_ID &&
+      connection.logoDomain === logoDomainFromBaseUrl(connection.baseUrl)
+    ) {
+      changes.logoDomain = logoDomainFromBaseUrl(changes.baseUrl)
     }
 
     if (patch.enabled !== undefined) {
@@ -738,6 +764,7 @@ export class ProviderRegistry {
         handle,
         displayName: copiedName(source.displayName),
         baseUrl: source.baseUrl,
+        logoDomain: source.logoDomain,
         allowInsecureHttp: source.allowInsecureHttp,
         enabled: true,
         retryMaxAttempts: source.retryMaxAttempts,
@@ -1846,6 +1873,7 @@ function summaryOf(provider: {
   retryAmbiguousNetwork: boolean
   archivedAt: Date | null
   templateId: string | null
+  logoDomain: string | null
   authHeader: string
   authPrefix: string
   staticHeadersEncrypted: string
@@ -1864,6 +1892,7 @@ function summaryOf(provider: {
     handle: provider.handle,
     displayName: provider.displayName,
     baseUrl: provider.baseUrl,
+    logoDomain: provider.logoDomain,
     allowInsecureHttp: provider.allowInsecureHttp,
     enabled: provider.enabled,
     retryMaxAttempts: provider.retryMaxAttempts,
@@ -1882,6 +1911,32 @@ function summaryOf(provider: {
     createdAt: provider.createdAt,
     updatedAt: provider.updatedAt,
   }
+}
+
+function logoDomainFromBaseUrl(baseUrl: string): string | null {
+  try {
+    return normalizeLogoDomainInput(new URL(baseUrl).hostname)
+  } catch {
+    return null
+  }
+}
+
+function readLogoDomainInput(input: unknown):
+  | { readonly ok: true; readonly value: string | null }
+  | { readonly ok: false; readonly problem: FieldProblem } {
+  if (input === null || (typeof input === 'string' && input.trim() === '')) {
+    return { ok: true, value: null }
+  }
+  if (typeof input !== 'string') {
+    return {
+      ok: false,
+      problem: { field: 'logoDomain', message: 'must be a valid hostname, HTTP(S) URL, or null' },
+    }
+  }
+  const normalized = normalizeLogoDomainInput(input)
+  return normalized === null
+    ? { ok: false, problem: { field: 'logoDomain', message: 'must be a valid hostname or HTTP(S) URL' } }
+    : { ok: true, value: normalized }
 }
 
 function displayNameProblems(input: unknown): readonly FieldProblem[] {

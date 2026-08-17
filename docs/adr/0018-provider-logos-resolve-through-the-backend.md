@@ -1,0 +1,3 @@
+# Provider Logos resolve through the backend
+
+Iroha resolves Owner-configured Provider Logo Domains through its backend, trying logo.dev and then Google favicon for the exact hostname and caching the result by hostname and theme. We rejected direct browser retrieval because it exposes the logo.dev token and the Owner's configured Provider domains in browser requests, direct Provider-site favicon downloads because they add an unnecessary outbound-fetch and content-validation surface, and parent-domain fallback because correct registrable-domain discovery adds complexity that the feature does not need; clearing a Logo Domain disables external lookup and shows the generic icon.

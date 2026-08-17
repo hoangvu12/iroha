@@ -20,6 +20,7 @@ export function providerRecord(
     handle: id,
     displayName: 'Example',
     baseUrl: PROVIDER_DEFAULT_BASE_URL,
+    logoDomain: 'example.com',
     allowInsecureHttp: false,
     enabled: true,
     retryMaxAttempts: 3,

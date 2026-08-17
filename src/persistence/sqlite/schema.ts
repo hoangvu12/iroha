@@ -66,6 +66,7 @@ export const providers = sqliteTable('providers', {
   handle: text('handle').notNull().unique(),
   displayName: text('display_name').notNull(),
   baseUrl: text('base_url').notNull(),
+  logoDomain: text('logo_domain'),
   allowInsecureHttp: integer('allow_insecure_http', { mode: 'boolean' }).notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull(),
   retryMaxAttempts: integer('retry_max_attempts').notNull().default(3),

@@ -66,6 +66,7 @@ export const providers = pgTable('providers', {
   handle: text('handle').notNull().unique(),
   displayName: text('display_name').notNull(),
   baseUrl: text('base_url').notNull(),
+  logoDomain: text('logo_domain'),
   allowInsecureHttp: boolean('allow_insecure_http').notNull(),
   enabled: boolean('enabled').notNull(),
   retryMaxAttempts: integer('retry_max_attempts').notNull().default(3),

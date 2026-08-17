@@ -756,6 +756,7 @@ function toProvider(row: ProviderRow): ProviderRecord {
     handle: row.handle,
     displayName: row.displayName,
     baseUrl: row.baseUrl,
+    logoDomain: row.logoDomain,
     allowInsecureHttp: row.allowInsecureHttp,
     enabled: row.enabled,
     retryMaxAttempts: row.retryMaxAttempts,
@@ -790,6 +791,7 @@ function encodeProviderRow(provider: ProviderRecord): {
   handle: string
   displayName: string
   baseUrl: string
+  logoDomain: string | null
   allowInsecureHttp: boolean
   enabled: boolean
   retryMaxAttempts: number
@@ -815,6 +817,7 @@ function encodeProviderRow(provider: ProviderRecord): {
     handle: provider.handle,
     displayName: provider.displayName,
     baseUrl: provider.baseUrl,
+    logoDomain: provider.logoDomain,
     allowInsecureHttp: provider.allowInsecureHttp,
     enabled: provider.enabled,
     retryMaxAttempts: provider.retryMaxAttempts,

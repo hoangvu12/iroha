@@ -34,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ProviderIcon } from '@/components/provider-icon'
+import { LogoDomainField } from '@/components/logo-domain-field'
 import {
   Failure,
   Field,
@@ -60,7 +61,7 @@ import {
 } from '@/lib/providers'
 import { fetchRequests } from '@/lib/requests'
 import type { BulkKeyEntry } from '@/lib/parse-bulk-keys'
-import { useBrandByTemplateId } from '@/lib/use-provider-templates'
+import { logoDomainFromBaseUrl, normalizeLogoDomainInput } from '@/lib/logo-domain'
 
 interface ProvidersAreaProps {
   readonly csrfToken: string
@@ -227,7 +228,6 @@ function ProviderRow({
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
-  const { brandFor } = useBrandByTemplateId()
   const [rowError, setRowError] = useState<ManagementError | null>(null)
   const status = describeProviderStatus(provider.keys)
 
@@ -279,10 +279,7 @@ function ProviderRow({
         }}
         className="bg-card hover:bg-muted/40 group flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 transition-colors"
       >
-        <ProviderIcon
-          brand={brandFor(provider.templateId)}
-          {...(provider.templateId === null ? {} : { templateId: provider.templateId })}
-        />
+        <ProviderIcon logoDomain={provider.logoDomain} />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-baseline gap-2">
             <span className="truncate text-sm font-medium tracking-tight">
@@ -441,6 +438,10 @@ function CreateProviderForm({
   // only widens the dropdown, it does not gate the default.
   const [templateId, setTemplateId] = useState<string | null>(GENERIC_PROVIDER_TEMPLATE_ID)
   const [baseUrl, setBaseUrl] = useState(GENERIC_PROVIDER_TEMPLATE_BASE_URL)
+  const [logoDomain, setLogoDomain] = useState(() => logoDomainFromBaseUrl(GENERIC_PROVIDER_TEMPLATE_BASE_URL) ?? '')
+  const logoDomainTouched = useRef(false)
+  const [authHeader, setAuthHeader] = useState(GENERIC_PROVIDER_TEMPLATE.authHeader)
+  const [authPrefix, setAuthPrefix] = useState(GENERIC_PROVIDER_TEMPLATE.authPrefix)
   const [templates, setTemplates] = useState<readonly ProviderTemplateView[]>([
     GENERIC_PROVIDER_TEMPLATE,
   ])
@@ -497,21 +498,46 @@ function CreateProviderForm({
         ? 'No templates available'
         : selectedTemplate?.displayName ?? 'Pick a template'
 
-  // Auto-fill the default base URL when the Owner picks a template, but
-  // never clobber a URL the Owner has typed by hand. The previous template's
-  // base URL lives in a ref so the comparison can decide whether the field
-  // is still "untouched" (matches what we last seeded) or already carries a
-  // custom value. After each template change the ref advances so the next
-  // change has the right "last seeded" baseline to compare against.
+  // Auto-fill the default base URL, auth header, and auth prefix when the Owner
+  // picks a template, but never clobber values the Owner has typed by hand.
+  // The previous template's values live in refs so the comparison can decide
+  // whether the fields are still "untouched" (match what we last seeded) or
+  // already carry custom values. After each template change the refs advance
+  // so the next change has the right "last seeded" baseline to compare against.
   const lastAutofilledBaseUrl = useRef<string | null>(GENERIC_PROVIDER_TEMPLATE_BASE_URL)
+  const lastAutofilledAuthHeader = useRef<string>(GENERIC_PROVIDER_TEMPLATE.authHeader)
+  const lastAutofilledAuthPrefix = useRef<string>(GENERIC_PROVIDER_TEMPLATE.authPrefix)
   useEffect(() => {
     if (selectedTemplate === null) return
-    const seeded = selectedTemplate.baseUrl
+    const seededBaseUrl = selectedTemplate.baseUrl
+    const seededAuthHeader = selectedTemplate.authHeader
+    const seededAuthPrefix = selectedTemplate.authPrefix
     if (baseUrl === '' || baseUrl === lastAutofilledBaseUrl.current) {
-      setBaseUrl(seeded)
+      setBaseUrl(seededBaseUrl)
     }
-    lastAutofilledBaseUrl.current = seeded
+    if (authHeader === lastAutofilledAuthHeader.current) {
+      setAuthHeader(seededAuthHeader)
+    }
+    if (authPrefix === lastAutofilledAuthPrefix.current) {
+      setAuthPrefix(seededAuthPrefix)
+    }
+    lastAutofilledBaseUrl.current = seededBaseUrl
+    lastAutofilledAuthHeader.current = seededAuthHeader
+    lastAutofilledAuthPrefix.current = seededAuthPrefix
   }, [selectedTemplate])
+
+  useEffect(() => {
+    if (selectedTemplate === null || logoDomainTouched.current) return
+    if (selectedTemplate.brand !== null) {
+      setLogoDomain(selectedTemplate.brand.domain)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      const suggested = logoDomainFromBaseUrl(baseUrl)
+      if (suggested !== null && !logoDomainTouched.current) setLogoDomain(suggested)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [baseUrl, selectedTemplate])
 
   const updateKeyRow = useCallback(
     (rowId: string, patch: Partial<CreateProviderKeyRow>) => {
@@ -540,17 +566,26 @@ function CreateProviderForm({
   }, [])
 
   const form = useSubmission(async () => {
+    const normalizedLogoDomain = normalizeLogoDomainInput(logoDomain)
+    if (logoDomain.trim() !== '' && normalizedLogoDomain === null) {
+      throw new ManagementError('validation_failed', 'Check the highlighted field.', [
+        { field: 'logoDomain', message: 'Enter a valid hostname or HTTP(S) URL.' },
+      ])
+    }
     await createProvider(
       {
         displayName,
         handle,
         baseUrl,
+        logoDomain: normalizedLogoDomain,
         keys:
           keyInputMode === 'bulk'
             ? bulkKeys.map((b) => ({ upstreamKey: b.upstreamKey, baseUrl: b.baseUrl }))
             : keys.map((row) => ({ upstreamKey: row.upstreamKey, baseUrl: row.baseUrl })),
         allowInsecureHttp,
         templateId,
+        authHeader,
+        authPrefix,
       },
       csrfToken,
     )
@@ -596,8 +631,7 @@ function CreateProviderForm({
               {selectedTemplate !== null ? (
                 <span className="flex items-center gap-2">
                   <ProviderIcon
-                    brand={selectedTemplate.brand}
-                    templateId={selectedTemplate.id}
+                    logoDomain={selectedTemplate.brand?.domain ?? null}
                     size="sm"
                   />
                   <span>{selectedTemplate.displayName}</span>
@@ -612,8 +646,7 @@ function CreateProviderForm({
               <SelectItem key={template.id} value={template.id} textValue={template.displayName}>
                 <span className="flex items-center gap-2">
                   <ProviderIcon
-                    brand={template.brand}
-                    templateId={template.id}
+                    logoDomain={template.brand?.domain ?? null}
                     size="sm"
                   />
                   <span>{template.displayName}</span>
@@ -633,6 +666,35 @@ function CreateProviderForm({
         value={baseUrl}
         onChange={setBaseUrl}
         problem={form.problemFor('baseUrl')}
+      />
+
+      <LogoDomainField
+        id="new-logo-domain"
+        value={logoDomain}
+        onChange={(value) => { logoDomainTouched.current = true; setLogoDomain(value) }}
+        problem={form.problemFor('logoDomain')}
+      />
+
+      <Field
+        id="new-auth-header"
+        label="Authentication header"
+        value={authHeader}
+        onChange={setAuthHeader}
+        hint="The HTTP header name for authentication."
+        problem={form.problemFor('authHeader')}
+      />
+
+      <Field
+        id="new-auth-prefix"
+        label="Authentication prefix"
+        value={authPrefix}
+        onChange={setAuthPrefix}
+        hint={
+          authHeader
+            ? `Sent as: ${authHeader}: ${authPrefix}<your-key>`
+            : 'Enter a header name above to see the format.'
+        }
+        problem={form.problemFor('authPrefix')}
       />
 
       <div className="flex flex-col gap-2">

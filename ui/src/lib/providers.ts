@@ -41,6 +41,7 @@ export interface ProviderView {
   readonly handle: string
   readonly displayName: string
   readonly baseUrl: string
+  readonly logoDomain: string | null
   readonly allowInsecureHttp: boolean
   readonly enabled: boolean
   readonly retryMaxAttempts: number
@@ -182,7 +183,10 @@ export async function createProvider(
     baseUrl: string
     keys: readonly { readonly upstreamKey: string; readonly baseUrl?: string }[]
     allowInsecureHttp: boolean
+    logoDomain?: string | null
     templateId: string | null
+    authHeader?: string
+    authPrefix?: string
   },
   csrfToken: string,
 ): Promise<ProviderView> {
@@ -204,7 +208,10 @@ export async function createProvider(
     }),
     allowInsecureHttp: input.allowInsecureHttp,
   }
+  if (input.logoDomain !== undefined) body.logoDomain = input.logoDomain
   if (input.templateId !== null) body.templateId = input.templateId
+  if (input.authHeader !== undefined) body.authHeader = input.authHeader
+  if (input.authPrefix !== undefined) body.authPrefix = input.authPrefix
   return await request<ProviderView>('POST', '/providers', {
     body,
     csrfToken,
@@ -216,10 +223,13 @@ export async function updateProvider(
   patch: {
     displayName?: string
     baseUrl?: string
+    logoDomain?: string | null
     allowInsecureHttp?: boolean
     enabled?: boolean
     retryMaxAttempts?: number
     retryAmbiguousNetwork?: boolean
+    authHeader?: string
+    authPrefix?: string
   },
   csrfToken: string,
 ): Promise<ProviderView> {

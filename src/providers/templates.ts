@@ -41,6 +41,9 @@ export const DASHSCOPE_INFERENCE_ADAPTER_ID = 'dashscope-inference-adapter'
 /** Typed MiniMax adapter for structured text-capacity failure evidence. */
 export const MINIMAX_INFERENCE_ADAPTER_ID = 'minimax-inference-adapter'
 
+/** Typed Z.ai (Zhipu / BigModel) adapter for documented error-code capacity evidence. */
+export const ZAI_INFERENCE_ADAPTER_ID = 'zai-inference-adapter'
+
 /**
  * The well-known Usage Adapter id the reactive-only generic Usage Adapter is
  * registered under. Built-in templates that have no documented entitlement
@@ -56,6 +59,9 @@ export const REACTIVE_ONLY_USAGE_ADAPTER_ID = 'reactive-only-usage-adapter'
  * reachable with the same bearer key as inference.
  */
 export const MINIMAX_USAGE_ADAPTER_ID = 'minimax-usage-adapter'
+
+/** Authoritative GLM Coding Plan quota adapter shared by Z.ai and BigModel. */
+export const ZAI_USAGE_ADAPTER_ID = 'zai-usage-adapter'
 
 /**
  * The id of the Generic OpenAI-compatible Provider Template, the default Iroha
@@ -155,6 +161,26 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     },
     knownModels: [],
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
+    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
+    brand: null,
+  },
+  {
+    id: 'generic-anthropic-compatible',
+    displayName: 'Generic Anthropic-compatible',
+    description:
+      'A safe default for any Anthropic-shaped service Iroha does not know by brand. x-api-key authentication, no inferred capability defaults, and reactive-only entitlement visibility.',
+    baseUrl: 'https://api.example.com/v1',
+    authHeader: 'x-api-key',
+    authPrefix: '',
+    capabilities: {
+      chat: false,
+      streaming: false,
+      tools: false,
+      structuredOutput: false,
+      responses: false,
+    },
+    knownModels: [],
+    inferenceAdapterId: ANTHROPIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
     brand: null,
   },
@@ -300,6 +326,26 @@ export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
     inferenceAdapterId: ANTHROPIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
     brand: { domain: 'anthropic.com', accentColor: '#D97757' },
+  },
+  {
+    id: 'zai',
+    displayName: 'Z.ai / BigModel',
+    description:
+      'Zhipu AI GLM Coding Plan via Z.ai. Override the base URL with https://open.bigmodel.cn/api/coding/paas/v4 for a mainland BigModel key; subscription quota is read per key, while pay-as-you-go credit remains unavailable.',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    authHeader: 'authorization',
+    authPrefix: 'Bearer ',
+    capabilities: {
+      chat: true,
+      streaming: true,
+      tools: true,
+      structuredOutput: false,
+      responses: false,
+    },
+    knownModels: ['glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air'],
+    inferenceAdapterId: ZAI_INFERENCE_ADAPTER_ID,
+    usageAdapterId: ZAI_USAGE_ADAPTER_ID,
+    brand: { domain: 'z.ai', accentColor: '#0EA5E9' },
   },
 ]
 

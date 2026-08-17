@@ -29,6 +29,7 @@ import type { ProviderTemplate } from '../providers/index.ts'
  */
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const NEGATIVE_CACHE_TTL_MS = 60 * 1000
 const CACHE_MAX_ENTRIES = 256
 
 /** logo.dev's upstream image endpoint; the response honours `format=webp`. */
@@ -72,6 +73,8 @@ export interface BrandLogoServiceOptions {
   readonly templates: readonly ProviderTemplate[]
   /** Replaces the upstream fetch; tests inject a stub. */
   readonly fetch?: typeof fetch
+  /** Overrides the short miss TTL for deterministic focused tests. */
+  readonly negativeCacheTtlMs?: number
 }
 
 export interface CachedBrandLogo {
@@ -88,7 +91,9 @@ export class BrandLogoService {
   readonly #cacheDirectory: string
   readonly #templates: ReadonlyMap<string, ProviderTemplate>
   readonly #fetch: typeof fetch
+  readonly #negativeCacheTtlMs: number
   readonly #cache = new Map<string, CacheEntry>()
+  readonly #misses = new Map<string, number>()
 
   constructor(options: BrandLogoServiceOptions) {
     this.#token = options.token
@@ -97,6 +102,7 @@ export class BrandLogoService {
       : join(process.cwd(), options.cacheDirectory)
     this.#templates = new Map(options.templates.map((template) => [template.id, template]))
     this.#fetch = options.fetch ?? globalThis.fetch
+    this.#negativeCacheTtlMs = options.negativeCacheTtlMs ?? NEGATIVE_CACHE_TTL_MS
   }
 
   /**
@@ -111,7 +117,15 @@ export class BrandLogoService {
     const template = this.#templates.get(templateId)
     if (template === undefined || template.brand === null) return null
 
-    const cacheKey = this.#cacheKey(templateId, theme)
+    return await this.resolveDomain(template.brand.domain, theme)
+  }
+
+  /** Resolves one exact hostname without contacting it or trying a parent domain. */
+  async resolveDomain(domain: string, theme: BrandLogoTheme): Promise<CachedBrandLogo | null> {
+    const normalizedDomain = normalizeLogoHostname(domain)
+    if (normalizedDomain === null) return null
+
+    const cacheKey = this.#cacheKey(normalizedDomain, theme)
 
     const cached = this.#readFromMemory(cacheKey)
     if (cached !== null) return cached
@@ -122,17 +136,31 @@ export class BrandLogoService {
       return onDisk
     }
 
-    const fetched = await this.#fetchFromUpstream(template.brand.domain, theme)
-    if (fetched === null) return null
+    const missExpiresAt = this.#misses.get(cacheKey)
+    if (missExpiresAt !== undefined) {
+      if (missExpiresAt > Date.now()) return null
+      this.#misses.delete(cacheKey)
+    }
+
+    const fetched = await this.#fetchFromUpstream(normalizedDomain, theme)
+    if (fetched === null) {
+      if (this.#misses.size >= CACHE_MAX_ENTRIES) {
+        const oldest = this.#misses.keys().next().value
+        if (oldest !== undefined) this.#misses.delete(oldest)
+      }
+      this.#misses.set(cacheKey, Date.now() + this.#negativeCacheTtlMs)
+      return null
+    }
 
     await this.#writeToDisk(cacheKey, fetched)
     this.#writeToMemory(cacheKey, fetched.contentType, fetched.bytes)
+    this.#misses.delete(cacheKey)
     return fetched
   }
 
-  /** A theme shares the plain template id; themed variants get a suffix. */
-  #cacheKey(templateId: string, theme: BrandLogoTheme): string {
-    return theme === 'auto' ? templateId : `${templateId}.${theme}`
+  /** A theme shares the plain hostname; themed variants get a suffix. */
+  #cacheKey(domain: string, theme: BrandLogoTheme): string {
+    return theme === 'auto' ? domain : `${domain}.${theme}`
   }
 
   #readFromMemory(cacheKey: string): CachedBrandLogo | null {
@@ -227,5 +255,44 @@ export class BrandLogoService {
     const arrayBuffer = await response.arrayBuffer()
     const contentType = response.headers.get('content-type') ?? fallbackContentType
     return { bytes: new Uint8Array(arrayBuffer), contentType }
+  }
+}
+
+/** Normalizes a DNS hostname and rejects URLs, ports, paths, IPs, and malformed labels. */
+export function normalizeLogoHostname(value: string): string | null {
+  const candidate = value.trim().toLowerCase().replace(/\.$/, '')
+  if (candidate.length === 0 || candidate.length > 253) return null
+  if (candidate.includes('://') || candidate.includes('/') || candidate.includes('@') || candidate.includes(':')) return null
+
+  let hostname: string
+  try {
+    hostname = new URL(`http://${candidate}`).hostname.toLowerCase().replace(/\.$/, '')
+  } catch {
+    return null
+  }
+  if (hostname !== candidate || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) || hostname.includes(':')) return null
+
+  const labels = hostname.split('.')
+  if (labels.length < 2) return null
+  if (labels.some((label) => label.length === 0 || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))) {
+    return null
+  }
+  return hostname
+}
+
+/** Accepts an HTTP(S) URL or hostname and returns only its normalized hostname. */
+export function normalizeLogoDomainInput(value: string): string | null {
+  const trimmed = value.trim()
+  if (trimmed === '') return null
+  if (!trimmed.includes('://')) return normalizeLogoHostname(trimmed)
+
+  try {
+    const url = new URL(trimmed)
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username !== '' || url.password !== '') {
+      return null
+    }
+    return normalizeLogoHostname(url.hostname)
+  } catch {
+    return null
   }
 }

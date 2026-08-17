@@ -152,9 +152,9 @@ describe('BrandLogoService', () => {
 
     // Disk cache should hold both the body and the content-type metadata so a
     // second instance can read it back without consulting logo.dev.
-    const body = await readFile(join(cacheDir, 'openai.bin'))
+    const body = await readFile(join(cacheDir, 'openai.com.bin'))
     expect(Array.from(body)).toEqual(Array.from(PNG_BYTES))
-    const meta = JSON.parse(await readFile(join(cacheDir, 'openai.meta.json'), 'utf8'))
+    const meta = JSON.parse(await readFile(join(cacheDir, 'openai.com.meta.json'), 'utf8'))
     expect(meta.contentType).toBe('image/webp')
 
     // The in-memory cache means the second call does not hit the stubbed
@@ -256,6 +256,30 @@ describe('BrandLogoService', () => {
 
     expect(await service.getLogo('openai')).toBeNull()
     expect(calls.map((call) => call.url)).toEqual([logoDevUrl, faviconUrl])
+  })
+
+  test('shares cache identity between an exact domain lookup and the legacy template lookup', async () => {
+    const url = 'https://img.logo.dev/openai.com?token=tok&size=64&retina=true&format=webp&theme=dark'
+    const { fetch, calls } = stubbedFetch(new Map([[url, new Response(PNG_BYTES, { status: 200 })]]))
+    const service = new BrandLogoService({
+      token: 'tok', cacheDirectory: cacheDir, templates: [TEMPLATE_WITH_BRAND], fetch,
+    })
+
+    expect(await service.resolveDomain('OpenAI.COM.', 'dark')).not.toBeNull()
+    expect(await service.getLogo('openai', 'dark')).not.toBeNull()
+    expect(calls.map((call) => call.url)).toEqual([url])
+  })
+
+  test('briefly caches misses by exact hostname and theme', async () => {
+    const { fetch, calls } = stubbedFetch(new Map())
+    const service = new BrandLogoService({
+      token: 'tok', cacheDirectory: cacheDir, templates: [], fetch,
+    })
+
+    expect(await service.resolveDomain('api.openai.com', 'light')).toBeNull()
+    expect(await service.resolveDomain('api.openai.com', 'light')).toBeNull()
+    expect(calls).toHaveLength(2)
+    expect(calls.every((call) => call.url.includes('api.openai.com'))).toBe(true)
   })
 
   test('returns null when the upstream fetch throws', async () => {

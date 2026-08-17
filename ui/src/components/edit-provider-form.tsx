@@ -1,10 +1,12 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ManagementError, updateProvider, type ProviderView } from '@/lib/providers'
+import { LogoDomainField } from '@/components/logo-domain-field'
+import { logoDomainFromBaseUrl, normalizeLogoDomainInput } from '@/lib/logo-domain'
+import { GENERIC_PROVIDER_TEMPLATE_ID, ManagementError, updateProvider, type ProviderView } from '@/lib/providers'
 
 export function EditProviderForm({
   provider,
@@ -19,6 +21,10 @@ export function EditProviderForm({
 }) {
   const [displayName, setDisplayName] = useState(provider.displayName)
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl)
+  const [logoDomain, setLogoDomain] = useState(provider.logoDomain ?? '')
+  const logoDomainTouched = useRef(false)
+  const [authHeader, setAuthHeader] = useState(provider.authHeader)
+  const [authPrefix, setAuthPrefix] = useState(provider.authPrefix)
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(provider.allowInsecureHttp)
   const [enabled, setEnabled] = useState(provider.enabled)
   const [retryMaxAttempts, setRetryMaxAttempts] = useState(String(provider.retryMaxAttempts))
@@ -26,11 +32,20 @@ export function EditProviderForm({
     provider.retryAmbiguousNetwork,
   )
   const form = useSubmission(async () => {
+    const normalizedLogoDomain = normalizeLogoDomainInput(logoDomain)
+    if (logoDomain.trim() !== '' && normalizedLogoDomain === null) {
+      throw new ManagementError('validation_failed', 'Check the highlighted field.', [
+        { field: 'logoDomain', message: 'Enter a valid hostname or HTTP(S) URL.' },
+      ])
+    }
     await updateProvider(
       provider.id,
       {
         displayName,
         baseUrl,
+        ...(logoDomainTouched.current ? { logoDomain: normalizedLogoDomain } : {}),
+        authHeader,
+        authPrefix,
         allowInsecureHttp,
         enabled,
         retryMaxAttempts: Number(retryMaxAttempts),
@@ -40,6 +55,16 @@ export function EditProviderForm({
     )
     onDone()
   })
+
+  useEffect(() => {
+    if (provider.templateId !== GENERIC_PROVIDER_TEMPLATE_ID || logoDomainTouched.current) return
+    if (provider.logoDomain !== logoDomainFromBaseUrl(provider.baseUrl)) return
+    const timer = window.setTimeout(() => {
+      const suggested = logoDomainFromBaseUrl(baseUrl)
+      if (suggested !== null && !logoDomainTouched.current) setLogoDomain(suggested)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [baseUrl, provider.baseUrl, provider.logoDomain, provider.templateId])
 
   return (
     <form className="flex flex-col gap-3" onSubmit={form.submit} noValidate>
@@ -56,6 +81,32 @@ export function EditProviderForm({
         value={baseUrl}
         onChange={setBaseUrl}
         problem={form.problemFor('baseUrl')}
+      />
+      <LogoDomainField
+        id={`edit-${provider.id}-logo-domain`}
+        value={logoDomain}
+        onChange={(value) => { logoDomainTouched.current = true; setLogoDomain(value) }}
+        problem={form.problemFor('logoDomain')}
+      />
+      <Field
+        id={`edit-${provider.id}-auth-header`}
+        label="Authentication header"
+        value={authHeader}
+        onChange={setAuthHeader}
+        hint="The HTTP header name for authentication."
+        problem={form.problemFor('authHeader')}
+      />
+      <Field
+        id={`edit-${provider.id}-auth-prefix`}
+        label="Authentication prefix"
+        value={authPrefix}
+        onChange={setAuthPrefix}
+        hint={
+          authHeader
+            ? `Sent as: ${authHeader}: ${authPrefix}<your-key>`
+            : 'Enter a header name above to see the format.'
+        }
+        problem={form.problemFor('authPrefix')}
       />
       <div className="flex flex-col gap-1.5">
         <label className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -77,8 +128,8 @@ export function EditProviderForm({
             checked={retryAmbiguousNetwork}
             onCheckedChange={(value) => setRetryAmbiguousNetwork(value === true)}
           />
-          Retry ambiguous network failures. Off by default because a generation may have
-          completed.
+          Retry one connection failure before a response. Off by default because this may
+          duplicate a request or charge when the Provider completed it without responding.
         </label>
       </div>
       <Field

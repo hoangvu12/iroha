@@ -362,6 +362,7 @@ for (const engine of availableEngines) {
         handle: id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
+        logoDomain: 'example.com',
         allowInsecureHttp: false,
         enabled: true,
         retryMaxAttempts: 3,
@@ -435,6 +436,14 @@ for (const engine of availableEngines) {
 
         expect(created).toEqual(connection('pc_one'))
         expect(await database.providers.getProvider('pc_one')).toEqual(connection('pc_one'))
+      })
+
+      test('round-trips nullable Logo Domains', async () => {
+        await database.providers.insertProvider(connection('pc_logo', { logoDomain: 'openai.com' }))
+        await database.providers.insertProvider(connection('pc_no_logo', { logoDomain: null }))
+
+        expect((await database.providers.getProvider('pc_logo'))?.logoDomain).toBe('openai.com')
+        expect((await database.providers.getProvider('pc_no_logo'))?.logoDomain).toBeNull()
       })
 
       test('enforces globally unique immutable Provider Handles', async () => {
@@ -789,6 +798,7 @@ for (const engine of availableEngines) {
         handle: id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
+        logoDomain: 'example.com',
         allowInsecureHttp: false,
         enabled: true,
         retryMaxAttempts: 3,
@@ -903,6 +913,7 @@ for (const engine of availableEngines) {
         handle: id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
+        logoDomain: 'example.com',
         allowInsecureHttp: false,
         enabled: true,
         retryMaxAttempts: 3,
@@ -1076,6 +1087,7 @@ for (const engine of availableEngines) {
         handle: id,
         displayName: 'Example',
         baseUrl: 'https://api.example.com/v1',
+        logoDomain: 'example.com',
         allowInsecureHttp: false,
         enabled: true,
         retryMaxAttempts: 3,

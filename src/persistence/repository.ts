@@ -122,6 +122,8 @@ export interface ProviderRecord {
   readonly displayName: string
   /** The Provider's default OpenAI-compatible base URL, exactly as the Owner gave it. */
   readonly baseUrl: string
+  /** Normalized hostname used to discover the Provider Logo; null disables discovery. */
+  readonly logoDomain: string | null
   /** The explicit per-Provider exception that permits plain HTTP. */
   readonly allowInsecureHttp: boolean
   readonly enabled: boolean
@@ -255,6 +257,7 @@ export interface UpstreamKeyRecord {
 export interface ProviderPatch {
   readonly displayName?: string
   readonly baseUrl?: string
+  readonly logoDomain?: string | null
   readonly allowInsecureHttp?: boolean
   readonly enabled?: boolean
   readonly retryMaxAttempts?: number

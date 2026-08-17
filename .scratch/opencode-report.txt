@@ -1,0 +1,178 @@
+SKIPPED (non-chat)
+bevansatria/openrouter/google/lyria-3-clip-preview
+bevansatria/openrouter/google/lyria-3-pro-preview
+dashscope/qwen-audio-3.0-asr-flash
+dashscope/qwen-image-2.0
+dashscope/qwen-image-2.0-2026-03-03
+dashscope/qwen-image-2.0-pro
+dashscope/qwen-image-2.0-pro-2026-03-03
+dashscope/qwen-image-2.0-pro-2026-04-22
+dashscope/qwen-image-2.0-pro-2026-06-22
+dashscope/qwen-image-3.0
+dashscope/qwen-image-3.0-pro
+dashscope/qwen-image-edit
+dashscope/qwen-image-edit-max
+dashscope/qwen-image-edit-max-2026-01-16
+dashscope/qwen-image-edit-plus
+dashscope/qwen-image-edit-plus-2025-10-30
+dashscope/qwen-image-edit-plus-2025-12-15
+dashscope/qwen-image-max
+dashscope/qwen-image-max-2025-12-30
+dashscope/qwen-image-plus
+dashscope/qwen-image-plus-2026-01-09
+dashscope/qwen-mt-flash
+dashscope/qwen-mt-lite
+dashscope/qwen-mt-plus
+dashscope/qwen-mt-turbo
+dashscope/qwen-vl-ocr-2025-11-20
+dashscope/qwen3-asr-flash-2026-02-10
+dashscope/qwen3-asr-flash-realtime
+dashscope/qwen3-asr-flash-realtime-2025-10-27
+dashscope/qwen3-asr-flash-realtime-2026-02-10
+dashscope/qwen3-livetranslate-flash
+dashscope/qwen3-livetranslate-flash-2025-12-01
+dashscope/qwen3-livetranslate-flash-realtime
+dashscope/qwen3-livetranslate-flash-realtime-2025-09-22
+dashscope/qwen3-omni-30b-a3b-captioner
+dashscope/qwen3-omni-flash-realtime
+dashscope/qwen3-omni-flash-realtime-2025-09-15
+dashscope/qwen3-omni-flash-realtime-2025-12-01
+dashscope/qwen3-s2s-flash-realtime
+dashscope/qwen3-tts-flash
+dashscope/qwen3-tts-flash-2025-09-18
+dashscope/qwen3-tts-flash-2025-11-27
+dashscope/qwen3-tts-flash-realtime
+dashscope/qwen3-tts-flash-realtime-2025-09-18
+dashscope/qwen3-tts-flash-realtime-2025-11-27
+dashscope/qwen3-tts-instruct-flash
+dashscope/qwen3-tts-instruct-flash-2026-01-26
+dashscope/qwen3-tts-instruct-flash-realtime
+dashscope/qwen3-tts-instruct-flash-realtime-2026-01-22
+dashscope/qwen3-tts-vc-2026-01-22
+dashscope/qwen3-tts-vc-realtime-2025-11-27
+dashscope/qwen3-tts-vc-realtime-2026-01-15
+dashscope/qwen3-tts-vd-2026-01-26
+dashscope/qwen3-tts-vd-realtime-2025-12-16
+dashscope/qwen3-tts-vd-realtime-2026-01-15
+dashscope/qwen3.5-livetranslate-flash-realtime
+dashscope/qwen3.5-livetranslate-flash-realtime-2026-05-19
+dashscope/qwen3.5-omni-flash-realtime
+dashscope/qwen3.5-omni-flash-realtime-2026-03-15
+dashscope/qwen3.5-omni-plus-realtime
+dashscope/qwen3.5-omni-plus-realtime-2026-03-15
+dashscope/qwen3.7-text-embedding
+dashscope/text-embedding-v3
+dashscope/text-embedding-v4
+dashscope/tongyi-tingwu-slp
+dashscope/wan2.7-image
+dashscope/wan2.7-image-pro
+dashscope/z-image-turbo
+
+FALLBACK LIMITS
+bevansatria/ag/gemini-3-flash -> 1048576
+bevansatria/ag/gemini-3-flash-agent -> 1048576
+bevansatria/ag/gemini-3.1-pro-low -> 1048576
+bevansatria/ag/gemini-pro-agent -> 1048576
+bevansatria/ag/gpt-oss-120b-medium -> 131072
+bevansatria/cf/@cf/deepseek-ai/deepseek-r1-distill-qwen-32b -> 163840
+bevansatria/cf/@cf/meta/llama-3.1-70b-instruct-fp8-fast -> 128000
+bevansatria/cf/@cf/meta/llama-3.1-8b-instruct-awq -> 128000
+bevansatria/cf/@cf/meta/llama-3.1-8b-instruct-fp8-fast -> 128000
+bevansatria/cf/@cf/meta/llama-3.2-1b-instruct -> 128000
+bevansatria/cf/@cf/meta/llama-3.2-3b-instruct -> 128000
+bevansatria/cf/@cf/meta/llama-3.3-70b-instruct-fp8-fast -> 128000
+bevansatria/cf/@cf/mistralai/mistral-small-3.1-24b-instruct -> 131072
+bevansatria/cf/@cf/qwen/qwen2.5-coder-32b-instruct -> 131072
+bevansatria/cf/@cf/qwen/qwq-32b -> 131072
+bevansatria/cf/minimax/m3 -> 1000000
+bevansatria/cl/kwaipilot/kat-coder-pro -> 262144
+bevansatria/combo/Gemini-3.1-F -> 1048576
+bevansatria/combo/gemini-3.1-H -> 1048576
+bevansatria/combo/luma-mini -> 131072
+bevansatria/combo/luna -> 131072
+bevansatria/fb/mimo/mimo-v2.5 -> 131072
+bevansatria/gc/gemini-3-pro-preview -> 1048576
+bevansatria/gcli/grok-build -> 256000
+bevansatria/gh/copilot-search-a -> 131072
+bevansatria/gh/copilot-search-b -> 131072
+bevansatria/gh/copilot-search-c -> 131072
+bevansatria/gh/exec-agent-a -> 131072
+bevansatria/gh/exec-agent-b -> 131072
+bevansatria/gh/exec-agent-c -> 131072
+bevansatria/gh/goldeneye-free-auto -> 131072
+bevansatria/gh/gpt-4-o-preview -> 128000
+bevansatria/gh/gpt-5.2-codex -> 400000
+bevansatria/gh/grok-code-fast-1 -> 256000
+bevansatria/gh/mai-code-1-flash -> 131072
+bevansatria/gh/mai-code-1-flash-4th -> 131072
+bevansatria/gh/mai-code-1-flash-picker -> 131072
+bevansatria/gh/mai-code-1-flash-secondary -> 131072
+bevansatria/gh/mai-code-1-flash-tertiary -> 131072
+bevansatria/gh/mai-code-1.1-flash -> 131072
+bevansatria/gh/oswe-vscode-prime -> 131072
+bevansatria/gh/trajectory-compaction -> 131072
+bevansatria/iam/auto -> 131072
+bevansatria/kc/anthropic/claude-opus-4-20250514 -> 200000
+bevansatria/kc/anthropic/claude-sonnet-4-20250514 -> 200000
+bevansatria/kimchi/kimi-k2.7 -> 262144
+bevansatria/kimchi/nemotron-3-ultra-fp4 -> 131072
+bevansatria/mmf/mimo-auto -> 131072
+bevansatria/nvidia/meta/llama-4-maverick-17b-128e-instruct -> 1048576
+bevansatria/nvidia/mistralai/mistral-large-3-675b-instruct-2512 -> 131072
+bevansatria/nvidia/nemotron-3-super-120b-a12b -> 131072
+bevansatria/nvidia/nemotron-3-ultra-550b-a55b -> 131072
+bevansatria/nvidia/openai/gpt-oss-120b -> 131072
+bevansatria/nvidia/openai/gpt-oss-20b -> 131072
+bevansatria/oc/big-pickle -> 131072
+bevansatria/oc/hy3-free -> 131072
+bevansatria/oc/laguna-s-2.1-free -> 131072
+bevansatria/oc/mimo-v2.5-free -> 131072
+bevansatria/oc/nemotron-3-ultra-free -> 131072
+bevansatria/oc/nemotron-3.5-lightning-free -> 131072
+bevansatria/oc/north-mini-code-free -> 131072
+bevansatria/openrouter/nvidia/nemotron-3-nano-30b-a3b:free -> 131072
+bevansatria/openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free -> 131072
+bevansatria/openrouter/nvidia/nemotron-3-super-120b-a12b:free -> 131072
+bevansatria/openrouter/openrouter/owl-alpha -> 131072
+bevansatria/openrouter/poolside/laguna-m.1:free -> 131072
+bevansatria/openrouter/poolside/laguna-xs.2:free -> 131072
+bevansatria/openrouter/qwen/qwen3-coder:free -> 262144
+bevansatria/qd/auto -> 131072
+bevansatria/qd/dfmodel -> 131072
+bevansatria/qd/dmodel -> 131072
+bevansatria/qd/efficient -> 131072
+bevansatria/qd/gm51model -> 131072
+bevansatria/qd/kmodel -> 131072
+bevansatria/qd/kmodel_latest -> 131072
+bevansatria/qd/mmodel -> 131072
+bevansatria/qd/performance -> 131072
+bevansatria/qd/qmodel -> 131072
+bevansatria/qd/qmodel_38max -> 131072
+bevansatria/qd/qmodel_latest -> 131072
+bevansatria/qd/qmodel_preview -> 131072
+bevansatria/qd/ultimate -> 131072
+dashscope/ccai-pro -> 131072
+dashscope/deepseek-v3.2 -> 163840
+dashscope/qwen-coder-plus -> 131072
+dashscope/qwen-flash-character -> 131072
+dashscope/qwen-plus-character -> 131072
+dashscope/qwen2-7b-instruct -> 131072
+dashscope/qwen3-235b-a22b-instruct-2507 -> 131072
+dashscope/qwen3-30b-a3b -> 131072
+dashscope/qwen3-30b-a3b-instruct-2507 -> 131072
+dashscope/qwen3-30b-a3b-thinking-2507 -> 131072
+dashscope/qwen3-coder-next -> 262144
+dashscope/qwen3-vl-235b-a22b-instruct -> 131072
+dashscope/qwen3-vl-flash -> 131072
+dashscope/qwen3-vl-flash-2025-10-15 -> 131072
+dashscope/qwen3-vl-flash-2026-01-22 -> 131072
+dashscope/qwen3.5-flash -> 131072
+dashscope/qwen3.5-flash-2026-02-23 -> 131072
+dashscope/qwen3.5-omni-flash -> 131072
+dashscope/qwen3.5-omni-flash-2026-03-15 -> 131072
+dashscope/qwen3.5-omni-plus -> 131072
+dashscope/qwen3.5-omni-plus-2026-03-15 -> 131072
+dashscope/qwen3.7-flash -> 131072
+dashscope/qwen3.7-flash-2026-07-15 -> 131072
+dashscope/qwen3.8-2.4t-a95b -> 131072
+z-ai/glm-5-turbo -> 200000

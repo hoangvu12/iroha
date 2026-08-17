@@ -1,4 +1,0 @@
-Iroha starting with postgresql://neondb_owner@ep-calm-moon-azigz2oz-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb
-  Migrations applied.
-  No Owner yet: first-run setup is open in the browser.
-  Listening on http://127.0.0.1:3000

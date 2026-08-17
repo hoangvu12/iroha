@@ -143,9 +143,10 @@ Provide a database-backed management UI and admin API for Provider Connections, 
 - Provider selection is explicit through `/providers/{connection_id}/v1/*`; there is no unscoped `/v1` inference route.
 - Provider Connection IDs are immutable. Display name, base URL, settings, and enabled/archive state are editable. Duplicate creates a new identity.
 - The supported OpenAI surface is Models, Chat Completions, and Responses with their streaming forms, tools, structured output, cancellation, and error behavior.
+- The supported Anthropic surface is `POST /providers/{connection_id}/v1/messages` with Anthropic-shape bodies, streaming SSE events, tools, structured output, error envelope, and the full reverse-translation path for OpenAI-shaped Targets. The full feature spec lives at `.scratch/anthropic-support/spec.md`; the architectural decisions at `docs/adr/0010-anthropic-inference-adapter-owns-round-trip.md`, `0011-anthropic-compatible-v1-messages-surface.md`, and `0012-anthropic-provider-template-mirrors-openai.md`.
 - `/api/v1/directory/providers` is authenticated with a Gateway Key and filtered through Key Scope. `/api/v1/admin/*` is authenticated with the Owner session. Version one has no admin automation tokens.
 - The generated OpenAPI document covers discovery and admin APIs. The OpenAI surface is governed by SDK conformance tests and an explicit capability matrix rather than a copied OpenAI schema.
-- The first Provider Templates include Generic OpenAI-compatible, OpenAI, OpenRouter, MiniMax, and verified data-only OpenAI-compatible defaults informed by nyanis.
+- The first Provider Templates include Generic OpenAI-compatible, OpenAI, OpenRouter, MiniMax, Anthropic, and verified data-only OpenAI-compatible defaults informed by nyanis.
 - Provider Templates are data. Typed Inference Adapters own behavior and typed Usage Adapters own authoritative entitlement polling. The UI cannot upload executable plugins.
 - The generic Inference Adapter supports safe configurable header authentication and encrypted static headers but never arbitrary authentication code.
 - The generic Usage Adapter is reactive-only and reports authoritative remaining balance as Unknown.
@@ -188,7 +189,6 @@ Provide a database-backed management UI and admin API for Provider Connections, 
 
 ## Out of Scope
 
-- Anthropic-compatible public endpoints or automatic translation from Anthropic requests.
 - Embeddings, images, audio, moderation, files, batches, vector stores, and other OpenAI endpoints beyond Models, Chat Completions, and Responses.
 - An unscoped inference route, automatic cross-Provider model routing, virtual model aliases, or model substitution.
 - Cross-Provider fallback to a different Provider Connection.

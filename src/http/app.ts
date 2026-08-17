@@ -26,7 +26,7 @@ import { createBrandLogoRoutes } from './brand-logos.ts'
 import { createCatalogRoutes } from './catalog.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
-import { createGlobalInferenceRoutes, createInferenceRoutes, DEFAULT_TRANSPORT, type StreamingTimeouts, type TransportDefaults } from './inference.ts'
+import { createAdminInferenceRoutes, createGlobalInferenceRoutes, createInferenceRoutes, DEFAULT_TRANSPORT, type StreamingTimeouts, type TransportDefaults } from './inference.ts'
 import { createRequestHistoryRoutes } from './request-history.ts'
 import { ReadinessState } from './readiness.ts'
 import { createSettingsRoutes } from './settings.ts'
@@ -206,6 +206,17 @@ export function createApp(options: AppOptions) {
     }))
     .use(createAuthRoutes({ identity }))
     .use(createAdminRoutes({ identity, providers, gatewayKeys, adapterRegistry }))
+    .use(
+      createAdminInferenceRoutes(identity, {
+        gatewayKeys, providers, inference, modelCatalog, adapterRegistry, database, requestHistory,
+        transportDefaults, usageService,
+        ...(options.timer === undefined ? {} : { timer: options.timer }),
+        ...(options.shutdown === undefined ? {} : { shutdown: options.shutdown }),
+        ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
+        ...(options.streamingTimeouts === undefined ? {} : { timeouts: options.streamingTimeouts }),
+        ...(options.retrySleep === undefined ? {} : { retrySleep: options.retrySleep }),
+      }),
+    )
     .use(createDirectoryRoutes({ gatewayKeys }))
     .use(createGlobalModelRoutes({ gatewayKeys, database }))
     .use(createBrandLogoRoutes({ brandLogos: options.brandLogos ?? noBrandLogoService(), identity }))

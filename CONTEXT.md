@@ -17,8 +17,12 @@ One transmission from the Gateway to a Provider within a Request. Each Attempt r
 _Avoid_: Request, retry request
 
 **Provider**:
-The owner-managed entity through which the Gateway reaches one upstream AI inference service. It has a stable ID, a base URL, and holds Upstream Keys. Each Upstream Key may declare its own base URL override; when unset, the key uses the Provider's base URL. The Provider owns every transport, authentication, retry, timeout, capability, and idempotency setting the Gateway uses to reach the upstream. It is seeded by a Provider Template that identifies the upstream brand.
+The owner-managed entity through which the Gateway reaches one upstream AI inference service. It has a stable ID, a unique public Handle, a base URL, and holds Upstream Keys. Each Upstream Key may declare its own base URL override; when unset, the key uses the Provider's base URL. The Provider owns every transport, authentication, retry, timeout, capability, and idempotency setting the Gateway uses to reach the upstream. It is seeded by a Provider Template that identifies the upstream brand.
 _Avoid_: Vendor, backend, account, integration, provider connection
+
+**Provider Handle**:
+The globally unique, immutable, owner-facing identifier that selects a Provider in Gateway inference URLs and Qualified Model IDs. Iroha proposes it from the Provider's display name during creation and the Owner may edit it before saving; changing the display name afterward never changes the Handle. An archived Provider continues reserving its Handle.
+_Avoid_: Alias, slug, Provider ID
 
 **Upstream Key**:
 A secret issued by a Provider and attached to one Provider for upstream inference requests. It may declare its own base URL; when set, the key sends requests there; when unset, the key uses the Provider's base URL.
@@ -64,9 +68,21 @@ _Avoid_: Status mapping, error table
 The bounded next step a Failure Classification permits: stop, retry the same Upstream Key, or try an eligible alternate. It does not itself change durable Key Health.
 _Avoid_: Retry policy, failover rule
 
+**Provider Pack**:
+Iroha's complete built-in knowledge of one upstream brand: one Provider Template, one Inference Adapter, and one Usage Adapter. Every Pack ships inside the release; Iroha never loads one at runtime.
+_Avoid_: Plugin, integration, driver, provider definition, provider kind
+
 **Provider Template**:
-A built-in setup aid that supplies known defaults for creating a Provider without containing an account or secret.
+A built-in setup aid that supplies known defaults for creating a Provider without containing an account or secret. It belongs to one Provider Pack and declares the wire shape that Pack's upstream speaks.
 _Avoid_: Adapter, preset
+
+**Provider Logo**:
+The visual identity shown for a Provider. Every Provider has one, independently of which Provider Template seeded it. Its Logo Domain may be changed by the Owner.
+_Avoid_: Provider Template image, template logo
+
+**Logo Domain**:
+The hostname used to discover a Provider Logo. A Provider Template may propose its official Logo Domain, while a generic Provider may derive one from its base URL.
+_Avoid_: Base URL, image URL
 
 **Owner**:
 The person operating an Iroha installation and supplying all Provider credentials used by it.
@@ -85,7 +101,7 @@ The access policy that determines which Providers and Upstream Models a Gateway 
 _Avoid_: Role, permissions
 
 **Qualified Model ID**:
-A Gateway-facing model identifier in the form `<provider_id>/<model_id>` that selects both one Provider and one exact Upstream Model for a global API call. The first slash is the separator; every character after it belongs to the Upstream Model's exact ID.
+A Gateway-facing model identifier in the form `<provider_handle>/<model_id>` that selects both one Provider and one exact Upstream Model for a global API call. The first slash is the separator; every character after it belongs to the Upstream Model's exact ID.
 _Avoid_: Alias, virtual model, prefixed model
 
 **Key Health**:

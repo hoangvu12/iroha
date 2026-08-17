@@ -1,0 +1,15 @@
+# Optimistic updates stop at the upstream boundary
+
+The management UI applies optimistic updates to a mutation when, and only when, the Gateway can answer it without talking to a Provider. `removeKey`, `disableKey`, `activateKey`, `updateProvider`, `archive`, `purge`, `updateKeySettings`, the Upstream Account mutations, and the Gateway Key update, revoke, and delete are pure database writes whose resulting state is fully determined by the request — `disableKey` (`src/providers/provider-registry.ts:1013`) always writes `health: 'disabled'`, `healthReason: 'disabled by Owner'`, `retryAfterAt: null`, `healthScope: 'key'` — so the UI can predict them exactly and does. `addKey`, `bulkAddKeys`, `createProvider`, `duplicate`, and `testKey` all await real upstream network probes before responding, and `createGatewayKey` and `revealKey` return values only the server can produce; these show a pending indicator and wait.
+
+The rule is drawn at the upstream boundary rather than at "how slow does it feel" because the boundary is checkable. Anyone can read a registry method and see whether it awaits `#probeConnectionKeys` (`src/providers/provider-registry.ts:1676`) or a cipher; nobody can agree on a millisecond threshold. It also happens to divide the mutations exactly where prediction stops being possible: a probe's verdict is evidence about the world, and inventing one in the client would put a fabricated Key Health in front of the Owner.
+
+We rejected optimistic placeholder rows for `addKey` and `bulkAddKeys`. The server does insert the Key as `unverified` before probing, so a placeholder would start out truthful, but it needs a client-generated temporary ID that no server route will accept, and ADR-0009's partial-success contract means a bulk import must then withdraw an arbitrary subset of the rows it just drew. The cost landed on the two riskiest mutations to get right and bought the least.
+
+## Consequences
+
+`archive` (`src/providers/provider-registry.ts:741`) writes both `enabled: false` and `archivedAt`, so its optimistic patch must set both; patching only `archived` leaves a stale toggle on screen. `updateGatewayKey` must patch `revision: revision + 1`, mirroring the server's own `expectedRevision + 1` (`src/keys/gateway-key-registry.ts:242`), or the next edit fails the optimistic-concurrency check.
+
+A row disables its own actions while its mutation is in flight. Sub-100ms mutations make the restriction invisible, and it removes last-write-wins reconciliation between racing mutations on one row.
+
+The upstream boundary is not fixed. `#probeConnectionKeys` probes sequentially, so `addKey` costs one round trip per unverified Key on the Provider; bounding it to a small concurrent pool shortens the wait but does not move the mutation across the line, because the verdict still cannot be predicted.

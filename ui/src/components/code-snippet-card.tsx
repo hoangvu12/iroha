@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Copy, Terminal } from 'lucide-react'
+import { Check, Copy, LoaderCircle, Play, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -38,6 +46,7 @@ const GATEWAY_KEY_PLACEHOLDER = '<gateway-key>'
 
 interface CodeSnippetCardProps {
   readonly provider: ProviderView
+  readonly csrfToken: string
 }
 
 /**
@@ -58,7 +67,7 @@ function hasKeyRestriction(key: KeyView): boolean {
   return key.allowedModels !== null || key.deniedModels !== null
 }
 
-export function CodeSnippetCard({ provider }: CodeSnippetCardProps) {
+export function CodeSnippetCard({ provider, csrfToken }: CodeSnippetCardProps) {
   const [catalog, setCatalog] = useState<CatalogView | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [modelId, setModelId] = useState<string | null>(null)
@@ -262,7 +271,17 @@ export function CodeSnippetCard({ provider }: CodeSnippetCardProps) {
             )
           })}
         </div>
-        <CopyButton text={snippet} />
+        <div className="flex items-center gap-1">
+          {(language === 'curl' || language === 'curl-anthropic') && (
+            <TestRequestButton
+              language={language}
+              providerId={provider.id}
+              model={modelId ?? ''}
+              csrfToken={csrfToken}
+            />
+          )}
+          <CopyButton text={snippet} />
+        </div>
       </div>
 
       <pre className="bg-muted/50 overflow-x-auto p-4 font-mono text-xs leading-relaxed">
@@ -273,6 +292,97 @@ export function CodeSnippetCard({ provider }: CodeSnippetCardProps) {
         ))}
       </pre>
     </section>
+  )
+}
+
+interface TestRequestButtonProps {
+  readonly language: 'curl' | 'curl-anthropic'
+  readonly providerId: string
+  readonly model: string
+  readonly csrfToken: string
+}
+
+function TestRequestButton({ language, providerId, model, csrfToken }: TestRequestButtonProps) {
+  const [open, setOpen] = useState(false)
+  const [result, setResult] = useState<{ readonly ok: boolean; readonly status: string; readonly body: string } | null>(null)
+  const [testing, setTesting] = useState(false)
+
+  const close = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (!nextOpen) {
+      setResult(null)
+    }
+  }
+
+  const testRequest = async () => {
+    if (model === '' || testing) return
+    setOpen(true)
+    setTesting(true)
+    setResult(null)
+    const anthropic = language === 'curl-anthropic'
+
+    try {
+      const response = await fetch(`/api/v1/admin/providers/${encodeURIComponent(providerId)}/test`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-iroha-csrf': csrfToken },
+        body: JSON.stringify({ model, protocol: anthropic ? 'anthropic' : 'openai' }),
+      })
+      const rawBody = await response.text()
+      let body = rawBody || '(empty response body)'
+      try {
+        body = JSON.stringify(JSON.parse(rawBody), null, 2)
+      } catch {
+        // Keep non-JSON responses readable as returned by the Gateway.
+      }
+      setResult({ ok: response.ok, status: `${response.status} ${response.statusText}`.trim(), body })
+    } catch (error) {
+      setResult({
+        ok: false,
+        status: 'Request failed',
+        body: error instanceof Error ? error.message : 'The Gateway could not be reached.',
+      })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <>
+      <Button type="button" variant="ghost" size="xs" disabled={model === '' || testing} onClick={() => void testRequest()}>
+        <Play className="size-3" aria-hidden />
+        Test
+      </Button>
+      <Dialog open={open} onOpenChange={close}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Test cURL request</DialogTitle>
+            <DialogDescription>
+              Sent “Hello” through the selected Provider and model using your Owner Session.
+            </DialogDescription>
+          </DialogHeader>
+          {testing && (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm" role="status">
+              <LoaderCircle className="size-4 animate-spin" aria-hidden />
+              Sending request…
+            </div>
+          )}
+          {result !== null && (
+            <div className="grid min-w-0 gap-2" aria-live="polite">
+              <p className={result.ok ? 'text-sm font-medium text-emerald-600 dark:text-emerald-400' : 'text-destructive text-sm font-medium'}>
+                {result.status}
+              </p>
+              <pre className="bg-muted max-h-64 overflow-auto rounded-md p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
+                {result.body}
+              </pre>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => close(false)}>Close</Button>
+            {!testing && <Button type="button" onClick={() => void testRequest()}><Play className="size-4" aria-hidden />Retry</Button>}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 

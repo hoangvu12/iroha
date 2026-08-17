@@ -224,7 +224,7 @@ export function ProviderDetail({
         onOpenChange={(open) => !open && setUsageDialogReadings(null)}
       />
 
-      <CodeSnippetCard provider={provider} />
+      <CodeSnippetCard provider={provider} csrfToken={csrfToken} />
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <KeyHealthCard provider={provider} />

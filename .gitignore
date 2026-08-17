@@ -8,6 +8,9 @@ data/
 *.db-shm
 *.db-wal
 
+# Runtime logs. `bun run dev` rewrites these on every start.
+*.log
+
 # Real secrets. `.env.example` is the tracked template.
 .env
 .env.local

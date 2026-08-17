@@ -22,9 +22,11 @@ import type { MetricsCollector } from '../metrics/metrics.ts'
 import type { InferenceActivity, ShutdownController } from '../runtime/shutdown.ts'
 import { systemTimer, type Timer } from '../runtime/timer.ts'
 import type { UsageService } from '../usage/index.ts'
+import type { OwnerIdentity } from '../identity/index.ts'
 import type { CapacityEvidence } from '../providers/provider-evidence.ts'
 import { authorizeQualifiedModel, type QualifiedModelFailure } from './qualified-model.ts'
 import { bearerToken } from './bearer-token.ts'
+import { createOwnerGuard, managementError } from './owner-guard.ts'
 
 /** The terminal shape of one attempt's outcome, what the recorder writes. */
 interface AttemptTerminal {
@@ -346,6 +348,90 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
 }
 
 export type InferenceRoutes = ReturnType<typeof createInferenceRoutes>
+
+/**
+ * Owner-only smoke test for the Code Snippet card. This deliberately does not
+ * teach the public inference routes to accept Owner Session cookies: browser
+ * administration and application authentication remain separate boundaries.
+ */
+export function createAdminInferenceRoutes(
+  identity: OwnerIdentity,
+  options: InferenceRoutesOptions,
+) {
+  const guard = createOwnerGuard(identity)
+  const timer = options.timer ?? systemTimer
+  const retrySleep = options.retrySleep ?? sleepWithTimer(timer)
+  const transport = options.transportDefaults ?? DEFAULT_TRANSPORT
+
+  return new Elysia({ name: 'iroha/admin-inference', prefix: '/api/v1/admin/providers' }).post(
+    '/:id/test',
+    async ({ params, body, request, cookie, status }) => {
+      const guarded = await guard.requireOwner({ request, cookie }, { csrf: true })
+      if ('response' in guarded) {
+        return status(guarded.response.status, guarded.response.body)
+      }
+
+      const provider = await options.providers.getProvider(params.id)
+      if (provider === null) {
+        return status(404, managementError('provider_not_found', 'No such Provider.'))
+      }
+
+      const activity = options.shutdown?.beginInference(request.signal)
+      if (activity === null) return shuttingDownError()
+      const anthropic = body.protocol === 'anthropic'
+      const testRequest = new Request(request.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: body.model,
+          ...(anthropic ? { max_tokens: 1024 } : {}),
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+        signal: request.signal,
+      })
+      const authorization: Extract<InferenceAuthorization, { readonly ok: true }> = {
+        ok: true,
+        keyId: 'owner-session',
+        keyName: 'Owner session',
+      }
+      const shared = {
+        request: testRequest,
+        providerId: provider.id,
+        providerHandle: provider.handle,
+        gatewayKeys: options.gatewayKeys,
+        providers: options.providers,
+        modelCatalog: options.modelCatalog,
+        timer,
+        retrySleep,
+        transport,
+        adapterRegistry: options.adapterRegistry ?? null,
+        database: options.database ?? null,
+        requestHistory: options.requestHistory,
+        usageService: options.usageService,
+        authorization,
+        ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
+        ...(options.timeouts === undefined ? {} : { timeouts: options.timeouts }),
+        ...(activity === undefined ? {} : { requestActivity: activity }),
+      }
+
+      return anthropic
+        ? await forwardAnthropicMessages(shared)
+        : await forwardGeneration({ ...shared, inference: options.inference, upstreamPath: '/chat/completions' })
+    },
+    {
+      body: t.Object({
+        model: t.String({ minLength: 1, maxLength: 512 }),
+        protocol: t.Union([t.Literal('openai'), t.Literal('anthropic')]),
+      }),
+      detail: {
+        tags: ['Providers'],
+        summary: 'Test inference as Owner',
+        description: 'Sends a small non-streaming inference request through the selected Provider using the Owner Session instead of a Gateway Key.',
+        security: [{ OwnerSession: [] }],
+      },
+    },
+  )
+}
 
 /** Global Chat Completions delegates to the provider-scoped pipeline after deterministic qualification. */
 export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {

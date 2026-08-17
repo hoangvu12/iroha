@@ -25,6 +25,7 @@ import {
   type ProviderTemplate,
   type ProviderWireFormat,
 } from './templates.ts'
+import { BUILT_IN_PROVIDER_PACKS, type PackAdapterOptions, type ProviderPack } from './packs/index.ts'
 
 /**
  * The Adapter Registry: the single source of truth for which Inference and
@@ -289,6 +290,57 @@ export interface BuiltInAdapterRegistryOptions {
   readonly minimaxInferenceAdapter?: InferenceAdapter
   /** Replaces the typed Z.ai adapter in transport-focused tests. */
   readonly zaiInferenceAdapter?: InferenceAdapter
+  /**
+   * When set, the registry is built from the built-in Provider Pack list with
+   * every Pack's Inference and Usage Adapter constructed over this upstream
+   * transport. This one mechanism replaces the per-adapter overrides above —
+   * supplying it ignores them — so adding a Pack cannot require a new override
+   * field and no Provider can silently escape to the real network in tests.
+   */
+  readonly upstreamTransport?: typeof fetch
+}
+
+/**
+ * Builds an Adapter Registry from a Provider Pack list: each Pack's Inference
+ * and Usage Adapter is constructed from the Pack's own factory, so the Pack —
+ * not a string id — is what carries a Provider's behaviour. Adapters shared by
+ * several Packs (the generic Inference Adapter, the reactive-only Usage
+ * Adapter) are built once and keyed by the id the Packs name them under. The
+ * optional adapter options — only an injectable upstream transport — are
+ * applied to every Pack uniformly.
+ */
+export function adapterRegistryFromPacks(
+  packs: readonly ProviderPack[],
+  adapterOptions: PackAdapterOptions = {},
+): AdapterRegistry {
+  const inferenceSeen = new Map<string, InferenceAdapter>()
+  const usageSeen = new Map<string, UsageAdapter>()
+  const inferenceEntries: (readonly [string, InferenceAdapter])[] = []
+  const usageEntries: (readonly [string, UsageAdapter])[] = []
+  const templates: ProviderTemplate[] = []
+
+  for (const pack of packs) {
+    const template: ProviderTemplate = { id: pack.id, ...pack.template }
+    templates.push(template)
+
+    if (!inferenceSeen.has(template.inferenceAdapterId)) {
+      const adapter = pack.inferenceAdapter(adapterOptions)
+      inferenceSeen.set(template.inferenceAdapterId, adapter)
+      inferenceEntries.push([template.inferenceAdapterId, adapter])
+    }
+
+    if (template.usageAdapterId !== null && !usageSeen.has(template.usageAdapterId)) {
+      const adapter = pack.usageAdapter(adapterOptions)
+      usageSeen.set(template.usageAdapterId, adapter)
+      usageEntries.push([template.usageAdapterId, adapter])
+    }
+  }
+
+  return new AdapterRegistry({
+    inferenceAdapters: inferenceEntries,
+    usageAdapters: usageEntries,
+    providerTemplates: templates,
+  })
 }
 
 /**
@@ -301,6 +353,12 @@ export interface BuiltInAdapterRegistryOptions {
 export function createBuiltInAdapterRegistry(
   options: BuiltInAdapterRegistryOptions = {},
 ): AdapterRegistry {
+  // The one mechanism: build every built-in Pack's adapters over the injected
+  // transport. No per-Provider list to maintain, so no Pack can be forgotten.
+  if (options.upstreamTransport !== undefined) {
+    return adapterRegistryFromPacks(BUILT_IN_PROVIDER_PACKS, { fetch: options.upstreamTransport })
+  }
+
   return new AdapterRegistry({
     inferenceAdapters: inferenceAdapters({
       [GENERIC_INFERENCE_ADAPTER_ID]: options.genericInferenceAdapter ?? createGenericInferenceAdapter(),

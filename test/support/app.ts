@@ -3,13 +3,7 @@ import { createApp } from '../../src/http/app.ts'
 import type { StreamingTimeouts, TransportDefaults } from '../../src/http/inference.ts'
 import { ReadinessState } from '../../src/http/readiness.ts'
 import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
-import {
-  createAnthropicInferenceAdapter,
-  createDashscopeInferenceAdapter,
-  createGenericInferenceAdapter,
-  createMinimaxInferenceAdapter,
-  createZaiInferenceAdapter,
-} from '../../src/inference/index.ts'
+import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
 import { BackgroundScheduleSettingsService } from '../../src/jobs/index.ts'
 import { ModelCatalogService, templateKnowledgeFromRegistry } from '../../src/models/index.ts'
@@ -185,16 +179,11 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   const upstreamKeyProbe = options.upstreamKeyProbe ?? fakeKeyProbe()
   const upstreamTransport = options.upstreamTransport ?? stubUpstreamTransport()
   const inference = createGenericInferenceAdapter({ fetch: upstreamTransport })
-  const anthropicInferenceAdapter = createAnthropicInferenceAdapter({ fetch: upstreamTransport })
-  const dashscopeInferenceAdapter = createDashscopeInferenceAdapter({ fetch: upstreamTransport })
-  const minimaxInferenceAdapter = createMinimaxInferenceAdapter({ fetch: upstreamTransport })
-  const zaiInferenceAdapter = createZaiInferenceAdapter({ fetch: upstreamTransport })
+  // One mechanism: every built-in Provider Pack's adapters are built over the
+  // test's upstream transport, so no Provider can escape to the real network
+  // and adding a Pack needs no new injection line here.
   const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry({
-    genericInferenceAdapter: inference,
-    anthropicInferenceAdapter,
-    dashscopeInferenceAdapter,
-    minimaxInferenceAdapter,
-    zaiInferenceAdapter,
+    upstreamTransport,
   })
   const providers = new ProviderRegistry({
     database,

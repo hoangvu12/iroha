@@ -11,7 +11,7 @@ Acting on anything in the management UI produces no feedback until a full refetc
 The delay is not the network. Three separate causes, in order of impact:
 
 1. **Every mutation triggers a full refetch and throws away a response it already has.** Every Provider mutation returns the complete `ProviderView`; the UI discards it and calls `reload()` instead (`ui/src/lib/providers.ts:236-432`).
-2. **`providers-area`'s `reload()` refetches 800 Request events** alongside the Provider list (`ui/src/components/providers-area.tsx:86-102`), so toggling one Provider re-pulls the traffic history behind every sparkline.
+2. **`providers-area`'s `reload()` refetches 800 Request events** alongside the Provider list (`ui/src/components/providers-area.tsx:86-102`), so toggling one Provider re-pulls the traffic history behind every sparkline. `provider-detail` pulls 800 of its own, scoped to the Provider (`ui/src/components/provider-detail.tsx:145`).
 3. **`provider-detail`'s `reload()` fetches every Provider to find one** (`ui/src/components/provider-detail.tsx:117`), although `GET /providers/:id` exists and is unused (`src/http/admin.ts:171`).
 
 Separately, `addKey`, `createProvider` and `duplicate` await `#probeConnectionKeys` (`src/providers/provider-registry.ts:1676`), which probes each unverified Key **sequentially** over the network before responding. That is genuine server-side latency, not a refetch artefact.

@@ -8,13 +8,34 @@ Fix the helper in both files, clean up two pieces of repo hygiene, then land the
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Both Anthropic test helpers post a `handle`, following the naming convention in `test/http/providers.test.ts`.
-- [ ] `bun test` reports zero failures.
-- [ ] `bun run typecheck` passes.
-- [ ] `stdout.log` and `stderr.log` are untracked via `git rm --cached`, and `.gitignore` covers `*.log` and `.scratch/`.
-- [ ] The two `.scratch/` files currently tracked — `.scratch/iroha-v1/spec.md` and `.scratch/anthropic-support/issues/03-anthropic-tools-and-tool-name-sanitisation.md` — are also untracked. A `.gitignore` entry does not untrack a file already in the index, so leaving them would keep two of the tracker's files versioned while the rest are not.
-- [ ] The working tree's source changes, new tests, six new ADRs, five research documents and `scripts/` are committed to `feat/provider-packs`. `.scratch/` is not.
-- [ ] `main` is fast-forwarded to `feat/provider-packs`.
-- [ ] A `feat/optimistic-updates` branch exists off the merged `main`.
+- [x] Both Anthropic test helpers post a `handle`, following the naming convention in `test/http/providers.test.ts`.
+- [x] `bun test` reports zero failures.
+- [x] `bun run typecheck` passes.
+- [x] `stdout.log` and `stderr.log` are untracked via `git rm --cached`, and `.gitignore` covers `*.log`. **`.scratch/` is not ignored** — see Comments.
+- [ ] ~~The two `.scratch/` files currently tracked are also untracked.~~ Withdrawn by the Owner — see Comments.
+- [x] The working tree's source changes, new tests, six new ADRs, five research documents and `scripts/` are committed to `feat/provider-packs`, as `005a46a`. `.scratch/` is committed too, per the Owner's decision.
+- [x] `main` is fast-forwarded to `feat/provider-packs`.
+- [x] A `feat/optimistic-updates` branch exists off the merged `main`.
+
+## Comments
+
+**The 25 failures had a second cause this ticket did not name.** Adding the
+`handle` fixed the Provider create, but every test then failed on
+`upstream.calls[0]` being `undefined`: both files build their inference path
+as `/providers/${connection.id}/v1/chat/completions`, and ADR-0017 made the
+Handle — not the ID — the public routing identity, so every request returned
+`400 invalid_provider_handle` without reaching the stub transport. Both files
+now route by `connection.handle` and declare `handle` on `ConnectionBody`.
+Gateway Key scope entries still carry `providerId`; that surface is unchanged.
+
+**`.scratch/` stays in version control.** The ticket said two `.scratch/`
+files were tracked; in fact about 110 are — the full issue tracker for eleven
+features. Asked whether to untrack all of it, the Owner chose to leave
+`.scratch/` versioned, so neither the `.gitignore` entry nor the untracking
+was applied. Only the two runtime logs were untracked.
+
+**A remote does exist.** The ticket said none was configured, but `origin`
+points at `github.com/hoangvu12/iroha` and `main` is now eight commits ahead
+of `origin/main`. The merge was still purely local — nothing was pushed.

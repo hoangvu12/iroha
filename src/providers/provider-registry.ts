@@ -221,6 +221,19 @@ const TIMEOUT_MAXIMUM_MS = 600_000
 const STATIC_HEADERS_BLANK = '[]'
 
 /**
+ * How many Upstream Keys one probe pass tests at the same time.
+ *
+ * Sequential probing made every mutation that adds a key pay one upstream round
+ * trip per unverified key already on the Provider, so a bulk import of forty
+ * cost forty. Unbounded probing is not the cure: forty simultaneous
+ * authentication attempts against the very upstream being tested invite a 429
+ * and would record forty valid keys as rate-limited. Five is small enough to
+ * look like ordinary traffic and wide enough that an import is bounded by
+ * ceil(n / 5) round trips instead of n.
+ */
+const PROBE_CONCURRENCY = 5
+
+/**
  * Header names Iroha treats as safe without further validation: the canonical
  * OpenAI-compatible header shapes, plus the OpenRouter / Anthropic-style
  * aliases. Anything outside this list passes only when it matches the
@@ -1672,21 +1685,33 @@ export class ProviderRegistry {
     return { ok: true, value: { connection, key } }
   }
 
-  /** Tests every unverified key of one connection the way creation and duplication do. */
+  /**
+   * Tests every unverified key of one connection the way creation and
+   * duplication do, at most {@link PROBE_CONCURRENCY} at a time.
+   *
+   * Order is deliberately undefined: each key carries its own base URL and its
+   * own row, and its verdict is computed from the state read before the pass
+   * began, so nothing one probe learns can change what another records.
+   */
   async #probeConnectionKeys(providerId: string): Promise<void> {
     const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return
 
-    for (const key of await this.#database.providers.listKeys(providerId)) {
-      if (key.health !== 'unverified') continue
+    // Listed once — `bulkAddKeys` counts on one probe pass reading the pool a
+    // single time, however many keys it inserted.
+    const unverified = (await this.#database.providers.listKeys(providerId)).filter(
+      (key) => key.health === 'unverified',
+    )
 
+    await forEachWithConcurrency(unverified, PROBE_CONCURRENCY, async (key) => {
       // The probe must hit the URL the key will actually use at inference
       // time, not always the Provider's default — a key with its own
       // override URL is meaningless if its health verdict was earned against
-      // a different endpoint.
+      // a different endpoint. Resolved per key inside the pool, so two probes
+      // in flight cannot borrow each other's endpoint.
       const probeBaseUrl = key.baseUrl ?? connection.baseUrl
       const probe = await this.#runProbe(probeBaseUrl, key.encryptedKey)
-      if (!probe.readable) continue
+      if (!probe.readable) return
 
       const at = this.#clock.now()
       await this.#database.providers.updateKey(
@@ -1694,7 +1719,7 @@ export class ProviderRegistry {
         probedPatch(key, probe, at),
         at,
       )
-    }
+    })
   }
 
   async #runProbe(
@@ -1833,6 +1858,40 @@ export class ProviderRegistry {
     }
     return headers
   }
+}
+
+/**
+ * Visits every value, keeping at most `limit` visits in flight.
+ *
+ * Workers share one cursor rather than taking a fixed slice each, so one slow
+ * upstream never leaves the rest of the pool idle. A visit that throws is held
+ * back rather than allowed to abandon the queue: every remaining value still
+ * gets its turn, and only then is the first failure re-raised. That matters for
+ * a probe pass, whose whole purpose is to record the verdicts it did earn —
+ * rejecting early would return to the caller while sibling probes were still
+ * running, and their writes would land after the answer had been sent.
+ */
+async function forEachWithConcurrency<T>(
+  values: readonly T[],
+  limit: number,
+  visit: (value: T) => Promise<void>,
+): Promise<void> {
+  let next = 0
+  const failures: unknown[] = []
+
+  const workers = Array.from({ length: Math.min(limit, values.length) }, async () => {
+    while (next < values.length) {
+      const value = values[next++]!
+      try {
+        await visit(value)
+      } catch (cause) {
+        failures.push(cause)
+      }
+    }
+  })
+  await Promise.all(workers)
+
+  if (failures.length > 0) throw failures[0]
 }
 
 /** One attempt to probe a stored key. Either it ran or the material was unreadable. */

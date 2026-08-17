@@ -45,20 +45,21 @@ import { BulkKeyInput } from '@/components/bulk-key-input'
 import { ApiError, toApiError } from '@/lib/api-client'
 import { describeProviderStatus } from '@/lib/provider-status'
 import {
-  archiveProvider,
   checkProviderHandleAvailability,
-  createProvider,
-  duplicateProvider,
-  fetchProviders,
-  fetchProviderTemplates,
   GENERIC_PROVIDER_TEMPLATE,
   GENERIC_PROVIDER_TEMPLATE_BASE_URL,
   GENERIC_PROVIDER_TEMPLATE_ID,
-  purgeProvider,
-  type ProviderTemplateView,
   type ProviderView,
 } from '@/lib/providers'
-import { fetchRequests } from '@/lib/requests'
+import { useProviderTemplates } from '@/lib/use-provider-templates'
+import {
+  useArchiveProvider,
+  useCreateProvider,
+  useDuplicateProvider,
+  useProviders,
+  usePurgeProvider,
+  useRequestHistory,
+} from '@/lib/use-providers'
 import type { BulkKeyEntry } from '@/lib/parse-bulk-keys'
 import { logoDomainFromBaseUrl, normalizeLogoDomainInput } from '@/lib/logo-domain'
 
@@ -75,32 +76,21 @@ const HOUR_MS = 60 * 60 * 1000
 const TRAFFIC_HOURS = 12
 
 export function ProvidersArea({ csrfToken }: ProvidersAreaProps) {
-  const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
-  const [traffic, setTraffic] = useState<ReadonlyMap<string, ProviderTraffic>>(new Map())
-  const [error, setError] = useState<ApiError | null>(null)
+  const providers = useProviders()
+  // Its own query key, so archiving or toggling a Provider no longer re-pulls
+  // the traffic history behind every sparkline.
+  const history = useRequestHistory()
   const [creating, setCreating] = useState(false)
   const navigate = useNavigate()
 
-  const reload = useCallback(async () => {
-    try {
-      const [list, page] = await Promise.all([
-        fetchProviders(),
-        fetchRequests({}, { limit: 800 }),
-      ])
-      setProviders(list)
-      setTraffic(buildTrafficByProvider(page.events))
-      setError(null)
-    } catch (cause) {
-      setError(toApiError(cause))
-    }
-  }, [])
+  const traffic = useMemo(
+    () => buildTrafficByProvider(history.data?.events ?? []),
+    [history.data],
+  )
 
-  useEffect(() => {
-    void reload()
-  }, [reload])
-
-  const active = providers?.filter((p) => !p.archived) ?? null
-  const archived = providers?.filter((p) => p.archived) ?? null
+  const error = providers.error === null ? null : toApiError(providers.error)
+  const active = providers.data?.filter((p) => !p.archived) ?? null
+  const archived = providers.data?.filter((p) => p.archived) ?? null
 
   const openProvider = (id: string) => {
     void navigate({ to: '/providers/$providerId', params: { providerId: id } })
@@ -116,7 +106,7 @@ export function ProvidersArea({ csrfToken }: ProvidersAreaProps) {
             variant="outline"
             size="sm"
             onClick={() => setCreating(true)}
-            disabled={providers === null}
+            disabled={providers.data === undefined}
           >
             <Plus className="size-3.5" aria-hidden />
             New provider
@@ -138,10 +128,7 @@ export function ProvidersArea({ csrfToken }: ProvidersAreaProps) {
           </DialogHeader>
           <CreateProviderForm
             csrfToken={csrfToken}
-            onCreated={() => {
-              setCreating(false)
-              void reload()
-            }}
+            onCreated={() => setCreating(false)}
             onCancel={() => setCreating(false)}
           />
         </DialogContent>
@@ -171,7 +158,6 @@ export function ProvidersArea({ csrfToken }: ProvidersAreaProps) {
               csrfToken={csrfToken}
               traffic={traffic.get(provider.id)}
               onOpen={() => openProvider(provider.id)}
-              onChanged={() => void reload()}
             />
           ))}
         </ul>
@@ -193,7 +179,6 @@ export function ProvidersArea({ csrfToken }: ProvidersAreaProps) {
                 csrfToken={csrfToken}
                 traffic={traffic.get(provider.id)}
                 onOpen={() => openProvider(provider.id)}
-                onChanged={() => void reload()}
                 archived
               />
             ))}
@@ -209,33 +194,30 @@ function ProviderRow({
   csrfToken,
   traffic,
   onOpen,
-  onChanged,
   archived = false,
 }: {
   readonly provider: ProviderView
   readonly csrfToken: string
   readonly traffic: ProviderTraffic | undefined
   readonly onOpen: () => void
-  readonly onChanged: () => void
   readonly archived?: boolean
 }) {
-  const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
-  const [rowError, setRowError] = useState<ApiError | null>(null)
+  const archive = useArchiveProvider(csrfToken)
+  const duplicate = useDuplicateProvider(csrfToken)
+  const purge = usePurgeProvider(csrfToken)
   const status = describeProviderStatus(provider.keys)
+  const target = { id: provider.id, displayName: provider.displayName }
 
-  const run = async (action: string, perform: () => Promise<unknown>) => {
-    setBusy(action)
-    setRowError(null)
-    try {
-      await perform()
-      onChanged()
-    } catch (cause) {
-      setRowError(toApiError(cause))
-    } finally {
-      setBusy(null)
-    }
-  }
+  // One row's actions close while that row's own mutation is in flight; a
+  // mutation on another Provider leaves this one alone.
+  const busy = archive.isPending
+    ? 'archive'
+    : duplicate.isPending
+      ? 'duplicate'
+      : purge.isPending
+        ? 'purge'
+        : null
 
   return (
     <li>
@@ -250,10 +232,7 @@ function ProviderRow({
           <EditProviderForm
             provider={provider}
             csrfToken={csrfToken}
-            onDone={() => {
-              setEditing(false)
-              onChanged()
-            }}
+            onDone={() => setEditing(false)}
             onCancel={() => setEditing(false)}
           />
         </DialogContent>
@@ -309,17 +288,13 @@ function ProviderRow({
             archived={archived}
             busy={busy}
             onEdit={() => setEditing(true)}
-            onArchive={() =>
-              void run('archive', () => archiveProvider(provider.id, csrfToken))
-            }
-            onDuplicate={() =>
-              void run('duplicate', async () => {
-                const handle = window.prompt('Choose the immutable Handle for the duplicated Provider:', `${provider.handle}-2`)
-                if (handle === null) return provider
-                return await duplicateProvider(provider.id, handle, csrfToken)
-              })
-            }
-            onPurge={() => void run('purge', () => purgeProvider(provider.id, csrfToken))}
+            onArchive={() => archive.mutate(target)}
+            onDuplicate={() => {
+              const handle = window.prompt('Choose the immutable Handle for the duplicated Provider:', `${provider.handle}-2`)
+              if (handle === null) return
+              duplicate.mutate({ ...target, handle })
+            }}
+            onPurge={() => purge.mutate(target)}
           />
         </div>
       </div>
@@ -328,13 +303,6 @@ function ProviderRow({
         <Dot tone={status.tone} />
         <span>{status.label}</span>
       </div>
-
-      {rowError && (
-        <Alert variant="destructive" role="alert" className="mt-2">
-          <AlertTitle>That did not work</AlertTitle>
-          <AlertDescription>{rowError.message}</AlertDescription>
-        </Alert>
-      )}
     </li>
   )
 }
@@ -433,10 +401,15 @@ function CreateProviderForm({
   const logoDomainTouched = useRef(false)
   const [authHeader, setAuthHeader] = useState(GENERIC_PROVIDER_TEMPLATE.authHeader)
   const [authPrefix, setAuthPrefix] = useState(GENERIC_PROVIDER_TEMPLATE.authPrefix)
-  const [templates, setTemplates] = useState<readonly ProviderTemplateView[]>([
-    GENERIC_PROVIDER_TEMPLATE,
-  ])
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const create = useCreateProvider(csrfToken)
+  const templateList = useProviderTemplates()
+  // Until the list arrives the selector still offers the Generic template, which
+  // is what lets the form be usable with no loading state to wait on. A failed
+  // fetch clears it: an empty selector plus the message below beats pretending
+  // one template is on offer when the registry could not be read.
+  const templates = templateList.data ?? (templateList.isError ? [] : [GENERIC_PROVIDER_TEMPLATE])
+  const loadError =
+    templateList.error === null ? null : toApiError(templateList.error).message
 
   useEffect(() => {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(handle) || handle.length > 63) {
@@ -453,29 +426,14 @@ function CreateProviderForm({
   }, [handle])
 
   useEffect(() => {
-    const controller = new AbortController()
-    fetchProviderTemplates(controller.signal)
-      .then((list) => {
-        if (controller.signal.aborted) return
-        setTemplates(list)
-        setLoadError(null)
-        // Re-point the selection when the defaulted template is not part of
-        // the served list (a custom registry); otherwise it stays put.
-        const stillValid = list.some((template) => template.id === templateId)
-        if (!stillValid) {
-          const first = list[0]
-          if (first !== undefined) setTemplateId(first.id)
-        }
-      })
-      .catch((cause: unknown) => {
-        if (controller.signal.aborted) return
-        setTemplates([])
-        setLoadError(
-          cause instanceof ApiError ? cause.message : 'Could not load provider templates.',
-        )
-      })
-    return () => controller.abort()
-  }, [])
+    const served = templateList.data
+    if (served === undefined) return
+    // Re-point the selection when the defaulted template is not part of the
+    // served list (a custom registry); otherwise it stays put.
+    if (served.some((template) => template.id === templateId)) return
+    const first = served[0]
+    if (first !== undefined) setTemplateId(first.id)
+  }, [templateList.data, templateId])
 
   const selectedTemplate =
     templateId === null
@@ -563,8 +521,8 @@ function CreateProviderForm({
         { field: 'logoDomain', message: 'Enter a valid hostname or HTTP(S) URL.' },
       ])
     }
-    await createProvider(
-      {
+    await create.mutateAsync({
+      input: {
         displayName,
         handle,
         baseUrl,
@@ -578,8 +536,7 @@ function CreateProviderForm({
         authHeader,
         authPrefix,
       },
-      csrfToken,
-    )
+    })
     onCreated()
   })
 
@@ -633,7 +590,7 @@ function CreateProviderForm({
             </SelectValue>
           </SelectTrigger>
           <SelectContent align="start">
-            {templates?.map((template) => (
+            {templates.map((template) => (
               <SelectItem key={template.id} value={template.id} textValue={template.displayName}>
                 <span className="flex items-center gap-2">
                   <ProviderIcon

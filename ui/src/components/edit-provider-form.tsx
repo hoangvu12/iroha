@@ -7,7 +7,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { LogoDomainField } from '@/components/logo-domain-field'
 import { logoDomainFromBaseUrl, normalizeLogoDomainInput } from '@/lib/logo-domain'
 import { ApiError, toApiError } from '@/lib/api-client'
-import { GENERIC_PROVIDER_TEMPLATE_ID, updateProvider, type ProviderView } from '@/lib/providers'
+import { GENERIC_PROVIDER_TEMPLATE_ID, type ProviderView } from '@/lib/providers'
+import { useUpdateProvider } from '@/lib/use-providers'
 
 export function EditProviderForm({
   provider,
@@ -32,6 +33,10 @@ export function EditProviderForm({
   const [retryAmbiguousNetwork, setRetryAmbiguousNetwork] = useState(
     provider.retryAmbiguousNetwork,
   )
+  const update = useUpdateProvider(csrfToken)
+  // The save both toasts and, for a rejected field, marks the field: the toast
+  // names the Provider for an Owner who has already looked away, and the field
+  // problems say which value to fix.
   const form = useSubmission(async () => {
     const normalizedLogoDomain = normalizeLogoDomainInput(logoDomain)
     if (logoDomain.trim() !== '' && normalizedLogoDomain === null) {
@@ -39,9 +44,10 @@ export function EditProviderForm({
         { field: 'logoDomain', message: 'Enter a valid hostname or HTTP(S) URL.' },
       ])
     }
-    await updateProvider(
-      provider.id,
-      {
+    await update.mutateAsync({
+      id: provider.id,
+      displayName: provider.displayName,
+      patch: {
         displayName,
         baseUrl,
         ...(logoDomainTouched.current ? { logoDomain: normalizedLogoDomain } : {}),
@@ -52,8 +58,7 @@ export function EditProviderForm({
         retryMaxAttempts: Number(retryMaxAttempts),
         retryAmbiguousNetwork,
       },
-      csrfToken,
-    )
+    })
     onDone()
   })
 

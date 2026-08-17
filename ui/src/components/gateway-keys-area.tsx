@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import {
+  Check,
+  Copy,
   KeyRound,
+  Loader2,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -32,19 +35,23 @@ import { ModelListPicker } from '@/components/model-list-picker'
 import { ProviderIcon } from '@/components/provider-icon'
 import { StatusBadge } from '@/components/status-badge'
 import { cn } from '@/lib/utils'
-import { ApiError } from '@/lib/api-client'
-import {
-  createGatewayKey,
-  deleteGatewayKey,
-  fetchGatewayKeys,
-  revokeGatewayKey,
-  updateGatewayKey,
-  type CreatedGatewayKey,
-  type GatewayKeyAccess,
-  type GatewayKeyScopeEntry,
-  type GatewayKeyView,
+import { ApiError, toApiError } from '@/lib/api-client'
+import type {
+  CreatedGatewayKey,
+  GatewayKeyAccess,
+  GatewayKeyScopeEntry,
+  GatewayKeyView,
 } from '@/lib/gateway-keys'
-import { fetchProviders, type ProviderView } from '@/lib/providers'
+import type { ProviderView } from '@/lib/providers'
+import { useProviders } from '@/lib/use-providers'
+import {
+  useCreateGatewayKey,
+  useDeleteGatewayKey,
+  useGatewayKeys,
+  useRevokeGatewayKey,
+  useUpdateGatewayKey,
+  type GatewayKeyEdit,
+} from '@/lib/use-gateway-keys'
 
 /**
  * The Gateway Keys area. Lists every key with its name, scope, and revocation
@@ -52,34 +59,22 @@ import { fetchProviders, type ProviderView } from '@/lib/providers'
  * is shown once on creation; this view never re-renders it.
  */
 export function GatewayKeysArea({ csrfToken }: { readonly csrfToken: string }) {
-  const [keys, setKeys] = useState<readonly GatewayKeyView[] | null>(null)
-  const [providers, setProviders] = useState<readonly ProviderView[] | null>(null)
-  const [error, setError] = useState<ApiError | null>(null)
+  const keys = useGatewayKeys()
+  // The Key Scope picker needs the Provider list; this screen is only another
+  // reader of the cache entry the Providers area writes.
+  const providers = useProviders()
   const [creating, setCreating] = useState(false)
   const [issued, setIssued] = useState<CreatedGatewayKey | null>(null)
 
-  const reload = useCallback(async () => {
-    try {
-      const [loaded, list] = await Promise.all([fetchGatewayKeys(), fetchProviders()])
-      setKeys(loaded)
-      setProviders(list)
-      setError(null)
-    } catch (cause: unknown) {
-      setError(cause instanceof ApiError ? cause : new ApiError('request_failed', 'Load failed.'))
-    }
-  }, [])
-
-  useEffect(() => {
-    void reload()
-  }, [reload])
-
-  const activeProviders = (providers ?? []).filter((p) => !p.archived)
+  const loadFailure = keys.error ?? providers.error
+  const rows = keys.data
+  const activeProviders = (providers.data ?? []).filter((provider) => !provider.archived)
 
   return (
     <div className="flex flex-col gap-6">
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">Gateway Keys</h1>
-        {(keys === null || keys.length > 0) && (
+        {(rows === undefined || rows.length > 0) && (
           <Button
             type="button"
             variant="outline"
@@ -88,7 +83,7 @@ export function GatewayKeysArea({ csrfToken }: { readonly csrfToken: string }) {
               setCreating(true)
               setIssued(null)
             }}
-            disabled={keys === null || providers === null}
+            disabled={rows === undefined || providers.data === undefined}
           >
             <Plus className="size-3.5" aria-hidden />
             New Gateway Key
@@ -96,10 +91,10 @@ export function GatewayKeysArea({ csrfToken }: { readonly csrfToken: string }) {
         )}
       </header>
 
-      {error && (
+      {loadFailure && (
         <Alert variant="destructive" role="alert">
           <AlertTitle>Gateway Keys unavailable</AlertTitle>
-          <AlertDescription>{error.message}</AlertDescription>
+          <AlertDescription>{toApiError(loadFailure).message}</AlertDescription>
         </Alert>
       )}
 
@@ -118,22 +113,20 @@ export function GatewayKeysArea({ csrfToken }: { readonly csrfToken: string }) {
               onCreated={(created) => {
                 setCreating(false)
                 setIssued(created)
-                void reload()
               }}
-              onFailure={setError}
             />
         </DialogContent>
       </Dialog>
 
       {issued && <IssuedSecret keyView={issued} />}
 
-      {keys === null ? (
+      {rows === undefined ? (
         <div className="flex flex-col gap-2">
           <Skeleton className="h-12 w-full rounded-lg" />
           <Skeleton className="h-12 w-full rounded-lg" />
           <Skeleton className="h-12 w-full rounded-lg" />
         </div>
-      ) : keys.length === 0 ? (
+      ) : rows.length === 0 ? (
         <Card>
           <EmptyState
             icon={KeyRound}
@@ -144,13 +137,12 @@ export function GatewayKeysArea({ csrfToken }: { readonly csrfToken: string }) {
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
-          {keys.map((key) => (
+          {rows.map((key) => (
             <GatewayKeyRow
               key={key.id}
               keyView={key}
-              providers={providers ?? []}
+              providers={providers.data ?? []}
               csrfToken={csrfToken}
-              onChanged={() => void reload()}
             />
           ))}
         </ul>
@@ -165,46 +157,23 @@ function GatewayKeyRow({
   keyView,
   providers,
   csrfToken,
-  onChanged,
 }: {
   readonly keyView: GatewayKeyView
   readonly providers: readonly ProviderView[]
   readonly csrfToken: string
-  readonly onChanged: () => void
 }) {
-  const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [error, setError] = useState<ApiError | null>(null)
+  const update = useUpdateGatewayKey(csrfToken)
+  const revoke = useRevokeGatewayKey(csrfToken)
+  const remove = useDeleteGatewayKey(csrfToken)
 
-  const runRevoke = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await revokeGatewayKey(keyView.id, csrfToken)
-      onChanged()
-    } catch (cause) {
-      setError(
-        cause instanceof ApiError
-          ? cause
-          : new ApiError('request_failed', 'That did not work.'),
-      )
-    } finally {
-      setBusy(false)
-    }
-  }
+  // One row's own mutations, not the table's: a key being revoked must not
+  // freeze the key next to it.
+  const busy = update.isPending || revoke.isPending || remove.isPending
 
-  const runDelete = async () => {
+  const confirmDelete = () => {
     if (!window.confirm(`Permanently delete revoked Gateway Key "${keyView.name}"? Historical requests and audit events will remain.`)) return
-    setBusy(true)
-    setError(null)
-    try {
-      await deleteGatewayKey(keyView.id, csrfToken)
-      onChanged()
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause : new ApiError('request_failed', 'That did not work.'))
-    } finally {
-      setBusy(false)
-    }
+    remove.mutate({ id: keyView.id, name: keyView.name })
   }
 
   return (
@@ -249,17 +218,16 @@ function GatewayKeyRow({
               </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
-                onSelect={() => void runRevoke()}
-                disabled={busy}
+                onSelect={() => revoke.mutate({ id: keyView.id, name: keyView.name })}
               >
-                {busy ? 'Revoking…' : 'Revoke'}
+                Revoke
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         )}
         {keyView.revoked && (
-          <Button type="button" variant="destructive" size="sm" disabled={busy} onClick={() => void runDelete()}>
-            {busy ? 'Deleting…' : 'Delete'}
+          <Button type="button" variant="destructive" size="sm" disabled={busy} onClick={confirmDelete}>
+            Delete
           </Button>
         )}
       </div>
@@ -274,17 +242,15 @@ function GatewayKeyRow({
             keyView={keyView}
             providers={providers}
             csrfToken={csrfToken}
-            onSaved={() => { setEditing(false); onChanged() }}
+            onSubmit={(edit) => {
+              // The patched row is the confirmation, so the dialog gets out of
+              // the way immediately; a refusal rolls the row back and toasts.
+              setEditing(false)
+              update.mutate({ id: keyView.id, edit })
+            }}
           />
         </DialogContent>
       </Dialog>
-
-      {error && (
-        <Alert variant="destructive" role="alert" className="mt-2">
-          <AlertTitle>That did not work</AlertTitle>
-          <AlertDescription>{error.message}</AlertDescription>
-        </Alert>
-      )}
     </li>
   )
 }
@@ -293,12 +259,12 @@ function EditGatewayKeyForm({
   keyView,
   providers,
   csrfToken,
-  onSaved,
+  onSubmit,
 }: {
   readonly keyView: GatewayKeyView
   readonly providers: readonly ProviderView[]
   readonly csrfToken: string
-  readonly onSaved: () => void
+  readonly onSubmit: (edit: GatewayKeyEdit) => void
 }) {
   const [name, setName] = useState(keyView.name)
   const [accessMode, setAccessMode] = useState<'all' | 'selected'>(keyView.access.mode)
@@ -310,42 +276,27 @@ function EditGatewayKeyForm({
     })),
   )
   const [corsOrigins, setCorsOrigins] = useState(keyView.corsOrigins)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<ApiError | null>(null)
 
-  const submit = async (event: FormEvent) => {
+  const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (busy) return
     const scoped = providers.flatMap((provider) => {
       const entry = selected[provider.id]
       return entry?.enabled
         ? [{ providerId: provider.id, models: entry.models.length === 0 ? null : entry.models }]
         : []
     })
-    setBusy(true)
-    setError(null)
-    try {
-      await updateGatewayKey(keyView.id, {
-        revision: keyView.revision,
-        name,
-        access: accessMode === 'all' ? { mode: 'all' } : { mode: 'selected', providers: scoped },
-        corsOrigins,
-      }, csrfToken)
-      onSaved()
-    } catch (cause) {
-      const failure = cause instanceof ApiError
-        ? cause
-        : new ApiError('request_failed', 'That request could not be completed.')
-      setError(failure.code === 'gateway_key_conflict'
-        ? new ApiError(failure.code, 'This key changed in another tab. Close this dialog, review the latest settings, and try again.')
-        : failure)
-    } finally {
-      setBusy(false)
-    }
+    onSubmit({
+      // Read off the prop, never off form state: an optimistic edit has already
+      // advanced the cached row, and the next submit must carry that revision.
+      revision: keyView.revision,
+      name,
+      access: accessMode === 'all' ? { mode: 'all' } : { mode: 'selected', providers: scoped },
+      corsOrigins,
+    })
   }
 
   return (
-    <form className="flex flex-col gap-5" onSubmit={(event) => void submit(event)}>
+    <form className="flex flex-col gap-5" onSubmit={submit}>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={`gateway-key-edit-name-${keyView.id}`}>Name</Label>
         <Input id={`gateway-key-edit-name-${keyView.id}`} value={name} onChange={(event) => setName(event.target.value)} required />
@@ -374,8 +325,7 @@ function EditGatewayKeyForm({
         )}
       </fieldset>
       <CorsOriginsField origins={corsOrigins} onChange={setCorsOrigins} />
-      {error && <Alert variant="destructive"><AlertTitle>Could not save</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>}
-      <div className="flex justify-end"><Button type="submit" size="sm" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</Button></div>
+      <div className="flex justify-end"><Button type="submit" size="sm">Save changes</Button></div>
     </form>
   )
 }
@@ -484,12 +434,10 @@ function CreateGatewayKeyForm({
   providers,
   csrfToken,
   onCreated,
-  onFailure,
 }: {
   readonly providers: readonly ProviderView[]
   readonly csrfToken: string
   readonly onCreated: (created: CreatedGatewayKey) => void
-  readonly onFailure: (error: ApiError) => void
 }) {
   const [name, setName] = useState('')
   const [accessMode, setAccessMode] = useState<'all' | 'selected'>('all')
@@ -501,12 +449,12 @@ function CreateGatewayKeyForm({
     ),
   )
   const [corsOrigins, setCorsOrigins] = useState<readonly string[]>([])
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
+  const create = useCreateGatewayKey(csrfToken)
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (busy) return
+    if (create.isPending) return
 
     const scope: GatewayKeyScopeEntry[] = providers.flatMap((provider) => {
       const entry = selected[provider.id]
@@ -519,22 +467,21 @@ function CreateGatewayKeyForm({
       return
     }
 
-    setBusy(true)
     setError(null)
     const access: GatewayKeyAccess = accessMode === 'all'
       ? { mode: 'all' }
       : { mode: 'selected', providers: scope }
-    createGatewayKey({ name, access, corsOrigins: [...corsOrigins] }, csrfToken)
-      .then((created) => onCreated(created))
-      .catch((cause: unknown) => {
-        const failure =
-          cause instanceof ApiError
-            ? cause
-            : new ApiError('request_failed', 'That request could not be completed.')
-        setError(failure)
-        onFailure(failure)
-      })
-      .finally(() => setBusy(false))
+    // The dialog stays open until the Gateway answers, because only its answer
+    // carries the secret. A refusal therefore reports itself here, in front of
+    // the input the Owner still has, rather than as a toast about a row that
+    // does not exist yet.
+    create.mutate(
+      { name, access, corsOrigins },
+      {
+        onSuccess: onCreated,
+        onError: (cause) => setError(toApiError(cause)),
+      },
+    )
   }
 
   return (
@@ -633,8 +580,9 @@ function CreateGatewayKeyForm({
       )}
 
       <div className="flex items-center justify-end pt-1">
-        <Button type="submit" size="sm" disabled={busy}>
-          {busy ? 'Creating…' : 'Create Gateway Key'}
+        <Button type="submit" size="sm" disabled={create.isPending}>
+          {create.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+          {create.isPending ? 'Creating…' : 'Create Gateway Key'}
         </Button>
       </div>
     </form>
@@ -756,7 +704,67 @@ function IssuedSecret({ keyView }: { readonly keyView: CreatedGatewayKey }) {
         <pre className="bg-muted overflow-x-auto rounded-md p-3 font-mono text-xs break-all">
           {keyView.secret}
         </pre>
+        <CopySecretButton secret={keyView.secret} />
       </AlertDescription>
     </Alert>
+  )
+}
+
+/** How long the copied confirmation stays on the control. */
+const COPIED_LABEL_MS = 1500
+
+function CopySecretButton({ secret }: { readonly secret: string }) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), COPIED_LABEL_MS)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  const copy = async () => {
+    try {
+      if (navigator.clipboard?.writeText !== undefined) {
+        await navigator.clipboard.writeText(secret)
+      } else {
+        // A gateway served over plain http is not a secure context, so the
+        // clipboard API is absent and the selection trick is the only route.
+        const textarea = document.createElement('textarea')
+        textarea.value = secret
+        textarea.setAttribute('readonly', '')
+        textarea.style.position = 'absolute'
+        textarea.style.left = '-9999px'
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+      }
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="xs"
+      className="mt-2"
+      onClick={() => void copy()}
+      aria-live="polite"
+    >
+      {copied ? (
+        <>
+          <Check className="size-3" aria-hidden />
+          Copied
+        </>
+      ) : (
+        <>
+          <Copy className="size-3" aria-hidden />
+          Copy
+        </>
+      )}
+    </Button>
   )
 }

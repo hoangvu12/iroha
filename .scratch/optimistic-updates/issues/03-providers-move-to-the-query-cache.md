@@ -20,3 +20,29 @@ Optimistic: `updateProvider`, `activateKey`, `disableKey`, `removeKey`, `archive
 - [ ] A bulk import that partially fails raises one summary toast, with per-entry detail inline in the import dialog.
 - [ ] Toggling a Provider no longer refetches Request events.
 - [ ] `bun run typecheck` passes.
+
+## Comments
+
+Every bullet above is met. `bun run typecheck`, `bun run --cwd ui build` and
+`bun test` (1144 pass / 2 skip / 0 fail across 89 files) are green. No browser
+tests, per `docs/agents/ui-testing.md`.
+
+The recipe lives in `useProviderMutation` in the new `ui/src/lib/use-providers.ts`:
+one mutation declares `perform`, a `failureTitle` naming its row, an optional
+`optimistic: { providerId, patch }`, and an optional `viewOfResult`. Whether a
+mutation predicts is visible from whether it declares `optimistic`, and the
+pairing is structural — nothing can predict without naming the Provider it
+patches. `onSettled` invalidates by prefix and is deliberately not awaited, so a
+row's actions reopen when the response lands rather than when the background
+refetch does.
+
+Two deliberate departures:
+
+- The Upstream Account mutations have no call site anywhere in the UI today.
+  They are converted as the spec asks, with their patches written and reviewable,
+  but nothing exercises them until an accounts surface exists.
+- The Provider Handle availability probe in `CreateProviderForm` stays a
+  debounced `useEffect`. It is a per-keystroke validation probe, not shared
+  server state: caching it would add one cache entry per prefix the Owner types
+  and a 30s `staleTime` would keep reporting a handle available after a create
+  took it.

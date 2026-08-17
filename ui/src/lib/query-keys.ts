@@ -26,6 +26,12 @@ export const queryKeys = {
   gatewayKeys: () => ['gateway-keys'] as const,
   requests: (filters: RequestsQuery = {}) => ['requests', filters] as const,
   audit: (filters: AuditQuery = {}) => ['audit', filters] as const,
+  /**
+   * Every page of the audit feed, whatever filters it carries. This is the key a
+   * mutation invalidates: any write appends an entry the open page may show, and
+   * the mutation has no idea which filters that page is holding.
+   */
+  auditAll: () => ['audit'] as const,
   usage: (providerId: string) => ['usage', providerId] as const,
 }
 

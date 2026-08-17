@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import {
   ArrowLeft,
   Archive,
@@ -53,33 +54,34 @@ import {
 } from '@/components/key-health'
 import { Dot } from '@/components/dot'
 import { LineChart, Line } from '@/components/charts/line-chart'
-import { ApiError } from '@/lib/api-client'
+import { toApiError } from '@/lib/api-client'
 import { describeProviderStatus } from '@/lib/provider-status'
 import {
-  activateKey,
-  addKey,
-  archiveProvider,
-  bulkAddKeys,
-  disableKey,
-  duplicateProvider,
-  fetchProviders,
-  purgeProvider,
-  removeKey,
-  revealKey,
-  testKey,
-  updateKeySettings,
+  type KeySettingsPatch,
   type KeyView,
   type ProviderView,
 } from '@/lib/providers'
-import type { BulkKeyEntry } from '@/lib/parse-bulk-keys'
-import { fetchRequests, type RequestEventView } from '@/lib/requests'
-import { refreshCatalog } from '@/lib/catalog'
 import {
-  fetchUsage,
-  refreshUsage,
-  type UsageReadingView,
-  type UsageView,
-} from '@/lib/usage'
+  useActivateKey,
+  useAddKey,
+  useArchiveProvider,
+  useBulkAddKeys,
+  useDisableKey,
+  useDuplicateProvider,
+  useProvider,
+  useProviderUsage,
+  usePurgeProvider,
+  useRefreshUsage,
+  useRemoveKey,
+  useRequestHistory,
+  useRevealKey,
+  useTestKey,
+  useUpdateKeySettings,
+} from '@/lib/use-providers'
+import type { BulkKeyEntry } from '@/lib/parse-bulk-keys'
+import { type RequestEventView } from '@/lib/requests'
+import { refreshCatalog } from '@/lib/catalog'
+import { type UsageReadingView, type UsageView } from '@/lib/usage'
 import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
 interface ProviderDetailProps {
@@ -108,60 +110,20 @@ export function ProviderDetail({
   onBack,
   onDeleted,
 }: ProviderDetailProps) {
-  const [provider, setProvider] = useState<ProviderView | null>(null)
-  const [analytics, setAnalytics] = useState<ProviderAnalytics | null>(null)
-  const [usage, setUsage] = useState<UsageView | null>(null)
+  // One Provider by id, not the whole list filtered down to one.
+  const providerQuery = useProvider(providerId)
+  const history = useRequestHistory({ providerId })
+  const usageQuery = useProviderUsage(providerId)
   const [usageDialogReadings, setUsageDialogReadings] = useState<readonly UsageReadingView[] | null>(null)
-  const [error, setError] = useState<ApiError | null>(null)
 
-  const reload = useCallback(async () => {
-    try {
-      const all = await fetchProviders()
-      const match = all.find((c) => c.id === providerId)
-      if (match === undefined) {
-        setError(new ApiError('provider_not_found', 'No such Provider.'))
-        setProvider(null)
-        return
-      }
-      setProvider(match)
-      setError(null)
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause : new ApiError('request_failed', 'Load failed.'))
-    }
-  }, [providerId])
+  const analytics = useMemo(
+    () => (history.data === undefined ? null : buildProviderAnalytics(history.data.events)),
+    [history.data],
+  )
 
-  useEffect(() => {
-    void reload()
-  }, [reload])
-
-  useEffect(() => {
-    let cancelled = false
-    void fetchRequests({ providerId }, { limit: 800 })
-      .then((page) => {
-        if (cancelled) return
-        setAnalytics(buildProviderAnalytics(page.events))
-      })
-      .catch(() => {
-        if (cancelled) return
-        setAnalytics(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [providerId])
-
-  const reloadUsage = useCallback(async () => {
-    try {
-      const value = await fetchUsage(providerId)
-      setUsage(value)
-    } catch {
-      // The reading was already shown as '—' before this call; keep it.
-    }
-  }, [providerId])
-
-  useEffect(() => {
-    void reloadUsage()
-  }, [reloadUsage])
+  const provider = providerQuery.data ?? null
+  const usage = usageQuery.data ?? null
+  const error = providerQuery.error === null ? null : toApiError(providerQuery.error)
 
   if (provider === null && error === null) {
     return <Skeleton className="h-48 w-full" />
@@ -197,19 +159,12 @@ export function ProviderDetail({
 
       <ProviderAnalyticsStrip analytics={analytics} />
 
-      <ProviderActions
-        provider={provider}
-        csrfToken={csrfToken}
-        onChanged={reload}
-        onDeleted={onDeleted}
-      />
+      <ProviderActions provider={provider} csrfToken={csrfToken} onDeleted={onDeleted} />
 
       <UpstreamKeysCard
         provider={provider}
         csrfToken={csrfToken}
         usage={usage}
-        onChanged={reload}
-        onUsageChanged={() => void reloadUsage()}
         onOpenUsageDialog={setUsageDialogReadings}
       />
 
@@ -370,17 +325,19 @@ function AnalyticsSparkline({ hourlyCounts }: { readonly hourlyCounts: readonly 
 function ProviderActions({
   provider,
   csrfToken,
-  onChanged,
   onDeleted,
 }: {
   readonly provider: ProviderView
   readonly csrfToken: string
-  readonly onChanged: () => void
   readonly onDeleted: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState<'archive' | 'purge' | null>(null)
+  const archive = useArchiveProvider(csrfToken)
+  const duplicate = useDuplicateProvider(csrfToken)
+  const purge = usePurgeProvider(csrfToken)
   const archived = provider.archived
+  const target = { id: provider.id, displayName: provider.displayName }
 
   return (
     <div className="flex flex-col gap-2">
@@ -395,10 +352,7 @@ function ProviderActions({
           <EditProviderForm
             provider={provider}
             csrfToken={csrfToken}
-            onDone={() => {
-              setEditing(false)
-              onChanged()
-            }}
+            onDone={() => setEditing(false)}
             onCancel={() => setEditing(false)}
           />
         </DialogContent>
@@ -413,10 +367,7 @@ function ProviderActions({
           size="sm"
           disabled={archived}
           successLabel="Refreshed"
-          onClick={async () => {
-            await refreshCatalog(provider.id, csrfToken)
-            onChanged()
-          }}
+          onClick={() => refreshCatalog(provider.id, csrfToken)}
         >
           <RefreshCcw className="size-3.5" aria-hidden /> Refresh catalog
         </StatefulButton>
@@ -427,8 +378,7 @@ function ProviderActions({
           onClick={async () => {
             const handle = window.prompt('Choose the immutable Handle for the duplicated Provider:', `${provider.handle}-2`)
             if (handle === null) return
-            await duplicateProvider(provider.id, handle, csrfToken)
-            onChanged()
+            await duplicate.mutateAsync({ ...target, handle })
           }}
         >
           <Copy className="size-3.5" aria-hidden /> Duplicate
@@ -444,9 +394,8 @@ function ProviderActions({
                 errorLabel="Try again"
                 className="border-status-danger/40 text-status-danger hover:bg-status-danger/5"
                 onClick={async () => {
-                  await archiveProvider(provider.id, csrfToken)
+                  await archive.mutateAsync(target)
                   setConfirming(null)
-                  onChanged()
                 }}
                 onBlur={() => setConfirming(null)}
               >
@@ -475,7 +424,7 @@ function ProviderActions({
                 errorLabel="Try again"
                 className="border-status-danger/40 text-status-danger hover:bg-status-danger/5"
                 onClick={async () => {
-                  await purgeProvider(provider.id, csrfToken)
+                  await purge.mutateAsync(target)
                   setConfirming(null)
                   onDeleted()
                 }}
@@ -505,38 +454,15 @@ function UpstreamKeysCard({
   provider,
   csrfToken,
   usage,
-  onChanged,
-  onUsageChanged,
   onOpenUsageDialog,
 }: {
   readonly provider: ProviderView
   readonly csrfToken: string
   readonly usage: UsageView | null
-  readonly onChanged: () => void
-  readonly onUsageChanged: () => void
   readonly onOpenUsageDialog: (readings: readonly UsageReadingView[]) => void
 }) {
   const [adding, setAdding] = useState(false)
   const [configuring, setConfiguring] = useState<KeyView | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<ApiError | null>(null)
-
-  const run = async (label: string, perform: () => Promise<unknown>) => {
-    setBusy(label)
-    setError(null)
-    try {
-      await perform()
-      onChanged()
-    } catch (cause) {
-      setError(
-        cause instanceof ApiError
-          ? cause
-          : new ApiError('request_failed', 'That did not work.'),
-      )
-    } finally {
-      setBusy(null)
-    }
-  }
 
   return (
     <section className="bg-card rounded-xl border overflow-hidden">
@@ -549,34 +475,16 @@ function UpstreamKeysCard({
           </span>
         </div>
         {!provider.archived && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setAdding(true)}
-            disabled={busy !== null}
-          >
+          <Button type="button" variant="outline" size="sm" onClick={() => setAdding(true)}>
             Add key
           </Button>
         )}
       </div>
 
-      {error && (
-        <Alert variant="destructive" role="alert" className="m-5">
-          <AlertTitle>That did not work</AlertTitle>
-          <AlertDescription>{error.message}</AlertDescription>
-        </Alert>
-      )}
-
       {adding && !provider.archived && (
         <AddKeyDialog
-          providerId={provider.id}
-          defaultBaseUrl={provider.baseUrl}
+          provider={provider}
           csrfToken={csrfToken}
-          onAdd={(input) =>
-            run('add-key', () => addKey(provider.id, input, csrfToken))
-          }
-          onChanged={onChanged}
           onDone={() => setAdding(false)}
           onCancel={() => setAdding(false)}
         />
@@ -588,10 +496,7 @@ function UpstreamKeysCard({
           defaultBaseUrl={provider.baseUrl}
           keyView={configuring}
           csrfToken={csrfToken}
-          onDone={() => {
-            setConfiguring(null)
-            onChanged()
-          }}
+          onDone={() => setConfiguring(null)}
           onCancel={() => setConfiguring(null)}
         />
       )}
@@ -623,14 +528,11 @@ function UpstreamKeysCard({
 {provider.keys.map((key) => (
                 <UpstreamKeyRow
                   key={key.id}
-                  providerId={provider.id}
+                  provider={provider}
                   keyView={key}
                   csrfToken={csrfToken}
                   usage={usage}
-                  busy={busy}
-                  run={run}
                   onConfigure={() => setConfiguring(key)}
-                  onUsageChanged={onUsageChanged}
                   onOpenUsageDialog={onOpenUsageDialog}
                 />
               ))}
@@ -643,28 +545,17 @@ function UpstreamKeysCard({
 }
 
 function AddKeyDialog({
-  providerId,
-  defaultBaseUrl,
+  provider,
   csrfToken,
-  onAdd,
-  onChanged,
   onDone,
   onCancel,
 }: {
-  readonly providerId: string
-  readonly defaultBaseUrl: string
+  readonly provider: ProviderView
   readonly csrfToken: string
-  readonly onAdd: (input: {
-    readonly upstreamKey: string
-    readonly baseUrl?: string | null
-    readonly accountId: string | null
-    readonly allowedModels: readonly string[] | null
-    readonly deniedModels: readonly string[] | null
-  }) => Promise<void>
-  readonly onChanged: () => void
   readonly onDone: () => void
   readonly onCancel: () => void
 }) {
+  const defaultBaseUrl = provider.baseUrl
   const [keyInputMode, setKeyInputMode] = useState<'single' | 'bulk'>('single')
   const [value, setValue] = useState('')
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl)
@@ -678,74 +569,70 @@ function AddKeyDialog({
       readonly problems: readonly { readonly field: string; readonly message: string }[]
     }[]
   } | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<ApiError | null>(null)
+  // Neither of these touches the cache before its response lands: the server
+  // stores each Key and then probes it, and no client may invent that verdict.
+  const add = useAddKey(csrfToken)
+  const bulk = useBulkAddKeys(csrfToken)
+  const busy = add.isPending || bulk.isPending
 
   const trimmedBaseUrl = baseUrl.trim()
   const explicitOverride = trimmedBaseUrl !== '' && trimmedBaseUrl !== defaultBaseUrl
+  const target = { id: provider.id, displayName: provider.displayName }
 
   const switchMode = (next: 'single' | 'bulk') => {
     if (busy || keyInputMode === next) return
     setKeyInputMode(next)
-    setError(null)
     setBulkPartialResult(null)
   }
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault()
     if (busy) return
-    setError(null)
     setBulkPartialResult(null)
     if (keyInputMode === 'single') {
       if (value === '') return
-      setBusy(true)
-      void onAdd({
-        upstreamKey: value,
-        baseUrl: explicitOverride ? trimmedBaseUrl : null,
-        accountId: null,
-        allowedModels: allowedModels.length === 0 ? null : allowedModels,
-        deniedModels: deniedModels.length === 0 ? null : deniedModels,
-      })
-        .then(() => {
-          setValue('')
-          setBaseUrl(defaultBaseUrl)
-          onDone()
-        })
-        .catch((cause: unknown) =>
-          setError(
-            cause instanceof ApiError
-              ? cause
-              : new ApiError('request_failed', 'Could not save.'),
-          ),
-        )
-        .finally(() => setBusy(false))
+      add.mutate(
+        {
+          ...target,
+          input: {
+            upstreamKey: value,
+            baseUrl: explicitOverride ? trimmedBaseUrl : null,
+            accountId: null,
+            allowedModels: allowedModels.length === 0 ? null : allowedModels,
+            deniedModels: deniedModels.length === 0 ? null : deniedModels,
+          },
+        },
+        {
+          onSuccess: () => {
+            setValue('')
+            setBaseUrl(defaultBaseUrl)
+            onDone()
+          },
+        },
+      )
       return
     }
     if (bulkKeys.length === 0) return
-    setBusy(true)
-    void bulkAddKeys(providerId, bulkKeys, csrfToken)
-      .then((result) => {
-        if (result.failed.length === 0) {
-          setBulkKeys([])
-          setBulkPartialResult(null)
-          onChanged()
-          onDone()
-          return
-        }
-        onChanged()
-        setBulkPartialResult({
-          added: result.added.length,
-          failed: result.failed,
-        })
-      })
-      .catch((cause: unknown) =>
-        setError(
-          cause instanceof ApiError
-            ? cause
-            : new ApiError('request_failed', 'Could not save.'),
-        ),
-      )
-      .finally(() => setBusy(false))
+    bulk.mutate(
+      { ...target, entries: bulkKeys },
+      {
+        onSuccess: (result) => {
+          if (result.failed.length === 0) {
+            setBulkKeys([])
+            setBulkPartialResult(null)
+            onDone()
+            return
+          }
+          // ADR-0009: one toast summarising the import, the per-line reasons
+          // inline below, where the Owner can still see the pasted keys.
+          toast.error(
+            `Added ${result.added.length} of ${result.added.length + result.failed.length} keys to ${provider.displayName}`,
+            { description: 'Every rejected line is listed in the dialog.' },
+          )
+          setBulkPartialResult({ added: result.added.length, failed: result.failed })
+        },
+      },
+    )
   }
 
   const totalEntries = bulkKeys.length
@@ -841,7 +728,7 @@ function AddKeyDialog({
                   everything.
                 </p>
                 <ModelListPicker
-                  providerId={providerId}
+                  providerId={provider.id}
                   csrfToken={csrfToken}
                   selected={allowedModels}
                   onChange={setAllowedModels}
@@ -857,7 +744,7 @@ function AddKeyDialog({
                   empty to exclude nothing.
                 </p>
                 <ModelListPicker
-                  providerId={providerId}
+                  providerId={provider.id}
                   csrfToken={csrfToken}
                   selected={deniedModels}
                   onChange={setDeniedModels}
@@ -890,12 +777,6 @@ function AddKeyDialog({
             </>
           )}
 
-          {error !== null && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>Could not save</AlertTitle>
-              <AlertDescription>{error.message}</AlertDescription>
-            </Alert>
-          )}
           <div className="flex items-center gap-2">
             <Button
               type="submit"
@@ -943,8 +824,7 @@ function ConfigureKeyDialog({
   const [baseUrl, setBaseUrl] = useState(keyView.baseUrl ?? '')
   const [allowedModels, setAllowedModels] = useState<readonly string[]>(keyView.allowedModels ?? [])
   const [deniedModels, setDeniedModels] = useState<readonly string[]>(keyView.deniedModels ?? [])
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<ApiError | null>(null)
+  const save = useUpdateKeySettings(csrfToken)
 
   const trimmedBaseUrl = baseUrl.trim()
   const explicitOverride = trimmedBaseUrl !== '' && trimmedBaseUrl !== defaultBaseUrl
@@ -952,29 +832,17 @@ function ConfigureKeyDialog({
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault()
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    void updateKeySettings(
-      providerId,
-      keyView.id,
-      {
-        accountId: null,
-        baseUrl: explicitOverride ? trimmedBaseUrl : clearingOverride ? null : undefined,
-        allowedModels: allowedModels.length === 0 ? null : [...allowedModels],
-        deniedModels: deniedModels.length === 0 ? null : [...deniedModels],
-      },
-      csrfToken,
-    )
-      .then(() => onDone())
-      .catch((cause: unknown) =>
-        setError(
-          cause instanceof ApiError
-            ? cause
-            : new ApiError('request_failed', 'Could not save.'),
-        ),
-      )
-      .finally(() => setBusy(false))
+    if (save.isPending) return
+    const settings: KeySettingsPatch = {
+      accountId: null,
+      baseUrl: explicitOverride ? trimmedBaseUrl : clearingOverride ? null : undefined,
+      allowedModels: allowedModels.length === 0 ? null : [...allowedModels],
+      deniedModels: deniedModels.length === 0 ? null : [...deniedModels],
+    }
+    // The row behind the dialog changes the moment this fires, but the dialog
+    // waits for the response before closing: a rejected model list would
+    // otherwise take the Owner's typing with it.
+    save.mutate({ providerId, keyId: keyView.id, settings }, { onSuccess: onDone })
   }
 
   return (
@@ -1055,17 +923,17 @@ function ConfigureKeyDialog({
             />
           </div>
 
-          {error !== null && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>Could not save</AlertTitle>
-              <AlertDescription>{error.message}</AlertDescription>
-            </Alert>
-          )}
           <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={busy}>
-              {busy ? 'Saving…' : 'Save key settings'}
+            <Button type="submit" size="sm" disabled={save.isPending}>
+              {save.isPending ? 'Saving…' : 'Save key settings'}
             </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={busy}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onCancel}
+              disabled={save.isPending}
+            >
               Cancel
             </Button>
           </div>
@@ -1075,33 +943,36 @@ function ConfigureKeyDialog({
   )
 }
 
+/** Which of this row's own mutations is in flight, if any. */
+type KeyAction = 'activate' | 'disable' | 'remove' | 'test'
+
 function KeyActionsMenu({
   keyView,
-  providerId,
-  csrfToken,
-  busy,
-  run,
-  onConfigure,
-  onReveal,
+  pending,
   revealing,
   revealed,
-  onUsageChanged,
+  onConfigure,
+  onReveal,
+  onRefresh,
+  onActivate,
+  onDisable,
+  onRemove,
 }: {
   readonly keyView: KeyView
-  readonly providerId: string
-  readonly csrfToken: string
-  readonly busy: string | null
-  readonly run: (label: string, perform: () => Promise<unknown>) => Promise<void>
-  readonly onConfigure: () => void
-  readonly onReveal: () => void
+  readonly pending: KeyAction | null
   readonly revealing: boolean
   readonly revealed: boolean
-  readonly onUsageChanged: () => void
+  readonly onConfigure: () => void
+  readonly onReveal: () => void
+  readonly onRefresh: () => void
+  readonly onActivate: () => void
+  readonly onDisable: () => void
+  readonly onRemove: () => void
 }) {
   const [removing, setRemoving] = useState(false)
-  const onConfirmRemove = () => {
-    void run(`remove-${keyView.id}`, () => removeKey(providerId, keyView.id, csrfToken))
-  }
+  // This row's actions close while this row's own mutation is in flight; the
+  // other Keys on the Provider stay live.
+  const busy = pending !== null
   return (
     <>
       <DropdownMenu>
@@ -1116,58 +987,32 @@ function KeyActionsMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem onSelect={onConfigure} disabled={busy !== null}>
+          <DropdownMenuItem onSelect={onConfigure} disabled={busy}>
             Configure
           </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={onReveal}
-            disabled={busy !== null || revealing}
-          >
+          <DropdownMenuItem onSelect={onReveal} disabled={busy || revealing}>
             <Eye className="size-3.5" aria-hidden />
             {revealing ? 'Revealing…' : revealed ? 'Reveal again' : 'Reveal value'}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() =>
-              void run(`refresh-${keyView.id}`, async () => {
-                await testKey(providerId, keyView.id, csrfToken)
-                await refreshUsage(providerId, csrfToken)
-                onUsageChanged()
-              })
-            }
-            disabled={busy !== null}
-          >
-            {busy === `refresh-${keyView.id}` ? 'Refreshing…' : 'Refresh'}
+          <DropdownMenuItem onSelect={onRefresh} disabled={busy}>
+            {pending === 'test' ? 'Refreshing…' : 'Refresh'}
           </DropdownMenuItem>
           {keyView.health !== 'active' && (
-            <DropdownMenuItem
-              onSelect={() =>
-                void run(`activate-${keyView.id}`, () =>
-                  activateKey(providerId, keyView.id, csrfToken),
-                )
-              }
-              disabled={busy !== null}
-            >
-              {busy === `activate-${keyView.id}` ? 'Activating…' : 'Activate'}
+            <DropdownMenuItem onSelect={onActivate} disabled={busy}>
+              {pending === 'activate' ? 'Activating…' : 'Activate'}
             </DropdownMenuItem>
           )}
           {keyView.health !== 'disabled' && (
-            <DropdownMenuItem
-              onSelect={() =>
-                void run(`disable-${keyView.id}`, () =>
-                  disableKey(providerId, keyView.id, csrfToken),
-                )
-              }
-              disabled={busy !== null}
-            >
-              {busy === `disable-${keyView.id}` ? 'Disabling…' : 'Disable'}
+            <DropdownMenuItem onSelect={onDisable} disabled={busy}>
+              {pending === 'disable' ? 'Disabling…' : 'Disable'}
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             variant="destructive"
             onSelect={() => setRemoving(true)}
-            disabled={busy !== null}
+            disabled={busy}
           >
             Remove
           </DropdownMenuItem>
@@ -1185,15 +1030,13 @@ function KeyActionsMenu({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy === `remove-${keyView.id}`}>
-              Cancel
-            </AlertDialogCancel>
+            <AlertDialogCancel disabled={pending === 'remove'}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              disabled={busy === `remove-${keyView.id}`}
-              onClick={onConfirmRemove}
+              disabled={pending === 'remove'}
+              onClick={onRemove}
             >
-              {busy === `remove-${keyView.id}` ? 'Removing…' : 'Remove key'}
+              {pending === 'remove' ? 'Removing…' : 'Remove key'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1203,49 +1046,40 @@ function KeyActionsMenu({
 }
 
 function UpstreamKeyRow({
-  providerId,
+  provider,
   keyView,
   csrfToken,
   usage,
-  busy,
-  run,
   onConfigure,
-  onUsageChanged,
   onOpenUsageDialog,
 }: {
-  readonly providerId: string
+  readonly provider: ProviderView
   readonly keyView: KeyView
   readonly csrfToken: string
   readonly usage: UsageView | null
-  readonly busy: string | null
-  readonly run: (label: string, perform: () => Promise<unknown>) => Promise<void>
   readonly onConfigure: () => void
-  readonly onUsageChanged: () => void
   readonly onOpenUsageDialog: (readings: readonly UsageReadingView[]) => void
 }) {
-  const [reveal, setReveal] = useState<{
-    readonly value: string
-  } | null>(null)
-  const [revealing, setRevealing] = useState(false)
-  const [revealError, setRevealError] = useState<ApiError | null>(null)
+  const [revealed, setRevealed] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const onReveal = async () => {
-    setRevealing(true)
-    setRevealError(null)
-    try {
-      const result = await revealKey(providerId, keyView.id)
-      setReveal({ value: result.value })
-    } catch (cause) {
-      setRevealError(
-        cause instanceof ApiError
-          ? cause
-          : new ApiError('request_failed', 'Could not reveal the key.'),
-      )
-    } finally {
-      setRevealing(false)
-    }
-  }
+  const target = { providerId: provider.id, keyId: keyView.id }
+  const activate = useActivateKey(csrfToken)
+  const disable = useDisableKey(csrfToken)
+  const remove = useRemoveKey(csrfToken)
+  const test = useTestKey(csrfToken)
+  const usageRefresh = useRefreshUsage(csrfToken)
+  const reveal = useRevealKey()
+
+  const pending: KeyAction | null = activate.isPending
+    ? 'activate'
+    : disable.isPending
+      ? 'disable'
+      : remove.isPending
+        ? 'remove'
+        : test.isPending || usageRefresh.isPending
+          ? 'test'
+          : null
 
   useEffect(() => {
     if (!copied) return
@@ -1254,13 +1088,13 @@ function UpstreamKeyRow({
   }, [copied])
 
   const onCopy = async () => {
-    if (reveal === null) return
+    if (revealed === null) return
     try {
       if (navigator.clipboard?.writeText !== undefined) {
-        await navigator.clipboard.writeText(reveal.value)
+        await navigator.clipboard.writeText(revealed)
       } else {
         const textarea = document.createElement('textarea')
-        textarea.value = reveal.value
+        textarea.value = revealed
         textarea.setAttribute('readonly', '')
         textarea.style.position = 'absolute'
         textarea.style.left = '-9999px'
@@ -1282,7 +1116,7 @@ function UpstreamKeyRow({
           health={keyView.health}
           lastProbe={keyView.lastProbe}
           healthReason={keyView.healthReason}
-          pending={busy === `refresh-${keyView.id}`}
+          pending={pending === 'test'}
         />
       </td>
       <td className="px-5 py-3.5 align-top">
@@ -1302,38 +1136,38 @@ function UpstreamKeyRow({
           <div className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
             <KeyActionsMenu
               keyView={keyView}
-              providerId={providerId}
-              csrfToken={csrfToken}
-              busy={busy}
-              run={run}
+              pending={pending}
+              revealing={reveal.isPending}
+              revealed={revealed !== null}
               onConfigure={onConfigure}
-              onReveal={() => void onReveal()}
-              revealing={revealing}
-              revealed={reveal !== null}
-              onUsageChanged={onUsageChanged}
+              onReveal={() =>
+                reveal.mutate(target, { onSuccess: (result) => setRevealed(result.value) })
+              }
+              // A test tells us what the upstream now thinks of the Key, which
+              // is also the moment its remaining capacity is worth re-reading.
+              onRefresh={() =>
+                test.mutate(target, {
+                  onSuccess: () =>
+                    usageRefresh.mutate({ id: provider.id, displayName: provider.displayName }),
+                })
+              }
+              onActivate={() => activate.mutate(target)}
+              onDisable={() => disable.mutate(target)}
+              onRemove={() => remove.mutate(target)}
             />
           </div>
-          {revealError !== null && (
-            <span
-              className="text-status-danger ml-2 text-xs"
-              role="alert"
-              title={revealError.message}
-            >
-              Reveal failed
-            </span>
-          )}
         </div>
       </td>
-      {reveal !== null && (
+      {revealed !== null && (
         <RevealedValueDialog
           open={true}
           onOpenChange={(open) => {
             if (!open) {
-              setReveal(null)
+              setRevealed(null)
               setCopied(false)
             }
           }}
-          value={reveal.value}
+          value={revealed}
           copied={copied}
           onCopy={() => void onCopy()}
         />

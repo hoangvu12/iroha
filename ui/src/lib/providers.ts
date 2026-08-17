@@ -143,6 +143,10 @@ export async function fetchProviders(signal?: AbortSignal): Promise<readonly Pro
   return body.providers
 }
 
+export async function fetchProvider(id: string, signal?: AbortSignal): Promise<ProviderView> {
+  return await request<ProviderView>('GET', `/providers/${encodeURIComponent(id)}`, { signal })
+}
+
 export async function checkProviderHandleAvailability(handle: string, signal?: AbortSignal): Promise<{ available: boolean; suggestion: string | null }> {
   return await request('GET', `/providers/handles/${encodeURIComponent(handle)}/availability`, { signal })
 }
@@ -158,18 +162,20 @@ export async function fetchProviderTemplates(
   return body.templates
 }
 
+export interface NewProviderInput {
+  readonly handle: string
+  readonly displayName: string
+  readonly baseUrl: string
+  readonly keys: readonly { readonly upstreamKey: string; readonly baseUrl?: string }[]
+  readonly allowInsecureHttp: boolean
+  readonly logoDomain?: string | null
+  readonly templateId: string | null
+  readonly authHeader?: string
+  readonly authPrefix?: string
+}
+
 export async function createProvider(
-  input: {
-    handle: string
-    displayName: string
-    baseUrl: string
-    keys: readonly { readonly upstreamKey: string; readonly baseUrl?: string }[]
-    allowInsecureHttp: boolean
-    logoDomain?: string | null
-    templateId: string | null
-    authHeader?: string
-    authPrefix?: string
-  },
+  input: NewProviderInput,
   csrfToken: string,
 ): Promise<ProviderView> {
   const body: Record<string, unknown> = {
@@ -200,19 +206,22 @@ export async function createProvider(
   })
 }
 
+/** The Provider fields an Owner may edit. Each one is stored exactly as sent. */
+export interface ProviderPatch {
+  readonly displayName?: string
+  readonly baseUrl?: string
+  readonly logoDomain?: string | null
+  readonly allowInsecureHttp?: boolean
+  readonly enabled?: boolean
+  readonly retryMaxAttempts?: number
+  readonly retryAmbiguousNetwork?: boolean
+  readonly authHeader?: string
+  readonly authPrefix?: string
+}
+
 export async function updateProvider(
   id: string,
-  patch: {
-    displayName?: string
-    baseUrl?: string
-    logoDomain?: string | null
-    allowInsecureHttp?: boolean
-    enabled?: boolean
-    retryMaxAttempts?: number
-    retryAmbiguousNetwork?: boolean
-    authHeader?: string
-    authPrefix?: string
-  },
+  patch: ProviderPatch,
   csrfToken: string,
 ): Promise<ProviderView> {
   return await request<ProviderView>('PATCH', `/providers/${encodeURIComponent(id)}`, {
@@ -287,15 +296,17 @@ export async function disableKey(
   )
 }
 
+export interface NewKeyInput {
+  readonly upstreamKey: string
+  readonly baseUrl?: string | null
+  readonly accountId: string | null
+  readonly allowedModels: readonly string[] | null
+  readonly deniedModels: readonly string[] | null
+}
+
 export async function addKey(
   providerId: string,
-  input: {
-    readonly upstreamKey: string
-    readonly baseUrl?: string | null
-    readonly accountId: string | null
-    readonly allowedModels: readonly string[] | null
-    readonly deniedModels: readonly string[] | null
-  },
+  input: NewKeyInput,
   csrfToken: string,
 ): Promise<ProviderView> {
   const body: Record<string, unknown> = {
@@ -340,15 +351,23 @@ export async function bulkAddKeys(
   )
 }
 
+/**
+ * The Upstream Key settings one save carries. A null `accountId`,
+ * `allowedModels` or `deniedModels` is left out of the request below, which the
+ * server reads as "leave this field alone"; `baseUrl` distinguishes the two,
+ * with `undefined` leaving the override alone and null clearing it.
+ */
+export interface KeySettingsPatch {
+  readonly accountId: string | null
+  readonly allowedModels: readonly string[] | null
+  readonly deniedModels: readonly string[] | null
+  readonly baseUrl?: string | null
+}
+
 export async function updateKeySettings(
   providerId: string,
   keyId: string,
-  settings: {
-    accountId: string | null
-    allowedModels: readonly string[] | null
-    deniedModels: readonly string[] | null
-    baseUrl?: string | null
-  },
+  settings: KeySettingsPatch,
   csrfToken: string,
 ): Promise<ProviderView> {
   const body: Record<string, unknown> = {

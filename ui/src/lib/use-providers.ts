@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { toApiError } from './api-client.ts'
 import { queryKeys } from './query-keys.ts'
@@ -43,18 +49,56 @@ import { fetchUsage, refreshUsage } from './usage.ts'
 /** Twelve or twenty-four hours of traffic is plenty for a sparkline. */
 const REQUEST_HISTORY_LIMIT = 800
 
-export function useProviders() {
-  return useQuery({
+/**
+ * The Provider list read, as one object the hook and the route loader share.
+ * A loader that spelled the key or the fetch out for itself could drift from
+ * this hook by a character and warm an entry no screen ever reads — the app
+ * would still work, and the preload would silently do nothing.
+ */
+export function providersQueryOptions() {
+  return queryOptions({
     queryKey: queryKeys.providers(),
     queryFn: ({ signal }) => fetchProviders(signal),
   })
 }
 
-export function useProvider(providerId: string) {
-  return useQuery({
+export function useProviders() {
+  return useQuery(providersQueryOptions())
+}
+
+/** One Provider, by the id its route carries. Shared with that route's loader. */
+export function providerQueryOptions(providerId: string) {
+  return queryOptions({
     queryKey: queryKeys.provider(providerId),
     queryFn: ({ signal }) => fetchProvider(providerId, signal),
   })
+}
+
+export function useProvider(providerId: string) {
+  return useQuery(providerQueryOptions(providerId))
+}
+
+/**
+ * Warms one Provider's detail entry from an intent to open it.
+ *
+ * The Providers list opens a row by navigating imperatively rather than through
+ * a `Link`, so `defaultPreload: 'intent'` has nothing to hang hover intent on
+ * and the route's loader only runs once the Owner has already clicked. A row
+ * cannot become an anchor without putting its action menu's button inside one,
+ * which is invalid, so the row asks for the same read the loader would.
+ *
+ * `ensureQueryData` is a no-op on a fresh entry, which is what makes this safe
+ * to fire from every pointer that crosses a row: hovering the list warms at most
+ * one request per Provider per `staleTime`.
+ */
+export function useWarmProvider(): (providerId: string) => void {
+  const queryClient = useQueryClient()
+
+  return (providerId) => {
+    // A failure here is a head start that did not arrive. The component's own
+    // query re-reads the entry and renders the error branch it already has.
+    void queryClient.ensureQueryData(providerQueryOptions(providerId)).catch(() => {})
+  }
 }
 
 /**

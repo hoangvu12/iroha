@@ -1,4 +1,10 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { toApiError } from './api-client.ts'
 import { clearAudit, fetchAudit, type AuditFilter } from './audit.ts'
@@ -19,11 +25,22 @@ export const AUDIT_PAGE_SIZE = 25
  */
 export function useAuditPage(filter: AuditFilter, offset: number) {
   return useQuery({
-    queryKey: queryKeys.audit({ ...filter, limit: AUDIT_PAGE_SIZE, offset }),
-    queryFn: ({ signal }) => fetchAudit(filter, { limit: AUDIT_PAGE_SIZE, offset, signal }),
+    ...auditPageQueryOptions(filter, offset),
     // Matches what the screen did before: the page it was showing stays put
     // until the next one lands, rather than collapsing to a skeleton.
     placeholderData: keepPreviousData,
+  })
+}
+
+/**
+ * The key and the fetch behind one page, shared with the route loader that warms
+ * the first one. The page size is in here so the loader cannot warm a page size
+ * the screen does not ask for.
+ */
+export function auditPageQueryOptions(filter: AuditFilter, offset: number) {
+  return queryOptions({
+    queryKey: queryKeys.audit({ ...filter, limit: AUDIT_PAGE_SIZE, offset }),
+    queryFn: ({ signal }) => fetchAudit(filter, { limit: AUDIT_PAGE_SIZE, offset, signal }),
   })
 }
 

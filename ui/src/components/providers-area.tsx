@@ -59,6 +59,7 @@ import {
   useProviders,
   usePurgeProvider,
   useRequestHistory,
+  useWarmProvider,
 } from '@/lib/use-providers'
 import type { BulkKeyEntry } from '@/lib/parse-bulk-keys'
 import { logoDomainFromBaseUrl, normalizeLogoDomainInput } from '@/lib/logo-domain'
@@ -203,6 +204,7 @@ function ProviderRow({
   readonly archived?: boolean
 }) {
   const [editing, setEditing] = useState(false)
+  const warmProvider = useWarmProvider()
   const archive = useArchiveProvider(csrfToken)
   const duplicate = useDuplicateProvider(csrfToken)
   const purge = usePurgeProvider(csrfToken)
@@ -242,6 +244,12 @@ function ProviderRow({
         tabIndex={0}
         aria-label={`Open ${provider.displayName}`}
         onClick={onOpen}
+        // The row's stand-in for `defaultPreload: 'intent'`: an imperative
+        // navigation gives the router no `Link` to preload from, so the row asks
+        // for the Provider itself the moment the Owner looks like opening it.
+        // `onFocus` carries the same intent for a keyboard.
+        onMouseEnter={() => warmProvider(provider.id)}
+        onFocus={() => warmProvider(provider.id)}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return
           if (event.key === 'Enter' || event.key === ' ') {

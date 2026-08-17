@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { queryOptions, useQuery } from '@tanstack/react-query'
 import { fetchBackgroundJobs } from './background.ts'
 import { queryKeys } from './query-keys.ts'
 
@@ -9,7 +9,12 @@ import { queryKeys } from './query-keys.ts'
  * running when it finished minutes ago.
  */
 export function useBackgroundJobs() {
-  return useQuery({
+  return useQuery(backgroundJobsQueryOptions())
+}
+
+/** The jobs read, shared with the Overview route's loader. */
+export function backgroundJobsQueryOptions() {
+  return queryOptions({
     queryKey: queryKeys.backgroundJobs(),
     queryFn: ({ signal }) => fetchBackgroundJobs(signal),
   })

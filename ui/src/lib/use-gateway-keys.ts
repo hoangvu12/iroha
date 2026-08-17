@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { toApiError } from './api-client.ts'
 import {
@@ -34,11 +40,16 @@ export interface GatewayKeyEdit {
   readonly corsOrigins: readonly string[]
 }
 
-export function useGatewayKeys() {
-  return useQuery({
+/** The Gateway Keys list read, as one object the hook and its route loader share. */
+export function gatewayKeysQueryOptions() {
+  return queryOptions({
     queryKey: queryKeys.gatewayKeys(),
     queryFn: ({ signal }) => fetchGatewayKeys(signal),
   })
+}
+
+export function useGatewayKeys() {
+  return useQuery(gatewayKeysQueryOptions())
 }
 
 interface OptimisticMutation<TVariables, TResult> {

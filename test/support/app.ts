@@ -8,6 +8,7 @@ import {
   createDashscopeInferenceAdapter,
   createGenericInferenceAdapter,
   createMinimaxInferenceAdapter,
+  createZaiInferenceAdapter,
 } from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
 import { BackgroundScheduleSettingsService } from '../../src/jobs/index.ts'
@@ -187,11 +188,13 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   const anthropicInferenceAdapter = createAnthropicInferenceAdapter({ fetch: upstreamTransport })
   const dashscopeInferenceAdapter = createDashscopeInferenceAdapter({ fetch: upstreamTransport })
   const minimaxInferenceAdapter = createMinimaxInferenceAdapter({ fetch: upstreamTransport })
+  const zaiInferenceAdapter = createZaiInferenceAdapter({ fetch: upstreamTransport })
   const adapterRegistry = options.adapterRegistry ?? createBuiltInAdapterRegistry({
     genericInferenceAdapter: inference,
     anthropicInferenceAdapter,
     dashscopeInferenceAdapter,
     minimaxInferenceAdapter,
+    zaiInferenceAdapter,
   })
   const providers = new ProviderRegistry({
     database,

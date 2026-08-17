@@ -7,10 +7,7 @@
 
 import { createDashscopeInferenceAdapter } from '../../inference/dashscope-adapter.ts'
 import { createGenericUsageAdapter } from '../../usage/generic-adapter.ts'
-import {
-  DASHSCOPE_INFERENCE_ADAPTER_ID,
-  REACTIVE_ONLY_USAGE_ADAPTER_ID,
-} from '../adapter-ids.ts'
+import { REACTIVE_ONLY_USAGE_ADAPTER_ID } from '../adapter-ids.ts'
 import type { ProviderPack } from './pack.ts'
 
 export const dashscopePack: ProviderPack = {
@@ -38,7 +35,7 @@ export const dashscopePack: ProviderPack = {
       'qwen3.6-plus',
       'qwen3.7-plus',
     ],
-    inferenceAdapterId: DASHSCOPE_INFERENCE_ADAPTER_ID,
+    inferenceAdapterId: 'dashscope-inference-adapter',
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
     brand: { domain: 'alibabacloudmail.com', accentColor: '#FF6A00' },
   },

@@ -1,27 +1,8 @@
+import type { InferenceAdapter } from '../inference/index.ts'
+import type { UsageAdapter } from '../usage/index.ts'
 import {
-  createGenericInferenceAdapter,
-  createMinimaxInferenceAdapter,
-  createZaiInferenceAdapter,
-  type InferenceAdapter,
-} from '../inference/index.ts'
-import { createAnthropicInferenceAdapter } from '../inference/anthropic-adapter.ts'
-import { createDashscopeInferenceAdapter } from '../inference/dashscope-adapter.ts'
-import {
-  createGenericUsageAdapter,
-  createMinimaxUsageAdapter,
-  createZaiUsageAdapter,
-  type UsageAdapter,
-} from '../usage/index.ts'
-import {
-  ANTHROPIC_INFERENCE_ADAPTER_ID,
-  DASHSCOPE_INFERENCE_ADAPTER_ID,
   BUILT_IN_PROVIDER_TEMPLATES,
   GENERIC_INFERENCE_ADAPTER_ID,
-  MINIMAX_USAGE_ADAPTER_ID,
-  MINIMAX_INFERENCE_ADAPTER_ID,
-  REACTIVE_ONLY_USAGE_ADAPTER_ID,
-  ZAI_INFERENCE_ADAPTER_ID,
-  ZAI_USAGE_ADAPTER_ID,
   type ProviderTemplate,
   type ProviderWireFormat,
 } from './templates.ts'
@@ -262,6 +243,21 @@ export class AdapterRegistry {
     }
     return out
   }
+
+  /**
+   * The Inference Adapter that translates for the Anthropic messages surface —
+   * the one able to speak the Anthropic Messages shape (its `forwardAnthropic`
+   * is defined). The `/v1/messages` route uses it as its translator regardless
+   * of which Provider it is serving, so it is selected by that capability
+   * rather than by a brand string or adapter id. Null when this build ships no
+   * such adapter.
+   */
+  anthropicMessagesTranslator(): InferenceAdapter | null {
+    for (const adapter of this.#inference.values()) {
+      if (adapter.forwardAnthropic !== undefined) return adapter
+    }
+    return null
+  }
 }
 
 /**
@@ -273,29 +269,11 @@ export class AdapterRegistry {
  */
 export interface BuiltInAdapterRegistryOptions {
   /**
-   * Replaces the built-in generic Inference Adapter. Tests inject the same
-   * mock transport they use for the catalog so the adapter records against
-   * the same fetch the rest of the suite drives.
-   */
-  readonly genericInferenceAdapter?: InferenceAdapter
-  /**
-   * Replaces the built-in Anthropic Inference Adapter. Tests inject the
-   * same mock transport so an Anthropic Provider Connection's calls reach
-   * the same recorded calls list as a generic OpenAI-shaped call.
-   */
-  readonly anthropicInferenceAdapter?: InferenceAdapter
-  /** Replaces the typed DashScope adapter in transport-focused tests. */
-  readonly dashscopeInferenceAdapter?: InferenceAdapter
-  /** Replaces the typed MiniMax adapter in transport-focused tests. */
-  readonly minimaxInferenceAdapter?: InferenceAdapter
-  /** Replaces the typed Z.ai adapter in transport-focused tests. */
-  readonly zaiInferenceAdapter?: InferenceAdapter
-  /**
-   * When set, the registry is built from the built-in Provider Pack list with
-   * every Pack's Inference and Usage Adapter constructed over this upstream
-   * transport. This one mechanism replaces the per-adapter overrides above —
-   * supplying it ignores them — so adding a Pack cannot require a new override
-   * field and no Provider can silently escape to the real network in tests.
+   * When set, every built-in Provider Pack's Inference and Usage Adapter is
+   * constructed over this upstream transport. This is the one mechanism the
+   * test harness uses so no Provider can silently escape to the real network,
+   * and it is the only seam this factory offers — adding a Pack can never
+   * require a new option here.
    */
   readonly upstreamTransport?: typeof fetch
 }
@@ -344,33 +322,19 @@ export function adapterRegistryFromPacks(
 }
 
 /**
- * The Adapter Registry every Iroha build ships with: the generic Inference
- * Adapter, the typed Anthropic Inference Adapter, the reactive-only generic
- * Usage Adapter, and the built-in Provider Templates. Tests can construct
- * their own registry through the constructor to assert validation
- * behaviour; production reaches for this constant.
+ * The Adapter Registry every Iroha build ships with, built from the built-in
+ * Provider Pack list: each Pack contributes its Provider Template, Inference
+ * Adapter and Usage Adapter. The Pack list is the only source, so adding a
+ * typed Provider is one Pack module and one line in that list — nothing here
+ * changes. Tests pass `upstreamTransport` to build every Pack's adapters over
+ * the stub transport; production omits it and each adapter reaches for the
+ * runtime's own `fetch`.
  */
 export function createBuiltInAdapterRegistry(
   options: BuiltInAdapterRegistryOptions = {},
 ): AdapterRegistry {
-  // The one mechanism: build every built-in Pack's adapters over the injected
-  // transport. No per-Provider list to maintain, so no Pack can be forgotten.
-  if (options.upstreamTransport !== undefined) {
-    return adapterRegistryFromPacks(BUILT_IN_PROVIDER_PACKS, { fetch: options.upstreamTransport })
-  }
-
-  return new AdapterRegistry({
-    inferenceAdapters: inferenceAdapters({
-      [GENERIC_INFERENCE_ADAPTER_ID]: options.genericInferenceAdapter ?? createGenericInferenceAdapter(),
-      [ANTHROPIC_INFERENCE_ADAPTER_ID]: options.anthropicInferenceAdapter ?? createAnthropicInferenceAdapter(),
-      [DASHSCOPE_INFERENCE_ADAPTER_ID]: options.dashscopeInferenceAdapter ?? createDashscopeInferenceAdapter(),
-      [MINIMAX_INFERENCE_ADAPTER_ID]: options.minimaxInferenceAdapter ?? createMinimaxInferenceAdapter(),
-      [ZAI_INFERENCE_ADAPTER_ID]: options.zaiInferenceAdapter ?? createZaiInferenceAdapter(),
-    }),
-    usageAdapters: usageAdapters({
-      [REACTIVE_ONLY_USAGE_ADAPTER_ID]: createGenericUsageAdapter(),
-      [MINIMAX_USAGE_ADAPTER_ID]: createMinimaxUsageAdapter(),
-      [ZAI_USAGE_ADAPTER_ID]: createZaiUsageAdapter(),
-    }),
-  })
+  return adapterRegistryFromPacks(
+    BUILT_IN_PROVIDER_PACKS,
+    options.upstreamTransport === undefined ? {} : { fetch: options.upstreamTransport },
+  )
 }

@@ -1,17 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  ANTHROPIC_INFERENCE_ADAPTER_ID,
-  DASHSCOPE_INFERENCE_ADAPTER_ID,
   BUILT_IN_PROVIDER_TEMPLATES,
   findBuiltInTemplate,
-  GENERIC_INFERENCE_ADAPTER_ID,
-  MINIMAX_INFERENCE_ADAPTER_ID,
-  MINIMAX_USAGE_ADAPTER_ID,
   REACTIVE_ONLY_USAGE_ADAPTER_ID,
-  ZAI_INFERENCE_ADAPTER_ID,
-  ZAI_USAGE_ADAPTER_ID,
   type ProviderTemplate,
 } from '../../src/providers/templates.ts'
+import { createBuiltInAdapterRegistry } from '../../src/providers/index.ts'
 
 const REQUIRED_TEMPLATE_IDS = [
   'generic-openai-compatible',
@@ -52,37 +46,26 @@ describe('the built-in Provider Templates', () => {
     }
   })
 
-  test('every built-in template references a registered Inference Adapter', () => {
-    // The Anthropic and Generic Anthropic-compatible templates reference the
-    // typed Anthropic Inference Adapter; every other built-in template uses
-    // the generic one (except DashScope and MiniMax which have their own).
+  // Iterate the built-in list rather than branch per brand: whichever Provider
+  // Pack a template came from, its Inference Adapter must resolve through the
+  // registry the Packs build. Adding a Pack needs no edit here.
+  test('every built-in template resolves an Inference Adapter through the registry', () => {
+    const registry = createBuiltInAdapterRegistry()
     for (const template of BUILT_IN_PROVIDER_TEMPLATES) {
-      if (template.id === 'anthropic' || template.id === 'generic-anthropic-compatible') {
-        expect(template.inferenceAdapterId).toBe(ANTHROPIC_INFERENCE_ADAPTER_ID)
-      } else if (template.id === 'dashscope') {
-        expect(template.inferenceAdapterId).toBe(DASHSCOPE_INFERENCE_ADAPTER_ID)
-      } else if (template.id === 'MiniMax') {
-        expect(template.inferenceAdapterId).toBe(MINIMAX_INFERENCE_ADAPTER_ID)
-      } else if (template.id === 'zai') {
-        expect(template.inferenceAdapterId).toBe(ZAI_INFERENCE_ADAPTER_ID)
-      } else {
-        expect(template.inferenceAdapterId).toBe(GENERIC_INFERENCE_ADAPTER_ID)
-      }
+      expect(typeof template.inferenceAdapterId).toBe('string')
+      expect(template.inferenceAdapterId.length).toBeGreaterThan(0)
+      expect(registry.resolveInferenceAdapter(template.id)).not.toBeNull()
     }
   })
 
-  test('every built-in template that has no documented entitlement API declares the reactive-only Usage Adapter honestly', () => {
+  test('every built-in template names a Usage Adapter the registry resolves', () => {
+    const registry = createBuiltInAdapterRegistry()
     for (const template of BUILT_IN_PROVIDER_TEMPLATES) {
-      // MiniMax exposes a documented entitlement API; every other built-in
-      // template is honest about having no authority and points at the
-      // reactive-only adapter.
-      if (template.id === 'MiniMax') {
-        expect(template.usageAdapterId).toBe(MINIMAX_USAGE_ADAPTER_ID)
-      } else if (template.id === 'zai') {
-        expect(template.usageAdapterId).toBe(ZAI_USAGE_ADAPTER_ID)
-      } else {
-        expect(template.usageAdapterId).toBe(REACTIVE_ONLY_USAGE_ADAPTER_ID)
-      }
+      // Every built-in template names a Usage Adapter — a typed one where the
+      // Provider exposes a documented entitlement API, otherwise the honest
+      // reactive-only generic adapter — and the registry resolves it.
+      expect(template.usageAdapterId).not.toBeNull()
+      expect(registry.usageAdapter(template.usageAdapterId!)).not.toBeNull()
     }
   })
 
@@ -169,7 +152,7 @@ describe('the built-in Provider Templates', () => {
     expect(anthropic.usageAdapterId).toBe(REACTIVE_ONLY_USAGE_ADAPTER_ID)
   })
 
-  test('the Generic Anthropic-compatible template uses x-api-key auth and the Anthropic Inference Adapter', () => {
+  test('the Generic Anthropic-compatible template uses x-api-key auth and the Anthropic wire shape', () => {
     const genericAnthropic = findBuiltInTemplate('generic-anthropic-compatible') as ProviderTemplate
     expect(genericAnthropic.authHeader).toBe('x-api-key')
     expect(genericAnthropic.authPrefix).toBe('')
@@ -181,9 +164,9 @@ describe('the built-in Provider Templates', () => {
     expect(genericAnthropic.capabilities.tools).toBe(false)
     expect(genericAnthropic.capabilities.structuredOutput).toBe(false)
     expect(genericAnthropic.capabilities.responses).toBe(false)
-    // The typed Anthropic Inference Adapter handles the protocol translation,
-    // so users can call both /v1/chat/completions and /v1/messages.
-    expect(genericAnthropic.inferenceAdapterId).toBe(ANTHROPIC_INFERENCE_ADAPTER_ID)
+    // Its upstream speaks the Anthropic Messages shape, so a caller's body
+    // passes through the /v1/messages surface unchanged.
+    expect(genericAnthropic.wireFormat).toBe('anthropic')
     // No known models; the generic template is honest about not knowing the upstream.
     expect(genericAnthropic.knownModels.length).toBe(0)
     // No entitlement API; the reactive-only Usage Adapter is the honest default.

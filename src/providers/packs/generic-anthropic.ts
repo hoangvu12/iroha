@@ -7,10 +7,7 @@
 
 import { createAnthropicInferenceAdapter } from '../../inference/anthropic-adapter.ts'
 import { createGenericUsageAdapter } from '../../usage/generic-adapter.ts'
-import {
-  ANTHROPIC_INFERENCE_ADAPTER_ID,
-  REACTIVE_ONLY_USAGE_ADAPTER_ID,
-} from '../adapter-ids.ts'
+import { REACTIVE_ONLY_USAGE_ADAPTER_ID } from '../adapter-ids.ts'
 import type { ProviderPack } from './pack.ts'
 
 export const genericAnthropicPack: ProviderPack = {
@@ -31,7 +28,7 @@ export const genericAnthropicPack: ProviderPack = {
       responses: false,
     },
     knownModels: [],
-    inferenceAdapterId: ANTHROPIC_INFERENCE_ADAPTER_ID,
+    inferenceAdapterId: 'anthropic-inference-adapter',
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
     brand: null,
   },

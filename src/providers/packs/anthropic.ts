@@ -7,7 +7,7 @@
 
 import { createAnthropicInferenceAdapter } from '../../inference/anthropic-adapter.ts'
 import { createGenericUsageAdapter } from '../../usage/generic-adapter.ts'
-import { ANTHROPIC_INFERENCE_ADAPTER_ID, REACTIVE_ONLY_USAGE_ADAPTER_ID } from '../adapter-ids.ts'
+import { REACTIVE_ONLY_USAGE_ADAPTER_ID } from '../adapter-ids.ts'
 import type { ProviderPack } from './pack.ts'
 
 export const anthropicPack: ProviderPack = {
@@ -44,7 +44,7 @@ export const anthropicPack: ProviderPack = {
       'anthropic-sonnet-4-5',
       'anthropic-sonnet-4-5-20250929',
     ],
-    inferenceAdapterId: ANTHROPIC_INFERENCE_ADAPTER_ID,
+    inferenceAdapterId: 'anthropic-inference-adapter',
     usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
     brand: { domain: 'anthropic.com', accentColor: '#D97757' },
   },

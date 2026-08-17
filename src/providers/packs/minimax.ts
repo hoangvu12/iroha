@@ -6,10 +6,6 @@
 
 import { createMinimaxInferenceAdapter } from '../../inference/minimax-adapter.ts'
 import { createMinimaxUsageAdapter } from '../../usage/minimax-usage-adapter.ts'
-import {
-  MINIMAX_INFERENCE_ADAPTER_ID,
-  MINIMAX_USAGE_ADAPTER_ID,
-} from '../adapter-ids.ts'
 import type { ProviderPack } from './pack.ts'
 
 export const minimaxPack: ProviderPack = {
@@ -39,8 +35,8 @@ export const minimaxPack: ProviderPack = {
       'MiniMax-M2.1-highspeed',
       'MiniMax-M2',
     ],
-    inferenceAdapterId: MINIMAX_INFERENCE_ADAPTER_ID,
-    usageAdapterId: MINIMAX_USAGE_ADAPTER_ID,
+    inferenceAdapterId: 'minimax-inference-adapter',
+    usageAdapterId: 'minimax-usage-adapter',
     brand: { domain: 'minimax.io', accentColor: '#F43F5E' },
   },
   inferenceAdapter: (options) => createMinimaxInferenceAdapter(options),

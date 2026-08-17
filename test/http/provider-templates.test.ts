@@ -68,33 +68,19 @@ describe('the Provider Templates admin endpoint', () => {
     }
   })
 
-  test('built-in templates point at the generic inference adapter and at an adapter that exists in the registry', async () => {
+  test('the admin endpoint surfaces each template’s adapter ids exactly as the Pack list declares them', async () => {
     const response = await iroha.fetch(BASE)
     const body = (await response.json()) as TemplateListBody
+    // Iterate the built-in list (derived from the Provider Pack list) rather
+    // than branch per brand: every template the endpoint returns must surface
+    // the adapter ids its Pack declares. Adding a Pack needs no edit here.
+    const byId = new Map(BUILT_IN_PROVIDER_TEMPLATES.map((template) => [template.id, template]))
     for (const template of body.templates) {
-      // The Anthropic and Generic Anthropic-compatible templates point at the
-      // typed Anthropic adapter; every other built-in template uses the
-      // generic one (except DashScope and MiniMax which have their own).
-      if (template.id === 'anthropic' || template.id === 'generic-anthropic-compatible') {
-        expect(template.inferenceAdapterId).toBe('anthropic-inference-adapter')
-      } else if (template.id === 'dashscope') {
-        expect(template.inferenceAdapterId).toBe('dashscope-inference-adapter')
-      } else if (template.id === 'MiniMax') {
-        expect(template.inferenceAdapterId).toBe('minimax-inference-adapter')
-      } else if (template.id === 'zai') {
-        expect(template.inferenceAdapterId).toBe('zai-inference-adapter')
-      } else {
-        expect(template.inferenceAdapterId).toBe('generic-inference-adapter')
-      }
-      expect(template.usageAdapterId).not.toBe('')
-    }
-    // MiniMax and Z.ai ship typed Usage Adapters for their subscription APIs.
-    const minimax = body.templates.find((template) => template.id === 'MiniMax')
-    expect(minimax?.usageAdapterId).toBe('minimax-usage-adapter')
-    expect(body.templates.find((template) => template.id === 'zai')?.usageAdapterId).toBe('zai-usage-adapter')
-    const other = body.templates.filter((template) => template.id !== 'MiniMax' && template.id !== 'zai')
-    for (const template of other) {
-      expect(template.usageAdapterId).toBe('reactive-only-usage-adapter')
+      const source = byId.get(template.id)
+      expect(source).toBeDefined()
+      expect(template.inferenceAdapterId).not.toBe('')
+      expect(template.inferenceAdapterId).toBe(source!.inferenceAdapterId)
+      expect(template.usageAdapterId).toBe(source!.usageAdapterId ?? null)
     }
   })
 
@@ -105,19 +91,15 @@ describe('the Provider Templates admin endpoint', () => {
     expect(openai?.knownModels).toContain('gpt-4o-mini')
   })
 
-  test('every branded template carries its brand identity; the generic default carries none', async () => {
+  test('the admin endpoint surfaces each template’s brand exactly as the Pack list declares it', async () => {
     const response = await iroha.fetch(BASE)
     const body = (await response.json()) as TemplateListBody
-    const byId = new Map(body.templates.map((template) => [template.id, template]))
-
-    const openai = byId.get('openai')
-    expect(openai?.brand).toEqual({ domain: 'openai.com', accentColor: '#10A37F' })
-    const openrouter = byId.get('openrouter')
-    expect(openrouter?.brand).toEqual({ domain: 'openrouter.ai', accentColor: '#3D55E6' })
-    const MiniMax = byId.get('MiniMax')
-    expect(MiniMax?.brand).toEqual({ domain: 'minimax.io', accentColor: '#F43F5E' })
-    const generic = byId.get('generic-openai-compatible')
-    expect(generic?.brand).toBeNull()
+    // Iterate rather than branch per brand: each returned template's brand must
+    // match what its Pack declares (null for the generic defaults).
+    const byId = new Map(BUILT_IN_PROVIDER_TEMPLATES.map((template) => [template.id, template]))
+    for (const template of body.templates) {
+      expect(template.brand).toEqual(byId.get(template.id)?.brand ?? null)
+    }
   })
 
   test('requires the Owner session', async () => {

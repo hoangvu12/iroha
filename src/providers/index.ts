@@ -51,12 +51,9 @@ export {
   type UpstreamKeyProbe,
 } from './key-probe.ts'
 export {
-  ANTHROPIC_INFERENCE_ADAPTER_ID,
   BUILT_IN_PROVIDER_TEMPLATES,
   findBuiltInTemplate,
   GENERIC_INFERENCE_ADAPTER_ID,
-  MINIMAX_USAGE_ADAPTER_ID,
-  ZAI_USAGE_ADAPTER_ID,
   REACTIVE_ONLY_USAGE_ADAPTER_ID,
   type ProviderTemplate,
   type ProviderTemplateBrand,

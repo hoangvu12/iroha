@@ -16,7 +16,6 @@ import {
 import type { GatewayKeyRegistry, InferenceAuthorization } from '../keys/index.ts'
 import type { ModelCatalogService } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
-import { ANTHROPIC_INFERENCE_ADAPTER_ID } from '../providers/templates.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import type { InferenceTarget, ProviderRegistry } from '../providers/index.ts'
 import type { MetricsCollector } from '../metrics/metrics.ts'
@@ -1172,7 +1171,7 @@ async function forwardAnthropicMessages(options: {
     })
     if (corsPreflight !== null) return corsPreflight
 
-    const anthropicAdapter = adapterRegistry?.inferenceAdapter(ANTHROPIC_INFERENCE_ADAPTER_ID) ?? null
+    const anthropicAdapter = adapterRegistry?.anthropicMessagesTranslator() ?? null
     if (anthropicAdapter === null || anthropicAdapter.forwardAnthropic === undefined) {
       return anthropicMessagesErrorResponse(
         404,

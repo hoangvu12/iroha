@@ -71,6 +71,7 @@ import {
   useProvider,
   useProviderUsage,
   usePurgeProvider,
+  useRefreshCatalog,
   useRefreshUsage,
   useRemoveKey,
   useRequestHistory,
@@ -80,7 +81,6 @@ import {
 } from '@/lib/use-providers'
 import type { BulkKeyEntry } from '@/lib/parse-bulk-keys'
 import { type RequestEventView } from '@/lib/requests'
-import { refreshCatalog } from '@/lib/catalog'
 import { type UsageReadingView, type UsageView } from '@/lib/usage'
 import { formatTime as formatTimeWithUtc } from '@/lib/time'
 
@@ -336,6 +336,7 @@ function ProviderActions({
   const archive = useArchiveProvider(csrfToken)
   const duplicate = useDuplicateProvider(csrfToken)
   const purge = usePurgeProvider(csrfToken)
+  const catalog = useRefreshCatalog(csrfToken)
   const archived = provider.archived
   const target = { id: provider.id, displayName: provider.displayName }
 
@@ -367,7 +368,9 @@ function ProviderActions({
           size="sm"
           disabled={archived}
           successLabel="Refreshed"
-          onClick={() => refreshCatalog(provider.id, csrfToken)}
+          onClick={() =>
+            catalog.mutateAsync({ id: provider.id, displayName: provider.displayName })
+          }
         >
           <RefreshCcw className="size-3.5" aria-hidden /> Refresh catalog
         </StatefulButton>

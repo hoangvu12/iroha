@@ -35,6 +35,7 @@ import {
   type ProviderView,
   type UpstreamAccountView,
 } from './providers.ts'
+import { refreshCatalog } from './catalog.ts'
 import { fetchRequests, type RequestFilter } from './requests.ts'
 import { fetchUsage, refreshUsage } from './usage.ts'
 
@@ -145,6 +146,23 @@ interface ProviderMutation<TVariables, TResult> {
       current: ProviderView,
       variables: TVariables,
     ) => ProviderView | typeof REMOVED
+    /**
+     * How to undo the patch, for a mutation whose reach is narrower than the
+     * cache entry it writes.
+     *
+     * A Provider's Upstream Keys are separate rows sharing one `ProviderView`,
+     * and a row only disables its *own* actions, so the Owner can disable two
+     * Keys in quick succession. If the first then fails, putting the whole
+     * snapshot back would silently revoke the second Key's patch too. Given the
+     * view as the cache now holds it and the view the patch was computed from,
+     * this puts back only what this mutation touched. Mutations that own the
+     * whole Provider leave it out and the snapshot is restored wholesale.
+     */
+    readonly rollback?: (
+      current: ProviderView,
+      before: ProviderView,
+      variables: TVariables,
+    ) => ProviderView
   }
   /** The authoritative view the response carries, for the responses that carry one. */
   readonly viewOfResult?: (result: TResult) => ProviderView
@@ -155,6 +173,8 @@ interface ProviderSnapshot {
   readonly providerId: string
   readonly list: readonly ProviderView[] | undefined
   readonly detail: ProviderView | undefined
+  /** The Provider the patch was computed from, whichever entry supplied it. */
+  readonly before: ProviderView | undefined
 }
 
 /**
@@ -180,14 +200,11 @@ function useProviderMutation<TVariables, TResult>(
       // reaches the list and every detail read in flight.
       await queryClient.cancelQueries({ queryKey: queryKeys.providers() })
 
-      const snapshot: ProviderSnapshot = {
-        providerId,
-        list: queryClient.getQueryData<readonly ProviderView[]>(queryKeys.providers()),
-        detail: queryClient.getQueryData<ProviderView>(queryKeys.provider(providerId)),
-      }
+      const list = queryClient.getQueryData<readonly ProviderView[]>(queryKeys.providers())
+      const detail = queryClient.getQueryData<ProviderView>(queryKeys.provider(providerId))
+      const current = detail ?? list?.find((provider) => provider.id === providerId)
+      const snapshot: ProviderSnapshot = { providerId, list, detail, before: current }
 
-      const current =
-        snapshot.detail ?? snapshot.list?.find((provider) => provider.id === providerId)
       // Nothing cached to predict from; the response fills both keys in.
       if (current === undefined) return snapshot
 
@@ -198,10 +215,12 @@ function useProviderMutation<TVariables, TResult>(
           (list: readonly ProviderView[] | undefined) =>
             list?.filter((provider) => provider.id !== providerId),
         )
-        // The detail entry is left alone deliberately: dropping it while the
-        // detail screen is still mounted would send the screen straight back
-        // for a Provider that is on its way out. It navigates away on success
-        // and the entry ages out unobserved.
+        // The detail entry is dropped rather than patched. Leaving it would let
+        // `onSettled`'s prefix invalidation refetch a Provider that is on its way
+        // out and answer `404` on the screen still showing it; removing it takes
+        // the entry out of the invalidation's reach. `onDeleted` navigates away,
+        // and a rollback puts the entry back if the purge is refused.
+        queryClient.removeQueries({ queryKey: queryKeys.provider(providerId), exact: true })
         return snapshot
       }
 
@@ -210,7 +229,23 @@ function useProviderMutation<TVariables, TResult>(
     },
 
     onError(cause, variables, snapshot) {
-      if (snapshot !== undefined) restoreProviders(queryClient, snapshot)
+      if (snapshot !== undefined) {
+        const narrow = mutation.optimistic?.rollback
+        const before = snapshot.before
+        if (narrow !== undefined && before !== undefined) {
+          // Undo only this mutation's own reach, reading whatever the cache holds
+          // now — a sibling row's prediction may have landed in between.
+          const held = queryClient.getQueryData<ProviderView>(queryKeys.provider(before.id))
+          const current =
+            held ??
+            queryClient
+              .getQueryData<readonly ProviderView[]>(queryKeys.providers())
+              ?.find((provider) => provider.id === before.id)
+          writeProviderView(queryClient, narrow(current ?? before, before, variables))
+        } else {
+          restoreProviders(queryClient, snapshot)
+        }
+      }
       toast.error(mutation.failureTitle(variables), {
         description: toApiError(cause).message,
       })
@@ -253,7 +288,29 @@ function restoreProviders(queryClient: QueryClient, snapshot: ProviderSnapshot):
   }
   if (snapshot.detail !== undefined) {
     queryClient.setQueryData(queryKeys.provider(snapshot.providerId), snapshot.detail)
+    return
   }
+  // There was no detail entry to put back, but `writeProviderView` created one
+  // holding the prediction. Restoring nothing would leave the refused state
+  // cached: `onSettled` marks an inactive entry stale without refetching it, and
+  // both `ensureQueryData` callers serve stale data as a hit — so opening the
+  // Provider would paint what the Gateway had just refused.
+  queryClient.removeQueries({ queryKey: queryKeys.provider(snapshot.providerId), exact: true })
+}
+
+/**
+ * Puts one Upstream Key back as it was, leaving every other Key on the Provider
+ * as the cache now holds it. Re-inserted at its old index so a rollback does not
+ * reorder the Owner's list.
+ */
+function restoreKey(current: ProviderView, before: ProviderView, keyId: string): ProviderView {
+  const original = before.keys.find((key) => key.id === keyId)
+  const others = current.keys.filter((key) => key.id !== keyId)
+  if (original === undefined) return { ...current, keys: others }
+
+  const keys = [...others]
+  keys.splice(Math.min(before.keys.findIndex((key) => key.id === keyId), keys.length), 0, original)
+  return { ...current, keys }
 }
 
 /** Replaces one Upstream Key on a cached Provider and leaves the others alone. */
@@ -301,7 +358,7 @@ export function useArchiveProvider(csrfToken: string) {
     optimistic: {
       providerId: (variables) => variables.id,
       // Archiving both stamps the Provider and takes it out of use
-      // (`provider-registry.ts:741`); predicting only `archived` would leave a
+      // (`provider-registry.ts:753`); predicting only `archived` would leave a
       // stale Enabled toggle on screen.
       patch: (current) => ({ ...current, archived: true, enabled: false }),
     },
@@ -355,7 +412,7 @@ export function useActivateKey(csrfToken: string) {
     optimistic: {
       providerId: (variables) => variables.providerId,
       // The Owner's say-so, recorded verbatim and scoped to the one Key
-      // (`provider-registry.ts:993`).
+      // (`provider-registry.ts:994`).
       patch: (current, variables) =>
         patchKey(current, variables.keyId, (key) => ({
           ...key,
@@ -366,6 +423,8 @@ export function useActivateKey(csrfToken: string) {
           healthScopeId: null,
           healthModel: null,
         })),
+      rollback: (current, before, variables) =>
+        restoreKey(current, before, variables.keyId),
     },
     viewOfResult: (view) => view,
   })
@@ -378,7 +437,7 @@ export function useDisableKey(csrfToken: string) {
     failureTitle: (variables) => `Could not disable key ${variables.keyId}`,
     optimistic: {
       providerId: (variables) => variables.providerId,
-      // Four fields, always these four (`provider-registry.ts:1013`), with the
+      // Six fields, always these six (`provider-registry.ts:1026`), with the
       // scope pointing at the Key the Owner disabled.
       patch: (current, variables) =>
         patchKey(current, variables.keyId, (key) => ({
@@ -390,6 +449,8 @@ export function useDisableKey(csrfToken: string) {
           healthScopeId: variables.keyId,
           healthModel: null,
         })),
+      rollback: (current, before, variables) =>
+        restoreKey(current, before, variables.keyId),
     },
     viewOfResult: (view) => view,
   })
@@ -407,6 +468,8 @@ export function useRemoveKey(csrfToken: string) {
         ...current,
         keys: current.keys.filter((key) => key.id !== variables.keyId),
       }),
+      rollback: (current, before, variables) =>
+        restoreKey(current, before, variables.keyId),
     },
     viewOfResult: (view) => view,
   })
@@ -426,6 +489,8 @@ export function useUpdateKeySettings(csrfToken: string) {
           // override when it has one, the Provider's base URL otherwise.
           return { ...next, effectiveBaseUrl: next.baseUrl ?? current.baseUrl }
         }),
+      rollback: (current, before, variables) =>
+        restoreKey(current, before, variables.keyId),
     },
     viewOfResult: (view) => view,
   })
@@ -590,6 +655,34 @@ export function useRefreshUsage(csrfToken: string) {
       toast.error(`Could not refresh usage for ${variables.displayName}`, {
         description: toApiError(cause).message,
       })
+    },
+    onSettled() {
+      // A usage refresh is not only a read: it records `usage.refreshed` and
+      // reconciles Key Health from the Provider's own entitlement surface
+      // (`src/usage/usage-service.ts`). Writing `['usage', id]` alone would leave
+      // the reconciled Key Health unseen until `staleTime` expired.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providers() })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.auditAll() })
+    },
+  })
+}
+
+/**
+ * Refreshing a Provider's model catalogue.
+ *
+ * Pending only — it reads the upstream's model list — but it is also an audited
+ * write (`model_catalog.refreshed`), so it reconciles like every other mutation
+ * here. The button it sits behind reports its own success and failure inline, so
+ * this raises no toast of its own.
+ */
+export function useRefreshCatalog(csrfToken: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (variables: ProviderTarget) => refreshCatalog(variables.id, csrfToken),
+    onSettled() {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providers() })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.auditAll() })
     },
   })
 }

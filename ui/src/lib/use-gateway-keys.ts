@@ -52,14 +52,14 @@ export function useGatewayKeys() {
   return useQuery(gatewayKeysQueryOptions())
 }
 
-interface OptimisticMutation<TVariables, TResult> {
-  readonly send: (variables: TVariables) => Promise<TResult>
+interface GatewayKeyMutation<TVariables, TResult> {
+  readonly perform: (variables: TVariables) => Promise<TResult>
   /** The list as it will read once the Gateway has stored the change. */
-  readonly predict: (keys: GatewayKeyList, variables: TVariables) => GatewayKeyList
-  /** The toast raised when the Gateway refuses, naming the Gateway Key it was about. */
-  readonly failure: (variables: TVariables) => string
-  /** The stored view the Gateway answered with, for mutations that answer with one. */
-  readonly stored?: (result: TResult) => GatewayKeyView
+  readonly patch: (keys: GatewayKeyList, variables: TVariables) => GatewayKeyList
+  /** The failure toast’s title, naming the Gateway Key the Owner acted on. */
+  readonly failureTitle: (variables: TVariables) => string
+  /** The authoritative view the response carries, for the responses that carry one. */
+  readonly viewOfResult?: (result: TResult) => GatewayKeyView
 }
 
 /** The list as it was before the patch, kept so a refusal can put it back. */
@@ -72,13 +72,13 @@ interface Rollback {
  * patch, then either keep the Gateway's own view of the row or put the snapshot
  * back and say which Gateway Key it was.
  */
-function useOptimisticGatewayKeyMutation<TVariables, TResult>(
-  mutation: OptimisticMutation<TVariables, TResult>,
+function useGatewayKeyMutation<TVariables, TResult>(
+  mutation: GatewayKeyMutation<TVariables, TResult>,
 ) {
   const client = useQueryClient()
 
-  return useMutation<TResult, unknown, TVariables, Rollback>({
-    mutationFn: mutation.send,
+  return useMutation<TResult, Error, TVariables, Rollback>({
+    mutationFn: mutation.perform,
     async onMutate(variables) {
       // A read already in flight would land after the patch and redraw the row
       // as it was before the Owner acted.
@@ -87,7 +87,7 @@ function useOptimisticGatewayKeyMutation<TVariables, TResult>(
       if (previous !== undefined) {
         client.setQueryData<GatewayKeyList>(
           queryKeys.gatewayKeys(),
-          mutation.predict(previous, variables),
+          mutation.patch(previous, variables),
         )
       }
       return { previous }
@@ -96,10 +96,10 @@ function useOptimisticGatewayKeyMutation<TVariables, TResult>(
       if (context?.previous !== undefined) {
         client.setQueryData<GatewayKeyList>(queryKeys.gatewayKeys(), context.previous)
       }
-      toast.error(mutation.failure(variables), { description: describe(cause) })
+      toast.error(mutation.failureTitle(variables), { description: describe(cause) })
     },
     onSuccess(result) {
-      const stored = mutation.stored?.(result)
+      const stored = mutation.viewOfResult?.(result)
       if (stored === undefined) return
       client.setQueryData<GatewayKeyList>(queryKeys.gatewayKeys(), (keys) =>
         keys?.map((key) => (key.id === stored.id ? stored : key)),
@@ -110,12 +110,12 @@ function useOptimisticGatewayKeyMutation<TVariables, TResult>(
 }
 
 export function useUpdateGatewayKey(csrfToken: string) {
-  return useOptimisticGatewayKeyMutation<
+  return useGatewayKeyMutation<
     { readonly id: string; readonly edit: GatewayKeyEdit },
     GatewayKeyView
   >({
-    send: ({ id, edit }) => updateGatewayKey(id, { ...edit }, csrfToken),
-    predict: (keys, { id, edit }) =>
+    perform: ({ id, edit }) => updateGatewayKey(id, { ...edit }, csrfToken),
+    patch: (keys, { id, edit }) =>
       keys.map((key) =>
         key.id === id
           ? {
@@ -133,30 +133,30 @@ export function useUpdateGatewayKey(csrfToken: string) {
             }
           : key,
       ),
-    failure: ({ edit }) => `Could not save Gateway Key “${edit.name}”.`,
-    stored: (view) => view,
+    failureTitle: ({ edit }) => `Could not save Gateway Key ${edit.name}`,
+    viewOfResult: (view) => view,
   })
 }
 
 export function useRevokeGatewayKey(csrfToken: string) {
-  return useOptimisticGatewayKeyMutation<
+  return useGatewayKeyMutation<
     { readonly id: string; readonly name: string },
     GatewayKeyView
   >({
-    send: ({ id }) => revokeGatewayKey(id, csrfToken),
-    predict: (keys, { id }) => keys.map((key) => (key.id === id ? { ...key, revoked: true } : key)),
-    failure: ({ name }) => `Could not revoke Gateway Key “${name}”.`,
-    stored: (view) => view,
+    perform: ({ id }) => revokeGatewayKey(id, csrfToken),
+    patch: (keys, { id }) => keys.map((key) => (key.id === id ? { ...key, revoked: true } : key)),
+    failureTitle: ({ name }) => `Could not revoke Gateway Key ${name}`,
+    viewOfResult: (view) => view,
   })
 }
 
 export function useDeleteGatewayKey(csrfToken: string) {
   // Deletion answers with no body, so there is nothing to write back; the row
   // stays gone on the strength of the patch until the settle invalidation.
-  return useOptimisticGatewayKeyMutation<{ readonly id: string; readonly name: string }, void>({
-    send: ({ id }) => deleteGatewayKey(id, csrfToken),
-    predict: (keys, { id }) => keys.filter((key) => key.id !== id),
-    failure: ({ name }) => `Could not delete Gateway Key “${name}”.`,
+  return useGatewayKeyMutation<{ readonly id: string; readonly name: string }, void>({
+    perform: ({ id }) => deleteGatewayKey(id, csrfToken),
+    patch: (keys, { id }) => keys.filter((key) => key.id !== id),
+    failureTitle: ({ name }) => `Could not delete Gateway Key ${name}`,
   })
 }
 

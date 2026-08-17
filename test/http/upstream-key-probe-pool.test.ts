@@ -202,11 +202,12 @@ describe('probing Upstream Keys through a bounded pool', () => {
 
     await createProvider(keySet(KEY_COUNT))
 
-    // The bound is the point: twelve keys must not become twelve simultaneous
-    // authentication attempts on one upstream.
-    expect(probe.maxInFlight).toBeLessThanOrEqual(POOL_SIZE)
-    // And the pool is genuinely concurrent, not a sequential loop in disguise.
-    expect(probe.maxInFlight).toBeGreaterThan(1)
+    // Exactly five, asserted in both directions from one number. Twelve keys must
+    // not become twelve simultaneous authentication attempts on one upstream, and
+    // `toBeLessThanOrEqual` alone would also pass a pool of two — `releaseAt`
+    // only fires once five overlap, so a narrower pool never reaches this number
+    // and a wider one overshoots it.
+    expect(probe.maxInFlight).toBe(POOL_SIZE)
   })
 
   test('probes each Key against its own effective base URL', async () => {
@@ -273,33 +274,33 @@ describe('probing Upstream Keys through a bounded pool', () => {
     expect(current.keys.filter((key) => key.health === 'invalid_authentication')).toHaveLength(1)
   })
 
-  test('adding a Key to a Provider holding Unverified Keys costs a fraction of the sequential pass', async () => {
-    const PROBE_COST_MS = 30
-    await start(watchedProbe({ delayMs: PROBE_COST_MS }))
+  test('adding a Key to a Provider holding Unverified Keys overlaps the whole pass', async () => {
+    // What makes `addKey` faster is that its pass is KEY_COUNT / POOL_SIZE round
+    // trips deep instead of KEY_COUNT. That depth is asserted through the observed
+    // overlap rather than a stopwatch: the pass also pays a fixed cost this test
+    // does not model — one AES decryption and one row write per Key — which on a
+    // cold run is larger than the simulated probe latency it would be compared
+    // against, so an elapsed-time threshold fails on a cold suite and passes on a
+    // warm one. Overlap is the mechanism, and it is deterministic.
+    await start(watchedProbe({ releaseAt: POOL_SIZE }))
 
     const created = await createProvider([{ upstreamKey: 'sk-first-key' }])
     await seedUnverifiedKeys(created.id, KEY_COUNT - 1)
     const before = probe.calls.length
 
-    const started = Bun.nanoseconds()
     const added = await iroha.fetch(`${BASE}/${created.id}/keys`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ upstreamKey: 'sk-added-key' }),
       csrf,
     })
-    const elapsedMs = (Bun.nanoseconds() - started) / 1_000_000
 
     expect(added.status).toBe(201)
-    // The pass covered the seeded keys plus the new one.
+    // The pass covered the seeded keys plus the new one, each exactly once.
     expect(probe.calls.length - before).toBe(KEY_COUNT)
-
-    // Sequentially this pass cost KEY_COUNT round trips; through a pool of five
-    // it costs ceil(KEY_COUNT / 5). The threshold sits well above the ideal so a
-    // loaded machine does not fail the run, and well below the sequential cost so
-    // a regression to the loop does.
-    const sequentialMs = KEY_COUNT * PROBE_COST_MS
-    expect(elapsedMs).toBeLessThan(sequentialMs * 0.6)
+    // And it ran them five wide, so the Owner waited on ceil(KEY_COUNT / 5)
+    // sequential probes rather than KEY_COUNT of them.
+    expect(probe.maxInFlight).toBe(POOL_SIZE)
 
     const current = await view(created.id)
     // The Provider's own key, the seeded Unverified ones, and the new one.

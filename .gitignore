@@ -11,6 +11,12 @@ data/
 # Runtime logs. `bun run dev` rewrites these on every start.
 *.log
 
+# Ad-hoc request bodies used when probing an upstream by hand.
+/longctx.json
+/needle.json
+/navy_needle.json
+/t.json
+
 # Real secrets. `.env.example` is the tracked template.
 .env
 .env.local

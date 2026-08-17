@@ -55,7 +55,7 @@ export function useClearAudit(csrfToken: string) {
   return useMutation({
     mutationFn: () => clearAudit(csrfToken),
     onError(cause) {
-      toast.error('Could not clear the audit feed.', {
+      toast.error('Could not clear the audit feed', {
         description: toApiError(cause).message,
       })
     },

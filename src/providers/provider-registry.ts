@@ -1686,7 +1686,7 @@ export class ProviderRegistry {
   }
 
   /**
-   * Tests every unverified key of one connection the way creation and
+   * Tests every Unverified Upstream Key of one Provider the way creation and
    * duplication do, at most {@link PROBE_CONCURRENCY} at a time.
    *
    * Order is deliberately undefined: each key carries its own base URL and its
@@ -1697,8 +1697,8 @@ export class ProviderRegistry {
     const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return
 
-    // Listed once — `bulkAddKeys` counts on one probe pass reading the pool a
-    // single time, however many keys it inserted.
+    // One snapshot the workers share: the pass probes the keys that were
+    // Unverified when it began, not whatever the pool sees as verdicts land.
     const unverified = (await this.#database.providers.listKeys(providerId)).filter(
       (key) => key.health === 'unverified',
     )

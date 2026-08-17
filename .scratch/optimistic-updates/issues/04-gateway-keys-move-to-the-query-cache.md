@@ -6,7 +6,7 @@ The edit path uses optimistic concurrency: the server accepts a `revision` and s
 
 **Blocked by:** 02
 
-**Status:** done
+**Status:** complete
 
 - [x] `gateway-keys-area` reads from `['gateway-keys']`.
 - [x] `updateGatewayKey`, `revokeGatewayKey` and `deleteGatewayKey` apply optimistically and roll back on failure.

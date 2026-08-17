@@ -17,6 +17,11 @@
  * cannot give. The same is true of Usage Adapters: only Providers with a
  * documented entitlement API get a typed adapter; everyone else is honest
  * reactive-only.
+ *
+ * The built-in templates themselves are no longer declared here: each belongs
+ * to a Provider Pack under `packs/`, and the built-in list is derived from the
+ * Pack list (ADR-0019). This module keeps the Provider Template type and
+ * re-exports the derived list so existing importers are unchanged.
  */
 
 import type { ProviderCapabilities } from '../persistence/index.ts'
@@ -37,55 +42,21 @@ import type { ProviderCapabilities } from '../persistence/index.ts'
  */
 export type ProviderWireFormat = 'openai' | 'anthropic'
 
-/**
- * The well-known Inference Adapter id the generic Inference Adapter is
- * registered under. Built-in templates reference it; the Adapter Registry
- * asserts it exists at startup.
- */
-export const GENERIC_INFERENCE_ADAPTER_ID = 'generic-inference-adapter'
-
-/**
- * The well-known Inference Adapter id the typed Anthropic Inference Adapter
- * is registered under. The `anthropic` Provider Template references it;
- * the Adapter Registry asserts it exists at startup.
- */
-export const ANTHROPIC_INFERENCE_ADAPTER_ID = 'anthropic-inference-adapter'
-
-/** Typed DashScope adapter for provider-specific content-inspection retries. */
-export const DASHSCOPE_INFERENCE_ADAPTER_ID = 'dashscope-inference-adapter'
-
-/** Typed MiniMax adapter for structured text-capacity failure evidence. */
-export const MINIMAX_INFERENCE_ADAPTER_ID = 'minimax-inference-adapter'
-
-/** Typed Z.ai (Zhipu / BigModel) adapter for documented error-code capacity evidence. */
-export const ZAI_INFERENCE_ADAPTER_ID = 'zai-inference-adapter'
-
-/**
- * The well-known Usage Adapter id the reactive-only generic Usage Adapter is
- * registered under. Built-in templates that have no documented entitlement
- * API point at it; the Adapter Registry asserts it exists at startup.
- */
-export const REACTIVE_ONLY_USAGE_ADAPTER_ID = 'reactive-only-usage-adapter'
-
-/**
- * The well-known Usage Adapter id the MiniMax typed Usage Adapter is
- * registered under. The MiniMax Provider Template points at it because
- * MiniMax exposes a documented entitlement API at
- * `/v1/api/openplatform/coding_plan/remains` and `/account/query_balance`
- * reachable with the same bearer key as inference.
- */
-export const MINIMAX_USAGE_ADAPTER_ID = 'minimax-usage-adapter'
-
-/** Authoritative GLM Coding Plan quota adapter shared by Z.ai and BigModel. */
-export const ZAI_USAGE_ADAPTER_ID = 'zai-usage-adapter'
-
-/**
- * The id of the Generic OpenAI-compatible Provider Template, the default Iroha
- * seeds a new Provider Connection with when the Owner names no template. It
- * carries no brand and no inferred capability defaults, so a bare create stays
- * honest: safe OpenAI-shaped defaults, nothing assumed.
- */
-export const GENERIC_PROVIDER_TEMPLATE_ID = 'generic-openai-compatible'
+// The adapter and template id constants live in a dependency-free leaf module
+// so a Provider Pack can name the id it carries without closing an import cycle
+// back through this file. They are re-exported here so existing importers of
+// `templates.ts` are unchanged.
+export {
+  GENERIC_INFERENCE_ADAPTER_ID,
+  ANTHROPIC_INFERENCE_ADAPTER_ID,
+  DASHSCOPE_INFERENCE_ADAPTER_ID,
+  MINIMAX_INFERENCE_ADAPTER_ID,
+  ZAI_INFERENCE_ADAPTER_ID,
+  REACTIVE_ONLY_USAGE_ADAPTER_ID,
+  MINIMAX_USAGE_ADAPTER_ID,
+  ZAI_USAGE_ADAPTER_ID,
+  GENERIC_PROVIDER_TEMPLATE_ID,
+} from './adapter-ids.ts'
 
 /**
  * The brand identity of a Provider Template: the upstream domain logo.dev
@@ -167,226 +138,6 @@ export interface ProviderTemplate {
   readonly brand: ProviderTemplateBrand | null
 }
 
-/**
- * The built-in Provider Templates Iroha ships with. Order is the order the
- * Owner sees in the picker; the generic default comes first so the Owner is
- * never nudged toward a brand when a compatible service will do.
- */
-export const BUILT_IN_PROVIDER_TEMPLATES: readonly ProviderTemplate[] = [
-  {
-    id: GENERIC_PROVIDER_TEMPLATE_ID,
-    wireFormat: 'openai',
-    displayName: 'Generic OpenAI-compatible',
-    description:
-      'A safe default for any OpenAI-shaped service Iroha does not know by brand. Bearer authentication, no inferred capability defaults, and reactive-only entitlement visibility.',
-    baseUrl: 'https://api.example.com/v1',
-    authHeader: 'authorization',
-    authPrefix: 'Bearer ',
-    capabilities: {
-      chat: false,
-      streaming: false,
-      tools: false,
-      structuredOutput: false,
-      responses: false,
-    },
-    knownModels: [],
-    inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
-    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
-    brand: null,
-  },
-  {
-    id: 'generic-anthropic-compatible',
-    wireFormat: 'anthropic',
-    displayName: 'Generic Anthropic-compatible',
-    description:
-      'A safe default for any Anthropic-shaped service Iroha does not know by brand. x-api-key authentication, no inferred capability defaults, and reactive-only entitlement visibility.',
-    baseUrl: 'https://api.example.com/v1',
-    authHeader: 'x-api-key',
-    authPrefix: '',
-    capabilities: {
-      chat: false,
-      streaming: false,
-      tools: false,
-      structuredOutput: false,
-      responses: false,
-    },
-    knownModels: [],
-    inferenceAdapterId: ANTHROPIC_INFERENCE_ADAPTER_ID,
-    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
-    brand: null,
-  },
-  {
-    id: 'openai',
-    wireFormat: 'openai',
-    displayName: 'OpenAI',
-    description:
-      'OpenAI’s public OpenAI-compatible surface. Bearer authentication and the full capability set Iroha knows OpenAI supports.',
-    baseUrl: 'https://api.openai.com/v1',
-    authHeader: 'authorization',
-    authPrefix: 'Bearer ',
-    capabilities: {
-      chat: true,
-      streaming: true,
-      tools: true,
-      structuredOutput: true,
-      responses: true,
-    },
-    knownModels: [
-      'gpt-4o',
-      'gpt-4o-mini',
-      'gpt-4.1',
-      'gpt-4.1-mini',
-      'gpt-4.1-nano',
-      'o1',
-      'o1-mini',
-      'o3',
-      'o3-mini',
-      'o4-mini',
-    ],
-    inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
-    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
-    brand: { domain: 'openai.com', accentColor: '#10A37F' },
-  },
-  {
-    id: 'openrouter',
-    wireFormat: 'openai',
-    displayName: 'OpenRouter',
-    description:
-      'OpenRouter’s OpenAI-compatible surface. Bearer authentication; the catalog merges whatever OpenRouter reports on refresh.',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    authHeader: 'authorization',
-    authPrefix: 'Bearer ',
-    capabilities: {
-      chat: true,
-      streaming: true,
-      tools: true,
-      structuredOutput: true,
-      responses: false,
-    },
-    knownModels: [],
-    inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
-    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
-    brand: { domain: 'openrouter.ai', accentColor: '#3D55E6' },
-  },
-  {
-    id: 'dashscope',
-    wireFormat: 'openai',
-    displayName: 'DashScope',
-    description:
-      'Alibaba Cloud DashScope international OpenAI-compatible endpoint with bounded recovery from intermittent content-inspection failures.',
-    baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-    authHeader: 'authorization',
-    authPrefix: 'Bearer ',
-    capabilities: {
-      chat: true,
-      streaming: true,
-      tools: true,
-      structuredOutput: true,
-      responses: false,
-    },
-    knownModels: [
-      'qwen3-coder-next',
-      'qwen3-coder-plus',
-      'qwen3-max-2026-01-23',
-      'qwen3.5-plus',
-      'qwen3.6-plus',
-      'qwen3.7-plus',
-    ],
-    inferenceAdapterId: DASHSCOPE_INFERENCE_ADAPTER_ID,
-    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
-    brand: { domain: 'alibabacloudmail.com', accentColor: '#FF6A00' },
-  },
-  {
-    id: 'MiniMax',
-    wireFormat: 'openai',
-    displayName: 'MiniMax',
-    description:
-      'MiniMax’s OpenAI-compatible endpoint. Bearer authentication; supports chat completions, streaming, tools, and the OpenAI Responses API. Entitlement polls chain the MiniMax coding-plan and credit endpoints.',
-    baseUrl: 'https://api.minimax.io/v1',
-    authHeader: 'authorization',
-    authPrefix: 'Bearer ',
-    capabilities: {
-      chat: true,
-      streaming: true,
-      tools: true,
-      structuredOutput: false,
-      responses: true,
-    },
-    knownModels: [
-      'MiniMax-M3',
-      'MiniMax-M2.7',
-      'MiniMax-M2.7-highspeed',
-      'MiniMax-M2.5',
-      'MiniMax-M2.5-highspeed',
-      'MiniMax-M2.1',
-      'MiniMax-M2.1-highspeed',
-      'MiniMax-M2',
-    ],
-    inferenceAdapterId: MINIMAX_INFERENCE_ADAPTER_ID,
-    usageAdapterId: MINIMAX_USAGE_ADAPTER_ID,
-    brand: { domain: 'minimax.io', accentColor: '#F43F5E' },
-  },
-  {
-    id: 'anthropic',
-    wireFormat: 'anthropic',
-    displayName: 'Anthropic',
-    description:
-      'Anthropic’s first-party API. Authentication uses the `x-api-key` header; the typed Anthropic Inference Adapter translates OpenAI-shape requests and responses to and from the Anthropic Messages envelope.',
-    baseUrl: 'https://api.anthropic.com/v1',
-    authHeader: 'x-api-key',
-    authPrefix: '',
-    capabilities: {
-      chat: true,
-      streaming: true,
-      tools: true,
-      structuredOutput: true,
-      responses: true,
-    },
-    knownModels: [
-      'anthropic-opus-5',
-      'anthropic-sonnet-5',
-      'anthropic-fable-5',
-      'anthropic-mythos-5',
-      'anthropic-opus-4-8',
-      'anthropic-opus-4-7',
-      'anthropic-mythos-preview',
-      'anthropic-opus-4-6',
-      'anthropic-sonnet-4-6',
-      'anthropic-haiku-4-5',
-      'anthropic-haiku-4-5-20251001',
-      'anthropic-opus-4-5',
-      'anthropic-opus-4-5-20251101',
-      'anthropic-sonnet-4-5',
-      'anthropic-sonnet-4-5-20250929',
-    ],
-    inferenceAdapterId: ANTHROPIC_INFERENCE_ADAPTER_ID,
-    usageAdapterId: REACTIVE_ONLY_USAGE_ADAPTER_ID,
-    brand: { domain: 'anthropic.com', accentColor: '#D97757' },
-  },
-  {
-    id: 'zai',
-    wireFormat: 'openai',
-    displayName: 'Z.ai / BigModel',
-    description:
-      'Zhipu AI GLM Coding Plan via Z.ai. Override the base URL with https://open.bigmodel.cn/api/coding/paas/v4 for a mainland BigModel key; subscription quota is read per key, while pay-as-you-go credit remains unavailable.',
-    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-    authHeader: 'authorization',
-    authPrefix: 'Bearer ',
-    capabilities: {
-      chat: true,
-      streaming: true,
-      tools: true,
-      structuredOutput: false,
-      responses: false,
-    },
-    knownModels: ['glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air'],
-    inferenceAdapterId: ZAI_INFERENCE_ADAPTER_ID,
-    usageAdapterId: ZAI_USAGE_ADAPTER_ID,
-    brand: { domain: 'z.ai', accentColor: '#0EA5E9' },
-  },
-]
-
-/** Looks one template up by id. Returns null when the id is unknown. */
-export function findBuiltInTemplate(id: string): ProviderTemplate | null {
-  return BUILT_IN_PROVIDER_TEMPLATES.find((template) => template.id === id) ?? null
-}
+// The built-in Provider Templates are derived from the built-in Provider Pack
+// list (ADR-0019) and re-exported here so existing importers are unchanged.
+export { BUILT_IN_PROVIDER_TEMPLATES, findBuiltInTemplate } from './packs/index.ts'

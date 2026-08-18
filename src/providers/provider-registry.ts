@@ -233,6 +233,15 @@ const TIMEOUT_MAXIMUM_MS = 600_000
 const STATIC_HEADERS_BLANK = '[]'
 
 /**
+ * How long a key parked for a billing condition waits before it is worth one
+ * controlled trial, when the Provider named no retry time of its own. Long
+ * enough that an unpaid account stops costing Requests a wasted Attempt every
+ * minute, short enough that settling the bill is noticed without an Owner
+ * Refresh.
+ */
+const PAYMENT_REQUIRED_RECHECK_SECONDS = 900
+
+/**
  * How many Upstream Keys one probe pass tests at the same time.
  *
  * Sequential probing made every mutation that adds a key pay one upstream round
@@ -1709,6 +1718,34 @@ export class ProviderRegistry {
             at,
           ),
         ),
+      )
+      return
+    }
+    if (classification.kind === 'payment_required') {
+      // A Provider that names a billing condition has said something durable
+      // about this credential: it will not serve again until the Owner settles
+      // the account. Only an Inference Adapter that read that from the
+      // Provider's own error envelope may claim it, so the reading must arrive
+      // as key-scoped exhaustion Capacity Evidence; a status-derived
+      // `payment_required` from the legacy path still changes nothing.
+      if (
+        input.classification === undefined ||
+        classification.capacityScope !== 'key' ||
+        classification.capacityEvidence?.availability !== 'exhausted'
+      ) {
+        return
+      }
+      // Billing does not clear on a timer, so a Provider rarely sends
+      // `Retry-After` with one. The cooldown exists to bound how often a key
+      // that is out of credit costs a Request a wasted Attempt, not to predict
+      // when the Owner pays; expiry only earns the key one controlled trial.
+      const recheckAt = new Date(
+        at.getTime() + Math.max(1, classification.retryAfterSeconds ?? PAYMENT_REQUIRED_RECHECK_SECONDS) * 1000,
+      )
+      await this.#database.providers.updateKey(
+        key.id,
+        healthPatch('exhausted', input.reason, at, recheckAt, 'key', key.id, null),
+        at,
       )
       return
     }

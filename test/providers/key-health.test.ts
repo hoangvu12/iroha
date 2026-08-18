@@ -140,6 +140,73 @@ describe('durable scoped Key Health', () => {
     expect((await opened.database.providers.getKey(trial.value.keyId))?.health).toBe('active')
   })
 
+  describe('a Provider that named a billing condition', () => {
+    // DashScope answers an overdue account with 400 Arrearage, Z.ai with 1113,
+    // MiniMax with 402. Each is durable: the key will not serve again until
+    // the Owner settles the account, so leaving it `active` feeds a dead
+    // credential its full share of traffic until someone notices by hand.
+    const paymentRequired = (keyId: string, observedAt: Date) => ({
+      kind: 'payment_required' as const,
+      capacityScope: 'key' as const,
+      retryAction: 'try_alternate' as const,
+      retryAfterSeconds: null,
+      capacityEvidence: {
+        availability: 'exhausted' as const,
+        authority: 'provisional' as const,
+        scope: { kind: 'key' as const, keyId },
+        reason: 'credit_exhausted' as const,
+        observedAt,
+        freshUntil: observedAt,
+        recheckAt: null,
+        facts: {},
+        diagnostics: {},
+      },
+    })
+
+    test('parks the key and leaves the rest of the Provider serving', async () => {
+      await registry.recordInferenceFailure({
+        keyId: keyIds[0]!,
+        model: 'gpt-4o',
+        classification: paymentRequired(keyIds[0]!, clock.now()),
+        reason: 'upstream HTTP 400',
+      })
+
+      const stored = await opened.database.providers.getKey(keyIds[0]!)
+      expect(stored).toMatchObject({ health: 'exhausted', healthScope: 'key', healthScopeId: keyIds[0] })
+      const target = await registry.resolveInference(providerId, 'gpt-4o')
+      if (!target.ok) throw new Error(target.failure.code)
+      expect(target.value.keyId).toBe(keyIds[1]!)
+    })
+
+    test('offers the parked key one controlled trial once the cooldown expires', async () => {
+      await registry.disableKey(providerId, keyIds[1]!)
+      await registry.recordInferenceFailure({
+        keyId: keyIds[0]!,
+        model: 'gpt-4o',
+        classification: paymentRequired(keyIds[0]!, clock.now()),
+        reason: 'upstream HTTP 400',
+      })
+
+      // Billing does not clear on a timer, so the wait is Iroha's own.
+      expect((await registry.resolveInference(providerId, 'gpt-4o')).ok).toBe(false)
+      clock.advance(901)
+      expect((await registry.resolveInference(providerId, 'gpt-4o')).ok).toBe(true)
+    })
+
+    test('changes nothing when no adapter read it from the Provider', async () => {
+      // A bare status-derived reading is a guess about one response, not
+      // knowledge about the credential.
+      await registry.recordInferenceFailure({
+        keyId: keyIds[0]!,
+        model: 'gpt-4o',
+        status: 402,
+        reason: 'upstream HTTP 402',
+      })
+
+      expect((await opened.database.providers.getKey(keyIds[0]!))?.health).toBe('active')
+    })
+  })
+
   test('manual authentication never clears authoritative exhaustion', async () => {
     await registry.recordInferenceFailure({
       keyId: keyIds[0]!,

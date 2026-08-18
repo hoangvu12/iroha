@@ -261,6 +261,75 @@ describe('scoped inference retries', () => {
     expect(upstream.calls[0]?.headers.authorization).not.toBe(upstream.calls[1]?.headers.authorization)
   })
 
+  describe('a DashScope key whose account is overdue', () => {
+    // Observed in production: one key of a 14-key Provider fell into arrears
+    // and answered 400 Arrearage. Read as a generic 400 the Request stopped,
+    // so every caller that happened to land on that key saw a hard failure
+    // while thirteen healthy keys sat idle.
+    const arrearage = () => Response.json({
+      error: {
+        code: 'Arrearage',
+        type: 'Arrearage',
+        param: null,
+        message: 'Access denied, please make sure your account is in good standing.',
+      },
+      request_id: 'dashscope-request-id',
+    }, { status: 400 })
+
+    test('reaches an alternate key on a streaming call', async () => {
+      upstream.respondWith(() => (upstream.calls.length === 1 ? arrearage() : Response.json(completion())))
+
+      const response = await iroha.fetch(`/providers/${providerHandle}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+        body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }], stream: true }),
+      })
+
+      expect(response.status).toBe(200)
+      expect(upstream.calls).toHaveLength(2)
+      expect(upstream.calls[0]?.headers.authorization).not.toBe(upstream.calls[1]?.headers.authorization)
+    })
+
+    test('parks the overdue key so later Requests never pay for it again', async () => {
+      upstream.respondWith(() => (upstream.calls.length === 1 ? arrearage() : Response.json(completion())))
+
+      await chat()
+
+      const keys = await iroha.database.providers.listKeys(providerId)
+      expect(keys.map((key) => key.health).sort()).toEqual(['active', 'exhausted'])
+      const parked = keys.find((key) => key.health === 'exhausted')
+      expect(parked).toMatchObject({ healthScope: 'key', healthScopeId: parked?.id })
+      expect(parked?.retryAfterAt).not.toBeNull()
+    })
+
+    test('records why the Attempt failed without retaining the message', async () => {
+      upstream.respondWith(() => (upstream.calls.length === 1 ? arrearage() : Response.json(completion())))
+
+      const response = await chat()
+      const requestId = response.headers.get('x-request-id')!
+      const attempts = await iroha.database.requestHistory.getAttempts(requestId)
+
+      expect(attempts[0]?.diagnostics).toMatchObject({
+        status: 400,
+        providerCode: 'Arrearage',
+        classification: 'payment_required',
+        capacityScope: 'key',
+      })
+      expect(JSON.stringify(attempts[0]?.diagnostics)).not.toContain('good standing')
+    })
+
+    test('stops when the overdue key is the only one left', async () => {
+      // One alternate, not a walk of the whole Provider: an unpaid account is
+      // no reason to spend the retry budget on every remaining credential.
+      upstream.respondWith(arrearage)
+
+      const response = await chat()
+
+      expect(response.status).toBe(400)
+      expect(upstream.calls).toHaveLength(2)
+    })
+  })
+
   test('ambiguous network failure does not replay by default', async () => {
     upstream.respondWith(() => {
       throw new TypeError('connection reset')

@@ -25,6 +25,8 @@ import {
   type GatewayKeyScopeEntry,
   type KeyProbeVerdict,
   type ModelCatalogEntryRecord,
+  type KeyModelAvailabilityRecord,
+  type KeyModelAvailabilityRepository,
   type ModelCatalogRepository,
   type ModelCatalogSource,
   type ModelCatalogSyncRecord,
@@ -61,6 +63,7 @@ import {
   gatewayKeys,
   modelCatalogEntries,
   modelCatalogSync,
+  keyModelAvailability,
   owner,
   ownerSessions,
   providers,
@@ -97,6 +100,7 @@ class PostgresDatabase implements Database {
   readonly providers: ProviderRepository
   readonly gatewayKeys: GatewayKeyRepository
   readonly modelCatalog: ModelCatalogRepository
+  readonly keyModelAvailability: KeyModelAvailabilityRepository
   readonly usage: UsageRepository
   readonly requestHistory: RequestHistoryRepository
   readonly backgroundJobs: BackgroundJobRepository
@@ -114,6 +118,7 @@ class PostgresDatabase implements Database {
     this.providers = new PostgresProviderRepository(handle)
     this.gatewayKeys = new PostgresGatewayKeyRepository(handle)
     this.modelCatalog = new PostgresModelCatalogRepository(handle)
+    this.keyModelAvailability = new PostgresKeyModelAvailabilityRepository(handle)
     this.usage = new PostgresUsageRepository(handle)
     this.requestHistory = new PostgresRequestHistoryRepository(handle)
     this.backgroundJobs = new PostgresBackgroundJobRepository(handle)
@@ -147,6 +152,7 @@ class PostgresDatabase implements Database {
         providers: new PostgresProviderRepository(tx),
         gatewayKeys: new PostgresGatewayKeyRepository(tx),
         modelCatalog: new PostgresModelCatalogRepository(tx),
+        keyModelAvailability: new PostgresKeyModelAvailabilityRepository(tx),
         usage: new PostgresUsageRepository(tx),
         requestHistory: new PostgresRequestHistoryRepository(tx),
         backgroundJobs: new PostgresBackgroundJobRepository(tx),
@@ -1130,6 +1136,58 @@ function toSyncRecord(row: SyncRow): ModelCatalogSyncRecord {
     lastSuccessAt: row.lastSuccessAt,
     lastFailureAt: row.lastFailureAt,
     lastFailureMessage: row.lastFailureMessage,
+  }
+}
+
+class PostgresKeyModelAvailabilityRepository implements KeyModelAvailabilityRepository {
+  constructor(private readonly handle: Handle) {}
+
+  async listForProvider(providerId: string): Promise<readonly KeyModelAvailabilityRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(keyModelAvailability)
+      .where(eq(keyModelAvailability.providerId, providerId))
+    return rows.map(toKeyModelAvailability)
+  }
+
+  async put(record: Omit<KeyModelAvailabilityRecord, 'stale'>): Promise<void> {
+    const models = [...record.models]
+    await this.handle
+      .insert(keyModelAvailability)
+      .values({
+        keyId: record.keyId,
+        providerId: record.providerId,
+        models,
+        discoveredAt: record.discoveredAt,
+        stale: false,
+      })
+      .onConflictDoUpdate({
+        target: keyModelAvailability.keyId,
+        set: { providerId: record.providerId, models, discoveredAt: record.discoveredAt, stale: false },
+      })
+  }
+
+  async markStale(keyId: string): Promise<void> {
+    // Only the flag moves. Discarding the models here would erase the one
+    // usable answer we have and leave the key unrestricted (ADR-0023).
+    await this.handle
+      .update(keyModelAvailability)
+      .set({ stale: true })
+      .where(eq(keyModelAvailability.keyId, keyId))
+  }
+}
+
+type KeyModelAvailabilityRow = typeof keyModelAvailability.$inferSelect
+
+function toKeyModelAvailability(row: KeyModelAvailabilityRow): KeyModelAvailabilityRecord {
+  const models = row.models
+  return {
+    keyId: row.keyId,
+    providerId: row.providerId,
+    // A corrupt list must not break routing; an unreadable one reads as unknown.
+    models: Array.isArray(models) ? models.filter((entry): entry is string => typeof entry === 'string') : [],
+    discoveredAt: row.discoveredAt,
+    stale: row.stale,
   }
 }
 

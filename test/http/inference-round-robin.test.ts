@@ -134,6 +134,9 @@ describe('round-robin key selection on the inference path', () => {
     connection = await addKey(connection.id, 'sk-second-upstream-key-for-tests')
     connection = await addKey(connection.id, 'sk-third-upstream-key-for-tests')
     expect(connection.keys).toHaveLength(3)
+    // Adding a key discovers its Key Model Availability, which is an upstream
+    // call of its own. Only the rotation below is being counted here.
+    upstream.reset()
 
     const used: string[] = []
     for (let index = 0; index < 6; index++) {

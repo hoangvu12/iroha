@@ -8,6 +8,7 @@ import {
   type ProviderView,
   type UpstreamAccountView,
 } from '../providers/index.ts'
+import type { ModelCatalogService } from '../models/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import type {
   CreatedGatewayKey,
@@ -28,6 +29,13 @@ export interface AdminRoutesOptions {
    * leave the picker empty without the Owner noticing.
    */
   readonly adapterRegistry: AdapterRegistry
+  /**
+   * The Model Catalog, re-synchronized after an Upstream Key is added so a new
+   * key's Key Model Availability is known before it is ever routed to
+   * (ADR-0023). Optional: a harness that never adds keys need not supply it,
+   * and a key added without it is simply unrestricted until the next refresh.
+   */
+  readonly modelCatalog?: ModelCatalogService
 }
 
 /**
@@ -44,8 +52,25 @@ export function createAdminRoutes({
   providers,
   gatewayKeys,
   adapterRegistry,
+  modelCatalog,
 }: AdminRoutesOptions) {
   const guard = createOwnerGuard(identity)
+
+  /**
+   * Gives newly added Upstream Keys their Key Model Availability, so a key is
+   * routed by what it actually carries from its first Request rather than from
+   * the next background sync (ADR-0023). Costs one discovery GET per new key on
+   * a key-scoped Provider and nothing at all on any other. It never fails the
+   * add: the key is saved either way, and an undiscovered key is unrestricted.
+   */
+  const discoverAddedKeys = async (providerId: string): Promise<void> => {
+    if (modelCatalog === undefined) return
+    try {
+      await modelCatalog.discoverMissingKeys(providerId)
+    } catch {
+      // An undiscovered key stays unrestricted; nothing here may fail the add.
+    }
+  }
 
   return new Elysia({ name: 'iroha/admin', prefix: '/api/v1/admin' }).guard(
     { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
@@ -533,6 +558,7 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
+        await discoverAddedKeys(params.id)
         return status(201, toProviderDto(result.value))
       },
       {
@@ -572,6 +598,7 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
+        await discoverAddedKeys(params.id)
         return status(200, {
           added: result.value.added.map((entry) => ({
             index: entry.index,

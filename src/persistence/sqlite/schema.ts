@@ -200,6 +200,33 @@ export const modelCatalogSync = sqliteTable('model_catalog_sync', {
 })
 
 /**
+ * One Upstream Key's Key Model Availability: the models that key is known to
+ * call, discovered from the Provider (ADR-0023).
+ *
+ * Deliberately not part of `model_catalog_entries`. That table is the Model
+ * Catalog — what a caller may ask for, carrying Owner exclusions and capability
+ * overrides. This one is discovered fact with no Owner input, and it answers a
+ * different question: which Upstream Keys should be preferred for a model.
+ *
+ * A key with no row here has unknown availability and is never restricted by
+ * it. `stale` marks a list retained through a failed rediscovery, which stays
+ * usable — the previous answer beats no answer.
+ */
+export const keyModelAvailability = sqliteTable('key_model_availability', {
+  keyId: text('key_id')
+    .primaryKey()
+    .references(() => upstreamKeys.id, { onDelete: 'cascade' }),
+  providerId: text('provider_id')
+    .notNull()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  /** JSON array of exact model IDs. The repository owns encoding. */
+  models: text('models').notNull(),
+  /** When the Provider last answered; drives the age limit that forces a re-read. */
+  discoveredAt: integer('discovered_at', { mode: 'timestamp_ms' }).notNull(),
+  stale: integer('stale', { mode: 'boolean' }).notNull().default(false),
+})
+
+/**
  * The last usage polling outcome of one Provider. `result` holds the last
  * successful normalized reading; `lastFailureAt` and `lastFailureMessage` are
  * kept independently so the Owner sees the latest error without losing the

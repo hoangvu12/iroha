@@ -148,6 +148,13 @@
       "when": 1786923589060,
       "tag": "0020_overjoyed_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1787007632135,
+      "tag": "0021_glossy_nightcrawler",
+      "breakpoints": true
     }
   ]
 }

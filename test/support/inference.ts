@@ -20,6 +20,13 @@ export interface MockUpstreamTransport {
   readonly calls: RecordedUpstreamCall[]
   /** Replaces the responder for every call that follows. */
   respondWith(responder: UpstreamResponder): void
+  /**
+   * Forgets every recorded call. Setting up a Provider legitimately reaches the
+   * upstream — model discovery runs per Upstream Key on a key-scoped Provider —
+   * so a test that counts inference attempts calls this once its fixture is
+   * built, and then counts only what its own assertions caused.
+   */
+  reset(): void
   /** The transport to inject into the generic Inference Adapter. */
   readonly fetch: typeof fetch
 }
@@ -45,6 +52,9 @@ export function mockUpstreamTransport(initial?: UpstreamResponder): MockUpstream
     calls,
     respondWith(next: UpstreamResponder) {
       responder = next
+    },
+    reset() {
+      calls.length = 0
     },
     fetch: fetchImpl,
   }

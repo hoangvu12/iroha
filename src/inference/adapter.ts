@@ -90,6 +90,13 @@ export type InferenceFailureKind =
   | 'capacity_limited'
   | 'payment_required'
   | 'content_inspection_failed'
+  /**
+   * The Upstream Key cannot call the requested Upstream Model. This is an
+   * entitlement fact about the key, not a limit on it, so it never becomes
+   * Capacity Evidence and never changes Key Health; it only asks the routing
+   * layer for a different key.
+   */
+  | 'model_unavailable'
   | 'provider_failure'
   | 'request_rejected'
 

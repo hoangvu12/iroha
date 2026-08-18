@@ -25,6 +25,8 @@ import {
   type GatewayKeyScopeEntry,
   type KeyProbeVerdict,
   type ModelCatalogEntryRecord,
+  type KeyModelAvailabilityRecord,
+  type KeyModelAvailabilityRepository,
   type ModelCatalogRepository,
   type ModelCatalogSource,
   type ModelCatalogSyncRecord,
@@ -62,6 +64,7 @@ import {
   gatewayKeys,
   modelCatalogEntries,
   modelCatalogSync,
+  keyModelAvailability,
   owner,
   ownerSessions,
   providers,
@@ -112,6 +115,7 @@ class SqliteDatabase implements Database {
   readonly providers: ProviderRepository
   readonly gatewayKeys: GatewayKeyRepository
   readonly modelCatalog: ModelCatalogRepository
+  readonly keyModelAvailability: KeyModelAvailabilityRepository
   readonly usage: UsageRepository
   readonly requestHistory: RequestHistoryRepository
   readonly backgroundJobs: BackgroundJobRepository
@@ -136,6 +140,7 @@ class SqliteDatabase implements Database {
     this.providers = new SqliteProviderRepository(handle)
     this.gatewayKeys = new SqliteGatewayKeyRepository(handle)
     this.modelCatalog = new SqliteModelCatalogRepository(handle)
+    this.keyModelAvailability = new SqliteKeyModelAvailabilityRepository(handle)
     this.usage = new SqliteUsageRepository(handle)
     this.requestHistory = new SqliteRequestHistoryRepository(handle)
     this.backgroundJobs = new SqliteBackgroundJobRepository(handle)
@@ -154,6 +159,7 @@ class SqliteDatabase implements Database {
       providers: this.providers,
       gatewayKeys: this.gatewayKeys,
       modelCatalog: this.modelCatalog,
+      keyModelAvailability: this.keyModelAvailability,
       usage: this.usage,
       requestHistory: this.requestHistory,
       backgroundJobs: this.backgroundJobs,
@@ -1191,6 +1197,67 @@ function toSyncRecord(row: SyncRow): ModelCatalogSyncRecord {
     lastSuccessAt: row.lastSuccessAt,
     lastFailureAt: row.lastFailureAt,
     lastFailureMessage: row.lastFailureMessage,
+  }
+}
+
+class SqliteKeyModelAvailabilityRepository implements KeyModelAvailabilityRepository {
+  constructor(private readonly handle: Handle) {}
+
+  async listForProvider(providerId: string): Promise<readonly KeyModelAvailabilityRecord[]> {
+    const rows = await this.handle
+      .select()
+      .from(keyModelAvailability)
+      .where(eq(keyModelAvailability.providerId, providerId))
+    return rows.map(toKeyModelAvailability)
+  }
+
+  async put(record: Omit<KeyModelAvailabilityRecord, 'stale'>): Promise<void> {
+    const models = JSON.stringify([...record.models])
+    await this.handle
+      .insert(keyModelAvailability)
+      .values({
+        keyId: record.keyId,
+        providerId: record.providerId,
+        models,
+        discoveredAt: record.discoveredAt,
+        stale: false,
+      })
+      .onConflictDoUpdate({
+        target: keyModelAvailability.keyId,
+        set: { providerId: record.providerId, models, discoveredAt: record.discoveredAt, stale: false },
+      })
+  }
+
+  async markStale(keyId: string): Promise<void> {
+    // Only the flag moves. Discarding the models here would erase the one
+    // usable answer we have and leave the key unrestricted (ADR-0023).
+    await this.handle
+      .update(keyModelAvailability)
+      .set({ stale: true })
+      .where(eq(keyModelAvailability.keyId, keyId))
+  }
+}
+
+type KeyModelAvailabilityRow = typeof keyModelAvailability.$inferSelect
+
+function toKeyModelAvailability(row: KeyModelAvailabilityRow): KeyModelAvailabilityRecord {
+  return {
+    keyId: row.keyId,
+    providerId: row.providerId,
+    models: readModelList(row.models),
+    discoveredAt: row.discoveredAt,
+    stale: row.stale,
+  }
+}
+
+/** A corrupt list must not break routing; an unreadable one reads as unknown. */
+function readModelList(raw: string): readonly string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((entry): entry is string => typeof entry === 'string')
+  } catch {
+    return []
   }
 }
 

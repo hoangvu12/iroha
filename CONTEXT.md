@@ -45,8 +45,16 @@ The Gateway's derived decision that an Upstream Key may receive a new inference 
 _Avoid_: Active status, round-robin status
 
 **Upstream Model**:
-A model offered by a Provider and addressed by its exact Provider-defined model name.
+A model addressed by its exact Provider-defined model name. A Provider offers it, but not every Upstream Key of that Provider can necessarily call it.
 _Avoid_: Alias, virtual model
+
+**Model Catalog**:
+A Provider's retained set of Upstream Models a caller may ask for, assembled from Provider discovery, Provider Template knowledge, and Owner additions, then narrowed by Owner exclusions. It is what the Provider Directory reports. It says nothing about which Upstream Key can serve a given model.
+_Avoid_: Key Model Availability, model list
+
+**Key Model Availability**:
+The Upstream Models one Upstream Key is known to call, as discovered from the Provider. It is entitlement rather than capacity: a key that cannot call a model is neither unhealthy nor limited, so Key Health and Capacity Scope are unaffected. It is positive evidence only — a listed model is reliable, but an unlisted one is unproven rather than refused, because a Provider may under-report what a key can reach. It therefore orders the eligible Upstream Keys of a Request and never removes one. A Provider Pack declares whether its Upstream Models are available per Provider or per Upstream Key; only the latter gives a key a meaningful Key Model Availability.
+_Avoid_: Key Health, Capacity Scope, Model Catalog, model permissions, entitlement filter
 
 **Provider Directory**:
 The authenticated list of Providers a Gateway Key is permitted to use, including their exact Upstream Models and supported inference capabilities.

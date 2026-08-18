@@ -120,6 +120,17 @@ export interface ProviderTemplate {
   readonly capabilities: ProviderCapabilities
   /** Models the template was reviewed against; data-only, never a secret. */
   readonly knownModels: readonly string[]
+  /**
+   * Whether this upstream offers the same Upstream Models to every Upstream Key
+   * of a Provider (`provider`) or a different set per key (`key`).
+   *
+   * Only `key` gives a Provider's keys a meaningful Key Model Availability:
+   * Iroha then discovers each key's models separately, unions them into the
+   * Model Catalog, and prefers the keys known to carry a requested model when
+   * it selects one. Optional, and read as `provider` when omitted, because that
+   * is what almost every upstream does and what Iroha did before this existed.
+   */
+  readonly modelAvailability?: 'provider' | 'key'
   /** The registered Inference Adapter the template assumes. */
   readonly inferenceAdapterId: string
   /**

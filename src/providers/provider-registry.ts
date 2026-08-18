@@ -38,6 +38,18 @@ export type ProviderFailure =
   | { readonly code: 'provider_disabled' }
   /** No Upstream Key on the connection is currently eligible to serve. */
   | { readonly code: 'no_eligible_key' }
+  /**
+   * Every Upstream Key's Key Model Availability is known and none of them
+   * carries the requested Upstream Model. Waiting cannot change this, so the
+   * Request is refused before any Attempt is sent (ADR-0023).
+   */
+  | { readonly code: 'model_unroutable' }
+  /**
+   * Upstream Keys do carry the requested Upstream Model, but none of them is
+   * eligible right now. This is temporary and worth retrying, unlike
+   * `model_unroutable` and unlike a credentials problem.
+   */
+  | { readonly code: 'model_keys_unavailable' }
   /** Purge is archive-first: only an archived connection can be purged. */
   | { readonly code: 'not_archived' }
   /** Encrypted material could not be read; the master key likely changed. */
@@ -275,6 +287,27 @@ export class ProviderRegistry {
     this.#clock = options.clock ?? systemClock
     this.#adapterRegistry = options.adapterRegistry
     this.#selector = new RoundRobinSelector()
+  }
+
+  /**
+   * Key Model Availability by key id, for a Provider whose Provider Template
+   * declares its Upstream Models key-scoped. Every other Provider gets an empty
+   * map, which reads as "nothing known" and therefore restricts nothing — so a
+   * Provider that never had per-key entitlement routes exactly as before.
+   */
+  async #availabilityFor(
+    connection: ProviderRecord,
+    keys: readonly UpstreamKeyRecord[],
+  ): Promise<ReadonlyMap<string, readonly string[]>> {
+    const templateId = connection.templateId
+    if (templateId === null) return EMPTY_AVAILABILITY
+    if (this.#adapterRegistry.providerTemplate(templateId)?.modelAvailability !== 'key') {
+      return EMPTY_AVAILABILITY
+    }
+    if (keys.length === 0) return EMPTY_AVAILABILITY
+
+    const stored = await this.#database.keyModelAvailability.listForProvider(connection.id)
+    return new Map(stored.map((entry) => [entry.keyId, entry.models]))
   }
 
   /** Resolve a public Handle once at the inference boundary; all later policy remains ID-based. */
@@ -1388,6 +1421,12 @@ export class ProviderRegistry {
    * enough for the request, the connection must be enabled and unarchived,
    * and an enabled connection with no eligible key is reported rather than
    * guessed at. Selection never writes to the database.
+   *
+   * On a Provider whose Upstream Models are key-scoped, Key Model Availability
+   * then *orders* the eligible keys — those known to carry the model rotate
+   * first, the rest stay reachable behind them. It never removes a key, because
+   * a Provider may under-report what a key can reach and a strict filter would
+   * silently retire real capacity (ADR-0023).
    */
   async resolveInference(
     providerId: string,
@@ -1403,6 +1442,19 @@ export class ProviderRegistry {
     const excluded = new Set(excludedKeyIds)
     const keys = await this.#database.providers.listKeys(providerId)
     const at = this.#clock.now()
+
+    const availability = await this.#availabilityFor(connection, keys)
+    const carries = (candidate: UpstreamKeyRecord): boolean =>
+      availability.get(candidate.id)?.includes(model) === true
+
+    // A model absent from every *known* availability cannot be served by any
+    // key, so no Attempt is worth sending. A key whose availability is unknown
+    // keeps the model routable: unknown means unrestricted, never refused.
+    if (availability.size > 0 && keys.every((candidate) => availability.has(candidate.id))
+      && !keys.some(carries)) {
+      return failed({ code: 'model_unroutable' })
+    }
+
     const eligible = keys.filter((candidate) => {
       if (excluded.has(candidate.id) || !keyServesModel(candidate, model)) return false
       if (candidate.health === 'active') {
@@ -1412,9 +1464,17 @@ export class ProviderRegistry {
       if (candidate.retryAfterAt === null || candidate.retryAfterAt > at) return false
       return !this.#controlledTrials.has(healthClaim(candidate))
     })
-    if (eligible.length === 0) return failed({ code: 'no_eligible_key' })
+    if (eligible.length === 0) {
+      // Keys that carry the model exist but none can serve now: temporary, and
+      // worth telling apart from having no usable credentials at all.
+      return failed({ code: keys.some(carries) ? 'model_keys_unavailable' : 'no_eligible_key' })
+    }
 
-    const key = this.#selector.select(providerId, eligible)
+    // Prefer the keys known to carry the model; the rest remain reachable once
+    // the preferred ones are exhausted, which is what the retry loop's growing
+    // `excludedKeyIds` eventually produces.
+    const preferred = eligible.filter(carries)
+    const key = this.#selector.select(providerId, preferred.length > 0 ? preferred : eligible)
     if (key === null) return failed({ code: 'no_eligible_key' })
     if (key.health !== 'active') {
       const claim = healthClaim(key)
@@ -2270,6 +2330,9 @@ function readStaticHeaders(input: unknown, problems: FieldProblem[]): readonly P
 
 const MODEL_ID_MAXIMUM = 128
 const MODEL_LIST_MAXIMUM = 500
+
+/** Shared by every Provider that has no key-scoped Upstream Models. */
+const EMPTY_AVAILABILITY: ReadonlyMap<string, readonly string[]> = new Map()
 
 /**
  * Whether a key may serve one requested model. The account never adds a

@@ -76,6 +76,12 @@ export type { BackgroundJobCollaborators } from './scheduler.ts'
  * The repo boundary already enforces per-event FKs; the bounded batch is the
  * second wall against a single DELETE taking the lock for too long.
  */
+/**
+ * The longest a stored Key Model Availability may go unread. It caps the
+ * configured model-sync interval for Providers that have one, and nothing else.
+ */
+const KEY_MODEL_AVAILABILITY_MAX_AGE_SECONDS = 86_400
+
 export function buildDefaultJobs(): BackgroundJob[] {
   return [
     {
@@ -88,7 +94,18 @@ export function buildDefaultJobs(): BackgroundJob[] {
         let succeeded = 0
         let affected = 0
         for (const connection of targets) {
-          const effective = effectiveIntervalFor(schedule, 'modelSync', connection.id)
+          const configured = effectiveIntervalFor(schedule, 'modelSync', connection.id)
+          // A Provider that entitles each Upstream Key separately gets a hard
+          // ceiling on its interval. A key that LOSES a model reports an error
+          // the Gateway can route around, but a key that GAINS one reports
+          // nothing at all — re-reading is the only way that ever surfaces, so
+          // it must not wait out a multi-day configured interval (ADR-0023).
+          // Presence of stored availability is the test, so a Provider that
+          // never had any keeps its configured interval exactly.
+          const availability = await database.keyModelAvailability.listForProvider(connection.id)
+          const effective = availability.length > 0
+            ? Math.min(configured, KEY_MODEL_AVAILABILITY_MAX_AGE_SECONDS)
+            : configured
           const prior = await database.modelCatalog.getSync(connection.id)
           if (!connectionIsDue({
             lastSyncedAt: prior?.syncedAt ?? null,

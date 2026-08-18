@@ -20,6 +20,8 @@ export type {
   GatewayKeyAccess,
   GatewayKeyRepository,
   GatewayKeyScopeEntry,
+  KeyModelAvailabilityRecord,
+  KeyModelAvailabilityRepository,
   KeyProbeVerdict,
   ModelCatalogEntryRecord,
   ModelCatalogRepository,

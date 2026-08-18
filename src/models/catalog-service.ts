@@ -75,6 +75,12 @@ export interface ModelCatalogServiceOptions {
    * Defaults to no template knowledge until built-in templates exist.
    */
   readonly templateKnowledge?: (templateId: string) => readonly string[] | Promise<readonly string[]>
+  /**
+   * Whether a connection's `templateId` entitles its Upstream Keys separately.
+   * Defaults to `provider`, which is what every Provider did before Key Model
+   * Availability existed and what almost every upstream still does.
+   */
+  readonly templateAvailability?: (templateId: string) => 'provider' | 'key'
 }
 
 /**
@@ -90,6 +96,43 @@ export function templateKnowledgeFromRegistry(
 ): (templateId: string) => readonly string[] {
   return (templateId) => registry.providerTemplate(templateId)?.knownModels ?? []
 }
+
+/**
+ * Reads a Provider Template's model-availability declaration from the Adapter
+ * Registry. An unknown template — or one that declares nothing — reads as
+ * `provider`, so a removed template can never turn an existing connection into
+ * a key-scoped one behind the Owner's back.
+ */
+export function templateAvailabilityFromRegistry(
+  registry: AdapterRegistry,
+): (templateId: string) => 'provider' | 'key' {
+  return (templateId) => registry.providerTemplate(templateId)?.modelAvailability ?? 'provider'
+}
+
+const DISCOVERY_UNREACHABLE = 'the provider could not be reached for model discovery'
+const DISCOVERY_UNREADABLE = 'the provider answered model discovery without a usable model list'
+
+/** One Upstream Key's transport for a read-only discovery GET. */
+interface DiscoveryTarget {
+  readonly keyId: string
+  readonly baseUrl: string
+  readonly allowInsecureHttp: boolean
+  readonly upstreamKey: string
+  readonly authHeader: string
+  readonly authPrefix: string
+  readonly staticHeaders: Readonly<Record<string, string>>
+  readonly redirectAllowSameOrigin: boolean
+  readonly idempotencyHeader: string
+  readonly connectionTimeoutMs: number
+  readonly firstByteTimeoutMs: number
+  readonly nonStreamingTotalTimeoutMs: number
+  readonly streamingIdleTimeoutMs: number
+  readonly totalRetryTimeoutMs: number
+}
+
+type DiscoveryOutcome =
+  | { readonly ok: true; readonly models: readonly string[] }
+  | { readonly ok: false; readonly message: string }
 
 const MODEL_ID_MAXIMUM = 128
 const CAPABILITY_KEYS = [
@@ -117,6 +160,7 @@ export class ModelCatalogService {
   readonly #inference: InferenceAdapter
   readonly #clock: Clock
   readonly #templateKnowledge: (templateId: string) => readonly string[] | Promise<readonly string[]>
+  readonly #templateAvailability: (templateId: string) => 'provider' | 'key'
 
   constructor(options: ModelCatalogServiceOptions) {
     this.#database = options.database
@@ -124,6 +168,7 @@ export class ModelCatalogService {
     this.#inference = options.inference
     this.#clock = options.clock ?? systemClock
     this.#templateKnowledge = options.templateKnowledge ?? (() => [])
+    this.#templateAvailability = options.templateAvailability ?? (() => 'provider')
   }
 
   /** The current catalog and sync state of one connection. Read-only. */
@@ -145,91 +190,175 @@ export class ModelCatalogService {
     if (connection === null) return failed({ code: 'provider_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
 
-    const target = await this.#discoveryTarget(providerId)
-    if (!target.ok) return target
+    // A Provider that entitles each Upstream Key separately is discovered once
+    // per key: no single key's answer describes the connection, so trusting one
+    // would both understate the Model Catalog and leave every other key without
+    // a Key Model Availability (ADR-0023).
+    const keyScoped = this.#templateAvailability(connection.templateId ?? '') === 'key'
+    const targets = await this.#discoveryTargets(providerId, keyScoped)
+    if (!targets.ok) return targets
 
     const prior = await this.#database.modelCatalog.getSync(providerId)
     const at = this.#clock.now()
 
-    let upstream
-    try {
-      upstream = await this.#inference.forward({
-        baseUrl: target.value.baseUrl,
-        allowInsecureHttp: target.value.allowInsecureHttp,
-        path: '/models',
-        method: 'GET',
-        body: null,
-        headers: {},
-        upstreamKey: target.value.upstreamKey,
-        signal: null,
-        authHeader: target.value.authHeader,
-        authPrefix: target.value.authPrefix,
-        staticHeaders: target.value.staticHeaders,
-        redirectAllowSameOrigin: target.value.redirectAllowSameOrigin,
-        idempotencyHeader: target.value.idempotencyHeader,
-        idempotencyGenerationSafe: false,
-        connectionTimeoutMs: target.value.connectionTimeoutMs,
-        firstByteTimeoutMs: target.value.firstByteTimeoutMs,
-        nonStreamingTotalTimeoutMs: target.value.nonStreamingTotalTimeoutMs,
-        streamingIdleTimeoutMs: target.value.streamingIdleTimeoutMs,
-        totalRetryTimeoutMs: target.value.totalRetryTimeoutMs,
-      })
-    } catch {
+    const attempts: { readonly keyId: string; readonly outcome: DiscoveryOutcome }[] = []
+    for (const target of targets.value) {
+      attempts.push({ keyId: target.keyId, outcome: await this.#discover(target) })
+    }
+
+    const answered = attempts.filter((attempt) => attempt.outcome.ok)
+    if (answered.length === 0) {
+      // Every key refused. Nothing is erased: each retained list is only marked
+      // stale, so routing keeps the last answer it had.
+      if (keyScoped) {
+        for (const attempt of attempts) await this.#database.keyModelAvailability.markStale(attempt.keyId)
+      }
+      const first = attempts[0]?.outcome
       return await this.#recordedFailure(
         providerId,
         prior,
         at,
-        'the provider could not be reached for model discovery',
+        first !== undefined && !first.ok ? first.message : DISCOVERY_UNREACHABLE,
       )
     }
 
-    if (upstream.status < 200 || upstream.status >= 300) {
-      return await this.#recordedFailure(
-        providerId,
-        prior,
-        at,
-        `the provider refused model discovery (HTTP ${upstream.status})`,
-      )
-    }
-
-    // Discovery never asks for a stream, so a live body here means an adapter
-    // misbehaved; it cannot be parsed as a model list either way.
-    if (upstream.kind !== 'buffered') {
-      return await this.#recordedFailure(
-        providerId,
-        prior,
-        at,
-        'the provider answered model discovery without a usable model list',
-      )
-    }
-
-    const discovered = readDiscoveredModels(upstream.body)
-    if (discovered === null) {
-      return await this.#recordedFailure(
-        providerId,
-        prior,
-        at,
-        'the provider answered model discovery without a usable model list',
-      )
+    let discovered: readonly string[]
+    if (keyScoped) {
+      for (const attempt of attempts) {
+        if (attempt.outcome.ok) {
+          await this.#database.keyModelAvailability.put({
+            keyId: attempt.keyId,
+            providerId,
+            models: attempt.outcome.models,
+            discoveredAt: at,
+          })
+        } else {
+          await this.#database.keyModelAvailability.markStale(attempt.keyId)
+        }
+      }
+      // The Model Catalog is the union across keys, retained lists included, so
+      // a model only one key carries stays askable and a key that failed this
+      // round does not shrink the catalog.
+      const availability = await this.#database.keyModelAvailability.listForProvider(providerId)
+      discovered = [...new Set(availability.flatMap((entry) => entry.models))]
+    } else {
+      discovered = answered[0]?.outcome.ok === true ? answered[0].outcome.models : []
     }
 
     await this.#database.modelCatalog.syncDiscovered(providerId, discovered, at)
     await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
+
+    // A partly successful round still refreshed the catalog, so the success
+    // advances; the failure is recorded beside it rather than instead of it.
+    const refused = attempts.find((attempt) => !attempt.outcome.ok)
+    const failure = refused === undefined || refused.outcome.ok
+      ? null
+      : `${refused.outcome.message} (${attempts.length - answered.length} of ${attempts.length} keys)`
     await this.#database.modelCatalog.putSync({
       providerId,
       syncedAt: at,
       lastSuccessAt: at,
-      lastFailureAt: null,
-      lastFailureMessage: null,
+      lastFailureAt: failure === null ? null : at,
+      lastFailureMessage: failure,
     })
     await this.#database.audit.record({
       action: 'model_catalog.refreshed',
       outcome: 'success',
-      detail: { providerId },
+      detail: { providerId, ...(keyScoped ? { keys: attempts.length, answered: answered.length } : {}) },
       at,
     })
 
     return await this.#viewOf(providerId)
+  }
+
+  /**
+   * Discovers Key Model Availability for the Upstream Keys that have none yet,
+   * and merges what they carry into the Model Catalog.
+   *
+   * Called after the Owner adds keys, where the keys without availability are
+   * exactly the ones just added — so this costs one discovery GET per new key
+   * rather than a full re-read of the connection. It does nothing at all for a
+   * Provider whose Upstream Models are not key-scoped, and it never fails the
+   * caller: a key left undiscovered is unrestricted, not unusable (ADR-0023).
+   */
+  async discoverMissingKeys(providerId: string): Promise<void> {
+    const connection = await this.#database.providers.getProvider(providerId)
+    if (connection === null || connection.archivedAt !== null) return
+    if (this.#templateAvailability(connection.templateId ?? '') !== 'key') return
+
+    const known = new Set(
+      (await this.#database.keyModelAvailability.listForProvider(providerId)).map((entry) => entry.keyId),
+    )
+    const targets = await this.#discoveryTargets(providerId, true)
+    if (!targets.ok) return
+    const missing = targets.value.filter((target) => !known.has(target.keyId))
+    if (missing.length === 0) return
+
+    const at = this.#clock.now()
+    let discovered = false
+    for (const target of missing) {
+      const outcome = await this.#discover(target)
+      if (!outcome.ok) continue
+      await this.#database.keyModelAvailability.put({
+        keyId: target.keyId,
+        providerId,
+        models: outcome.models,
+        discoveredAt: at,
+      })
+      discovered = true
+    }
+    if (!discovered) return
+
+    // A new key can carry models no existing key does, and those must become
+    // askable. The union is taken over every stored availability rather than
+    // just the new keys', or this would shrink the catalog to what they carry.
+    const availability = await this.#database.keyModelAvailability.listForProvider(providerId)
+    const union = [...new Set(availability.flatMap((entry) => entry.models))]
+    if (union.length === 0) return
+    await this.#database.modelCatalog.syncDiscovered(providerId, union, at)
+    await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
+  }
+
+  /** One read-only discovery GET against one Upstream Key. Never throws. */
+  async #discover(target: DiscoveryTarget): Promise<DiscoveryOutcome> {
+    let upstream
+    try {
+      upstream = await this.#inference.forward({
+        baseUrl: target.baseUrl,
+        allowInsecureHttp: target.allowInsecureHttp,
+        path: '/models',
+        method: 'GET',
+        body: null,
+        headers: {},
+        upstreamKey: target.upstreamKey,
+        signal: null,
+        authHeader: target.authHeader,
+        authPrefix: target.authPrefix,
+        staticHeaders: target.staticHeaders,
+        redirectAllowSameOrigin: target.redirectAllowSameOrigin,
+        idempotencyHeader: target.idempotencyHeader,
+        idempotencyGenerationSafe: false,
+        connectionTimeoutMs: target.connectionTimeoutMs,
+        firstByteTimeoutMs: target.firstByteTimeoutMs,
+        nonStreamingTotalTimeoutMs: target.nonStreamingTotalTimeoutMs,
+        streamingIdleTimeoutMs: target.streamingIdleTimeoutMs,
+        totalRetryTimeoutMs: target.totalRetryTimeoutMs,
+      })
+    } catch {
+      return { ok: false, message: DISCOVERY_UNREACHABLE }
+    }
+
+    if (upstream.status < 200 || upstream.status >= 300) {
+      return { ok: false, message: `the provider refused model discovery (HTTP ${upstream.status})` }
+    }
+
+    // Discovery never asks for a stream, so a live body here means an adapter
+    // misbehaved; it cannot be parsed as a model list either way.
+    if (upstream.kind !== 'buffered') return { ok: false, message: DISCOVERY_UNREADABLE }
+
+    const models = readDiscoveredModels(upstream.body)
+    if (models === null) return { ok: false, message: DISCOVERY_UNREADABLE }
+    return { ok: true, models }
   }
 
   /** Names a model the Owner vouches for, even before any discovery reports it. */
@@ -366,46 +495,28 @@ export class ModelCatalogService {
   }
 
   /**
-   * The base URL and one usable Upstream Key for a read-only discovery GET.
-   * A key with its own override URL is discovered against that URL; otherwise
-   * the connection base URL is used — the same inheritance inference and the
-   * usage poller both follow.
+   * The Upstream Keys a read-only discovery GET should run against, and the
+   * transport each one uses. A key with its own override URL is discovered
+   * against that URL; otherwise the connection base URL is used — the same
+   * inheritance inference and the usage poller both follow.
+   *
+   * `everyKey` asks for one target per non-disabled key, which is what a
+   * key-scoped Provider needs. Otherwise only the first is returned, because
+   * every key of a provider-scoped Provider would answer identically and a
+   * second call would buy nothing.
    */
-  async #discoveryTarget(
+  async #discoveryTargets(
     providerId: string,
-  ): Promise<
-    ModelCatalogResult<{
-      readonly baseUrl: string
-      readonly allowInsecureHttp: boolean
-      readonly upstreamKey: string
-      readonly authHeader: string
-      readonly authPrefix: string
-      readonly staticHeaders: Readonly<Record<string, string>>
-      readonly redirectAllowSameOrigin: boolean
-      readonly idempotencyHeader: string
-      readonly connectionTimeoutMs: number
-      readonly firstByteTimeoutMs: number
-      readonly nonStreamingTotalTimeoutMs: number
-      readonly streamingIdleTimeoutMs: number
-      readonly totalRetryTimeoutMs: number
-    }>
-  > {
+    everyKey: boolean,
+  ): Promise<ModelCatalogResult<readonly DiscoveryTarget[]>> {
     const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'provider_not_found' })
 
-    const key =
-      (await this.#database.providers.listKeys(providerId)).find(
-        (candidate) => candidate.health !== 'disabled',
-      ) ?? null
-    if (key === null) return failed({ code: 'no_eligible_key' })
-
-    let upstreamKey: string
-    try {
-      upstreamKey = await this.#cipher.decrypt(key.encryptedKey)
-    } catch (cause) {
-      if (cause instanceof SecretCipherError) return failed({ code: 'stored_key_unreadable' })
-      throw cause
-    }
+    const usable = (await this.#database.providers.listKeys(providerId)).filter(
+      (candidate) => candidate.health !== 'disabled',
+    )
+    const keys = everyKey ? usable : usable.slice(0, 1)
+    if (keys.length === 0) return failed({ code: 'no_eligible_key' })
 
     let staticHeaders: Readonly<Record<string, string>> = {}
     try {
@@ -427,9 +538,21 @@ export class ModelCatalogService {
       throw cause
     }
 
-    return {
-      ok: true,
-      value: {
+    const targets: DiscoveryTarget[] = []
+    for (const key of keys) {
+      let upstreamKey: string
+      try {
+        upstreamKey = await this.#cipher.decrypt(key.encryptedKey)
+      } catch (cause) {
+        if (!(cause instanceof SecretCipherError)) throw cause
+        // One unreadable secret among many must not stop the others; only a
+        // connection whose every key is unreadable is genuinely unreadable.
+        if (keys.length === 1) return failed({ code: 'stored_key_unreadable' })
+        continue
+      }
+
+      targets.push({
+        keyId: key.id,
         baseUrl: key.baseUrl ?? connection.baseUrl,
         allowInsecureHttp: connection.allowInsecureHttp,
         upstreamKey,
@@ -443,8 +566,11 @@ export class ModelCatalogService {
         nonStreamingTotalTimeoutMs: connection.nonStreamingTotalTimeoutMs,
         streamingIdleTimeoutMs: connection.streamingIdleTimeoutMs,
         totalRetryTimeoutMs: connection.totalRetryTimeoutMs,
-      },
+      })
     }
+
+    if (targets.length === 0) return failed({ code: 'stored_key_unreadable' })
+    return { ok: true, value: targets }
   }
 
   async #editableConnection(

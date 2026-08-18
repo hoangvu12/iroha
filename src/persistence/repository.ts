@@ -515,6 +515,32 @@ export interface ModelCatalogRepository {
 }
 
 /**
+ * One Upstream Key's Key Model Availability. `models` is what the Provider said
+ * that key can call; `stale` is true when a later rediscovery failed and this
+ * list was retained rather than discarded (ADR-0023).
+ */
+export interface KeyModelAvailabilityRecord {
+  readonly keyId: string
+  readonly providerId: string
+  readonly models: readonly string[]
+  readonly discoveredAt: Date
+  readonly stale: boolean
+}
+
+export interface KeyModelAvailabilityRepository {
+  /** Every known availability of one Provider's keys. Keys with none are simply absent. */
+  listForProvider(providerId: string): Promise<readonly KeyModelAvailabilityRecord[]>
+  /** Records a successful discovery for one key, clearing any stale mark. */
+  put(record: Omit<KeyModelAvailabilityRecord, 'stale'>): Promise<void>
+  /**
+   * Marks one key's list stale after a failed rediscovery. The models and the
+   * original `discoveredAt` are kept: a previous answer still beats no answer,
+   * and the age is what tells the next refresh this key is overdue.
+   */
+  markStale(keyId: string): Promise<void>
+}
+
+/**
  * The durable state of one Provider's Usage Adapter polling. `result` is the
  * last successful normalized reading kept across failures; the failure fields
  * describe the latest poll attempt separately so the UI can render both.
@@ -727,6 +753,7 @@ export interface Repositories {
   readonly providers: ProviderRepository
   readonly gatewayKeys: GatewayKeyRepository
   readonly modelCatalog: ModelCatalogRepository
+  readonly keyModelAvailability: KeyModelAvailabilityRepository
   readonly usage: UsageRepository
   readonly requestHistory: RequestHistoryRepository
   readonly backgroundJobs: BackgroundJobRepository

@@ -787,7 +787,7 @@ async function forwardGeneration(options: {
       if (!resolution.ok) {
         const refusal = authoritativeExhaustionKnown && resolution.failure.code === 'no_eligible_key'
           ? providerCapacityExhaustedRefusal()
-          : resolutionRefusal(resolution.failure)
+          : resolutionRefusal(resolution.failure, envelope.model)
         const retryAfter = lastUpstream === null
           ? await providers.earliestRetryAfterSeconds(providerId)
           : numericRetryAfter(lastUpstream.headers)
@@ -1370,7 +1370,7 @@ async function forwardAnthropicMessages(options: {
               promptTokens: null,
               completionTokens: null,
               totalTokens: null,
-              errorCode: resolutionRefusal(resolution.failure).code,
+              errorCode: resolutionRefusal(resolution.failure, envelope.model).code,
             })
             const retryAfter = numericRetryAfter(lastUpstream.headers) ?? (lastUpstream.status === 429 ? 30 : null)
             return returnLastUpstreamAsAnthropic(
@@ -1379,7 +1379,7 @@ async function forwardAnthropicMessages(options: {
               correlationId,
             )
           }
-          const refusal = resolutionRefusal(resolution.failure)
+          const refusal = resolutionRefusal(resolution.failure, envelope.model)
           const retryAfter = await providers.earliestRetryAfterSeconds(providerId)
           await history?.recordSkip(refusal.code, new Date())
           return anthropicMessagesErrorResponse(
@@ -2153,8 +2153,31 @@ function authorizationRefusal(
   }
 }
 
-function resolutionRefusal(failure: { readonly code: string }): Refusal {
+/**
+ * Turns a key-resolution failure into the caller's refusal.
+ *
+ * The two model-availability codes are deliberately distinct (ADR-0023).
+ * `model_unroutable` is permanent — no Upstream Key carries that model, and a
+ * retry can only fail again — so it answers 404 and names the model. Keys that
+ * carry it but are all busy answer 503, which is the same shape as any other
+ * transient capacity refusal. Collapsing the two would make an automated caller
+ * either retry a typo forever or abandon a model that works in a minute.
+ */
+function resolutionRefusal(failure: { readonly code: string }, model?: string): Refusal {
+  const named = model === undefined || model === '' ? 'that model' : `\`${model}\``
   switch (failure.code) {
+    case 'model_unroutable':
+      return {
+        status: 404,
+        code: 'model_unroutable',
+        message: `No Upstream Key on this Provider can serve ${named}.`,
+      }
+    case 'model_keys_unavailable':
+      return {
+        status: 503,
+        code: 'model_keys_unavailable',
+        message: `Every Upstream Key that serves ${named} is currently unavailable. Retry shortly.`,
+      }
     case 'provider_not_found':
       return { status: 404, code: 'provider_not_found', message: 'No such Provider.' }
     case 'provider_archived':

@@ -47,6 +47,11 @@ describe('scoped inference retries', () => {
       csrf,
     })
     secret = ((await key.json()) as { secret: string }).secret
+    // The fixture itself reaches the upstream: this Provider uses the DashScope
+    // template, whose Upstream Models are key-scoped, so creating the Provider
+    // and adding the second key each discover that key's Key Model
+    // Availability. Every assertion below counts inference Attempts only.
+    upstream.reset()
   })
 
   afterEach(async () => {
@@ -110,6 +115,7 @@ describe('scoped inference retries', () => {
       body: JSON.stringify({ upstreamKey: 'sk-third-retry-key' }),
       csrf,
     })
+    upstream.reset()
     upstream.respondWith(() => new Response('payment required', { status: 402 }))
 
     const response = await chat()

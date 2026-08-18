@@ -16,7 +16,7 @@ import {
   buildDefaultJobs,
 } from '../jobs/index.ts'
 import { GatewayKeyRegistry } from '../keys/index.ts'
-import { ModelCatalogService, templateKnowledgeFromRegistry } from '../models/index.ts'
+import { ModelCatalogService, templateAvailabilityFromRegistry, templateKnowledgeFromRegistry } from '../models/index.ts'
 import { openDatabase, type Database } from '../persistence/index.ts'
 import {
   AdapterRegistry,
@@ -158,6 +158,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     cipher: secretCipher,
     inference: createGenericInferenceAdapter({ fetch: globalThis.fetch }),
     templateKnowledge: templateKnowledgeFromRegistry(adapterRegistry),
+    templateAvailability: templateAvailabilityFromRegistry(adapterRegistry),
   })
   const backgroundSchedule = new BackgroundScheduleSettingsService({
     database,

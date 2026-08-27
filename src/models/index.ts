@@ -6,6 +6,7 @@ export {
   ModelCatalogService,
   templateAvailabilityFromRegistry,
   templateDiscoveryFromRegistry,
+  templateDiscoveryBasePathFromRegistry,
   templateKnowledgeFromRegistry,
   type CatalogEntryView,
   type CatalogSyncView,

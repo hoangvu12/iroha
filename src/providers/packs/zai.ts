@@ -28,6 +28,7 @@ export const zaiPack: ProviderPack = {
     },
     knownModels: ['glm-5.3', 'glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air'],
     modelDiscovery: 'best_effort',
+    modelDiscoveryBasePath: '/api/coding/paas/v4',
     inferenceAdapterId: 'zai-inference-adapter',
     usageAdapterId: 'zai-usage-adapter',
     brand: { domain: 'z.ai', accentColor: '#0EA5E9' },

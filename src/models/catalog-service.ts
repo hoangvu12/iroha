@@ -83,6 +83,8 @@ export interface ModelCatalogServiceOptions {
   readonly templateAvailability?: (templateId: string) => 'provider' | 'key'
   /** Whether a template's Provider implements OpenAI `GET /models`. */
   readonly templateDiscovery?: (templateId: string) => 'supported' | 'best_effort' | 'unsupported'
+  /** Optional Provider-specific base path for `GET /models`. */
+  readonly templateDiscoveryBasePath?: (templateId: string) => `/${string}` | null
 }
 
 /**
@@ -115,6 +117,12 @@ export function templateDiscoveryFromRegistry(
   registry: AdapterRegistry,
 ): (templateId: string) => 'supported' | 'best_effort' | 'unsupported' {
   return (templateId) => registry.providerTemplate(templateId)?.modelDiscovery ?? 'supported'
+}
+
+export function templateDiscoveryBasePathFromRegistry(
+  registry: AdapterRegistry,
+): (templateId: string) => `/${string}` | null {
+  return (templateId) => registry.providerTemplate(templateId)?.modelDiscoveryBasePath ?? null
 }
 
 const DISCOVERY_UNREACHABLE = 'the provider could not be reached for model discovery'
@@ -170,6 +178,7 @@ export class ModelCatalogService {
   readonly #templateKnowledge: (templateId: string) => readonly string[] | Promise<readonly string[]>
   readonly #templateAvailability: (templateId: string) => 'provider' | 'key'
   readonly #templateDiscovery: (templateId: string) => 'supported' | 'best_effort' | 'unsupported'
+  readonly #templateDiscoveryBasePath: (templateId: string) => `/${string}` | null
 
   constructor(options: ModelCatalogServiceOptions) {
     this.#database = options.database
@@ -179,6 +188,7 @@ export class ModelCatalogService {
     this.#templateKnowledge = options.templateKnowledge ?? (() => [])
     this.#templateAvailability = options.templateAvailability ?? (() => 'provider')
     this.#templateDiscovery = options.templateDiscovery ?? (() => 'supported')
+    this.#templateDiscoveryBasePath = options.templateDiscoveryBasePath ?? (() => null)
   }
 
   /** The current catalog and sync state of one connection. Read-only. */
@@ -226,10 +236,17 @@ export class ModelCatalogService {
     const keyScoped = this.#templateAvailability(connection.templateId ?? '') === 'key'
     const targets = await this.#discoveryTargets(providerId, keyScoped)
     if (!targets.ok) return targets
+    const discoveryBasePath = this.#templateDiscoveryBasePath(connection.templateId ?? '')
+    const discoveryTargets = discoveryBasePath === null
+      ? targets.value
+      : targets.value.map((target) => ({
+          ...target,
+          baseUrl: `${new URL(target.baseUrl).origin}${discoveryBasePath}`,
+        }))
 
     const prior = await this.#database.modelCatalog.getSync(providerId)
     const attempts: { readonly keyId: string; readonly outcome: DiscoveryOutcome }[] = []
-    for (const target of targets.value) {
+    for (const target of discoveryTargets) {
       attempts.push({ keyId: target.keyId, outcome: await this.#discover(target) })
     }
 

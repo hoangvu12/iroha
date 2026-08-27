@@ -127,6 +127,12 @@ export interface ProviderTemplate {
    */
   readonly modelDiscovery?: 'supported' | 'best_effort' | 'unsupported'
   /**
+   * Provider-specific API path that owns OpenAI-compatible model discovery.
+   * When set, Iroha keeps the configured base URL's origin but replaces its
+   * path before appending `/models`.
+   */
+  readonly modelDiscoveryBasePath?: `/${string}`
+  /**
    * Whether this upstream offers the same Upstream Models to every Upstream Key
    * of a Provider (`provider`) or a different set per key (`key`).
    *

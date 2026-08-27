@@ -44,14 +44,14 @@ describe('Provider Template contribution to the model catalog', () => {
     await iroha.dispose()
   })
 
-  const createConnection = async (displayName: string, templateId: string): Promise<ConnectionBody> => {
+  const createConnection = async (displayName: string, templateId: string, baseUrl = BASE_URL): Promise<ConnectionBody> => {
     const response = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         handle: crypto.randomUUID(),
         displayName,
-        baseUrl: BASE_URL,
+        baseUrl,
         keys: [{ upstreamKey: UPSTREAM_KEY }],
         templateId,
       }),
@@ -101,7 +101,7 @@ describe('Provider Template contribution to the model catalog', () => {
     expect(catalog.entries.map((entry) => entry.modelId)).toContain('glm-5.3')
     expect(catalog.entries.every((entry) => entry.source === 'template')).toBe(true)
     expect(upstream.calls).toHaveLength(1)
-    expect(upstream.calls[0]?.url).toBe(`${BASE_URL}/models`)
+    expect(upstream.calls[0]?.url).toBe('https://api.openai.com/api/coding/paas/v4/models')
   })
 
   test('a Provider with best-effort discovery uses a usable upstream model list', async () => {
@@ -112,6 +112,21 @@ describe('Provider Template contribution to the model catalog', () => {
 
     expect(catalog.entries).toContainEqual(expect.objectContaining({
       modelId: 'glm-upstream-new',
+      source: 'discovered',
+    }))
+  })
+
+  test('Z.ai discovers models through the coding endpoint when inference uses Anthropic', async () => {
+    connection = await createConnection('Z.ai Anthropic', 'zai', 'https://api.z.ai/api/anthropic')
+    upstream.respondWith(() => Response.json({ data: [{ id: 'glm-5.3-flash' }] }))
+    upstream.calls.length = 0
+
+    const catalog = await refreshCatalog()
+
+    expect(upstream.calls).toHaveLength(1)
+    expect(upstream.calls[0]?.url).toBe('https://api.z.ai/api/coding/paas/v4/models')
+    expect(catalog.entries).toContainEqual(expect.objectContaining({
+      modelId: 'glm-5.3-flash',
       source: 'discovered',
     }))
   })

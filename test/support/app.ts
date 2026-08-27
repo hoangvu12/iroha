@@ -6,7 +6,7 @@ import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
 import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
 import { BackgroundScheduleSettingsService } from '../../src/jobs/index.ts'
-import { ModelCatalogService, templateAvailabilityFromRegistry, templateDiscoveryFromRegistry, templateKnowledgeFromRegistry } from '../../src/models/index.ts'
+import { ModelCatalogService, templateAvailabilityFromRegistry, templateDiscoveryBasePathFromRegistry, templateDiscoveryFromRegistry, templateKnowledgeFromRegistry } from '../../src/models/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import {
   createBuiltInAdapterRegistry,
@@ -143,6 +143,7 @@ export function modelCatalogFor(
     templateKnowledge: templateKnowledgeFromRegistry(adapterRegistry),
     templateAvailability: templateAvailabilityFromRegistry(adapterRegistry),
     templateDiscovery: templateDiscoveryFromRegistry(adapterRegistry),
+    templateDiscoveryBasePath: templateDiscoveryBasePathFromRegistry(adapterRegistry),
   })
 }
 
@@ -206,6 +207,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     templateKnowledge: templateKnowledgeFromRegistry(adapterRegistry),
     templateAvailability: templateAvailabilityFromRegistry(adapterRegistry),
     templateDiscovery: templateDiscoveryFromRegistry(adapterRegistry),
+    templateDiscoveryBasePath: templateDiscoveryBasePathFromRegistry(adapterRegistry),
   })
   const usageAdapter = options.usageAdapter ?? createGenericUsageAdapter()
   const usageService = new UsageService({

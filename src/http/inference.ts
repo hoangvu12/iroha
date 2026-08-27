@@ -509,7 +509,7 @@ export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
   const forward = async (request: Request, upstreamPath: '/chat/completions' | '/responses'): Promise<Response> => {
     const admission = await admit(request, {
       internal: () => globalError(500, 'internal_error', 'The request could not be completed.'),
-      malformed: () => globalError(400, 'invalid_model_id', 'A Qualified Model ID is required.'),
+      malformed: () => globalError(400, 'invalid_model_id', 'Use <provider_handle>/<model_id>, or send the bare model ID to /providers/<provider_handle>/v1.'),
       unauthorized: qualifiedAuthorizationError,
     })
     if (!admission.ok) return admission.response
@@ -532,7 +532,7 @@ export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
     const headers = { 'content-type': 'application/json', 'x-request-id': correlationId }
     const admission = await admit(request, {
       internal: () => anthropicMessagesErrorResponse(500, 'internal_error', 'The request could not be completed.', headers, correlationId),
-      malformed: () => anthropicMessagesErrorResponse(400, 'invalid_model_id', 'A Qualified Model ID is required.', headers, correlationId),
+      malformed: () => anthropicMessagesErrorResponse(400, 'invalid_model_id', 'Use <provider_handle>/<model_id>, or send the bare model ID to /providers/<provider_handle>/v1.', headers, correlationId),
       unauthorized: (code) => qualifiedAnthropicAuthorizationError(code, headers, correlationId),
     })
     if (!admission.ok) return admission.response
@@ -557,7 +557,10 @@ export function createGlobalInferenceRoutes(options: InferenceRoutesOptions) {
 
 const qualifiedFailureMetadata: Record<QualifiedModelFailure, { readonly status: number; readonly message: string }> = {
   gateway_key_invalid: { status: 401, message: 'This Gateway Key is not valid.' },
-  invalid_model_id: { status: 400, message: 'A Qualified Model ID must be <provider_handle>/<model_id>.' },
+  invalid_model_id: {
+    status: 400,
+    message: 'Use <provider_handle>/<model_id>, or send the bare model ID to /providers/<provider_handle>/v1.',
+  },
   invalid_provider_handle: { status: 400, message: 'The Provider Handle is invalid.' },
   provider_not_allowed: { status: 403, message: 'This Gateway Key is not allowed to use that Provider.' },
   model_not_allowed: { status: 403, message: 'This Gateway Key is not allowed to request that model.' },

@@ -88,6 +88,20 @@ describe('Provider Template contribution to the model catalog', () => {
     expect(discovered?.source).toBe('discovered')
   })
 
+  test('a Provider without model discovery refreshes from template knowledge', async () => {
+    connection = await createConnection('Z.ai Coding Plan', 'zai')
+    upstream.calls.length = 0
+
+    const catalog = await refreshCatalog()
+
+    expect(catalog.sync.lastSuccessAt).not.toBeNull()
+    expect(catalog.sync.lastFailureAt).toBeNull()
+    expect(catalog.sync.stale).toBe(false)
+    expect(catalog.entries.map((entry) => entry.modelId)).toContain('glm-5.1')
+    expect(catalog.entries.every((entry) => entry.source === 'template')).toBe(true)
+    expect(upstream.calls).toHaveLength(0)
+  })
+
   test('a hand-configured connection has no template-known models', async () => {
     const hand = await createConnection('Hand-configured', 'generic-openai-compatible')
     connection = hand

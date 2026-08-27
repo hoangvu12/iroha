@@ -112,7 +112,9 @@ describe('global Chat Completions', () => {
   test('rejects malformed IDs, invalid keys, inaccessible Providers, and denied models before upstream', async () => {
     const malformed = await chat({ model: 'unqualified', messages: [] })
     expect(malformed.status).toBe(400)
-    expect(((await malformed.json()) as { error: { code: string } }).error.code).toBe('invalid_model_id')
+    const malformedError = (await malformed.json()) as { error: { code: string; message: string } }
+    expect(malformedError.error.code).toBe('invalid_model_id')
+    expect(malformedError.error.message).toContain('/providers/<provider_handle>/v1')
 
     const invalidHandle = await chat({ model: 'INVALID/model', messages: [] })
     expect(invalidHandle.status).toBe(400)

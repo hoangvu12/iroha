@@ -121,6 +121,12 @@ export interface ProviderTemplate {
   /** Models the template was reviewed against; data-only, never a secret. */
   readonly knownModels: readonly string[]
   /**
+   * Whether the Provider exposes the OpenAI-compatible `GET /models` surface.
+   * `unsupported` makes refresh reconcile the reviewed template knowledge
+   * without issuing a request the Provider does not implement.
+   */
+  readonly modelDiscovery?: 'supported' | 'unsupported'
+  /**
    * Whether this upstream offers the same Upstream Models to every Upstream Key
    * of a Provider (`provider`) or a different set per key (`key`).
    *

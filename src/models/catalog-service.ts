@@ -81,6 +81,8 @@ export interface ModelCatalogServiceOptions {
    * Availability existed and what almost every upstream still does.
    */
   readonly templateAvailability?: (templateId: string) => 'provider' | 'key'
+  /** Whether a template's Provider implements OpenAI `GET /models`. */
+  readonly templateDiscovery?: (templateId: string) => 'supported' | 'unsupported'
 }
 
 /**
@@ -107,6 +109,12 @@ export function templateAvailabilityFromRegistry(
   registry: AdapterRegistry,
 ): (templateId: string) => 'provider' | 'key' {
   return (templateId) => registry.providerTemplate(templateId)?.modelAvailability ?? 'provider'
+}
+
+export function templateDiscoveryFromRegistry(
+  registry: AdapterRegistry,
+): (templateId: string) => 'supported' | 'unsupported' {
+  return (templateId) => registry.providerTemplate(templateId)?.modelDiscovery ?? 'supported'
 }
 
 const DISCOVERY_UNREACHABLE = 'the provider could not be reached for model discovery'
@@ -161,6 +169,7 @@ export class ModelCatalogService {
   readonly #clock: Clock
   readonly #templateKnowledge: (templateId: string) => readonly string[] | Promise<readonly string[]>
   readonly #templateAvailability: (templateId: string) => 'provider' | 'key'
+  readonly #templateDiscovery: (templateId: string) => 'supported' | 'unsupported'
 
   constructor(options: ModelCatalogServiceOptions) {
     this.#database = options.database
@@ -169,6 +178,7 @@ export class ModelCatalogService {
     this.#clock = options.clock ?? systemClock
     this.#templateKnowledge = options.templateKnowledge ?? (() => [])
     this.#templateAvailability = options.templateAvailability ?? (() => 'provider')
+    this.#templateDiscovery = options.templateDiscovery ?? (() => 'supported')
   }
 
   /** The current catalog and sync state of one connection. Read-only. */
@@ -190,6 +200,25 @@ export class ModelCatalogService {
     if (connection === null) return failed({ code: 'provider_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
 
+    const at = this.#clock.now()
+    if (this.#templateDiscovery(connection.templateId ?? '') === 'unsupported') {
+      await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
+      await this.#database.modelCatalog.putSync({
+        providerId,
+        syncedAt: at,
+        lastSuccessAt: at,
+        lastFailureAt: null,
+        lastFailureMessage: null,
+      })
+      await this.#database.audit.record({
+        action: 'model_catalog.refreshed',
+        outcome: 'success',
+        detail: { providerId, source: 'template' },
+        at,
+      })
+      return await this.#viewOf(providerId)
+    }
+
     // A Provider that entitles each Upstream Key separately is discovered once
     // per key: no single key's answer describes the connection, so trusting one
     // would both understate the Model Catalog and leave every other key without
@@ -199,8 +228,6 @@ export class ModelCatalogService {
     if (!targets.ok) return targets
 
     const prior = await this.#database.modelCatalog.getSync(providerId)
-    const at = this.#clock.now()
-
     const attempts: { readonly keyId: string; readonly outcome: DiscoveryOutcome }[] = []
     for (const target of targets.value) {
       attempts.push({ keyId: target.keyId, outcome: await this.#discover(target) })

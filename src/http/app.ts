@@ -8,7 +8,7 @@ import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
 import type { OwnerIdentity } from '../identity/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import { BackgroundScheduleSettingsService } from '../jobs/index.ts'
-import { ModelCatalogService, templateAvailabilityFromRegistry, templateKnowledgeFromRegistry } from '../models/index.ts'
+import { ModelCatalogService, templateAvailabilityFromRegistry, templateDiscoveryFromRegistry, templateKnowledgeFromRegistry } from '../models/index.ts'
 import type { Database } from '../persistence/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import { createBuiltInAdapterRegistry } from '../providers/adapter-registry.ts'
@@ -128,6 +128,7 @@ export function createApp(options: AppOptions) {
         inference,
         templateKnowledge: templateKnowledgeFromRegistry(adapterRegistry),
         templateAvailability: templateAvailabilityFromRegistry(adapterRegistry),
+        templateDiscovery: templateDiscoveryFromRegistry(adapterRegistry),
       })
     })()
   const usageService =

@@ -97,7 +97,7 @@ describe('Provider Template contribution to the model catalog', () => {
     expect(catalog.sync.lastSuccessAt).not.toBeNull()
     expect(catalog.sync.lastFailureAt).toBeNull()
     expect(catalog.sync.stale).toBe(false)
-    expect(catalog.entries.map((entry) => entry.modelId)).toContain('glm-5.1')
+    expect(catalog.entries.map((entry) => entry.modelId)).toContain('glm-5.3')
     expect(catalog.entries.every((entry) => entry.source === 'template')).toBe(true)
     expect(upstream.calls).toHaveLength(0)
   })

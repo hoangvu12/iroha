@@ -125,7 +125,7 @@ export interface ProviderTemplate {
    * `unsupported` makes refresh reconcile the reviewed template knowledge
    * without issuing a request the Provider does not implement.
    */
-  readonly modelDiscovery?: 'supported' | 'unsupported'
+  readonly modelDiscovery?: 'supported' | 'best_effort' | 'unsupported'
   /**
    * Whether this upstream offers the same Upstream Models to every Upstream Key
    * of a Provider (`provider`) or a different set per key (`key`).

@@ -88,8 +88,9 @@ describe('Provider Template contribution to the model catalog', () => {
     expect(discovered?.source).toBe('discovered')
   })
 
-  test('a Provider without model discovery refreshes from template knowledge', async () => {
+  test('a Provider with best-effort discovery falls back to template knowledge', async () => {
     connection = await createConnection('Z.ai Coding Plan', 'zai')
+    upstream.respondWith(() => new Response('not a usable model list', { status: 200 }))
     upstream.calls.length = 0
 
     const catalog = await refreshCatalog()
@@ -99,7 +100,20 @@ describe('Provider Template contribution to the model catalog', () => {
     expect(catalog.sync.stale).toBe(false)
     expect(catalog.entries.map((entry) => entry.modelId)).toContain('glm-5.3')
     expect(catalog.entries.every((entry) => entry.source === 'template')).toBe(true)
-    expect(upstream.calls).toHaveLength(0)
+    expect(upstream.calls).toHaveLength(1)
+    expect(upstream.calls[0]?.url).toBe(`${BASE_URL}/models`)
+  })
+
+  test('a Provider with best-effort discovery uses a usable upstream model list', async () => {
+    connection = await createConnection('Z.ai Coding Plan', 'zai')
+    upstream.respondWith(() => Response.json({ data: [{ id: 'glm-upstream-new' }] }))
+
+    const catalog = await refreshCatalog()
+
+    expect(catalog.entries).toContainEqual(expect.objectContaining({
+      modelId: 'glm-upstream-new',
+      source: 'discovered',
+    }))
   })
 
   test('a hand-configured connection has no template-known models', async () => {

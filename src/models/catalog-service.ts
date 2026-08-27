@@ -82,7 +82,7 @@ export interface ModelCatalogServiceOptions {
    */
   readonly templateAvailability?: (templateId: string) => 'provider' | 'key'
   /** Whether a template's Provider implements OpenAI `GET /models`. */
-  readonly templateDiscovery?: (templateId: string) => 'supported' | 'unsupported'
+  readonly templateDiscovery?: (templateId: string) => 'supported' | 'best_effort' | 'unsupported'
 }
 
 /**
@@ -113,7 +113,7 @@ export function templateAvailabilityFromRegistry(
 
 export function templateDiscoveryFromRegistry(
   registry: AdapterRegistry,
-): (templateId: string) => 'supported' | 'unsupported' {
+): (templateId: string) => 'supported' | 'best_effort' | 'unsupported' {
   return (templateId) => registry.providerTemplate(templateId)?.modelDiscovery ?? 'supported'
 }
 
@@ -169,7 +169,7 @@ export class ModelCatalogService {
   readonly #clock: Clock
   readonly #templateKnowledge: (templateId: string) => readonly string[] | Promise<readonly string[]>
   readonly #templateAvailability: (templateId: string) => 'provider' | 'key'
-  readonly #templateDiscovery: (templateId: string) => 'supported' | 'unsupported'
+  readonly #templateDiscovery: (templateId: string) => 'supported' | 'best_effort' | 'unsupported'
 
   constructor(options: ModelCatalogServiceOptions) {
     this.#database = options.database
@@ -235,6 +235,23 @@ export class ModelCatalogService {
 
     const answered = attempts.filter((attempt) => attempt.outcome.ok)
     if (answered.length === 0) {
+      if (this.#templateDiscovery(connection.templateId ?? '') === 'best_effort') {
+        await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
+        await this.#database.modelCatalog.putSync({
+          providerId,
+          syncedAt: at,
+          lastSuccessAt: at,
+          lastFailureAt: null,
+          lastFailureMessage: null,
+        })
+        await this.#database.audit.record({
+          action: 'model_catalog.refreshed',
+          outcome: 'success',
+          detail: { providerId, source: 'template_fallback' },
+          at,
+        })
+        return await this.#viewOf(providerId)
+      }
       // Every key refused. Nothing is erased: each retained list is only marked
       // stale, so routing keeps the last answer it had.
       if (keyScoped) {

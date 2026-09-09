@@ -140,6 +140,8 @@ export interface AnthropicForwardRequest extends InferenceForwardRequest {
    * OpenAI-shape for a non-Anthropic Provider and the response translated back.
    */
   readonly passthrough: boolean
+  /** Inspect a failed OpenAI response before translation discards Provider error fields. */
+  readonly onUpstreamFailure?: (result: InferenceBufferedResult) => void
 }
 
 export interface InferenceAdapter {

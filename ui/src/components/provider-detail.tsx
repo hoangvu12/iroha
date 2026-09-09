@@ -1347,7 +1347,7 @@ function ProviderDetailsCard({ provider }: { readonly provider: ProviderView }) 
           <span className="font-mono break-all">{provider.baseUrl}</span>
         </DetailRow>
         <DetailRow label="Retry policy">
-          {provider.retryMaxAttempts} {provider.retryMaxAttempts === 1 ? 'attempt' : 'attempts'}
+          All eligible keys · Same-key retries {provider.retryMaxAttempts === 1 ? 'off' : 'on'}
           {provider.retryAmbiguousNetwork ? ' · Ambiguous net on' : ' · Ambiguous net off'}
         </DetailRow>
         <DetailRow label="Insecure HTTP">

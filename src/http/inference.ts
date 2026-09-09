@@ -8,7 +8,6 @@ import {
   generateIdempotencyValue,
   type InferenceAdapter,
   type InferenceAdapterCapabilities,
-  type InferenceFailureKind,
   type InferenceFailureClassification,
   type InferenceForwardRequest,
   type InferenceForwardResult,
@@ -123,7 +122,7 @@ export interface InferenceRoutesOptions {
   readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
-const MAX_INFERENCE_ATTEMPTS = 3
+const DEFAULT_SAME_KEY_ATTEMPTS = 3
 
 /** Reasonable defaults applied when no global setting has been written yet. */
 export const DEFAULT_TRANSPORT: TransportDefaults = {
@@ -745,7 +744,7 @@ async function forwardGeneration(options: {
   // resolves to the generic adapter inside that resolution; `inference` remains
   // only as the last resort for a Provider that vanished mid-Request.
   const resolved = await providers.resolveProvider(providerId)
-  const maxAttempts = resolved?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
+  const sameKeyAttemptBudget = resolved?.retryMaxAttempts ?? DEFAULT_SAME_KEY_ATTEMPTS
   const retryAmbiguousNetwork = resolved?.retryAmbiguousNetwork ?? false
   const totalRetryBudgetMs = resolved?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
   const providerAdapter = resolved?.inferenceAdapter ?? inference
@@ -774,7 +773,7 @@ async function forwardGeneration(options: {
     gatewayKeyName: authorization.keyName,
   }) ?? null
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     if (requestSignal.aborted) throw abortError()
     let target: InferenceTarget
     if (retainedTarget !== null) {
@@ -786,6 +785,7 @@ async function forwardGeneration(options: {
         envelope.model,
         attemptedKeys,
         alternateUsed,
+        resolved?.keyIds ?? [],
       )
       if (!resolution.ok) {
         const refusal = authoritativeExhaustionKnown && resolution.failure.code === 'no_eligible_key'
@@ -797,6 +797,11 @@ async function forwardGeneration(options: {
             ?? await providers.earliestRetryAfterSeconds(providerId)
             ?? (lastUpstream.status === 429 ? 30 : null)
         await history?.recordSkip(refusal.code, new Date())
+        await history?.finalize({
+          status: refusal.status, outcome: 'failure', isStreaming: envelope.stream,
+          latencyMs: timer.now() - startedAt, keyId: lastAttemptKeyId,
+          promptTokens: null, completionTokens: null, totalTokens: null, errorCode: refusal.code,
+        })
         return error(
           refusal.status,
           { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
@@ -910,14 +915,16 @@ async function forwardGeneration(options: {
         at: new Date(),
       })
       const status = streamed.status
-      const boundedAlternate = isSingleAlternateFailure(classification.kind)
-      if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed) && attempt < maxAttempts) {
-        if (boundedAlternate) alternateUsed = true
+      const retrySameKey = classification.retryAction === 'retry_same' && sameKeyRetries < 1 &&
+        sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
+        timer.now() - startedAt < totalRetryBudgetMs
+      if (classification.retryAction === 'try_alternate') {
+        alternateUsed = true
         attemptedKeys.push(target.keyId)
         metrics?.recordRetry()
         continue
       }
-      if (classification.retryAction === 'retry_same' && sameKeyRetries < 1 && attempt < maxAttempts) {
+      if (retrySameKey) {
         sameKeyRetries++
         retainedTarget = target
         await retrySleep(100, requestSignal)
@@ -991,7 +998,7 @@ async function forwardGeneration(options: {
       if (
         retryAmbiguousNetwork &&
         ambiguousNetworkRetries < 1 &&
-        attempt < maxAttempts &&
+        sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
         timer.now() - startedAt < totalRetryBudgetMs
       ) {
         ambiguousNetworkRetries++
@@ -1083,17 +1090,18 @@ async function forwardGeneration(options: {
       at: new Date(),
     })
 
-    const insideBudget = timer.now() - startedAt < totalRetryBudgetMs
-    if (!insideBudget || requestSignal.aborted) break
+    if (requestSignal.aborted) break
 
-    const boundedAlternate = isSingleAlternateFailure(classification.kind)
-    if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed)) {
-      if (boundedAlternate) alternateUsed = true
+    const retrySameKey = classification.retryAction === 'retry_same' && sameKeyRetries < 1 &&
+      sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
+      timer.now() - startedAt < totalRetryBudgetMs
+    if (classification.retryAction === 'try_alternate') {
+      alternateUsed = true
       attemptedKeys.push(target.keyId)
       metrics?.recordRetry()
       continue
     }
-    if (classification.retryAction === 'retry_same' && sameKeyRetries < 1) {
+    if (retrySameKey) {
       sameKeyRetries++
       retainedTarget = target
       await retrySleep(100, requestSignal)
@@ -1307,12 +1315,13 @@ async function forwardAnthropicMessages(options: {
 
     // Resolve the Provider once, before an Upstream Key is selected. The wire
     // shape its upstream speaks decides passthrough versus translation, and its
-    // retry settings bound the attempt loop. Read from the resolved value so the
+    // retry settings bound same-key replay; failover visits every eligible key. Read from the resolved value so the
     // route never looks up the Provider Template itself (ADR-0020); a Provider
     // with no template, or an unknown one, resolves to the OpenAI shape.
     const resolved = await providers.resolveProvider(providerId)
     const passthrough = resolved?.wireFormat === 'anthropic'
-    const maxAttempts = resolved?.retryMaxAttempts ?? MAX_INFERENCE_ATTEMPTS
+    const providerAdapter = resolved?.inferenceAdapter ?? anthropicAdapter
+    const sameKeyAttemptBudget = resolved?.retryMaxAttempts ?? DEFAULT_SAME_KEY_ATTEMPTS
     const retryAmbiguousNetwork = resolved?.retryAmbiguousNetwork ?? false
     const totalRetryBudgetMs = resolved?.totalRetryTimeoutMs ?? transport.totalRetryTimeoutMs
 
@@ -1342,7 +1351,7 @@ async function forwardAnthropicMessages(options: {
       gatewayKeyName: authorization.keyName,
     }) ?? null
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 1; ; attempt++) {
       if (requestSignal.aborted) throw abortError()
 
       let target: InferenceTarget
@@ -1355,6 +1364,7 @@ async function forwardAnthropicMessages(options: {
           envelope.model,
           attemptedKeys,
           alternateUsed,
+          resolved?.keyIds ?? [],
         )
         if (!resolution.ok) {
           // For the Anthropic-shape route the Anthropic SDK expects to see
@@ -1385,6 +1395,11 @@ async function forwardAnthropicMessages(options: {
           const refusal = resolutionRefusal(resolution.failure, envelope.model)
           const retryAfter = await providers.earliestRetryAfterSeconds(providerId)
           await history?.recordSkip(refusal.code, new Date())
+          await history?.finalize({
+            status: refusal.status, outcome: 'failure', isStreaming: envelope.stream,
+            latencyMs: timer.now() - startedAt, keyId: lastAttemptKeyId,
+            promptTokens: null, completionTokens: null, totalTokens: null, errorCode: refusal.code,
+          })
           return anthropicMessagesErrorResponse(
             refusal.status,
             refusal.code,
@@ -1433,6 +1448,19 @@ async function forwardAnthropicMessages(options: {
         totalRetryTimeoutMs: target.totalRetryTimeoutMs,
       }
 
+      // Keep Provider failure meaning before the Messages translator changes
+      // the error envelope. Only bounded classification survives the callback.
+      const upstreamFailure: { classification?: InferenceFailureClassification } = {}
+      const forwardAttempt: NonNullable<InferenceAdapter['forwardAnthropic']> = (request) =>
+        anthropicAdapter.forwardAnthropic!({
+          ...request,
+          onUpstreamFailure: (result) => {
+            upstreamFailure.classification = providerAdapter.classifyFailure(
+              result, { keyId: target.keyId, observedAt: new Date() },
+            )
+          },
+        })
+
       if (envelope.stream) {
         if (anthropicAdapter.forwardAnthropic === undefined) {
           return anthropicMessagesErrorResponse(
@@ -1444,7 +1472,7 @@ async function forwardAnthropicMessages(options: {
           )
         }
         const streamed = await streamAnthropicMessages(
-          { forwardAnthropic: anthropicAdapter.forwardAnthropic, classifyFailure: anthropicAdapter.classifyFailure },
+          { forwardAnthropic: forwardAttempt, classifyFailure: anthropicAdapter.classifyFailure },
           timer,
           forwardRequest,
           passthrough,
@@ -1476,8 +1504,12 @@ async function forwardAnthropicMessages(options: {
           return monitorResponse(streamed, requestActivity)
         }
         const headerMap = Object.fromEntries(streamed.headers.entries())
-        const classification = anthropicAdapter.classifyFailure({
+        const classification = upstreamFailure.classification ?? anthropicAdapter.classifyFailure({
           kind: 'buffered', status: streamed.status, headers: headerMap, body: '',
+        })
+        await reconcileInferenceCapacity({
+          providers, usageService, providerId, keyId: target.keyId,
+          model: envelope.model, classification,
         })
         await providers.recordInferenceFailure({
           keyId: target.keyId,
@@ -1491,17 +1523,20 @@ async function forwardAnthropicMessages(options: {
           outcome: 'failure',
           errorCode: refusal.code,
           retryAfterSeconds: numericRetryAfter(streamed.headers),
+          diagnostics: classification.diagnostics,
           at: new Date(),
         })
         const status = streamed.status
-        const boundedAlternate = isSingleAlternateFailure(classification.kind)
-        if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed) && attempt < maxAttempts) {
-          if (boundedAlternate) alternateUsed = true
+        const retrySameKey = classification.retryAction === 'retry_same' && sameKeyRetries < 1 &&
+          sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
+          timer.now() - startedAt < totalRetryBudgetMs
+        if (classification.retryAction === 'try_alternate') {
+          alternateUsed = true
           attemptedKeys.push(target.keyId)
           metrics?.recordRetry()
           continue
         }
-        if (classification.retryAction === 'retry_same' && sameKeyRetries < 1 && attempt < maxAttempts) {
+        if (retrySameKey) {
           sameKeyRetries++
           retainedTarget = target
           await retrySleep(100, requestSignal)
@@ -1523,7 +1558,7 @@ async function forwardAnthropicMessages(options: {
       }
 
       try {
-        lastUpstream = await anthropicAdapter.forwardAnthropic!({
+        lastUpstream = await forwardAttempt({
           ...forwardRequest,
           passthrough,
         })
@@ -1579,7 +1614,7 @@ async function forwardAnthropicMessages(options: {
         if (
           retryAmbiguousNetwork &&
           ambiguousNetworkRetries < 1 &&
-          attempt < maxAttempts &&
+          sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
           timer.now() - startedAt < totalRetryBudgetMs
         ) {
           ambiguousNetworkRetries++
@@ -1645,7 +1680,11 @@ async function forwardAnthropicMessages(options: {
       }
 
       const status = lastUpstream.status
-      const classification = anthropicAdapter.classifyFailure(lastUpstream)
+      const classification = upstreamFailure.classification ?? anthropicAdapter.classifyFailure(lastUpstream)
+      await reconcileInferenceCapacity({
+        providers, usageService, providerId, keyId: target.keyId,
+        model: envelope.model, classification,
+      })
       await providers.recordInferenceFailure({
         keyId: target.keyId,
         model: envelope.model,
@@ -1659,20 +1698,22 @@ async function forwardAnthropicMessages(options: {
         outcome: 'failure',
         errorCode: refusal.code,
         retryAfterSeconds: numericRetryAfter(lastUpstream.headers),
+        diagnostics: classification.diagnostics,
         at: new Date(),
       })
 
-      const insideBudget = timer.now() - startedAt < totalRetryBudgetMs
-      if (!insideBudget || requestSignal.aborted) break
+      if (requestSignal.aborted) break
 
-      const boundedAlternate = isSingleAlternateFailure(classification.kind)
-      if (classification.retryAction === 'try_alternate' && (!boundedAlternate || !alternateUsed)) {
-        if (boundedAlternate) alternateUsed = true
+      const retrySameKey = classification.retryAction === 'retry_same' && sameKeyRetries < 1 &&
+        sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
+        timer.now() - startedAt < totalRetryBudgetMs
+      if (classification.retryAction === 'try_alternate') {
+        alternateUsed = true
         attemptedKeys.push(target.keyId)
         metrics?.recordRetry()
         continue
       }
-      if (classification.retryAction === 'retry_same' && sameKeyRetries < 1) {
+      if (retrySameKey) {
         sameKeyRetries++
         retainedTarget = target
         await retrySleep(100, requestSignal)
@@ -2351,13 +2392,6 @@ function cooldownEvidence(
       retryAt: retryAt.toISOString(),
     },
   }
-}
-
-/** Failures whose alternate-key retry is deliberately capped at one. */
-function isSingleAlternateFailure(kind: InferenceFailureKind): boolean {
-  return kind === 'capacity_limited' ||
-    kind === 'payment_required' ||
-    kind === 'content_inspection_failed'
 }
 
 /** One OpenAI-shaped error: message, type, param, stable code, and correlation. */

@@ -191,6 +191,8 @@ export interface ProviderView {
  * glossary — its shape is free to change and no test should assert it.
  */
 export interface ResolvedProvider {
+  /** Bound failover to keys present when this Request started. */
+  readonly keyIds: readonly string[]
   /** The Provider Template that seeded the connection, or null when built by hand. */
   readonly templateId: string | null
   /** The body shape the upstream speaks; `openai` for a template-less Provider. */
@@ -372,6 +374,7 @@ export class ProviderRegistry {
     if (view === null) return null
     return {
       templateId: view.templateId,
+      keyIds: view.keys.map((key) => key.id),
       wireFormat: this.#adapterRegistry.resolveWireFormat(view.templateId),
       inferenceAdapter: this.#adapterRegistry.resolveInferenceAdapter(view.templateId),
       retryMaxAttempts: view.retryMaxAttempts,
@@ -1442,6 +1445,7 @@ export class ProviderRegistry {
     model: string,
     excludedKeyIds: readonly string[] = [],
     ignoreUnknownScope = false,
+    candidateKeyIds?: readonly string[],
   ): Promise<ProviderResult<InferenceTarget>> {
     const connection = await this.#database.providers.getProvider(providerId)
     if (connection === null) return failed({ code: 'provider_not_found' })
@@ -1465,6 +1469,7 @@ export class ProviderRegistry {
     }
 
     const eligible = keys.filter((candidate) => {
+      if (candidateKeyIds !== undefined && !candidateKeyIds.includes(candidate.id)) return false
       if (excluded.has(candidate.id) || !keyServesModel(candidate, model)) return false
       if (candidate.health === 'active') {
         return !scopeUnavailable(candidate, keys, model, at, ignoreUnknownScope)

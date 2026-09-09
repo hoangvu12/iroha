@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import type { UsageAdapter, UsagePollResult } from '../../src/usage/index.ts'
 import { completeSetup, createTestApp, type TestApp } from '../support/app.ts'
 import { mockUpstreamTransport } from '../support/inference.ts'
+import { systemTimer } from '../../src/runtime/timer.ts'
 
 const KEY_ZERO = 'sk-minimax-zero-capacity'
 const KEY_NEGATIVE = 'sk-minimax-negative-capacity'
@@ -176,6 +177,102 @@ describe('MiniMax capacity reconciliation through the assembled HTTP application
         capacityScope: 'key',
       })
       expect(JSON.stringify(body)).not.toContain(secret)
+    })
+  }
+
+  const retryCases = ['chat/completions', 'messages'].flatMap((path) =>
+    [false, true].flatMap((stream) => [1, 3].flatMap((maxAttempts) =>
+      [false, true].map((exhausted) => ({ path, stream, maxAttempts, exhausted })))),
+  )
+  for (const { path, stream, maxAttempts, exhausted } of retryCases) {
+    test(`MiniMax tries all six keys with retry setting ${maxAttempts} (${path}, stream=${stream}, exhausted=${exhausted})`, async () => {
+      const upstream = mockUpstreamTransport()
+      let calls = 0
+      let elapsed = 0
+      let addKeyDuringRequest: (() => Promise<void>) | undefined
+      upstream.respondWith(async () => {
+        calls++
+        if (calls === 1) await addKeyDuringRequest?.()
+        elapsed += 31_000
+        if (calls <= 5 || exhausted) {
+          return Response.json({ error: {
+            code: calls === 1 ? 'upstream_error' : 'upstream_rate_limited',
+            type: calls === 1 ? 'insufficient_balance_error' : 'rate_limit_error',
+            message: 'private-provider-message',
+          } }, { status: calls === 1 ? 402 : 429 })
+        }
+        if (stream) {
+          return new Response([
+            `data: ${JSON.stringify({ id: 'chatcmpl-recovered', object: 'chat.completion.chunk', created: 1, model: MODEL,
+              choices: [{ index: 0, delta: { role: 'assistant', content: 'ok' }, finish_reason: null }] })}\n\n`,
+            `data: ${JSON.stringify({ id: 'chatcmpl-recovered', object: 'chat.completion.chunk', created: 1, model: MODEL,
+              choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`,
+            'data: [DONE]\n\n',
+          ].join(''), { headers: { 'content-type': 'text/event-stream' } })
+        }
+        return Response.json({
+          id: 'chatcmpl-recovered', object: 'chat.completion', created: 1, model: MODEL,
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+        })
+      })
+      const iroha = await createTestApp({
+        upstreamTransport: upstream.fetch,
+        timer: { now: () => elapsed, set: systemTimer.set },
+      })
+      apps.push(iroha)
+      const csrf = (await completeSetup(iroha)).csrf
+      const created = await iroha.fetch('/api/v1/admin/providers', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
+        body: JSON.stringify({
+          handle: crypto.randomUUID(), templateId: 'MiniMax', displayName: 'MiniMax retry budget',
+          baseUrl: 'https://api.minimax.io/v1',
+          keys: [1, 2, 3, 4, 5, 6].map((i) => ({ upstreamKey: `sk-minimax-budget-${i}` })),
+        }),
+      })
+      expect(created.status).toBe(201)
+      const provider = await created.json() as ProviderBody
+      const updated = await iroha.fetch(`/api/v1/admin/providers/${provider.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
+        body: JSON.stringify({ retryMaxAttempts: maxAttempts }),
+      })
+      expect(updated.status).toBe(200)
+      const gatewayKey = await iroha.fetch('/api/v1/admin/gateway-keys', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
+        body: JSON.stringify({ name: 'retry budget caller', scope: [{ providerId: provider.id }] }),
+      })
+      const { secret } = await gatewayKey.json() as { secret: string }
+      if (exhausted) {
+        addKeyDuringRequest = async () => {
+          const added = await iroha.fetch(`/api/v1/admin/providers/${provider.id}/keys`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
+            body: JSON.stringify({ upstreamKey: 'sk-added-during-request' }),
+          })
+          expect(added.status).toBe(201)
+        }
+      }
+      const response = await iroha.fetch(`/providers/${provider.handle}/v1/${path}`, {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+        body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'hello' }], max_tokens: 16, stream }),
+      })
+      expect(response.status).toBe(exhausted ? (!stream && path === 'messages' ? 429 : 503) : 200)
+      const body = await response.text()
+      if (!exhausted) expect(body).toContain('ok')
+      expect(calls).toBe(6)
+      const detail = await (await iroha.fetch(`/api/v1/admin/requests/${response.headers.get('x-request-id')}`)).json() as {
+        event: { status: number; outcome: string }
+        attempts: Array<{ status: number; keyId: string; diagnostics: Record<string, unknown> }>
+      }
+      expect(detail.event).toMatchObject({ status: response.status, outcome: exhausted ? 'failure' : 'success' })
+      const transmitted = detail.attempts.filter((attempt) => attempt.keyId !== null)
+      expect(transmitted.map((attempt) => attempt.status)).toEqual([402, 429, 429, 429, 429, exhausted ? 429 : 200])
+      expect(new Set(transmitted.map((attempt) => attempt.keyId)).size).toBe(6)
+      expect(detail.attempts[0]?.diagnostics).toMatchObject({
+        providerType: 'insufficient_balance_error', capacityScope: 'key',
+      })
+      expect(detail.attempts[1]?.diagnostics).toMatchObject({
+        providerType: 'rate_limit_error', capacityScope: 'key',
+      })
+      expect(JSON.stringify(detail)).not.toContain('private-provider-message')
     })
   }
 })

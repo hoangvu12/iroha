@@ -1555,6 +1555,10 @@ async function forwardAnthropicAsOpenAi(
 
   if (response.status < 200 || response.status >= 300) {
     const rawBody = await response.text()
+    request.onUpstreamFailure?.({
+      kind: 'buffered', status: response.status,
+      headers: Object.fromEntries(response.headers.entries()), body: rawBody,
+    })
     return openAiToAnthropicErrorResponse(response.status, rawBody, Object.fromEntries(response.headers.entries()))
   }
 

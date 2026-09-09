@@ -140,9 +140,9 @@ export function EditProviderForm({
       </div>
       <Field
         id={`edit-${provider.id}-retry-attempts`}
-        label="Maximum attempts"
+        label="Same-key retry budget"
         type="number"
-        hint="One to five attempts across retries and alternate credentials."
+        hint="1 disables same-key retries. Higher values allow bounded retries. Failover always tries every eligible key."
         value={retryMaxAttempts}
         onChange={setRetryMaxAttempts}
         problem={form.problemFor('retryMaxAttempts')}

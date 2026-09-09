@@ -80,7 +80,7 @@ describe('scoped inference retries', () => {
     expect(keys.map((key) => key.health).sort()).toEqual(['active', 'invalid_authentication'])
   })
 
-  test('generic unknown-scope 429 tries at most one alternate without durable exhaustion', async () => {
+  test('generic unknown-scope 429 exhausts eligible keys without durable exhaustion', async () => {
     upstream.respondWith(() => new Response('slow', { status: 429, headers: { 'retry-after': '17' } }))
 
     const response = await chat()
@@ -108,7 +108,7 @@ describe('scoped inference retries', () => {
     expect(keys.map((key) => key.health).sort()).toEqual(['active', 'active'])
   })
 
-  test('unrecognized 402 stops after one alternate even when another key is eligible', async () => {
+  test('unrecognized 402 tries every eligible key and then stops', async () => {
     await iroha.fetch(`/api/v1/admin/providers/${providerId}/keys`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -120,8 +120,8 @@ describe('scoped inference retries', () => {
 
     const response = await chat()
 
-    expect(response.status).toBe(402)
-    expect(upstream.calls).toHaveLength(2)
+    expect(response.status).toBe(503)
+    expect(upstream.calls).toHaveLength(3)
     const keys = await iroha.database.providers.listKeys(providerId)
     expect(keys.map((key) => key.health).sort()).toEqual(['active', 'active', 'active'])
   })
@@ -319,13 +319,13 @@ describe('scoped inference retries', () => {
     })
 
     test('stops when the overdue key is the only one left', async () => {
-      // One alternate, not a walk of the whole Provider: an unpaid account is
-      // no reason to spend the retry budget on every remaining credential.
+      // Each refusal is key-scoped. Once both keys are parked, resolution
+      // reports that no eligible key remains without another upstream call.
       upstream.respondWith(arrearage)
 
       const response = await chat()
 
-      expect(response.status).toBe(400)
+      expect(response.status).toBe(503)
       expect(upstream.calls).toHaveLength(2)
     })
   })
@@ -379,7 +379,7 @@ describe('scoped inference retries', () => {
     expect(upstream.calls[0]?.headers.authorization).toBe(upstream.calls[1]?.headers.authorization)
   })
 
-  test('connection attempt maximum stops retry before another credential', async () => {
+  test('a same-key attempt setting of one does not prevent credential failover', async () => {
     await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
@@ -390,8 +390,8 @@ describe('scoped inference retries', () => {
 
     const response = await chat()
 
-    expect(response.status).toBe(401)
-    expect(upstream.calls).toHaveLength(1)
+    expect(response.status).toBe(503)
+    expect(upstream.calls).toHaveLength(2)
   })
 })
 

@@ -27,6 +27,7 @@ describe('the official OpenAI SDK through the Responses surface', () => {
       maxRetries: 0,
       dangerouslyAllowBrowser: true,
     })
+    upstream.reset()
   })
 
   afterEach(async () => {

@@ -89,8 +89,8 @@ describe('Provider Template contribution to the model catalog', () => {
   })
 
   test('a Provider with best-effort discovery falls back to template knowledge', async () => {
-    connection = await createConnection('Z.ai Coding Plan', 'zai')
     upstream.respondWith(() => new Response('not a usable model list', { status: 200 }))
+    connection = await createConnection('Z.ai Coding Plan', 'zai')
     upstream.calls.length = 0
 
     const catalog = await refreshCatalog()

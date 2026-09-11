@@ -58,7 +58,9 @@ describe('provider-scoped Chat Completions', () => {
     if (response.status !== 201) {
       throw new Error(`Connection create failed with ${response.status}: ${await response.text()}`)
     }
-    return (await response.json()) as ConnectionBody
+    const provider = (await response.json()) as ConnectionBody
+    upstream.reset()
+    return provider
   }
 
   const createKey = async (scope: unknown[]): Promise<{ secret: string }> => {
@@ -613,6 +615,7 @@ describe('provider-scoped Chat Completions', () => {
           csrf: signedIn.csrf,
         })
         const { secret } = (await key.json()) as { secret: string }
+        upstream.reset()
 
         const completion = await app.fetch(`/providers/${untested.handle}/v1/chat/completions`, {
           method: 'POST',

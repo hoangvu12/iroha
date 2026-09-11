@@ -26,6 +26,7 @@ describe('provider-scoped Responses API', () => {
     const provider = await createProvider(iroha, csrf)
     path = `/providers/${provider.handle}/v1/responses`
     secret = await createGatewayKey(iroha, csrf, provider.id)
+    upstream.reset()
   })
 
   afterEach(async () => {

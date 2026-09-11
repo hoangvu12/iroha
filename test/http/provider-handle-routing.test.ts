@@ -135,7 +135,9 @@ describe('provider-scoped Provider Handle routing', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
       body: JSON.stringify({ handle, displayName: 'Example', baseUrl: 'https://api.example.com/v1', keys: [{ upstreamKey: 'sk-upstream-secret-value' }] }),
     })
-    return await response.json() as { id: string; handle: string }
+    const provider = await response.json() as { id: string; handle: string }
+    upstream.reset()
+    return provider
   }
 
   async function createKey(providerId: string): Promise<string> {

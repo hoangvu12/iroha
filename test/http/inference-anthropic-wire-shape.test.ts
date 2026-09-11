@@ -130,7 +130,9 @@ describe('Anthropic /v1/messages honours the Provider Template wire shape', () =
     if (response.status !== 201) {
       throw new Error(`Provider create failed with ${response.status}: ${await response.text()}`)
     }
-    return (await response.json()) as ConnectionBody
+    const provider = (await response.json()) as ConnectionBody
+    upstream.reset()
+    return provider
   }
 
   const createKey = async (providerId: string): Promise<string> => {

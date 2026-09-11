@@ -24,6 +24,7 @@ describe('Owner inference test', () => {
       csrf,
     })
     providerId = ((await created.json()) as { id: string }).id
+    upstream.reset()
   })
 
   afterEach(async () => await iroha.dispose())

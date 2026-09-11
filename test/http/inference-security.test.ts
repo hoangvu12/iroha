@@ -103,6 +103,7 @@ describe('provider transport security boundaries', () => {
     path = `/providers/${connection.handle}/v1/chat/completions`
     const key = await createKey(iroha, csrf, [{ providerId: connection.id }])
     secret = key.secret
+    upstream.reset()
   })
 
   afterEach(async () => {
@@ -175,6 +176,7 @@ describe('provider transport security boundaries', () => {
     const created2 = (await created.json()) as ConnectionBody
     const key = await createKey(iroha, csrf, [{ providerId: created2.id }])
     const localSecret = key.secret
+    upstream.reset()
 
     await iroha.fetch(`/providers/${created2.handle}/v1/chat/completions`, {
       method: 'POST',
@@ -248,6 +250,7 @@ describe('provider transport security boundaries', () => {
     path = `/providers/${created.handle}/v1/chat/completions`
     const key = await createKey(iroha, csrf, [{ providerId: created.id }])
     secret = key.secret
+    upstream.reset()
 
     await chat()
 
@@ -311,6 +314,7 @@ describe('CORS behavior for inference', () => {
     path = `/providers/${connection.handle}/v1/chat/completions`
     const key = await createKey(iroha, csrf, [{ providerId: connection.id }])
     secret = key.secret
+    upstream.reset()
   })
 
   afterEach(async () => {
@@ -374,6 +378,7 @@ describe('CORS behavior for inference', () => {
     path = `/providers/${connection.handle}/v1/chat/completions`
     const key = await createKey(iroha, csrf, [{ providerId: connection.id }])
     secret = key.secret
+    upstream.reset()
 
     const response = await iroha.fetch(path, {
       method: 'POST',
@@ -415,6 +420,7 @@ describe('CORS behavior for inference', () => {
     }
     const key = (await keyResponse.json()) as { id: string; secret: string; revision: number; access: { mode: 'selected'; providers: unknown[] } }
     secret = key.secret
+    upstream.reset()
 
     const response = await iroha.fetch(path, {
       method: 'POST',
@@ -471,6 +477,7 @@ describe('CORS behavior for inference', () => {
     csrf = (await completeSetup(iroha)).csrf
     connection = await createConnection(iroha, csrf)
     path = `/providers/${connection.handle}/v1/chat/completions`
+    upstream.reset()
 
     const preflight = await iroha.fetch(path, {
       method: 'OPTIONS',

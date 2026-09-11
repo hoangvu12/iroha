@@ -139,6 +139,8 @@ describe('MiniMax capacity reconciliation through the assembled HTTP application
       })
       expect(created.status).toBe(201)
       const provider = (await created.json()) as ProviderBody
+      calls = 0
+      upstream.reset()
       const gatewayKey = await iroha.fetch('/api/v1/admin/gateway-keys', {
         method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
         body: JSON.stringify({ name: `MiniMax ${status} caller`, scope: [{ providerId: provider.id }] }),
@@ -231,6 +233,9 @@ describe('MiniMax capacity reconciliation through the assembled HTTP application
       })
       expect(created.status).toBe(201)
       const provider = await created.json() as ProviderBody
+      calls = 0
+      elapsed = 0
+      upstream.reset()
       const updated = await iroha.fetch(`/api/v1/admin/providers/${provider.id}`, {
         method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
         body: JSON.stringify({ retryMaxAttempts: maxAttempts }),

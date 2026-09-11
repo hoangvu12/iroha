@@ -47,6 +47,7 @@ describe('the official OpenAI SDK through the Chat Completions surface', () => {
       // browser guard fire; this is test-only and never carries real secrets.
       dangerouslyAllowBrowser: true,
     })
+    upstream.reset()
   })
 
   afterEach(async () => {

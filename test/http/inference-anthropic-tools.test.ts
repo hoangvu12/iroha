@@ -140,6 +140,7 @@ describe('Anthropic Inference Adapter — tools and tool-name sanitisation', () 
     csrf = (await completeSetup(iroha)).csrf
     connection = await createAnthropicConnection()
     path = `/providers/${connection.handle}/v1/chat/completions`
+    upstream.reset()
   })
 
   afterEach(async () => {

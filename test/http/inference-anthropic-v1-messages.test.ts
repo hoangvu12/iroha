@@ -161,6 +161,7 @@ describe('Anthropic-compatible /v1/messages public surface', () => {
     csrf = (await completeSetup(iroha)).csrf
     anthropicConnection = await createAnthropicConnection()
     openAiConnection = await createOpenAiConnection()
+    upstream.reset()
     anthropicPath = `/providers/${anthropicConnection.handle}/v1/messages`
     openAiPath = `/providers/${openAiConnection.handle}/v1/messages`
   })

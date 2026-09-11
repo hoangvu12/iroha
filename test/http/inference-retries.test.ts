@@ -167,6 +167,7 @@ describe('scoped inference retries', () => {
       csrf,
     })
     secret = ((await key.json()) as { secret: string }).secret
+    upstream.reset()
 
     const response = await chat()
 

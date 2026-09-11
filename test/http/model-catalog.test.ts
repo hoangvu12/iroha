@@ -93,6 +93,43 @@ describe('the provider-scoped Models API', () => {
     }
   }
 
+  test('discovers the initial catalog during Provider creation', async () => {
+    const response = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog`, { csrf })
+    expect(response.status).toBe(200)
+
+    const body = (await response.json()) as {
+      sync: { lastSuccessAt: string | null }
+      entries: { modelId: string }[]
+    }
+    expect(body.sync.lastSuccessAt).not.toBeNull()
+    expect(body.entries.map((entry) => entry.modelId).sort()).toEqual([MODEL, 'gpt-4o'].sort())
+  })
+
+  test('discovers every initial key for a key-scoped Provider', async () => {
+    upstream.calls.length = 0
+    const response = await iroha.fetch('/api/v1/admin/providers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        handle: crypto.randomUUID(),
+        templateId: 'dashscope',
+        displayName: 'Initial key catalogs',
+        baseUrl: BASE_URL,
+        keys: [
+          { upstreamKey: 'sk-initial-catalog-one' },
+          { upstreamKey: 'sk-initial-catalog-two' },
+        ],
+      }),
+      csrf,
+    })
+    expect(response.status).toBe(201)
+
+    const provider = (await response.json()) as ConnectionBody
+    const availability = await iroha.database.keyModelAvailability.listForProvider(provider.id)
+    expect(availability).toHaveLength(2)
+    expect(upstream.calls.filter((call) => call.url.endsWith('/models'))).toHaveLength(2)
+  })
+
   test('lists the discovered catalog through an unrestricted Gateway Key', async () => {
     await refreshCatalog()
     const key = await createKey([{ providerId: connection.id }])
@@ -237,8 +274,9 @@ describe('the Owner model catalog surface', () => {
     }
   }
 
-  test('a new templated Provider exposes its known models before discovery', async () => {
+  test('a new templated Provider retains known models when initial discovery fails', async () => {
     upstream.calls.length = 0
+    upstream.respondWith(() => new Response('provider is down', { status: 503 }))
     const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -263,7 +301,7 @@ describe('the Owner model catalog surface', () => {
       modelId: 'gpt-4o-mini',
       source: 'template',
     }))
-    expect(upstream.calls).toHaveLength(0)
+    expect(upstream.calls).toHaveLength(1)
   })
 
   test('a successful refresh discovers models with provenance and freshness', async () => {

@@ -26,6 +26,7 @@ describe('global Anthropic Messages', () => {
     anthropicId = await createProvider('Anthropic', 'anthropic', ANTHROPIC_BASE, 'sk-ant-global')
     openAiId = await createProvider('OpenAI', 'openai', OPENAI_BASE, 'sk-openai-global')
     secret = await createKey([{ providerId: anthropicId }, { providerId: openAiId }])
+    upstream.reset()
   })
 
   afterEach(async () => await iroha.dispose())

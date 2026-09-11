@@ -127,6 +127,7 @@ describe('round-robin key selection on the inference path', () => {
       csrf,
     })
     secret = ((await created.json()) as { secret: string }).secret
+    upstream.reset()
   }
 
   test('rotates the selected key round-robin across equal requests', async () => {

@@ -45,6 +45,7 @@ describe('HTTP shutdown lifecycle', () => {
       csrf: signedIn.csrf,
     })
     const key = (await keyResponse.json()) as { secret: string }
+    upstream.reset()
     let release!: (response: Response) => void
     upstream.respondWith((call) => new Promise<Response>((resolve) => {
       call.signal?.addEventListener('abort', () => {
@@ -110,6 +111,7 @@ describe('HTTP shutdown lifecycle', () => {
       csrf: signedIn.csrf,
     })
     const key = (await keyResponse.json()) as { secret: string }
+    upstream.reset()
     let stream: ReturnType<typeof controlledSse> | undefined
     upstream.respondWith((call) => {
       stream = controlledSse(call)

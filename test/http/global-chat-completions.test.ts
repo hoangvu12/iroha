@@ -20,6 +20,7 @@ describe('global Chat Completions', () => {
     csrf = (await completeSetup(iroha)).csrf
     providerId = await createProvider()
     secret = await createKey([{ providerId }])
+    upstream.reset()
   })
 
   afterEach(async () => await iroha.dispose())

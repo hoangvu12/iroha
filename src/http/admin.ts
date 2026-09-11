@@ -30,10 +30,10 @@ export interface AdminRoutesOptions {
    */
   readonly adapterRegistry: AdapterRegistry
   /**
-   * The Model Catalog, re-synchronized after an Upstream Key is added so a new
-   * key's Key Model Availability is known before it is ever routed to
-   * (ADR-0023). Optional: a harness that never adds keys need not supply it,
-   * and a key added without it is simply unrestricted until the next refresh.
+   * The Model Catalog, synchronized after a Provider or Upstream Key is added
+   * so discovered models and Key Model Availability exist before the new
+   * capacity is routed to (ADR-0023). Optional: a harness that never creates
+   * capacity need not supply it, and missing discovery remains unrestricted.
    */
   readonly modelCatalog?: ModelCatalogService
 }
@@ -70,6 +70,13 @@ export function createAdminRoutes({
     } catch {
       // An undiscovered key stays unrestricted; nothing here may fail the add.
     }
+  }
+
+  const refreshCreatedProvider = async (providerId: string): Promise<void> => {
+    if (modelCatalog === undefined) return
+    try {
+      await modelCatalog.refresh(providerId)
+    } catch {}
   }
 
   return new Elysia({ name: 'iroha/admin', prefix: '/api/v1/admin' }).guard(
@@ -173,6 +180,7 @@ export function createAdminRoutes({
           const failure = toFailure(result.failure)
           return status(failure.statusCode, failure.body)
         }
+        await refreshCreatedProvider(result.value.id)
         return status(201, toProviderDto(result.value))
       },
       {

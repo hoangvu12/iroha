@@ -84,6 +84,25 @@ describe('models.dev metadata fallback', () => {
     expect(second['anthropic/claude-sonnet-4-6']?.maxOutputTokens).toBe(64_000)
   })
 
+  test('uses the official repository mirror when the primary endpoint is unavailable', async () => {
+    const requested: string[] = []
+    const fallback = createModelsDevMetadataFallback({
+      fetch: async (input) => {
+        requested.push(String(input))
+        if (requested.length === 1) throw new Error('unreachable')
+        return Response.json(catalogBody)
+      },
+    })
+
+    const metadata = await fallback('requesty', ['openai/gpt-4o-mini'])
+
+    expect(requested).toEqual([
+      'https://models.dev/models.json',
+      'https://raw.githubusercontent.com/anomalyco/models.dev/dev/models.json',
+    ])
+    expect(metadata['openai/gpt-4o-mini']?.maxOutputTokens).toBe(16_384)
+  })
+
   test('treats an unavailable fallback as an empty optional supplement', async () => {
     const fallback = createModelsDevMetadataFallback({
       fetch: async () => new Response(null, { status: 503 }),

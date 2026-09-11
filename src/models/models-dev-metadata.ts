@@ -17,7 +17,10 @@ interface ModelsDevEntry {
   readonly metadata: ModelCatalogMetadata
 }
 
-const DEFAULT_ENDPOINT = 'https://models.dev/models.json'
+const DEFAULT_ENDPOINTS = [
+  'https://models.dev/models.json',
+  'https://raw.githubusercontent.com/anomalyco/models.dev/dev/models.json',
+] as const
 const DEFAULT_CACHE_TTL_MS = 15 * 60 * 1_000
 const FETCH_TIMEOUT_MS = 10_000
 const PREFIX_MATCH_MIN_SCORE = 70
@@ -29,7 +32,7 @@ export function createModelsDevMetadataFallback(
   const fetch = options.fetch ?? globalThis.fetch
   const clock = options.clock ?? Date.now
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
-  const endpoint = options.endpoint ?? DEFAULT_ENDPOINT
+  const endpoints = options.endpoint === undefined ? DEFAULT_ENDPOINTS : [options.endpoint]
   let cache: ReadonlyMap<string, ModelsDevEntry> = new Map()
   let loadedAt = 0
   let loading: Promise<ReadonlyMap<string, ModelsDevEntry>> | null = null
@@ -40,24 +43,29 @@ export function createModelsDevMetadataFallback(
     if (loading !== null) return await loading
 
     loading = (async () => {
-      try {
-        const response = await fetch(endpoint, {
-          method: 'GET',
-          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        })
-        if (!response.ok) return cache
-        const parsed = parseModelsDevCatalog(await response.json())
-        if (parsed.size === 0) return cache
-        cache = parsed
-        loadedAt = clock()
-        return cache
-      } catch {
-        return cache
-      } finally {
-        loading = null
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            method: 'GET',
+            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+          })
+          if (!response.ok) continue
+          const parsed = parseModelsDevCatalog(await response.json())
+          if (parsed.size === 0) continue
+          cache = parsed
+          loadedAt = clock()
+          return cache
+        } catch {
+          continue
+        }
       }
+      return cache
     })()
-    return await loading
+    try {
+      return await loading
+    } finally {
+      loading = null
+    }
   }
 
   return async (providerHandle, modelIds) => {

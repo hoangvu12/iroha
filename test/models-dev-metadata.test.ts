@@ -73,6 +73,22 @@ describe('models.dev metadata fallback', () => {
     expect(lookupModelsDevMetadata('gateway/openai/gpt-4o-mini', catalog)?.maxOutputTokens).toBe(16_384)
   })
 
+  test('does not mistake audio transcription temperature support for chat support', () => {
+    const catalog = parseModelsDevCatalog({
+      audio: {
+        models: {
+          whisper: {
+            id: 'whisper-1',
+            modalities: { input: ['audio'], output: ['text'] },
+            temperature: true,
+          },
+        },
+      },
+    })
+
+    expect(lookupModelsDevMetadata('audio/whisper-1', catalog)?.chat).toBe('unsupported')
+  })
+
   test('does not choose between conflicting provider-independent matches', () => {
     const catalog = parseModelsDevCatalog({
       first: { models: { shared: { id: 'shared', limit: { context: 1_000, output: 100 } } } },

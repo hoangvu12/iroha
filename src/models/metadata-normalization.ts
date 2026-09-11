@@ -14,7 +14,9 @@ export function readModelChatCapability(model: Record<string, unknown>): 'ok' | 
       : 'unsupported'
   }
 
+  const inputModalities = readInputModalities(model)
   const outputModalities = readOutputModalities(model)
+  if (inputModalities !== null && !inputModalities.includes('text')) return 'unsupported'
   if (outputModalities !== null && !outputModalities.includes('text')) return 'unsupported'
   if (outputModalities?.includes('text') && hasGenerativeEvidence(model)) return 'ok'
   return null
@@ -52,7 +54,7 @@ export function mergeModelMetadata(
 }
 
 function hasGenerativeEvidence(model: Record<string, unknown>): boolean {
-  for (const field of ['tool_call', 'reasoning', 'temperature', 'structured_output']) {
+  for (const field of ['tool_call', 'reasoning', 'structured_output']) {
     if (model[field] === true) return true
   }
   const features = stringArray(model.supported_features)

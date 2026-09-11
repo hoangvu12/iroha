@@ -448,6 +448,13 @@ export interface GatewayKeyRepository {
  */
 export type ModelCatalogSource = 'discovered' | 'template' | 'owner_added' | 'excluded'
 
+export interface ModelCatalogMetadata {
+  readonly normalizedName: string | null
+  readonly contextLength: number | null
+  readonly maxInputTokens: number | null
+  readonly maxOutputTokens: number | null
+}
+
 /**
  * One model in a Provider's catalog. Excluded rows are kept so Owner intent
  * survives synchronization, but they never join the effective catalog.
@@ -459,6 +466,7 @@ export interface ModelCatalogEntryRecord {
   readonly excluded: boolean
   /** Per-model capability overrides; null means inherit the Provider defaults. */
   readonly overrides: Readonly<Partial<ProviderCapabilities>> | null
+  readonly metadata: ModelCatalogMetadata | null
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -487,7 +495,12 @@ export interface ModelCatalogRepository {
    * no longer seen are removed — unless the Owner excluded them, so a block
    * survives a discovery that stops reporting the model.
    */
-  syncDiscovered(providerId: string, modelIds: readonly string[], at: Date): Promise<void>
+  syncDiscovered(
+    providerId: string,
+    modelIds: readonly string[],
+    at: Date,
+    metadataByModel?: Readonly<Record<string, ModelCatalogMetadata>>,
+  ): Promise<void>
   /**
    * Contributes the Provider Template's known models to the catalog. Only
    * absent models are added (source `template`); an existing row and an Owner

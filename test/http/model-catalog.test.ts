@@ -21,7 +21,19 @@ interface ConnectionBody {
 function discoveryBody(modelIds: string[]): Response {
   return Response.json({
     object: 'list',
-    data: modelIds.map((id, index) => ({ id, object: 'model', created: 1_700_000_000 + index })),
+    data: modelIds.map((id, index) => ({
+      id,
+      object: 'model',
+      created: 1_700_000_000 + index,
+      ...(index === 0
+        ? {
+            normalized_name: 'GPT 4o Mini',
+            context_window: 128_000,
+            max_input_tokens: 120_000,
+            max_output_tokens: 16_384,
+          }
+        : {}),
+    })),
   })
 }
 
@@ -141,6 +153,67 @@ describe('the provider-scoped Models API', () => {
     expect(body.object).toBe('list')
     expect(body.data.map((model) => model.id).sort()).toEqual([MODEL, 'gpt-4o'].sort())
     expect(body.data.every((model) => model.object === 'model')).toBe(true)
+  })
+
+  test('retains upstream token limits and emits Bifrost-compatible inline metadata', async () => {
+    const key = await createKey([{ providerId: connection.id }])
+    const response = await listModels(key)
+    const body = (await response.json()) as { data: Record<string, unknown>[] }
+    const model = body.data.find((candidate) => candidate.id === MODEL)
+
+    expect(model).toMatchObject({
+      id: MODEL,
+      normalized_name: 'GPT 4o Mini',
+      context_length: 128_000,
+      max_input_tokens: 120_000,
+      max_output_tokens: 16_384,
+    })
+  })
+
+  test('normalizes common metadata shapes without Provider-specific handling', async () => {
+    upstream.respondWith(() => Response.json({
+      object: 'list',
+      data: [
+        {
+          id: 'flat-model',
+          display_name: 'Flat Model',
+          context_length: 64_000,
+          max_completion_tokens: 8_000,
+        },
+        {
+          id: 'nested/model',
+          name: 'Nested Model',
+          limit: { context: 128_000, input: 120_000, output: 16_000 },
+        },
+        {
+          id: 'router/region/deployment',
+          top_provider: { context_length: 256_000, max_completion_tokens: 32_000 },
+        },
+      ],
+    }))
+    await refreshCatalog()
+    const key = await createKey([{ providerId: connection.id }])
+    const response = await listModels(key)
+    const body = (await response.json()) as { data: Record<string, unknown>[] }
+
+    expect(body.data).toContainEqual(expect.objectContaining({
+      id: 'flat-model',
+      normalized_name: 'Flat Model',
+      context_length: 64_000,
+      max_output_tokens: 8_000,
+    }))
+    expect(body.data).toContainEqual(expect.objectContaining({
+      id: 'nested/model',
+      normalized_name: 'Nested Model',
+      context_length: 128_000,
+      max_input_tokens: 120_000,
+      max_output_tokens: 16_000,
+    }))
+    expect(body.data).toContainEqual(expect.objectContaining({
+      id: 'router/region/deployment',
+      context_length: 256_000,
+      max_output_tokens: 32_000,
+    }))
   })
 
   test('catalog discovery hits a key\'s own base URL override', async () => {

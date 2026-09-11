@@ -182,6 +182,7 @@ export const modelCatalogEntries = sqliteTable(
     source: text('source').notNull(),
     excluded: integer('excluded', { mode: 'boolean' }).notNull(),
     overrides: text('overrides'),
+    metadata: text('metadata'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },

@@ -25,6 +25,7 @@ import {
   type GatewayKeyScopeEntry,
   type KeyProbeVerdict,
   type ModelCatalogEntryRecord,
+  type ModelCatalogMetadata,
   type KeyModelAvailabilityRecord,
   type KeyModelAvailabilityRepository,
   type ModelCatalogRepository,
@@ -899,7 +900,12 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
     return rows.map(toModelEntry)
   }
 
-  async syncDiscovered(providerId: string, modelIds: readonly string[], at: Date): Promise<void> {
+  async syncDiscovered(
+    providerId: string,
+    modelIds: readonly string[],
+    at: Date,
+    metadataByModel: Readonly<Record<string, ModelCatalogMetadata>> = {},
+  ): Promise<void> {
     const desired = new Set(modelIds)
 
     for (const modelId of modelIds) {
@@ -921,13 +927,20 @@ class SqliteModelCatalogRepository implements ModelCatalogRepository {
           source: 'discovered',
           excluded: false,
           overrides: null,
+          metadata: metadataByModel[modelId] === undefined ? null : JSON.stringify(metadataByModel[modelId]),
           createdAt: at,
           updatedAt: at,
         })
       } else {
         await this.handle
           .update(modelCatalogEntries)
-          .set({ source: 'discovered', updatedAt: at })
+          .set({
+            source: 'discovered',
+            updatedAt: at,
+            ...(metadataByModel[modelId] === undefined
+              ? {}
+              : { metadata: JSON.stringify(metadataByModel[modelId]) }),
+          })
           .where(
             and(
               eq(modelCatalogEntries.providerId, providerId),
@@ -1185,6 +1198,7 @@ function toModelEntry(row: ModelEntryRow): ModelCatalogEntryRecord {
     source: row.source as ModelCatalogSource,
     excluded: row.excluded,
     overrides: row.overrides === null ? null : (JSON.parse(row.overrides) as Partial<ProviderCapabilities>),
+    metadata: row.metadata === null ? null : (JSON.parse(row.metadata) as ModelCatalogMetadata),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }

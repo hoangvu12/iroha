@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import type { Database } from '../persistence/index.ts'
 import { bearerToken } from './bearer-token.ts'
+import { inlineModelMetadata } from './model-metadata.ts'
 
 export function createGlobalModelRoutes(options: { readonly gatewayKeys: GatewayKeyRegistry; readonly database: Database }) {
   return new Elysia({ name: 'iroha/global-models' }).get('/v1/models', async ({ request }) => {
@@ -14,7 +15,15 @@ export function createGlobalModelRoutes(options: { readonly gatewayKeys: Gateway
     }
 
     const token = bearerToken(request.headers)
-    const models: { id: string; object: 'model'; created: number }[] = []
+    const models: {
+      id: string
+      object: 'model'
+      created: number
+      normalized_name?: string
+      context_length?: number
+      max_input_tokens?: number
+      max_output_tokens?: number
+    }[] = []
     for (const provider of await options.database.providers.listProviders()) {
       if (provider.archivedAt !== null || !provider.enabled) continue
       const authorization = await options.gatewayKeys.authorizeProvider(provider.id, token)
@@ -25,7 +34,12 @@ export function createGlobalModelRoutes(options: { readonly gatewayKeys: Gateway
       for (const modelId of candidates) {
         const entry = effective.get(modelId)
         if (entry === undefined) continue
-        models.push({ id: `${provider.handle}/${modelId}`, object: 'model', created: Math.floor(entry.createdAt.getTime() / 1000) })
+        models.push({
+          id: `${provider.handle}/${modelId}`,
+          object: 'model',
+          created: Math.floor(entry.createdAt.getTime() / 1000),
+          ...inlineModelMetadata(entry.metadata),
+        })
       }
     }
     models.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
@@ -33,7 +47,15 @@ export function createGlobalModelRoutes(options: { readonly gatewayKeys: Gateway
   }, {
     detail: { hide: true, summary: 'List globally qualified models' },
     response: {
-      200: t.Object({ object: t.Literal('list'), data: t.Array(t.Object({ id: t.String(), object: t.Literal('model'), created: t.Number() })) }),
+      200: t.Object({ object: t.Literal('list'), data: t.Array(t.Object({
+        id: t.String(),
+        object: t.Literal('model'),
+        created: t.Number(),
+        normalized_name: t.Optional(t.String()),
+        context_length: t.Optional(t.Number()),
+        max_input_tokens: t.Optional(t.Number()),
+        max_output_tokens: t.Optional(t.Number()),
+      })) }),
     },
   })
 }

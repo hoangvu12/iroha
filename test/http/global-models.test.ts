@@ -46,6 +46,31 @@ describe('global Qualified Model discovery', () => {
     expect(await listIds(secret)).toEqual([])
   })
 
+  test('qualifies only the routing ID while preserving exact-model inline metadata', async () => {
+    const providerId = await createProvider('Requesty')
+    const modelId = 'anthropic/claude-sonnet-4-6'
+    await iroha.database.modelCatalog.syncDiscovered(providerId, [modelId], new Date(), {
+      [modelId]: {
+        normalizedName: 'Claude Sonnet 4.6',
+        contextLength: 200_000,
+        maxInputTokens: 180_000,
+        maxOutputTokens: 64_000,
+      },
+    })
+    const secret = await createKey({ mode: 'all' })
+
+    const response = await iroha.fetch('/v1/models', { headers: { authorization: `Bearer ${secret}` } })
+    const body = (await response.json()) as { data: Record<string, unknown>[] }
+
+    expect(body.data).toContainEqual(expect.objectContaining({
+      id: 'requesty/anthropic/claude-sonnet-4-6',
+      normalized_name: 'Claude Sonnet 4.6',
+      context_length: 200_000,
+      max_input_tokens: 180_000,
+      max_output_tokens: 64_000,
+    }))
+  })
+
   test('parses nested model IDs and normalizes malformed IDs and Provider privacy failures', async () => {
     expect(parseQualifiedModelId('example/openai/gpt-4o')).toEqual({ ok: true, providerHandle: 'example', modelId: 'openai/gpt-4o' })
     for (const malformed of ['gpt-4o', '/gpt-4o', 'pr_example/']) {

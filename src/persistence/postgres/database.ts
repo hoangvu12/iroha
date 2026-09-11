@@ -25,6 +25,7 @@ import {
   type GatewayKeyScopeEntry,
   type KeyProbeVerdict,
   type ModelCatalogEntryRecord,
+  type ModelCatalogMetadata,
   type KeyModelAvailabilityRecord,
   type KeyModelAvailabilityRepository,
   type ModelCatalogRepository,
@@ -839,7 +840,12 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
     return rows.map(toModelEntry)
   }
 
-  async syncDiscovered(providerId: string, modelIds: readonly string[], at: Date): Promise<void> {
+  async syncDiscovered(
+    providerId: string,
+    modelIds: readonly string[],
+    at: Date,
+    metadataByModel: Readonly<Record<string, ModelCatalogMetadata>> = {},
+  ): Promise<void> {
     const desired = new Set(modelIds)
 
     for (const modelId of modelIds) {
@@ -861,13 +867,18 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
           source: 'discovered',
           excluded: false,
           overrides: null,
+          metadata: metadataByModel[modelId] ?? null,
           createdAt: at,
           updatedAt: at,
         })
       } else {
         await this.handle
           .update(modelCatalogEntries)
-          .set({ source: 'discovered', updatedAt: at })
+          .set({
+            source: 'discovered',
+            updatedAt: at,
+            ...(metadataByModel[modelId] === undefined ? {} : { metadata: metadataByModel[modelId] }),
+          })
           .where(
             and(
               eq(modelCatalogEntries.providerId, providerId),
@@ -1124,6 +1135,7 @@ function toModelEntry(row: ModelEntryRow): ModelCatalogEntryRecord {
     source: row.source as ModelCatalogSource,
     excluded: row.excluded,
     overrides: row.overrides as Readonly<Partial<ProviderCapabilities>> | null,
+    metadata: row.metadata as ModelCatalogMetadata | null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }

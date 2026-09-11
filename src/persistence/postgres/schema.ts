@@ -177,6 +177,7 @@ export const modelCatalogEntries = pgTable(
     source: text('source').notNull(),
     excluded: boolean('excluded').notNull(),
     overrides: jsonb('overrides'),
+    metadata: jsonb('metadata'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
   },

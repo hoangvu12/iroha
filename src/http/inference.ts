@@ -26,6 +26,7 @@ import type { CapacityEvidence } from '../providers/provider-evidence.ts'
 import { authorizeQualifiedModel, type QualifiedModelFailure } from './qualified-model.ts'
 import { bearerToken } from './bearer-token.ts'
 import { createOwnerGuard, managementError } from './owner-guard.ts'
+import { inlineModelMetadata } from './model-metadata.ts'
 
 /** The terminal shape of one attempt's outcome, what the recorder writes. */
 interface AttemptTerminal {
@@ -217,7 +218,12 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
         return new Response(
           JSON.stringify({
             object: 'list',
-            data: result.value.map((model) => ({ id: model.id, object: 'model', created: model.created })),
+            data: result.value.map((model) => ({
+              id: model.id,
+              object: 'model',
+              created: model.created,
+              ...inlineModelMetadata(model.metadata),
+            })),
           }),
           { status: 200, headers: responseHeaders },
         )
@@ -231,7 +237,15 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           summary: 'List Provider Models',
           description: 'The OpenAI-compatible provider-scoped Models surface is covered by the capability matrix and intentionally omitted from the custom API document.',
         },
-        response: { 200: t.Object({ object: t.Literal('list'), data: t.Array(t.Object({ id: t.String(), object: t.Literal('model'), created: t.Number() })) }) },
+        response: { 200: t.Object({ object: t.Literal('list'), data: t.Array(t.Object({
+          id: t.String(),
+          object: t.Literal('model'),
+          created: t.Number(),
+          normalized_name: t.Optional(t.String()),
+          context_length: t.Optional(t.Number()),
+          max_input_tokens: t.Optional(t.Number()),
+          max_output_tokens: t.Optional(t.Number()),
+        })) }) },
       },
     )
     .post(

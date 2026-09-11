@@ -5,7 +5,7 @@ Iroha exposes the OpenAI-compatible surface only under a Provider Connection sco
 | Surface | Operations | Streaming | Tools | Structured output | Cancellation | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | Provider Directory | `GET /api/v1/directory/providers` | No | No | No | No | Authenticated with a Gateway Key and filtered by Key Scope. |
-| Models | `GET /providers/{connection_id}/v1/models` | No | No | No | No | Exact model IDs allowed by the caller's Key Scope. |
+| Models | `GET /providers/{connection_id}/v1/models` | No | No | No | No | Exact model IDs allowed by the caller's Key Scope, with retained inline token-limit metadata when the Provider reports it. |
 | Chat Completions | `POST /providers/{connection_id}/v1/chat/completions` | Yes | Yes | Yes | Yes | Preserves supported and unknown JSON fields; returns OpenAI-shaped errors and a request ID. |
 | Responses | `POST /providers/{connection_id}/v1/responses` | Yes | Yes | Yes | Yes | Preserves supported and unknown JSON fields; returns OpenAI-shaped errors and a request ID. |
 | Errors | All inference errors | N/A | N/A | N/A | N/A | Stable Iroha codes, sanitized upstream context, and `x-iroha-request-id`. |

@@ -830,7 +830,14 @@ for (const engine of availableEngines) {
       test('merges discovery, prunes only stale discovered rows, and keeps Owner intent', async () => {
         await database.providers.insertProvider(connection('pc_catalog'))
 
-        await database.modelCatalog.syncDiscovered('pc_catalog', ['gpt-4o-mini', 'gpt-4o'], at)
+        await database.modelCatalog.syncDiscovered('pc_catalog', ['gpt-4o-mini', 'gpt-4o'], at, {
+          'gpt-4o-mini': {
+            normalizedName: 'GPT 4o Mini',
+            contextLength: 128_000,
+            maxInputTokens: null,
+            maxOutputTokens: 16_384,
+          },
+        })
         await database.modelCatalog.addOwnerModel('pc_catalog', 'custom-model', at)
         await database.modelCatalog.setExcluded('pc_catalog', 'o1-preview', true, at)
 
@@ -843,6 +850,14 @@ for (const engine of availableEngines) {
           'gpt-4o:discovered:false',
           'o1-preview:excluded:true',
         ])
+        expect((await database.modelCatalog.listEntries('pc_catalog')).find(
+          (entry) => entry.modelId === 'gpt-4o-mini',
+        )?.metadata).toEqual({
+          normalizedName: 'GPT 4o Mini',
+          contextLength: 128_000,
+          maxInputTokens: null,
+          maxOutputTokens: 16_384,
+        })
 
         // A later discovery omits gpt-4o but re-reports gpt-4o-mini: only the
         // stale discovered row goes; Owner additions and exclusions survive.

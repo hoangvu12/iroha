@@ -190,6 +190,12 @@ const catalogEntryResponse = t.Object({
   source: t.Union([t.Literal('discovered'), t.Literal('template'), t.Literal('owner_added'), t.Literal('excluded')]),
   excluded: t.Boolean(),
   overrides: t.Union([t.Null(), capabilityOverrides]),
+  metadata: t.Union([t.Null(), t.Object({
+    normalizedName: t.Union([t.Null(), t.String()]),
+    contextLength: t.Union([t.Null(), t.Number()]),
+    maxInputTokens: t.Union([t.Null(), t.Number()]),
+    maxOutputTokens: t.Union([t.Null(), t.Number()]),
+  })]),
   updatedAt: t.String(),
 })
 
@@ -240,6 +246,7 @@ function toCatalogDto(view: CatalogView): CatalogDto {
       source: entry.source,
       excluded: entry.excluded,
       overrides: entry.overrides === null ? null : { ...entry.overrides },
+      metadata: entry.metadata === null ? null : { ...entry.metadata },
       updatedAt: entry.updatedAt.toISOString(),
     })),
   }

@@ -4,6 +4,7 @@ import type {
   ProviderCapabilities,
   Database,
   ModelCatalogSource,
+  ModelCatalogMetadata,
   ModelCatalogSyncRecord,
   ProviderRecord,
 } from '../persistence/index.ts'
@@ -36,6 +37,7 @@ export interface CatalogEntryView {
   readonly excluded: boolean
   /** Per-model capability overrides; null means inherit the connection defaults. */
   readonly overrides: Readonly<Partial<ProviderCapabilities>> | null
+  readonly metadata: ModelCatalogMetadata | null
   readonly updatedAt: Date
 }
 
@@ -62,6 +64,7 @@ export interface CatalogView {
 export interface ListableModel {
   readonly id: string
   readonly created: number
+  readonly metadata: ModelCatalogMetadata | null
 }
 
 export interface ModelCatalogServiceOptions {
@@ -147,7 +150,11 @@ interface DiscoveryTarget {
 }
 
 type DiscoveryOutcome =
-  | { readonly ok: true; readonly models: readonly string[] }
+  | {
+      readonly ok: true
+      readonly models: readonly string[]
+      readonly metadataByModel: Readonly<Record<string, ModelCatalogMetadata>>
+    }
   | { readonly ok: false; readonly message: string }
 
 const MODEL_ID_MAXIMUM = 128
@@ -306,7 +313,14 @@ export class ModelCatalogService {
       discovered = answered[0]?.outcome.ok === true ? answered[0].outcome.models : []
     }
 
-    await this.#database.modelCatalog.syncDiscovered(providerId, discovered, at)
+    const metadataByModel: Record<string, ModelCatalogMetadata> = {}
+    for (const attempt of answered) {
+      if (!attempt.outcome.ok) continue
+      for (const [modelId, metadata] of Object.entries(attempt.outcome.metadataByModel)) {
+        metadataByModel[modelId] ??= metadata
+      }
+    }
+    await this.#database.modelCatalog.syncDiscovered(providerId, discovered, at, metadataByModel)
     await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
 
     // A partly successful round still refreshed the catalog, so the success
@@ -357,6 +371,7 @@ export class ModelCatalogService {
 
     const at = this.#clock.now()
     let discovered = false
+    const metadataByModel: Record<string, ModelCatalogMetadata> = {}
     for (const target of missing) {
       const outcome = await this.#discover(target)
       if (!outcome.ok) continue
@@ -366,6 +381,9 @@ export class ModelCatalogService {
         models: outcome.models,
         discoveredAt: at,
       })
+      for (const [modelId, metadata] of Object.entries(outcome.metadataByModel)) {
+        metadataByModel[modelId] ??= metadata
+      }
       discovered = true
     }
     if (!discovered) return
@@ -376,7 +394,7 @@ export class ModelCatalogService {
     const availability = await this.#database.keyModelAvailability.listForProvider(providerId)
     const union = [...new Set(availability.flatMap((entry) => entry.models))]
     if (union.length === 0) return
-    await this.#database.modelCatalog.syncDiscovered(providerId, union, at)
+    await this.#database.modelCatalog.syncDiscovered(providerId, union, at, metadataByModel)
     await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
   }
 
@@ -417,9 +435,9 @@ export class ModelCatalogService {
     // misbehaved; it cannot be parsed as a model list either way.
     if (upstream.kind !== 'buffered') return { ok: false, message: DISCOVERY_UNREADABLE }
 
-    const models = readDiscoveredModels(upstream.body)
-    if (models === null) return { ok: false, message: DISCOVERY_UNREADABLE }
-    return { ok: true, models }
+    const discovery = readDiscoveredModels(upstream.body)
+    if (discovery === null) return { ok: false, message: DISCOVERY_UNREADABLE }
+    return { ok: true, ...discovery }
   }
 
   /** Names a model the Owner vouches for, even before any discovery reports it. */
@@ -543,7 +561,7 @@ export class ModelCatalogService {
           entry === undefined
             ? Math.floor(connection.createdAt.getTime() / 1000)
             : Math.floor(entry.createdAt.getTime() / 1000)
-        return { id: modelId, created }
+        return { id: modelId, created, metadata: entry?.metadata ?? null }
       }),
     }
   }
@@ -673,7 +691,10 @@ export class ModelCatalogService {
 }
 
 /** Reads an OpenAI `data`/`models` list into distinct model IDs, or null. */
-function readDiscoveredModels(raw: string): readonly string[] | null {
+function readDiscoveredModels(raw: string): {
+  readonly models: readonly string[]
+  readonly metadataByModel: Readonly<Record<string, ModelCatalogMetadata>>
+} | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -688,6 +709,7 @@ function readDiscoveredModels(raw: string): readonly string[] | null {
 
   const ids: string[] = []
   const seen = new Set<string>()
+  const metadataByModel: Record<string, ModelCatalogMetadata> = {}
   for (const item of list) {
     if (typeof item !== 'object' || item === null) continue
     const id = (item as Record<string, unknown>).id
@@ -696,9 +718,75 @@ function readDiscoveredModels(raw: string): readonly string[] | null {
     if (modelId === '' || seen.has(modelId)) continue
     seen.add(modelId)
     ids.push(modelId)
+    const metadata = readModelMetadata(item as Record<string, unknown>)
+    if (metadata !== null) metadataByModel[modelId] = metadata
   }
 
-  return ids
+  return { models: ids, metadataByModel }
+}
+
+function readModelMetadata(model: Record<string, unknown>): ModelCatalogMetadata | null {
+  const limit = nestedRecord(model.limit)
+  const topProvider = nestedRecord(model.top_provider)
+  const normalizedName = firstString(model, ['normalized_name', 'display_name', 'name'])
+  const contextLength = firstPositiveInteger(model, [
+    'context_length',
+    'context_window',
+    'max_context_length',
+    'max_context_tokens',
+    'max_context',
+    'contextWindow',
+    'ctx_len',
+    'n_ctx',
+    'context_size',
+  ]) ?? firstPositiveInteger(limit, ['context']) ?? firstPositiveInteger(topProvider, ['context_length'])
+  const maxInputTokens = firstPositiveInteger(model, [
+    'max_input_tokens',
+    'input_token_limit',
+    'max_prompt_tokens',
+    'max_input',
+  ]) ?? firstPositiveInteger(limit, ['input']) ?? firstPositiveInteger(topProvider, ['max_prompt_tokens'])
+  const maxOutputTokens = firstPositiveInteger(model, [
+    'max_output_tokens',
+    'output_token_limit',
+    'max_completion_tokens',
+    'max_output',
+    'max_tokens',
+  ]) ?? firstPositiveInteger(limit, ['output']) ?? firstPositiveInteger(topProvider, [
+    'max_completion_tokens',
+    'max_output_tokens',
+  ])
+  if (normalizedName === null && contextLength === null && maxInputTokens === null && maxOutputTokens === null) {
+    return null
+  }
+  return { normalizedName, contextLength, maxInputTokens, maxOutputTokens }
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function firstString(record: Record<string, unknown>, fields: readonly string[]): string | null {
+  for (const field of fields) {
+    const value = record[field]
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  }
+  return null
+}
+
+function firstPositiveInteger(record: Record<string, unknown>, fields: readonly string[]): number | null {
+  for (const field of fields) {
+    const value = record[field]
+    const number = typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value)
+        : Number.NaN
+    if (Number.isSafeInteger(number) && number > 0) return number
+  }
+  return null
 }
 
 function toSyncView(sync: ModelCatalogSyncRecord | null): CatalogSyncView {

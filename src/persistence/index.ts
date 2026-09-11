@@ -24,6 +24,7 @@ export type {
   KeyModelAvailabilityRepository,
   KeyProbeVerdict,
   ModelCatalogEntryRecord,
+  ModelCatalogMetadata,
   ModelCatalogRepository,
   ModelCatalogSource,
   ModelCatalogSyncRecord,

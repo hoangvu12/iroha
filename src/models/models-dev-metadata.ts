@@ -49,13 +49,37 @@ export function createModelsDevMetadataFallback(
             method: 'GET',
             signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
           })
-          if (!response.ok) continue
+          if (!response.ok) {
+            console.warn(JSON.stringify({
+              event: 'model_metadata_fallback_failed',
+              endpointHost: new URL(endpoint).hostname,
+              reason: `http_${response.status}`,
+            }))
+            continue
+          }
           const parsed = parseModelsDevCatalog(await response.json())
-          if (parsed.size === 0) continue
+          if (parsed.size === 0) {
+            console.warn(JSON.stringify({
+              event: 'model_metadata_fallback_failed',
+              endpointHost: new URL(endpoint).hostname,
+              reason: 'empty_catalog',
+            }))
+            continue
+          }
           cache = parsed
           loadedAt = clock()
+          console.info(JSON.stringify({
+            event: 'model_metadata_fallback_loaded',
+            endpointHost: new URL(endpoint).hostname,
+            entries: parsed.size,
+          }))
           return cache
-        } catch {
+        } catch (cause) {
+          console.warn(JSON.stringify({
+            event: 'model_metadata_fallback_failed',
+            endpointHost: new URL(endpoint).hostname,
+            reason: cause instanceof Error ? cause.name : 'unknown',
+          }))
           continue
         }
       }

@@ -10,6 +10,13 @@ export {
 } from './passwords.ts'
 export { hashSecret, randomSecret, secretsMatch } from './secrets.ts'
 export {
+  ManagementKeyRegistry,
+  MANAGEMENT_KEY_SCOPES,
+  type AuthenticatedManagementKey,
+  type ManagementKeyScope,
+  type ManagementKeyView,
+} from './management-key-registry.ts'
+export {
   createAttemptThrottle,
   UNKNOWN_SOURCE,
   type AttemptSource,

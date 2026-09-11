@@ -104,6 +104,10 @@ _Avoid_: Login (as a noun), token, Gateway Key
 A secret created by the Owner that authorizes an application to call the Gateway without exposing any Upstream Key.
 _Avoid_: Upstream Key, virtual key, user key
 
+**Management Key**:
+A revocable, scoped secret created by the Owner that authorizes a headless client to use the management API. It never authorizes Gateway inference, and a Management Key cannot create, revoke, or delete other Management Keys.
+_Avoid_: Gateway Key, Owner Session, admin token, agent key
+
 **Key Scope**:
 The access policy that determines which Providers and Upstream Models a Gateway Key permits its application to use and discover. It is either unrestricted, dynamically covering every active Provider and model, or selected, covering only its listed Providers and optional models.
 _Avoid_: Role, permissions

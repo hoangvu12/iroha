@@ -1,15 +1,16 @@
 import { Elysia, t } from 'elysia'
-import type { OwnerIdentity } from '../identity/index.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
 import type { UsageCapacityScope, UsageRecoveryEvidence } from '../usage/adapter.ts'
 import {
   type UsageService,
   type UsageServiceFailure,
   type UsageView,
 } from '../usage/index.ts'
-import { createOwnerGuard } from './owner-guard.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY } from './owner-guard.ts'
 
 export interface UsageRoutesOptions {
   readonly identity: OwnerIdentity
+  readonly managementKeys: ManagementKeyRegistry
   readonly usage: UsageService
 }
 
@@ -20,11 +21,11 @@ export interface UsageRoutesOptions {
  * echoes secret material or free upstream text: failure messages are the
  * structural descriptions the service recorded.
  */
-export function createUsageRoutes({ identity, usage }: UsageRoutesOptions) {
-  const guard = createOwnerGuard(identity)
+export function createUsageRoutes({ identity, managementKeys, usage }: UsageRoutesOptions) {
+  const guard = createOwnerGuard(identity, managementKeys)
 
   return new Elysia({ name: 'iroha/usage', prefix: '/api/v1/admin/providers/:id' }).guard(
-    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    { as: 'local', detail: { security: MANAGEMENT_SECURITY } },
     (app) => app
       .onError({ as: 'scoped' }, ({ code, status }) => {
       if (code === 'VALIDATION' || code === 'PARSE') {

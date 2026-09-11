@@ -1,14 +1,15 @@
 import { Elysia, t } from 'elysia'
-import type { OwnerIdentity } from '../identity/index.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
 import type {
   CatalogView,
   ModelCatalogFailure,
   ModelCatalogService,
 } from '../models/index.ts'
-import { createOwnerGuard } from './owner-guard.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY } from './owner-guard.ts'
 
 export interface CatalogRoutesOptions {
   readonly identity: OwnerIdentity
+  readonly managementKeys: ManagementKeyRegistry
   readonly modelCatalog: ModelCatalogService
 }
 
@@ -19,11 +20,11 @@ export interface CatalogRoutesOptions {
  * and capability overrides). Bodies are validated by the service rather than
  * by route schemas, matching the other admin surfaces.
  */
-export function createCatalogRoutes({ identity, modelCatalog }: CatalogRoutesOptions) {
-  const guard = createOwnerGuard(identity)
+export function createCatalogRoutes({ identity, managementKeys, modelCatalog }: CatalogRoutesOptions) {
+  const guard = createOwnerGuard(identity, managementKeys)
 
   return new Elysia({ name: 'iroha/catalog', prefix: '/api/v1/admin/providers/:id' }).guard(
-    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    { as: 'local', detail: { security: MANAGEMENT_SECURITY } },
     (app) => app
       .onError({ as: 'scoped' }, ({ code, status }) => {
       if (code === 'VALIDATION' || code === 'PARSE') {

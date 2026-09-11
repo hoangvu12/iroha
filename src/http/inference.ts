@@ -21,11 +21,11 @@ import type { MetricsCollector } from '../metrics/metrics.ts'
 import type { InferenceActivity, ShutdownController } from '../runtime/shutdown.ts'
 import { systemTimer, type Timer } from '../runtime/timer.ts'
 import type { UsageService } from '../usage/index.ts'
-import type { OwnerIdentity } from '../identity/index.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
 import type { CapacityEvidence } from '../providers/provider-evidence.ts'
 import { authorizeQualifiedModel, type QualifiedModelFailure } from './qualified-model.ts'
 import { bearerToken } from './bearer-token.ts'
-import { createOwnerGuard, managementError } from './owner-guard.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY, managementError } from './owner-guard.ts'
 import { inlineModelMetadata } from './model-metadata.ts'
 
 /** The terminal shape of one attempt's outcome, what the recorder writes. */
@@ -374,9 +374,10 @@ export type InferenceRoutes = ReturnType<typeof createInferenceRoutes>
  */
 export function createAdminInferenceRoutes(
   identity: OwnerIdentity,
+  managementKeys: ManagementKeyRegistry,
   options: InferenceRoutesOptions,
 ) {
-  const guard = createOwnerGuard(identity)
+  const guard = createOwnerGuard(identity, managementKeys)
   const timer = options.timer ?? systemTimer
   const retrySleep = options.retrySleep ?? sleepWithTimer(timer)
   const transport = options.transportDefaults ?? DEFAULT_TRANSPORT
@@ -445,7 +446,7 @@ export function createAdminInferenceRoutes(
         tags: ['Providers'],
         summary: 'Test inference as Owner',
         description: 'Sends a small non-streaming inference request through the selected Provider using the Owner Session instead of a Gateway Key.',
-        security: [{ OwnerSession: [] }],
+        security: MANAGEMENT_SECURITY,
       },
     },
   )

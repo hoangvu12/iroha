@@ -27,16 +27,21 @@ describe('generated API documentation', () => {
     expect(paths.some((path) => /^\/providers\/[^/]+\/v1\//.test(path))).toBe(false)
     expect(document.components?.securitySchemes).toMatchObject({
       GatewayKey: { type: 'http', scheme: 'bearer' },
+      ManagementKey: { type: 'http', scheme: 'bearer' },
       OwnerSession: { type: 'apiKey', in: 'cookie', name: 'iroha_session' },
     })
     expect((document.paths?.['/api/v1/directory/providers'] as { get?: { security?: unknown } })?.get?.security)
       .toEqual([{ GatewayKey: [] }])
     expect((document.paths?.['/api/v1/admin/providers'] as { get?: { security?: unknown } })?.get?.security)
-      .toEqual([{ OwnerSession: [] }])
+      .toEqual([{ OwnerSession: [] }, { ManagementKey: [] }])
     for (const [path, operations] of Object.entries(document.paths ?? {})) {
       if (!path.startsWith('/api/v1/admin/')) continue
       for (const operation of Object.values(operations as Record<string, { security?: unknown }>)) {
-        expect(operation.security).toEqual([{ OwnerSession: [] }])
+        expect(operation.security).toEqual(
+          path.startsWith('/api/v1/admin/management-keys')
+            ? [{ OwnerSession: [] }]
+            : [{ OwnerSession: [] }, { ManagementKey: [] }],
+        )
       }
     }
     expect(document.externalDocs?.url).toBe('/docs/capability-matrix')

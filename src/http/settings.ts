@@ -1,11 +1,12 @@
 import { Elysia, t } from 'elysia'
 import type { Database } from '../persistence/index.ts'
 import type { RequestHistoryService } from '../history/index.ts'
-import type { OwnerIdentity } from '../identity/index.ts'
-import { createOwnerGuard, type ManagementError } from './owner-guard.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY, type ManagementError } from './owner-guard.ts'
 
 export interface SettingsRoutesOptions {
   readonly identity: OwnerIdentity
+  readonly managementKeys: ManagementKeyRegistry
   readonly requestHistory: RequestHistoryService
   readonly database: Database
 }
@@ -15,11 +16,11 @@ export interface SettingsRoutesOptions {
  * request-history retention: the Owner chooses how long inference metadata
  * is kept, or disables it entirely.
  */
-export function createSettingsRoutes({ identity, requestHistory, database }: SettingsRoutesOptions) {
-  const guard = createOwnerGuard(identity)
+export function createSettingsRoutes({ identity, managementKeys, requestHistory, database }: SettingsRoutesOptions) {
+  const guard = createOwnerGuard(identity, managementKeys)
 
   return new Elysia({ name: 'iroha/admin-settings', prefix: '/api/v1/admin/settings' }).guard(
-    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    { as: 'local', detail: { security: MANAGEMENT_SECURITY } },
     (app) => app
       .get(
       '/request-history',

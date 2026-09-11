@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import type { OwnerIdentity } from '../identity/index.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
 import type { ProviderRegistry } from '../providers/index.ts'
 import type { Database, UpstreamKeyHealth } from '../persistence/index.ts'
 import {
@@ -8,10 +8,11 @@ import {
   MetricsSettingsService,
   MetricsSettingsValidationError,
 } from '../metrics/metrics.ts'
-import { createOwnerGuard, type ManagementError } from './owner-guard.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY, type ManagementError } from './owner-guard.ts'
 
 export interface MetricsRoutesOptions {
   readonly identity: OwnerIdentity
+  readonly managementKeys: ManagementKeyRegistry
   readonly database: Database
   readonly providers: ProviderRegistry
   readonly metrics: MetricsCollector
@@ -30,12 +31,13 @@ type ErrorDto = typeof errorResponse.static
 
 export function createMetricsRoutes({
   identity,
+  managementKeys,
   database,
   providers,
   metrics,
   metricsSettings,
 }: MetricsRoutesOptions) {
-  const guard = createOwnerGuard(identity)
+  const guard = createOwnerGuard(identity, managementKeys)
 
   return new Elysia({ name: 'iroha/admin-metrics', prefix: '/api/v1/admin' })
     .get(
@@ -60,7 +62,7 @@ export function createMetricsRoutes({
       {
         detail: {
           tags: ['Metrics'],
-          security: [{ OwnerSession: [] }],
+          security: MANAGEMENT_SECURITY,
           summary: 'Read bounded Iroha metrics',
           description:
             'Returns Prometheus-compatible request, latency, failure, retry, and bounded Key Health counters without Provider, model, key, or request identifiers.',
@@ -78,7 +80,7 @@ export function createMetricsRoutes({
       {
         detail: {
           tags: ['Settings', 'Metrics'],
-          security: [{ OwnerSession: [] }],
+          security: MANAGEMENT_SECURITY,
           summary: 'Read metrics exposure settings',
           description: 'Returns whether the optional authenticated metrics endpoint is enabled.',
         },
@@ -109,7 +111,7 @@ export function createMetricsRoutes({
       {
         detail: {
           tags: ['Settings', 'Metrics'],
-          security: [{ OwnerSession: [] }],
+          security: MANAGEMENT_SECURITY,
           summary: 'Update metrics exposure settings',
           description: 'Enables or disables the optional authenticated metrics endpoint.',
         },

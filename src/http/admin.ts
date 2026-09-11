@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import type { OwnerIdentity } from '../identity/index.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
 import {
   type KeyView,
   type ProviderFailure,
@@ -16,10 +16,11 @@ import type {
   GatewayKeyRegistry,
   GatewayKeyView,
 } from '../keys/index.ts'
-import { createOwnerGuard, managementError, type ManagementError } from './owner-guard.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY, managementError, type ManagementError } from './owner-guard.ts'
 
 export interface AdminRoutesOptions {
   readonly identity: OwnerIdentity
+  readonly managementKeys: ManagementKeyRegistry
   readonly providers: ProviderRegistry
   readonly gatewayKeys: GatewayKeyRegistry
   /**
@@ -49,12 +50,13 @@ export interface AdminRoutesOptions {
  */
 export function createAdminRoutes({
   identity,
+  managementKeys,
   providers,
   gatewayKeys,
   adapterRegistry,
   modelCatalog,
 }: AdminRoutesOptions) {
-  const guard = createOwnerGuard(identity)
+  const guard = createOwnerGuard(identity, managementKeys)
 
   /**
    * Gives newly added Upstream Keys their Key Model Availability, so a key is
@@ -80,7 +82,7 @@ export function createAdminRoutes({
   }
 
   return new Elysia({ name: 'iroha/admin', prefix: '/api/v1/admin' }).guard(
-    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    { as: 'local', detail: { security: MANAGEMENT_SECURITY } },
     (app) => app
       .onError({ as: 'scoped' }, ({ code, status }) => {
       if (code === 'VALIDATION' || code === 'PARSE') {

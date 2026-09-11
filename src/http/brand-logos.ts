@@ -1,11 +1,12 @@
 import { Elysia, t } from 'elysia'
 import { normalizeLogoHostname, type BrandLogoService } from '../brand-logos/index.ts'
-import type { OwnerIdentity } from '../identity/index.ts'
-import { createOwnerGuard, managementError } from './owner-guard.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY, managementError } from './owner-guard.ts'
 
 export interface BrandLogoRoutesOptions {
   readonly brandLogos: BrandLogoService
   readonly identity: OwnerIdentity
+  readonly managementKeys: ManagementKeyRegistry
 }
 
 const notFoundResponse = t.Object({
@@ -26,8 +27,8 @@ const notFoundResponse = t.Object({
  * logo.dev token, upstream refusal — collapses into a single 404 so the
  * UI's `<img onerror>` fallback is the only consumer-side branch needed.
  */
-export function createBrandLogoRoutes({ brandLogos, identity }: BrandLogoRoutesOptions) {
-  const guard = createOwnerGuard(identity)
+export function createBrandLogoRoutes({ brandLogos, identity, managementKeys }: BrandLogoRoutesOptions) {
+  const guard = createOwnerGuard(identity, managementKeys)
 
   return new Elysia({ name: 'iroha/brand-logos' })
     .onError({ as: 'scoped' }, ({ code, status }) => {
@@ -95,7 +96,7 @@ export function createBrandLogoRoutes({ brandLogos, identity }: BrandLogoRoutesO
           tags: ['Brand Logos'],
           summary: 'Resolve a Provider Logo Domain',
           description: 'Resolves one exact hostname through the server-side logo cache. Requires an Owner Session.',
-          security: [{ OwnerSession: [] }],
+          security: MANAGEMENT_SECURITY,
         },
       },
     )

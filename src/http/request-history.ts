@@ -1,11 +1,12 @@
 import { Elysia, t } from 'elysia'
 import type { OverviewRange, RequestHistoryService } from '../history/index.ts'
-import type { OwnerIdentity } from '../identity/index.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
 import type { RequestHistoryFilter, RequestHistoryListOptions } from '../persistence/index.ts'
-import { createOwnerGuard, type ManagementError } from './owner-guard.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY, type ManagementError } from './owner-guard.ts'
 
 export interface RequestHistoryRoutesOptions {
   readonly identity: OwnerIdentity
+  readonly managementKeys: ManagementKeyRegistry
   readonly requestHistory: RequestHistoryService
 }
 
@@ -14,11 +15,11 @@ export interface RequestHistoryRoutesOptions {
  * list of recent calls plus a per-call detail with the retry trail. Nothing
  * here exposes prompts, responses, or Upstream Key material.
  */
-export function createRequestHistoryRoutes({ identity, requestHistory }: RequestHistoryRoutesOptions) {
-  const guard = createOwnerGuard(identity)
+export function createRequestHistoryRoutes({ identity, managementKeys, requestHistory }: RequestHistoryRoutesOptions) {
+  const guard = createOwnerGuard(identity, managementKeys)
 
   return new Elysia({ name: 'iroha/admin-request-history', prefix: '/api/v1/admin/requests' }).guard(
-    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    { as: 'local', detail: { security: MANAGEMENT_SECURITY } },
     (app) => app
       .get(
       '/',

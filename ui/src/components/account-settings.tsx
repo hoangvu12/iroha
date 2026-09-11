@@ -17,6 +17,13 @@ import {
 } from '@/lib/auth'
 import { fetchRetention, updateRetention, type RetentionView } from '@/lib/settings'
 import { formatTime } from '@/lib/time'
+import {
+  createManagementKey,
+  deleteManagementKey,
+  fetchManagementKeys,
+  revokeManagementKey,
+  type ManagementKeyView,
+} from '@/lib/management-keys'
 
 interface AccountSettingsProps {
   readonly state: AuthState
@@ -38,6 +45,11 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
   const [retentionDraft, setRetentionDraft] = useState<string>('30')
   const [retentionError, setRetentionError] = useState<string | null>(null)
   const [retentionBusy, setRetentionBusy] = useState(false)
+  const [managementKeys, setManagementKeys] = useState<readonly ManagementKeyView[] | null>(null)
+  const [managementKeyName, setManagementKeyName] = useState('')
+  const [managementKeySecret, setManagementKeySecret] = useState<string | null>(null)
+  const [managementKeyError, setManagementKeyError] = useState<string | null>(null)
+  const [managementKeyBusy, setManagementKeyBusy] = useState(false)
 
   const reloadSessions = useCallback(async () => {
     try {
@@ -72,6 +84,31 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
       cancelled = true
     }
   }, [])
+
+  const reloadManagementKeys = useCallback(async () => {
+    try {
+      setManagementKeys(await fetchManagementKeys())
+      setManagementKeyError(null)
+    } catch (cause) {
+      setManagementKeyError(cause instanceof ApiError ? cause.message : 'Management Keys could not be loaded.')
+    }
+  }, [])
+
+  useEffect(() => { void reloadManagementKeys() }, [reloadManagementKeys])
+
+  const addManagementKey = async (event: FormEvent) => {
+    event.preventDefault()
+    setManagementKeyBusy(true)
+    setManagementKeyError(null)
+    try {
+      const created = await createManagementKey(managementKeyName, csrfToken)
+      setManagementKeySecret(created.secret)
+      setManagementKeyName('')
+      await reloadManagementKeys()
+    } catch (cause) {
+      setManagementKeyError(cause instanceof ApiError ? cause.message : 'Management Key could not be created.')
+    } finally { setManagementKeyBusy(false) }
+  }
 
   const revokeOne = async (session: SessionSummary) => {
     await revokeSession(session.id, csrfToken)
@@ -198,6 +235,27 @@ export function AccountSettings({ state, onSignedOut }: AccountSettingsProps) {
               />
             ))}
           </ul>
+        )}
+      </section>
+
+      <section>
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight">Management Keys</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Bearer credentials for agents and other headless management clients. New keys receive read, write, and Upstream Key reveal access.
+          </p>
+        </div>
+        <Separator className="my-4" />
+        {managementKeyError && <Alert variant="destructive" role="alert" className="mb-4"><AlertTitle>Management Key error</AlertTitle><AlertDescription>{managementKeyError}</AlertDescription></Alert>}
+        {managementKeySecret && (
+          <Alert className="mb-4"><AlertTitle>Copy this secret now</AlertTitle><AlertDescription><code className="mt-2 block break-all select-all text-xs">{managementKeySecret}</code><span className="mt-2 block text-xs">It will not be shown again.</span></AlertDescription></Alert>
+        )}
+        <form className="mb-4 flex items-end gap-3" onSubmit={(event) => void addManagementKey(event)}>
+          <div className="flex w-72 flex-col gap-1.5"><label htmlFor="management-key-name" className="text-muted-foreground text-xs">Name</label><Input id="management-key-name" value={managementKeyName} maxLength={100} required onChange={(event) => setManagementKeyName(event.target.value)} placeholder="Deployment agent" /></div>
+          <Button type="submit" size="sm" disabled={managementKeyBusy}>{managementKeyBusy ? 'Creating…' : 'Create key'}</Button>
+        </form>
+        {managementKeys === null ? <Skeleton className="h-12 w-full rounded-lg" /> : managementKeys.length === 0 ? <EmptyState icon={KeyRound} title="No Management Keys" description="Create one when an agent needs to administer Iroha." compact /> : (
+          <ul className="flex flex-col gap-2">{managementKeys.map((key) => <li key={key.id} className="bg-card flex items-center gap-3 rounded-lg border px-4 py-3"><div className="min-w-0 flex-1"><div className="text-sm font-medium">{key.name}</div><div className="text-muted-foreground text-xs">{key.id} · created {formatTime(key.createdAt)}{key.lastUsedAt ? ` · last used ${formatTime(key.lastUsedAt)}` : ''}{key.revokedAt ? ' · revoked' : ''}</div></div><StatefulButton variant="ghost" size="sm" successLabel={key.revokedAt ? 'Deleted' : 'Revoked'} onClick={async () => { try { if (key.revokedAt) await deleteManagementKey(key.id, csrfToken); else await revokeManagementKey(key.id, csrfToken); await reloadManagementKeys() } catch (cause) { setManagementKeyError(cause instanceof ApiError ? cause.message : 'Management Key action failed.'); throw cause } }}>{key.revokedAt ? 'Delete' : 'Revoke'}</StatefulButton></li>)}</ul>
         )}
       </section>
 

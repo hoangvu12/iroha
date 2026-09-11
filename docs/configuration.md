@@ -65,6 +65,17 @@ The management application decides what to show from `/api/v1/auth/state`: an un
 
 Sessions are `HttpOnly`, `SameSite=Strict` cookies. Each use slides the seven-day idle expiry forward; a session left unused past it is refused and forgotten. The Owner can list every signed-in browser, revoke one, or sign out everywhere. Management requests must be same-origin, and every state-changing management request must repeat its session's CSRF token in the `x-iroha-csrf` header.
 
+## Headless management
+
+Create a Management Key from **Settings → Management Keys**, copy its one-time secret, and send it as a bearer credential to the same `/api/v1/admin/*` endpoints used by the UI:
+
+```sh
+curl -H "Authorization: Bearer $IROHA_MANAGEMENT_KEY" \
+  http://localhost:3000/api/v1/admin/providers
+```
+
+Management Keys have independent `admin:read`, `admin:write`, and `upstream-keys:reveal` scopes. The Settings UI creates full-control keys; scoped keys can be created through the documented management-key endpoint. Management Keys do not require CSRF because they are not ambient browser credentials. They never authorize inference, and only an Owner Session can create, revoke, or permanently delete them. The full machine-readable contract is served at `/docs/json` and the interactive reference at `/docs`.
+
 The cookie is marked `Secure` when the browser reached Iroha over HTTPS, including through a TLS-terminating proxy that sets `X-Forwarded-Proto`. Either signal alone is enough, so a client cannot strip the flag by claiming plain HTTP. A plain-HTTP installation still works, because a `Secure` cookie would never be sent back.
 
 Setup, login, and recovery failures are throttled per calling address, and report nothing about which value was wrong or what is configured. Counting per address is what stops a stranger from locking the Owner out by failing on purpose; behind a reverse proxy that hides the caller, every caller looks like the proxy and the budget is shared. Counters live in memory and reset when Iroha restarts.

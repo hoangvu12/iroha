@@ -1,8 +1,12 @@
 import {
   secretsMatch,
+  type AuthenticatedManagementKey,
   type AuthenticatedSession,
+  type ManagementKeyRegistry,
+  type ManagementKeyScope,
   type OwnerIdentity,
 } from '../identity/index.ts'
+import { bearerToken } from './bearer-token.ts'
 
 /** The Owner's session cookie. Its value is `<session id>.<secret>`. */
 export const SESSION_COOKIE = 'iroha_session'
@@ -26,7 +30,10 @@ export interface GuardResponse {
   readonly response: { readonly status: 401 | 403; readonly body: ManagementError }
 }
 
-export type GuardOutcome = { readonly authenticated: AuthenticatedSession } | GuardResponse
+export type GuardOutcome =
+  | { readonly authenticated: AuthenticatedSession; readonly principal: 'owner_session' }
+  | { readonly authenticated: AuthenticatedManagementKey; readonly principal: 'management_key' }
+  | GuardResponse
 
 export type CookieJar = Record<string, { set(config: Record<string, unknown>): unknown } | undefined>
 
@@ -40,7 +47,7 @@ export interface OwnerGuard {
   ): Promise<GuardOutcome>
 }
 
-export function createOwnerGuard(identity: OwnerIdentity): OwnerGuard {
+export function createOwnerGuard(identity: OwnerIdentity, managementKeys?: ManagementKeyRegistry): OwnerGuard {
   /**
    * Resolves the session and, when its idle expiry moved, reissues the cookie
    * so the browser's copy expires no sooner than the stored one. Without this
@@ -68,13 +75,7 @@ export function createOwnerGuard(identity: OwnerIdentity): OwnerGuard {
     if (crossOrigin !== null) return { response: { status: 403, body: crossOrigin } }
 
     const authenticated = await resolveSession(context.request, context.cookie)
-    if (authenticated === null) {
-      return {
-        response: { status: 401, body: managementError('authentication_required', 'Sign in to continue.') },
-      }
-    }
-
-    if (options.csrf) {
+    if (authenticated !== null && options.csrf) {
       const supplied = context.request.headers.get(CSRF_HEADER) ?? ''
       if (!secretsMatch(authenticated.session.csrfToken, supplied)) {
         return {
@@ -86,11 +87,36 @@ export function createOwnerGuard(identity: OwnerIdentity): OwnerGuard {
       }
     }
 
-    return { authenticated }
+    if (authenticated !== null) return { authenticated, principal: 'owner_session' }
+
+    const machine = await managementKeys?.authenticate(
+      bearerToken(context.request.headers),
+      requiredScope(context.request),
+    )
+    if (machine !== undefined && machine !== null) {
+      return { authenticated: machine, principal: 'management_key' }
+    }
+
+    return {
+      response: {
+        status: 401,
+        body: managementError('authentication_required', 'Provide an Owner Session or Management Key.'),
+      },
+    }
   }
 
   return { resolveSession, requireOwner }
 }
+
+function requiredScope(request: Request): ManagementKeyScope {
+  const path = new URL(request.url).pathname
+  if (request.method === 'GET' && /\/providers\/[^/]+\/keys\/[^/]+\/value$/.test(path)) {
+    return 'upstream-keys:reveal'
+  }
+  return request.method === 'GET' || request.method === 'HEAD' ? 'admin:read' : 'admin:write'
+}
+
+export const MANAGEMENT_SECURITY = [{ OwnerSession: [] }, { ManagementKey: [] }]
 
 export function managementError(code: string, message: string): ManagementError {
   return { error: { code, message } }

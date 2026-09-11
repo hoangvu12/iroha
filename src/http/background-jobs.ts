@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import type { OwnerIdentity } from '../identity/index.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
 import type { Database } from '../persistence/index.ts'
 import type { BackgroundScheduler } from '../jobs/scheduler.ts'
 import {
@@ -8,10 +8,11 @@ import {
   type BackgroundScheduleSettings,
 } from '../jobs/schedule-settings.ts'
 import { type SchedulerSurface } from './background-scheduler-surface.ts'
-import { createOwnerGuard } from './owner-guard.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY } from './owner-guard.ts'
 
 export interface BackgroundRoutesOptions {
   readonly identity: OwnerIdentity
+  readonly managementKeys: ManagementKeyRegistry
   readonly database: Database
   readonly scheduler: BackgroundScheduler | SchedulerSurface
   readonly settings: BackgroundScheduleSettingsService
@@ -27,14 +28,15 @@ export interface BackgroundRoutesOptions {
  */
 export function createBackgroundRoutes({
   identity,
+  managementKeys,
   database,
   scheduler,
   settings,
 }: BackgroundRoutesOptions) {
-  const guard = createOwnerGuard(identity)
+  const guard = createOwnerGuard(identity, managementKeys)
 
   return new Elysia({ name: 'iroha/admin-background', prefix: '/api/v1/admin/background-jobs' }).guard(
-    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    { as: 'local', detail: { security: MANAGEMENT_SECURITY } },
     (app) => app
       .onError({ as: 'scoped' }, ({ code, status }) => {
       if (code === 'VALIDATION' || code === 'PARSE') {

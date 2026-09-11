@@ -1,10 +1,11 @@
 import { Elysia, t } from 'elysia'
 import type { Database } from '../persistence/index.ts'
-import type { OwnerIdentity } from '../identity/index.ts'
-import { createOwnerGuard, type ManagementError } from './owner-guard.ts'
+import type { ManagementKeyRegistry, OwnerIdentity } from '../identity/index.ts'
+import { createOwnerGuard, MANAGEMENT_SECURITY, type ManagementError } from './owner-guard.ts'
 
 export interface AuditRoutesOptions {
   readonly identity: OwnerIdentity
+  readonly managementKeys: ManagementKeyRegistry
   readonly database: Database
 }
 
@@ -14,11 +15,11 @@ export interface AuditRoutesOptions {
  * of filtering the request history exposes; the clear action wipes the feed
  * entirely and records the act of wiping.
  */
-export function createAuditRoutes({ identity, database }: AuditRoutesOptions) {
-  const guard = createOwnerGuard(identity)
+export function createAuditRoutes({ identity, managementKeys, database }: AuditRoutesOptions) {
+  const guard = createOwnerGuard(identity, managementKeys)
 
   return new Elysia({ name: 'iroha/admin-audit', prefix: '/api/v1/admin/audit' }).guard(
-    { as: 'local', detail: { security: [{ OwnerSession: [] }] } },
+    { as: 'local', detail: { security: MANAGEMENT_SECURITY } },
     (app) => app
       .get(
       '/',

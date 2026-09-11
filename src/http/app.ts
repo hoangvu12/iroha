@@ -5,7 +5,7 @@ import type { SecretCipher } from '../crypto/index.ts'
 import { RequestHistoryService } from '../history/index.ts'
 import type { InferenceAdapter } from '../inference/index.ts'
 import { createGenericInferenceAdapter } from '../inference/generic-adapter.ts'
-import type { OwnerIdentity } from '../identity/index.ts'
+import { ManagementKeyRegistry, type OwnerIdentity } from '../identity/index.ts'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
 import { BackgroundScheduleSettingsService } from '../jobs/index.ts'
 import { ModelCatalogService, templateAvailabilityFromRegistry, templateDiscoveryBasePathFromRegistry, templateDiscoveryFromRegistry, templateKnowledgeFromRegistry } from '../models/index.ts'
@@ -34,6 +34,7 @@ import { createUsageRoutes } from './usage.ts'
 import { createMetricsRoutes } from './metrics.ts'
 import { createGlobalModelRoutes } from './global-models.ts'
 import { MetricsCollector, MetricsSettingsService } from '../metrics/metrics.ts'
+import { createManagementKeyRoutes } from './management-keys.ts'
 
 export interface AppOptions {
   readonly database: Database
@@ -160,6 +161,7 @@ export function createApp(options: AppOptions) {
   const metricsSettings = options.metricsSettings ?? new MetricsSettingsService(database)
 
   const transportDefaults: TransportDefaults = options.transportDefaults ?? DEFAULT_TRANSPORT
+  const managementKeys = new ManagementKeyRegistry(database)
 
   return new Elysia()
     .get('/docs/capability-matrix', () => new Response(capabilityMatrixPage, {
@@ -190,6 +192,7 @@ export function createApp(options: AppOptions) {
           { name: 'Upstream Keys', description: 'Upstream Key lifecycle scoped to one Provider: add, configure, test, activate, disable, remove.' },
           { name: 'Upstream Accounts', description: 'Upstream Account groupings that share Provider billing or capacity across keys.' },
           { name: 'Gateway Keys', description: 'Application credentials the Owner issues: list, create, inspect, revoke, and self-discover permitted Providers.' },
+          { name: 'Management Keys', description: 'Scoped bearer credentials for headless administration. Only an Owner Session may create or revoke them.' },
           { name: 'Catalog', description: 'Per-Provider model catalog: discover, refresh, add, exclude, override capabilities, remove.' },
           { name: 'Usage', description: 'Per-Provider Usage Adapter reading and on-demand refresh.' },
           { name: 'Audit', description: 'Administrative event log.' },
@@ -202,15 +205,17 @@ export function createApp(options: AppOptions) {
         components: {
           securitySchemes: {
             GatewayKey: { type: 'http', scheme: 'bearer', bearerFormat: 'Gateway Key' },
+            ManagementKey: { type: 'http', scheme: 'bearer', bearerFormat: 'Management Key' },
             OwnerSession: { type: 'apiKey', in: 'cookie', name: 'iroha_session' },
           },
         },
       },
     }))
     .use(createAuthRoutes({ identity }))
-    .use(createAdminRoutes({ identity, providers, gatewayKeys, adapterRegistry, modelCatalog }))
+    .use(createManagementKeyRoutes({ identity, managementKeys }))
+    .use(createAdminRoutes({ identity, managementKeys, providers, gatewayKeys, adapterRegistry, modelCatalog }))
     .use(
-      createAdminInferenceRoutes(identity, {
+      createAdminInferenceRoutes(identity, managementKeys, {
         gatewayKeys, providers, inference, modelCatalog, adapterRegistry, database, requestHistory,
         transportDefaults, usageService,
         ...(options.timer === undefined ? {} : { timer: options.timer }),
@@ -222,29 +227,33 @@ export function createApp(options: AppOptions) {
     )
     .use(createDirectoryRoutes({ gatewayKeys }))
     .use(createGlobalModelRoutes({ gatewayKeys, database }))
-    .use(createBrandLogoRoutes({ brandLogos: options.brandLogos ?? noBrandLogoService(), identity }))
-    .use(createCatalogRoutes({ identity, modelCatalog }))
+    .use(createBrandLogoRoutes({ brandLogos: options.brandLogos ?? noBrandLogoService(), identity, managementKeys }))
+    .use(createCatalogRoutes({ identity, managementKeys, modelCatalog }))
     .use(
       createUsageRoutes({
         identity,
+        managementKeys,
         usage: usageService,
       }),
     )
     .use(
       createAuditRoutes({
         identity,
+        managementKeys,
         database,
       }),
     )
     .use(
       createRequestHistoryRoutes({
         identity,
+        managementKeys,
         requestHistory,
       }),
     )
     .use(
       createSettingsRoutes({
         identity,
+        managementKeys,
         requestHistory,
         database,
       }),
@@ -252,6 +261,7 @@ export function createApp(options: AppOptions) {
     .use(
       createBackgroundRoutes({
         identity,
+        managementKeys,
         database,
         scheduler: backgroundScheduler,
         settings: backgroundSchedule,
@@ -260,6 +270,7 @@ export function createApp(options: AppOptions) {
     .use(
       createMetricsRoutes({
         identity,
+        managementKeys,
         database,
         providers,
         metrics,

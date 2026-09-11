@@ -144,6 +144,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: true })
         if ('response' in guardResult) return status(guardResult.response.status, guardResult.response.body)
 
+        if (guardResult.principal !== 'owner_session') return status(401, managementError('authentication_required', 'Sign in to continue.'))
         await identity.revokeSession(guardResult.authenticated.session.id, 'logout')
         clearSessionCookie(cookie, request)
         return status(204, undefined)
@@ -163,6 +164,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
         const guardResult = await guard.requireOwner({ request, cookie }, { csrf: false })
         if ('response' in guardResult) return status(guardResult.response.status, guardResult.response.body)
 
+        if (guardResult.principal !== 'owner_session') return status(401, managementError('authentication_required', 'Sign in to continue.'))
         return { sessions: await identity.sessions(guardResult.authenticated.session.id) }
       },
       {
@@ -205,6 +207,7 @@ export function createAuthRoutes({ identity }: AuthRoutesOptions) {
           return status(404, managementError('session_not_found', 'That session is no longer signed in.'))
         }
 
+        if (guardResult.principal !== 'owner_session') return status(401, managementError('authentication_required', 'Sign in to continue.'))
         if (params.id === guardResult.authenticated.session.id) clearSessionCookie(cookie, request)
         return status(204, undefined)
       },

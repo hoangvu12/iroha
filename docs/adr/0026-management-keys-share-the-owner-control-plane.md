@@ -1,0 +1,3 @@
+# Management Keys share the Owner control plane
+
+Iroha accepts either an Owner Session or a scoped Management Key on the existing `/api/v1/admin/*` routes, keeping browser and headless clients on one database-authoritative control plane. Owner Sessions retain same-origin and CSRF protection; Management Keys use distinct `mk_` bearer credentials with read, write, and separately granted Upstream Key reveal authority. We rejected granting administration to Gateway Keys because an inference credential must not become control-plane authority, and rejected duplicate agent routes because their behavior and contracts would drift from the management UI. Only an Owner Session may create, revoke, or delete Management Keys, so machine authority cannot reproduce itself.

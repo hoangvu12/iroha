@@ -222,7 +222,7 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
               id: model.id,
               object: 'model',
               created: model.created,
-              ...inlineModelMetadata(model.metadata),
+              ...inlineModelMetadata(model.metadata, model.overrides),
             })),
           }),
           { status: 200, headers: responseHeaders },
@@ -245,6 +245,11 @@ export function createInferenceRoutes(options: InferenceRoutesOptions) {
           context_length: t.Optional(t.Number()),
           max_input_tokens: t.Optional(t.Number()),
           max_output_tokens: t.Optional(t.Number()),
+          chat: t.Optional(t.Union([t.Literal('ok'), t.Literal('unsupported')])),
+          architecture: t.Optional(t.Object({
+            input_modalities: t.Optional(t.Array(t.String())),
+            output_modalities: t.Optional(t.Array(t.String())),
+          })),
         })) }) },
       },
     )

@@ -24,3 +24,9 @@ export {
   type ModelMetadataFallback,
   type ModelsDevMetadataFallbackOptions,
 } from './models-dev-metadata.ts'
+export {
+  mergeModelMetadata,
+  readInputModalities,
+  readModelChatCapability,
+  readOutputModalities,
+} from './metadata-normalization.ts'

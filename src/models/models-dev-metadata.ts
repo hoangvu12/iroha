@@ -1,4 +1,10 @@
 import type { ModelCatalogMetadata } from '../persistence/index.ts'
+import {
+  mergeModelMetadata,
+  readInputModalities,
+  readModelChatCapability,
+  readOutputModalities,
+} from './metadata-normalization.ts'
 
 export type ModelMetadataFallback = (
   providerHandle: string,
@@ -17,9 +23,15 @@ interface ModelsDevEntry {
   readonly metadata: ModelCatalogMetadata
 }
 
-const DEFAULT_ENDPOINTS = [
-  'https://models.dev/models.json',
-  'https://raw.githubusercontent.com/anomalyco/models.dev/dev/models.json',
+const DEFAULT_ENDPOINT_GROUPS = [
+  [
+    'https://models.dev/models.json',
+    'https://raw.githubusercontent.com/anomalyco/models.dev/dev/models.json',
+  ],
+  [
+    'https://models.dev/api.json',
+    'https://raw.githubusercontent.com/anomalyco/models.dev/dev/api.json',
+  ],
 ] as const
 const DEFAULT_CACHE_TTL_MS = 15 * 60 * 1_000
 const FETCH_TIMEOUT_MS = 10_000
@@ -32,56 +44,64 @@ export function createModelsDevMetadataFallback(
   const fetch = options.fetch ?? globalThis.fetch
   const clock = options.clock ?? Date.now
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
-  const endpoints = options.endpoint === undefined ? DEFAULT_ENDPOINTS : [options.endpoint]
-  let cache: ReadonlyMap<string, ModelsDevEntry> = new Map()
+  const endpointGroups: readonly (readonly string[])[] = options.endpoint === undefined
+    ? DEFAULT_ENDPOINT_GROUPS
+    : [[options.endpoint]]
+  let cache: readonly ReadonlyMap<string, ModelsDevEntry>[] = []
   let loadedAt = 0
-  let loading: Promise<ReadonlyMap<string, ModelsDevEntry>> | null = null
+  let loading: Promise<readonly ReadonlyMap<string, ModelsDevEntry>[]> | null = null
 
-  const load = async (): Promise<ReadonlyMap<string, ModelsDevEntry>> => {
+  const load = async (): Promise<readonly ReadonlyMap<string, ModelsDevEntry>[]> => {
     const now = clock()
-    if (cache.size > 0 && now - loadedAt < cacheTtlMs) return cache
+    if (cache.length > 0 && now - loadedAt < cacheTtlMs) return cache
     if (loading !== null) return await loading
 
     loading = (async () => {
-      for (const endpoint of endpoints) {
-        try {
-          const response = await fetch(endpoint, {
-            method: 'GET',
-            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-          })
-          if (!response.ok) {
+      const loaded: ReadonlyMap<string, ModelsDevEntry>[] = []
+      for (const endpoints of endpointGroups) {
+        for (const endpoint of endpoints) {
+          try {
+            const response = await fetch(endpoint, {
+              method: 'GET',
+              signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+            })
+            if (!response.ok) {
+              console.warn(JSON.stringify({
+                event: 'model_metadata_fallback_failed',
+                endpointHost: new URL(endpoint).hostname,
+                reason: `http_${response.status}`,
+              }))
+              continue
+            }
+            const parsed = parseModelsDevCatalog(await response.json())
+            if (parsed.size === 0) {
+              console.warn(JSON.stringify({
+                event: 'model_metadata_fallback_failed',
+                endpointHost: new URL(endpoint).hostname,
+                reason: 'empty_catalog',
+              }))
+              continue
+            }
+            loaded.push(parsed)
+            console.info(JSON.stringify({
+              event: 'model_metadata_fallback_loaded',
+              endpointHost: new URL(endpoint).hostname,
+              entries: parsed.size,
+            }))
+            break
+          } catch (cause) {
             console.warn(JSON.stringify({
               event: 'model_metadata_fallback_failed',
               endpointHost: new URL(endpoint).hostname,
-              reason: `http_${response.status}`,
+              reason: cause instanceof Error ? cause.name : 'unknown',
             }))
             continue
           }
-          const parsed = parseModelsDevCatalog(await response.json())
-          if (parsed.size === 0) {
-            console.warn(JSON.stringify({
-              event: 'model_metadata_fallback_failed',
-              endpointHost: new URL(endpoint).hostname,
-              reason: 'empty_catalog',
-            }))
-            continue
-          }
-          cache = parsed
-          loadedAt = clock()
-          console.info(JSON.stringify({
-            event: 'model_metadata_fallback_loaded',
-            endpointHost: new URL(endpoint).hostname,
-            entries: parsed.size,
-          }))
-          return cache
-        } catch (cause) {
-          console.warn(JSON.stringify({
-            event: 'model_metadata_fallback_failed',
-            endpointHost: new URL(endpoint).hostname,
-            reason: cause instanceof Error ? cause.name : 'unknown',
-          }))
-          continue
         }
+      }
+      if (loaded.length > 0) {
+        cache = loaded
+        loadedAt = clock()
       }
       return cache
     })()
@@ -93,11 +113,14 @@ export function createModelsDevMetadataFallback(
   }
 
   return async (providerHandle, modelIds) => {
-    const catalog = await load()
+    const catalogs = await load()
     const metadata: Record<string, ModelCatalogMetadata> = {}
     for (const modelId of modelIds) {
-      const match = lookupModelsDevMetadata(`${providerHandle}/${modelId}`, catalog)
-      if (match !== null) metadata[modelId] = match
+      for (const catalog of catalogs) {
+        const match = lookupModelsDevMetadata(`${providerHandle}/${modelId}`, catalog)
+        if (match === null) continue
+        metadata[modelId] = mergeModelMetadata(metadata[modelId], match)
+      }
     }
     return metadata
   }
@@ -128,7 +151,7 @@ function addModelsDevEntry(
   model: Record<string, unknown>,
 ): void {
   const rawId = typeof model.id === 'string' && model.id.trim() !== '' ? model.id.trim() : fallbackId
-  const id = rawId.includes('/') || providerId === null ? rawId : `${providerId}/${rawId}`
+  const id = providerId === null ? rawId : `${providerId}/${rawId}`
   const metadata = readModelsDevMetadata(model)
   if (metadata !== null) entries.set(id.toLowerCase(), { id, metadata })
 }
@@ -181,10 +204,29 @@ function readModelsDevMetadata(model: Record<string, unknown>): ModelCatalogMeta
   const contextLength = positiveInteger(limit.context) ?? positiveInteger(limit.input)
   const maxInputTokens = positiveInteger(limit.input)
   const maxOutputTokens = positiveInteger(limit.output)
-  if (normalizedName === null && contextLength === null && maxInputTokens === null && maxOutputTokens === null) {
+  const chat = readModelChatCapability(model)
+  const inputModalities = readInputModalities(model)
+  const outputModalities = readOutputModalities(model)
+  if (
+    normalizedName === null
+    && contextLength === null
+    && maxInputTokens === null
+    && maxOutputTokens === null
+    && chat === null
+    && inputModalities === null
+    && outputModalities === null
+  ) {
     return null
   }
-  return { normalizedName, contextLength, maxInputTokens, maxOutputTokens }
+  return {
+    normalizedName,
+    contextLength,
+    maxInputTokens,
+    maxOutputTokens,
+    chat,
+    inputModalities,
+    outputModalities,
+  }
 }
 
 function cleanQualifiedId(id: string): string {

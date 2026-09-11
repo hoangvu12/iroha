@@ -55,8 +55,12 @@ describe('global Qualified Model discovery', () => {
         contextLength: 200_000,
         maxInputTokens: 180_000,
         maxOutputTokens: 64_000,
+        chat: 'unsupported',
+        inputModalities: ['text', 'image'],
+        outputModalities: ['text'],
       },
     })
+    await iroha.database.modelCatalog.updateOverrides(providerId, modelId, { chat: true }, new Date())
     const secret = await createKey({ mode: 'all' })
 
     const response = await iroha.fetch('/v1/models', { headers: { authorization: `Bearer ${secret}` } })
@@ -68,6 +72,8 @@ describe('global Qualified Model discovery', () => {
       context_length: 200_000,
       max_input_tokens: 180_000,
       max_output_tokens: 64_000,
+      chat: 'ok',
+      architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] },
     }))
   })
 

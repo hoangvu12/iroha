@@ -216,6 +216,41 @@ describe('the provider-scoped Models API', () => {
     }))
   })
 
+  test('retains generic chat evidence and modalities from upstream discovery', async () => {
+    upstream.respondWith(() => Response.json({
+      object: 'list',
+      data: [
+        {
+          id: 'chat-model',
+          supported_endpoints: ['/v1/chat/completions', '/v1/responses'],
+          input_modalities: ['text', 'image'],
+          output_modalities: ['text'],
+        },
+        {
+          id: 'audio-model',
+          supported_endpoints: ['/v1/audio/transcriptions'],
+          input_modalities: ['audio'],
+          output_modalities: ['text'],
+        },
+      ],
+    }))
+    await refreshCatalog()
+    const key = await createKey([{ providerId: connection.id }])
+    const response = await listModels(key)
+    const body = (await response.json()) as { data: Record<string, unknown>[] }
+
+    expect(body.data).toContainEqual(expect.objectContaining({
+      id: 'chat-model',
+      chat: 'ok',
+      architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] },
+    }))
+    expect(body.data).toContainEqual(expect.objectContaining({
+      id: 'audio-model',
+      chat: 'unsupported',
+      architecture: { input_modalities: ['audio'], output_modalities: ['text'] },
+    }))
+  })
+
   test('fills missing metadata generically while retaining upstream values', async () => {
     await iroha.dispose()
     upstream = mockUpstreamTransport(() => Response.json({

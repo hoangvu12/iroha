@@ -23,6 +23,11 @@ export function createGlobalModelRoutes(options: { readonly gatewayKeys: Gateway
       context_length?: number
       max_input_tokens?: number
       max_output_tokens?: number
+      chat?: 'ok' | 'unsupported'
+      architecture?: {
+        readonly input_modalities?: readonly string[]
+        readonly output_modalities?: readonly string[]
+      }
     }[] = []
     for (const provider of await options.database.providers.listProviders()) {
       if (provider.archivedAt !== null || !provider.enabled) continue
@@ -38,7 +43,7 @@ export function createGlobalModelRoutes(options: { readonly gatewayKeys: Gateway
           id: `${provider.handle}/${modelId}`,
           object: 'model',
           created: Math.floor(entry.createdAt.getTime() / 1000),
-          ...inlineModelMetadata(entry.metadata),
+          ...inlineModelMetadata(entry.metadata, entry.overrides),
         })
       }
     }
@@ -55,6 +60,11 @@ export function createGlobalModelRoutes(options: { readonly gatewayKeys: Gateway
         context_length: t.Optional(t.Number()),
         max_input_tokens: t.Optional(t.Number()),
         max_output_tokens: t.Optional(t.Number()),
+        chat: t.Optional(t.Union([t.Literal('ok'), t.Literal('unsupported')])),
+        architecture: t.Optional(t.Object({
+          input_modalities: t.Optional(t.Array(t.String())),
+          output_modalities: t.Optional(t.Array(t.String())),
+        })),
       })) }),
     },
   })

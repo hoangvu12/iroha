@@ -453,6 +453,9 @@ export interface ModelCatalogMetadata {
   readonly contextLength: number | null
   readonly maxInputTokens: number | null
   readonly maxOutputTokens: number | null
+  readonly chat?: 'ok' | 'unsupported' | null
+  readonly inputModalities?: readonly string[] | null
+  readonly outputModalities?: readonly string[] | null
 }
 
 /**

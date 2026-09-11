@@ -11,6 +11,12 @@ import type {
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
 import type { ModelMetadataFallback } from './models-dev-metadata.ts'
+import {
+  mergeModelMetadata,
+  readInputModalities,
+  readModelChatCapability,
+  readOutputModalities,
+} from './metadata-normalization.ts'
 
 export interface FieldProblem {
   readonly field: string
@@ -66,6 +72,7 @@ export interface ListableModel {
   readonly id: string
   readonly created: number
   readonly metadata: ModelCatalogMetadata | null
+  readonly overrides: Readonly<Partial<ProviderCapabilities>> | null
 }
 
 export interface ModelCatalogServiceOptions {
@@ -567,7 +574,12 @@ export class ModelCatalogService {
           entry === undefined
             ? Math.floor(connection.createdAt.getTime() / 1000)
             : Math.floor(entry.createdAt.getTime() / 1000)
-        return { id: modelId, created, metadata: entry?.metadata ?? null }
+        return {
+          id: modelId,
+          created,
+          metadata: entry?.metadata ?? null,
+          overrides: entry?.overrides ?? null,
+        }
       }),
     }
   }
@@ -681,13 +693,7 @@ export class ModelCatalogService {
     for (const modelId of modelIds) {
       const supplement = fallback[modelId]
       if (supplement === undefined) continue
-      const primary = metadataByModel[modelId]
-      metadataByModel[modelId] = {
-        normalizedName: primary?.normalizedName ?? supplement.normalizedName,
-        contextLength: primary?.contextLength ?? supplement.contextLength,
-        maxInputTokens: primary?.maxInputTokens ?? supplement.maxInputTokens,
-        maxOutputTokens: primary?.maxOutputTokens ?? supplement.maxOutputTokens,
-      }
+      metadataByModel[modelId] = mergeModelMetadata(metadataByModel[modelId], supplement)
     }
   }
 
@@ -786,10 +792,29 @@ function readModelMetadata(model: Record<string, unknown>): ModelCatalogMetadata
     'max_completion_tokens',
     'max_output_tokens',
   ])
-  if (normalizedName === null && contextLength === null && maxInputTokens === null && maxOutputTokens === null) {
+  const chat = readModelChatCapability(model)
+  const inputModalities = readInputModalities(model)
+  const outputModalities = readOutputModalities(model)
+  if (
+    normalizedName === null
+    && contextLength === null
+    && maxInputTokens === null
+    && maxOutputTokens === null
+    && chat === null
+    && inputModalities === null
+    && outputModalities === null
+  ) {
     return null
   }
-  return { normalizedName, contextLength, maxInputTokens, maxOutputTokens }
+  return {
+    normalizedName,
+    contextLength,
+    maxInputTokens,
+    maxOutputTokens,
+    chat,
+    inputModalities,
+    outputModalities,
+  }
 }
 
 function nestedRecord(value: unknown): Record<string, unknown> {

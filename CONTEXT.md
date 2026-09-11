@@ -49,7 +49,7 @@ A model addressed by its exact Provider-defined model name. A Provider offers it
 _Avoid_: Alias, virtual model
 
 **Model Catalog**:
-A Provider's retained set of Upstream Models a caller may ask for, assembled from Provider discovery, Provider Template knowledge, and Owner additions, then narrowed by Owner exclusions. It retains allow-listed discovery metadata against each exact Upstream Model ID without changing routing identity. It is what the Provider Directory reports. It says nothing about which Upstream Key can serve a given model.
+A Provider's retained set of Upstream Models a caller may ask for, assembled from Provider discovery, Provider Template knowledge, and Owner additions, then narrowed by Owner exclusions. It retains allow-listed metadata against each exact Upstream Model ID without changing routing identity; Provider-reported facts may be supplemented by unambiguous external catalog facts when fields are missing. It is what the Provider Directory reports. It says nothing about which Upstream Key can serve a given model.
 _Avoid_: Key Model Availability, model list
 
 **Key Model Availability**:

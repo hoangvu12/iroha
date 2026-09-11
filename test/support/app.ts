@@ -6,7 +6,7 @@ import { OwnerIdentity, type PasswordHasher } from '../../src/identity/index.ts'
 import { createGenericInferenceAdapter } from '../../src/inference/index.ts'
 import { GatewayKeyRegistry } from '../../src/keys/index.ts'
 import { BackgroundScheduleSettingsService } from '../../src/jobs/index.ts'
-import { ModelCatalogService, templateAvailabilityFromRegistry, templateDiscoveryBasePathFromRegistry, templateDiscoveryFromRegistry, templateKnowledgeFromRegistry } from '../../src/models/index.ts'
+import { ModelCatalogService, templateAvailabilityFromRegistry, templateDiscoveryBasePathFromRegistry, templateDiscoveryFromRegistry, templateKnowledgeFromRegistry, type ModelMetadataFallback } from '../../src/models/index.ts'
 import type { Database } from '../../src/persistence/index.ts'
 import {
   createBuiltInAdapterRegistry,
@@ -86,6 +86,7 @@ export interface TestAppOptions {
   readonly retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>
   /** Replaces the brand logo service the assembled app uses. */
   readonly brandLogos?: BrandLogoService
+  readonly modelMetadataFallback?: ModelMetadataFallback
 }
 
 export const SETUP_TOKEN = 'setup-token-for-tests-0123456789abcdef'
@@ -208,6 +209,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     templateAvailability: templateAvailabilityFromRegistry(adapterRegistry),
     templateDiscovery: templateDiscoveryFromRegistry(adapterRegistry),
     templateDiscoveryBasePath: templateDiscoveryBasePathFromRegistry(adapterRegistry),
+    ...(options.modelMetadataFallback === undefined ? {} : { metadataFallback: options.modelMetadataFallback }),
   })
   const usageAdapter = options.usageAdapter ?? createGenericUsageAdapter()
   const usageService = new UsageService({

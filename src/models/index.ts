@@ -17,3 +17,10 @@ export {
   type ModelCatalogResult,
   type ModelCatalogServiceOptions,
 } from './catalog-service.ts'
+export {
+  createModelsDevMetadataFallback,
+  lookupModelsDevMetadata,
+  parseModelsDevCatalog,
+  type ModelMetadataFallback,
+  type ModelsDevMetadataFallbackOptions,
+} from './models-dev-metadata.ts'

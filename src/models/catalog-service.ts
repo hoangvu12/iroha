@@ -10,6 +10,7 @@ import type {
 } from '../persistence/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
+import type { ModelMetadataFallback } from './models-dev-metadata.ts'
 
 export interface FieldProblem {
   readonly field: string
@@ -88,6 +89,7 @@ export interface ModelCatalogServiceOptions {
   readonly templateDiscovery?: (templateId: string) => 'supported' | 'best_effort' | 'unsupported'
   /** Optional Provider-specific base path for `GET /models`. */
   readonly templateDiscoveryBasePath?: (templateId: string) => `/${string}` | null
+  readonly metadataFallback?: ModelMetadataFallback
 }
 
 /**
@@ -186,6 +188,7 @@ export class ModelCatalogService {
   readonly #templateAvailability: (templateId: string) => 'provider' | 'key'
   readonly #templateDiscovery: (templateId: string) => 'supported' | 'best_effort' | 'unsupported'
   readonly #templateDiscoveryBasePath: (templateId: string) => `/${string}` | null
+  readonly #metadataFallback: ModelMetadataFallback
 
   constructor(options: ModelCatalogServiceOptions) {
     this.#database = options.database
@@ -196,6 +199,7 @@ export class ModelCatalogService {
     this.#templateAvailability = options.templateAvailability ?? (() => 'provider')
     this.#templateDiscovery = options.templateDiscovery ?? (() => 'supported')
     this.#templateDiscoveryBasePath = options.templateDiscoveryBasePath ?? (() => null)
+    this.#metadataFallback = options.metadataFallback ?? (async () => ({}))
   }
 
   /** The current catalog and sync state of one connection. Read-only. */
@@ -320,6 +324,7 @@ export class ModelCatalogService {
         metadataByModel[modelId] ??= metadata
       }
     }
+    await this.#fillMissingMetadata(connection.handle, discovered, metadataByModel)
     await this.#database.modelCatalog.syncDiscovered(providerId, discovered, at, metadataByModel)
     await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
 
@@ -394,6 +399,7 @@ export class ModelCatalogService {
     const availability = await this.#database.keyModelAvailability.listForProvider(providerId)
     const union = [...new Set(availability.flatMap((entry) => entry.models))]
     if (union.length === 0) return
+    await this.#fillMissingMetadata(connection.handle, union, metadataByModel)
     await this.#database.modelCatalog.syncDiscovered(providerId, union, at, metadataByModel)
     await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
   }
@@ -659,6 +665,30 @@ export class ModelCatalogService {
     if (connection === null) return failed({ code: 'provider_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
     return { ok: true, value: connection }
+  }
+
+  async #fillMissingMetadata(
+    providerHandle: string,
+    modelIds: readonly string[],
+    metadataByModel: Record<string, ModelCatalogMetadata>,
+  ): Promise<void> {
+    let fallback: Readonly<Record<string, ModelCatalogMetadata>>
+    try {
+      fallback = await this.#metadataFallback(providerHandle, modelIds)
+    } catch {
+      return
+    }
+    for (const modelId of modelIds) {
+      const supplement = fallback[modelId]
+      if (supplement === undefined) continue
+      const primary = metadataByModel[modelId]
+      metadataByModel[modelId] = {
+        normalizedName: primary?.normalizedName ?? supplement.normalizedName,
+        contextLength: primary?.contextLength ?? supplement.contextLength,
+        maxInputTokens: primary?.maxInputTokens ?? supplement.maxInputTokens,
+        maxOutputTokens: primary?.maxOutputTokens ?? supplement.maxOutputTokens,
+      }
+    }
   }
 
   async #recordedFailure(

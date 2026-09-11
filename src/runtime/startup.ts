@@ -16,7 +16,7 @@ import {
   buildDefaultJobs,
 } from '../jobs/index.ts'
 import { GatewayKeyRegistry } from '../keys/index.ts'
-import { ModelCatalogService, templateAvailabilityFromRegistry, templateDiscoveryBasePathFromRegistry, templateDiscoveryFromRegistry, templateKnowledgeFromRegistry } from '../models/index.ts'
+import { createModelsDevMetadataFallback, ModelCatalogService, templateAvailabilityFromRegistry, templateDiscoveryBasePathFromRegistry, templateDiscoveryFromRegistry, templateKnowledgeFromRegistry } from '../models/index.ts'
 import { openDatabase, type Database } from '../persistence/index.ts'
 import {
   AdapterRegistry,
@@ -161,6 +161,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     templateAvailability: templateAvailabilityFromRegistry(adapterRegistry),
     templateDiscovery: templateDiscoveryFromRegistry(adapterRegistry),
     templateDiscoveryBasePath: templateDiscoveryBasePathFromRegistry(adapterRegistry),
+    metadataFallback: createModelsDevMetadataFallback({ fetch: globalThis.fetch }),
   })
   const backgroundSchedule = new BackgroundScheduleSettingsService({
     database,

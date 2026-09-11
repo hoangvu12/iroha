@@ -4,6 +4,8 @@ Iroha retains an allow-listed subset of metadata returned by Provider model disc
 
 Provider fields are normalized generically while synchronizing the Model Catalog. Common flat field names, nested `limit` objects, and nested `top_provider` limits map into the same retained shape without selecting behavior by Provider or Provider Template. Malformed, zero, negative, unsafe, and unrelated upstream fields are ignored. A later successful discovery updates metadata it reports, while a discovery that omits metadata retains the last reported facts for a model that remains present.
 
+After discovery, Iroha may supplement missing fields from the public models.dev catalog. It resolves metadata from the Qualified Model ID, removes arbitrary outer gateway path segments only for lookup, and requires an unambiguous metadata result. Provider-reported fields always win, lookup never changes the exact Upstream Model ID, and an unavailable or ambiguous external catalog leaves fields unset rather than failing Provider discovery or guessing.
+
 We rejected deriving routing identities from canonical-model catalogs or removing Provider-owned prefixes. Such normalization is lossy for gateways, regional deployments, and aliases. Metadata never rewrites an inference request: exact model identity remains the Provider-defined `modelId`, and every character after the first slash of a Qualified Model ID remains the exact Upstream Model ID.
 
 The additional response fields are compatible extensions to the OpenAI-shaped Models list. Clients that only understand the standard fields may ignore them; discovery clients that understand inline model metadata can consume them without trying to infer identity from a modified model name.

@@ -216,6 +216,37 @@ describe('the provider-scoped Models API', () => {
     }))
   })
 
+  test('fills missing metadata generically while retaining upstream values', async () => {
+    await iroha.dispose()
+    upstream = mockUpstreamTransport(() => Response.json({
+      object: 'list',
+      data: [{ id: 'openai/gpt-4o-mini', context_length: 200_000 }],
+    }))
+    iroha = await createTestApp({
+      upstreamTransport: upstream.fetch,
+      modelMetadataFallback: async (_handle, modelIds) => Object.fromEntries(modelIds.map((modelId) => [modelId, {
+        normalizedName: 'GPT-4o Mini',
+        contextLength: 128_000,
+        maxInputTokens: 120_000,
+        maxOutputTokens: 16_384,
+      }])),
+    })
+    csrf = (await completeSetup(iroha)).csrf
+    connection = await createConnection()
+    const key = await createKey([{ providerId: connection.id }])
+
+    const response = await listModels(key)
+    const body = (await response.json()) as { data: Record<string, unknown>[] }
+
+    expect(body.data).toContainEqual(expect.objectContaining({
+      id: 'openai/gpt-4o-mini',
+      normalized_name: 'GPT-4o Mini',
+      context_length: 200_000,
+      max_input_tokens: 120_000,
+      max_output_tokens: 16_384,
+    }))
+  })
+
   test('catalog discovery hits a key\'s own base URL override', async () => {
     upstream.calls.length = 0
     const overrideUrl = 'https://override.example.com/v1'

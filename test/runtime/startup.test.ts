@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConfigurationError } from '../../src/config/environment.ts'
+import { createApp } from '../../src/http/app.ts'
+import { ModelCatalogService } from '../../src/models/index.ts'
 import { startIroha, type RunningIroha } from '../../src/runtime/startup.ts'
 
 import { testPasswordHasher } from '../support/identity.ts'
@@ -59,6 +61,29 @@ async function start(environment: Record<string, string | undefined>) {
 }
 
 describe('startup ordering', () => {
+  test('passes the assembled model catalog service to the HTTP app', async () => {
+    let received: unknown
+    const iroha = await startIroha({
+      environment: {
+        DATABASE_URL: 'file::memory:',
+        IROHA_MASTER_KEY: MASTER_KEY,
+        IROHA_SETUP_TOKEN: SETUP_TOKEN,
+        HOST: '127.0.0.1',
+        PORT: String(await freePort()),
+      },
+      frontendDirectory: join(temporaryDirectory(), 'no-frontend'),
+      log: () => undefined,
+      passwordHasher: testPasswordHasher,
+      appFactory: (options) => {
+        received = options.modelCatalog
+        return createApp(options)
+      },
+    })
+    running.push(iroha)
+
+    expect(received).toBeInstanceOf(ModelCatalogService)
+  })
+
   test('migrates before the port accepts traffic', async () => {
     const file = join(temporaryDirectory(), 'iroha.db')
     const port = await freePort()

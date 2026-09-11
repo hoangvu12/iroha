@@ -207,6 +207,7 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     providers,
     gatewayKeys,
     secretCipher,
+    modelCatalog,
     frontendDirectory: options.frontendDirectory ?? DEFAULT_FRONTEND_DIRECTORY,
     usageAdapter: options.usageAdapter ?? createGenericUsageAdapter(),
     usageService,

@@ -199,9 +199,10 @@ describe('Key Model Availability', () => {
     expect(body.error.code).toBe('model_keys_unavailable')
   })
 
-  test('a key with no discovered availability is unrestricted, never excluded', async () => {
-    // This key's discovery fails, so it has no list of its own. It must remain
-    // a candidate, or an undiscovered key would be dead weight.
+  test('a key with no discovered availability cannot keep a model routable', async () => {
+    // A model absent from every *known* key's availability is refused even when
+    // another key has no discovery data — trying the undiscovered key would
+    // guarantee an upstream failure on key-scoped providers.
     await iroha.fetch(`/api/v1/admin/providers/${providerId}/keys`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -211,13 +212,12 @@ describe('Key Model Availability', () => {
     expect(await storedAvailability()).toHaveLength(2)
     upstream.reset()
 
-    // With one availability unknown, a model absent from every *known* list is
-    // no longer provably unroutable, so it is attempted rather than refused.
-    // No key is preferred for it, so the whole eligible pool rotates as usual.
     const response = await chat('a-model-no-known-list-carries')
 
-    expect(response.status).toBe(200)
-    expect(attemptKeys()).toHaveLength(1)
+    expect(response.status).toBe(404)
+    const body = (await response.json()) as { error: { code: string } }
+    expect(body.error.code).toBe('model_unroutable')
+    expect(attemptKeys()).toHaveLength(0)
   })
 
   test('a failed rediscovery keeps the previous list and marks it stale', async () => {

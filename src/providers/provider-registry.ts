@@ -1461,10 +1461,12 @@ export class ProviderRegistry {
       availability.get(candidate.id)?.includes(model) === true
 
     // A model absent from every *known* availability cannot be served by any
-    // key, so no Attempt is worth sending. A key whose availability is unknown
-    // keeps the model routable: unknown means unrestricted, never refused.
-    if (availability.size > 0 && keys.every((candidate) => availability.has(candidate.id))
-      && !keys.some(carries)) {
+    // key, so no Attempt is worth sending. When at least one key has been
+    // discovered and none carry the model, treat it as unroutable regardless
+    // of keys with unknown availability — trying them would guarantee an
+    // upstream failure on key-scoped providers where data is authoritative.
+    if (availability.size > 0 && !keys.some((candidate) =>
+      availability.has(candidate.id) && carries(candidate))) {
       return failed({ code: 'model_unroutable' })
     }
 

@@ -341,7 +341,7 @@ describe('provider-scoped Chat Completions', () => {
 
         const response = await chat(key.secret, completionBody())
         const expectedStatus =
-          scenario.status === 401 || scenario.status === 403 || scenario.status === 429
+          scenario.status === 401 || scenario.status === 403 || scenario.status === 404 || scenario.status === 429
             ? 503
             : scenario.status
         expect(response.status).toBe(expectedStatus)

@@ -122,7 +122,7 @@ export function templateKnowledgeFromRegistry(
 export function templateAvailabilityFromRegistry(
   registry: AdapterRegistry,
 ): (templateId: string) => 'provider' | 'key' {
-  return (templateId) => registry.providerTemplate(templateId)?.modelAvailability ?? 'provider'
+  return (templateId) => registry.providerTemplate(templateId)?.modelAvailability ?? 'key'
 }
 
 export function templateDiscoveryFromRegistry(

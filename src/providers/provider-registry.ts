@@ -312,7 +312,7 @@ export class ProviderRegistry {
   ): Promise<ReadonlyMap<string, readonly string[]>> {
     const templateId = connection.templateId
     if (templateId === null) return EMPTY_AVAILABILITY
-    if (this.#adapterRegistry.providerTemplate(templateId)?.modelAvailability !== 'key') {
+    if (this.#adapterRegistry.providerTemplate(templateId)?.modelAvailability === 'provider') {
       return EMPTY_AVAILABILITY
     }
     if (keys.length === 0) return EMPTY_AVAILABILITY

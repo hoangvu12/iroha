@@ -422,6 +422,12 @@ export function classifyGenericFailure(result: InferenceForwardResult): Inferenc
   if (result.status >= 500) {
     return { kind: 'provider_failure', capacityScope: 'connection_model', retryAction: 'retry_same', retryAfterSeconds }
   }
+  // A 404 from an upstream that carries the model in its catalog means the
+  // specific key lacks entitlement, not that the model doesn't exist — try an
+  // alternate key before giving up.
+  if (result.status === 404) {
+    return { kind: 'request_rejected', capacityScope: 'connection_model', retryAction: 'try_alternate', retryAfterSeconds }
+  }
   return { kind: 'request_rejected', capacityScope: 'unknown', retryAction: 'stop', retryAfterSeconds }
 }
 

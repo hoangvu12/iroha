@@ -27,6 +27,7 @@ export const zaiPack: ProviderPack = {
       responses: false,
     },
     knownModels: ['glm-5.3', 'glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air'],
+    modelAvailability: 'key',
     modelDiscovery: 'best_effort',
     modelDiscoveryBasePath: '/api/coding/paas/v4',
     inferenceAdapterId: 'zai-inference-adapter',

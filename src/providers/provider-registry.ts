@@ -1471,6 +1471,7 @@ export class ProviderRegistry {
     const eligible = keys.filter((candidate) => {
       if (candidateKeyIds !== undefined && !candidateKeyIds.includes(candidate.id)) return false
       if (excluded.has(candidate.id) || !keyServesModel(candidate, model)) return false
+      if (availability.get(candidate.id) !== undefined && !carries(candidate)) return false
       if (candidate.health === 'active') {
         return !scopeUnavailable(candidate, keys, model, at, ignoreUnknownScope)
       }

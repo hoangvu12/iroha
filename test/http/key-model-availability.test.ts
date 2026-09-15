@@ -171,11 +171,10 @@ describe('Key Model Availability', () => {
     expect(attemptKeys()).toHaveLength(0)
   })
 
-  test('a carrier being unavailable does not refuse while another key is still eligible', async () => {
-    // Availability orders keys, it never removes them. With the only carrier
-    // disabled the remaining key is still tried — the Provider may serve a
-    // model its own catalog under-reports, and refusing here would retire real
-    // capacity on nothing more than an absence.
+  test('a carrier being unavailable refuses when no other key carries the model', async () => {
+    // When every key's availability has been discovered and only one carries
+    // the model, disabling that key means no eligible key remains. Non-carrying
+    // keys are excluded because trying them would guarantee an upstream failure.
     const stored = await storedAvailability()
     const carrier = stored.find((entry) => entry.models.includes(WIDE_ONLY_MODEL))
     expect(carrier).toBeDefined()
@@ -183,8 +182,9 @@ describe('Key Model Availability', () => {
 
     const response = await chat(WIDE_ONLY_MODEL)
 
-    expect(response.status).toBe(200)
-    expect(attemptKeys()).toEqual([`Bearer ${NARROW_KEY}`])
+    expect(response.status).toBe(503)
+    const body = (await response.json()) as { error: { code: string } }
+    expect(body.error.code).toBe('model_keys_unavailable')
   })
 
   test('reports carriers that are all unavailable as temporary, not as a credentials problem', async () => {

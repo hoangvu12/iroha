@@ -493,6 +493,15 @@ export interface ModelCatalogRepository {
   /** Every catalog row of one Provider, insertion order. */
   listEntries(providerId: string): Promise<readonly ModelCatalogEntryRecord[]>
   /**
+   * Every catalog row of many Providers in one read. The rows of a single
+   * Provider keep the `listEntries` order; rows of different Providers may
+   * interleave, so callers that need them grouped must group by `providerId`.
+   * An empty request reads nothing.
+   */
+  listEntriesByProviders(
+    providerIds: readonly string[],
+  ): Promise<readonly ModelCatalogEntryRecord[]>
+  /**
    * Replaces the Provider's discovered knowledge. Newly discovered models are
    * upserted, existing overrides and exclusions are kept, and discovered models
    * no longer seen are removed — unless the Owner excluded them, so a block

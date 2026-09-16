@@ -86,6 +86,28 @@ export type ConnectionAuthorization =
       readonly code: 'gateway_key_invalid' | 'connection_not_allowed'
     }
 
+/** One Provider a Gateway Key may list models on, with its model restriction. */
+export interface AuthorizedCatalogProvider {
+  readonly id: string
+  readonly handle: string
+  /** The exact upstream models the scope allows; `null` means every catalogued one. */
+  readonly models: readonly string[] | null
+}
+
+/**
+ * Whether one Gateway Key may list models, and on which Providers. Answering
+ * the whole catalog in one authorization is what keeps global discovery to a
+ * bounded number of reads instead of one authorization per Provider.
+ */
+export type CatalogAuthorization =
+  | {
+      readonly ok: true
+      readonly keyId: string
+      readonly keyName: string
+      readonly providers: readonly AuthorizedCatalogProvider[]
+    }
+  | { readonly ok: false }
+
 export interface GatewayKeyRegistryOptions {
   readonly database: Database
   readonly clock?: Clock
@@ -377,6 +399,39 @@ export class GatewayKeyRegistry {
     token: string | null,
   ): Promise<ConnectionAuthorization> {
     return await this.#authorizeScope(providerId, token)
+  }
+
+  /**
+   * Authorizes listing across every Provider a credential may use, in one pass.
+   * This answers exactly what `authorizeProvider` would answer for each live
+   * Provider in turn, but authenticates the key once and reads the Provider
+   * table once — a global catalog listing that authorizes per Provider spends
+   * a database round trip per Provider and grows slower as Providers are added.
+   *
+   * A missing, malformed, revoked, or wrong secret all answer the same way, so
+   * a caller learns nothing about which keys exist. Providers outside the scope,
+   * archived, or disabled are simply absent.
+   */
+  async authorizeCatalog(token: string | null): Promise<CatalogAuthorization> {
+    const key = await this.#locateKey(token)
+    if (key === null) return { ok: false }
+
+    await this.#database.gatewayKeys.markUsed(key.id, this.#clock.now())
+
+    const access = accessOf(key)
+    const live = (await this.#database.providers.listProviders())
+      .filter((provider) => provider.enabled && provider.archivedAt === null)
+    const providers = live.flatMap((provider) => {
+      if (access.mode === 'all') {
+        return [{ id: provider.id, handle: provider.handle, models: null }]
+      }
+      const entry = access.providers.find((candidate) => candidate.providerId === provider.id)
+      return entry === undefined
+        ? []
+        : [{ id: provider.id, handle: provider.handle, models: entry.models }]
+    })
+
+    return { ok: true, keyId: key.id, keyName: key.name, providers }
   }
 
   async #authorizeScope(

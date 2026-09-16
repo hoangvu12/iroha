@@ -1,20 +1,33 @@
 import { Elysia, t } from 'elysia'
 import type { GatewayKeyRegistry } from '../keys/index.ts'
-import type { Database } from '../persistence/index.ts'
+import type { Database, ModelCatalogEntryRecord } from '../persistence/index.ts'
 import { bearerToken } from './bearer-token.ts'
 import { inlineModelMetadata } from './model-metadata.ts'
 
 export function createGlobalModelRoutes(options: { readonly gatewayKeys: GatewayKeyRegistry; readonly database: Database }) {
   return new Elysia({ name: 'iroha/global-models' }).get('/v1/models', async ({ request }) => {
-    const discovery = await options.gatewayKeys.discover(bearerToken(request.headers) ?? '')
-    if (!discovery.ok) {
+    // One authorization and one catalog read serve the whole listing. Doing
+    // either per Provider costs a database round trip per Provider, which is
+    // what pushed this endpoint past the model-discovery deadline of clients
+    // that give it a few seconds before giving up on the Provider entirely.
+    const authorization = await options.gatewayKeys.authorizeCatalog(bearerToken(request.headers))
+    if (!authorization.ok) {
       return Response.json(
         { error: { code: 'gateway_key_invalid', message: 'This Gateway Key is not valid.' } },
         { status: 401 },
       )
     }
 
-    const token = bearerToken(request.headers)
+    const entriesByProvider = new Map<string, ModelCatalogEntryRecord[]>()
+    for (const entry of await options.database.modelCatalog.listEntriesByProviders(
+      authorization.providers.map((provider) => provider.id),
+    )) {
+      if (entry.excluded) continue
+      const group = entriesByProvider.get(entry.providerId)
+      if (group === undefined) entriesByProvider.set(entry.providerId, [entry])
+      else group.push(entry)
+    }
+
     const models: {
       id: string
       object: 'model'
@@ -29,13 +42,11 @@ export function createGlobalModelRoutes(options: { readonly gatewayKeys: Gateway
         readonly output_modalities?: readonly string[]
       }
     }[] = []
-    for (const provider of await options.database.providers.listProviders()) {
-      if (provider.archivedAt !== null || !provider.enabled) continue
-      const authorization = await options.gatewayKeys.authorizeProvider(provider.id, token)
-      if (!authorization.ok) continue
-      const entries = await options.database.modelCatalog.listEntries(provider.id)
-      const effective = new Map(entries.filter((entry) => !entry.excluded).map((entry) => [entry.modelId, entry]))
-      const candidates = authorization.models === null ? [...effective.keys()] : authorization.models
+    for (const provider of authorization.providers) {
+      const effective = new Map(
+        (entriesByProvider.get(provider.id) ?? []).map((entry) => [entry.modelId, entry]),
+      )
+      const candidates = provider.models === null ? [...effective.keys()] : provider.models
       for (const modelId of candidates) {
         const entry = effective.get(modelId)
         if (entry === undefined) continue

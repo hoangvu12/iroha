@@ -840,6 +840,18 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
     return rows.map(toModelEntry)
   }
 
+  async listEntriesByProviders(
+    providerIds: readonly string[],
+  ): Promise<readonly ModelCatalogEntryRecord[]> {
+    if (providerIds.length === 0) return []
+    const rows = await this.handle
+      .select()
+      .from(modelCatalogEntries)
+      .where(inArray(modelCatalogEntries.providerId, [...providerIds]))
+      .orderBy(modelCatalogEntries.createdAt, modelCatalogEntries.modelId)
+    return rows.map(toModelEntry)
+  }
+
   async syncDiscovered(
     providerId: string,
     modelIds: readonly string[],

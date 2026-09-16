@@ -189,19 +189,27 @@ describe('MiniMax capacity reconciliation through the assembled HTTP application
   for (const { path, stream, maxAttempts, exhausted } of retryCases) {
     test(`MiniMax tries all six keys with retry setting ${maxAttempts} (${path}, stream=${stream}, exhausted=${exhausted})`, async () => {
       const upstream = mockUpstreamTransport()
-      let calls = 0
+      let attempts = 0
       let elapsed = 0
       let addKeyDuringRequest: (() => Promise<void>) | undefined
-      upstream.respondWith(async () => {
-        calls++
-        if (calls === 1) await addKeyDuringRequest?.()
+      upstream.respondWith(async (call) => {
+        // Per-key model discovery reaches the same upstream, and adding a key
+        // mid-request starts a fresh sweep. Only the inference POSTs carry the
+        // failover sequence this test is about, so discovery is answered apart
+        // from it and never advances the retry position.
+        if (call.method !== 'POST') {
+          return Response.json({ object: 'list', data: [{ id: MODEL, object: 'model' }] })
+        }
+        // Read the position once: awaiting below lets later attempts land first.
+        const attempt = ++attempts
+        if (attempt === 1) await addKeyDuringRequest?.()
         elapsed += 31_000
-        if (calls <= 5 || exhausted) {
+        if (attempt <= 5 || exhausted) {
           return Response.json({ error: {
-            code: calls === 1 ? 'upstream_error' : 'upstream_rate_limited',
-            type: calls === 1 ? 'insufficient_balance_error' : 'rate_limit_error',
+            code: attempt === 1 ? 'upstream_error' : 'upstream_rate_limited',
+            type: attempt === 1 ? 'insufficient_balance_error' : 'rate_limit_error',
             message: 'private-provider-message',
-          } }, { status: calls === 1 ? 402 : 429 })
+          } }, { status: attempt === 1 ? 402 : 429 })
         }
         if (stream) {
           return new Response([
@@ -233,7 +241,7 @@ describe('MiniMax capacity reconciliation through the assembled HTTP application
       })
       expect(created.status).toBe(201)
       const provider = await created.json() as ProviderBody
-      calls = 0
+      attempts = 0
       elapsed = 0
       upstream.reset()
       const updated = await iroha.fetch(`/api/v1/admin/providers/${provider.id}`, {
@@ -262,7 +270,8 @@ describe('MiniMax capacity reconciliation through the assembled HTTP application
       expect(response.status).toBe(exhausted ? (!stream && path === 'messages' ? 429 : 503) : 200)
       const body = await response.text()
       if (!exhausted) expect(body).toContain('ok')
-      expect(calls).toBe(6)
+      expect(attempts).toBe(6)
+      expect(upstream.calls.filter((call) => call.method === 'POST').length).toBe(6)
       const detail = await (await iroha.fetch(`/api/v1/admin/requests/${response.headers.get('x-request-id')}`)).json() as {
         event: { status: number; outcome: string }
         attempts: Array<{ status: number; keyId: string; diagnostics: Record<string, unknown> }>

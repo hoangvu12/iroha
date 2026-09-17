@@ -15,6 +15,33 @@ import {
 
 export { appendStreamingReasoning as splitStreamingReasoning } from './streaming-reasoning.ts'
 
+/** Extracts text and reasoning from a content-blocks array (ZAI GLM format). */
+function extractContentBlocks(blocks: unknown[]): { text: string; reasoning: string } {
+  const textParts: string[] = []
+  const reasoningParts: string[] = []
+
+  for (const block of blocks) {
+    if (block === null || typeof block !== 'object') continue
+    const b = block as Record<string, unknown>
+
+    if (b.type === 'thinking') {
+      const thinkingBlocks = b.thinking
+      if (Array.isArray(thinkingBlocks)) {
+        for (const tb of thinkingBlocks) {
+          if (tb !== null && typeof tb === 'object') {
+            const t = (tb as Record<string, unknown>).text
+            if (typeof t === 'string') reasoningParts.push(t)
+          }
+        }
+      }
+    } else if (b.type === 'text') {
+      if (typeof b.text === 'string') textParts.push(b.text)
+    }
+  }
+
+  return { text: textParts.join(''), reasoning: reasoningParts.join('') }
+}
+
 export interface GenericInferenceAdapterOptions {
   /** Injectable transport; production uses the runtime's fetch. */
   readonly fetch?: typeof fetch
@@ -172,7 +199,15 @@ function normalizeAssistantMessage(message: Record<string, unknown>): Record<str
   const next: Record<string, unknown> = { ...message }
 
   const existingReasoning = pickReasoningField(next)
-  const content = next.content
+  let content = next.content
+
+  if (Array.isArray(content)) {
+    const { text, reasoning } = extractContentBlocks(content)
+    if (reasoning.length > 0) next.reasoning_content = reasoning
+    next.content = text
+    content = text
+    mutated = true
+  }
 
   if (typeof existingReasoning === 'string' && content === existingReasoning && content.length > 0) {
     next.content = ''
@@ -538,7 +573,16 @@ function normalizeStreamingDelta(
     mutated = true
   }
 
-  const content = d.content
+  let content = d.content
+
+  if (Array.isArray(content)) {
+    const { text, reasoning } = extractContentBlocks(content)
+    if (reasoning.length > 0) d.reasoning_content = reasoning
+    d.content = text
+    content = text
+    mutated = true
+  }
+
   const hasReasoningDelta = typeof d.reasoning === 'string' && d.reasoning.length > 0
   const duplicatesReasoningContent = content === d.reasoning_content
   if (typeof content === 'string' && content.length > 0) {

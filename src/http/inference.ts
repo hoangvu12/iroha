@@ -125,13 +125,30 @@ export interface InferenceRoutesOptions {
 
 const DEFAULT_SAME_KEY_ATTEMPTS = 3
 
+const RETRY_BACKOFF_BASE_MS = 250
+const RETRY_BACKOFF_MAX_MS = 8_000
+/** Never hold a Request longer than this waiting on a single sleep. */
+const RETRY_BACKOFF_RETRY_AFTER_CEILING_MS = 60_000
+
+/**
+ * Exponential backoff with jitter for retries inside one Request. A Provider
+ * retry hint (`Retry-After`) wins when it asks for longer, so a rate-limited
+ * Upstream Key is not hammered; the result is always bounded.
+ */
+function retryBackoffMs(retryIndex: number, retryAfterSeconds?: number | null): number {
+  const exponential = Math.min(RETRY_BACKOFF_BASE_MS * 2 ** Math.max(0, retryIndex - 1), RETRY_BACKOFF_MAX_MS)
+  const jittered = Math.round(exponential * (0.5 + Math.random()))
+  if (retryAfterSeconds === undefined || retryAfterSeconds === null || retryAfterSeconds <= 0) return jittered
+  return Math.max(jittered, Math.min(retryAfterSeconds * 1000, RETRY_BACKOFF_RETRY_AFTER_CEILING_MS))
+}
+
 /** Reasonable defaults applied when no global setting has been written yet. */
 export const DEFAULT_TRANSPORT: TransportDefaults = {
   connectionTimeoutMs: 10_000,
   firstByteTimeoutMs: 20_000,
   nonStreamingTotalTimeoutMs: 120_000,
   streamingIdleTimeoutMs: 30_000,
-  totalRetryTimeoutMs: 30_000,
+  totalRetryTimeoutMs: 120_000,
   corsAllowedOrigins: [],
 }
 
@@ -777,6 +794,31 @@ async function forwardGeneration(options: {
   let lastAttemptRecorder: { readonly finalize: (outcome: AttemptTerminal) => Promise<void> } | null = null
   let lastAttemptKeyId: string | null = null
   let authoritativeExhaustionKnown = false
+  let rounds = 1
+  let transientRetry = false
+  let lastTransientRefusal: Refusal | null = null
+  let lastTransientStatus: number | null = null
+  let lastTransientRetryAfter: number | null = null
+
+  // Start another pass over the eligible Upstream Key pool after a full pass
+  // failed transiently. Bounded by the same attempt budget and the total retry
+  // budget so a Request keeps trying without ever parking indefinitely.
+  const startNextRound = async (retryAfterSeconds?: number | null): Promise<boolean> => {
+    if (!transientRetry || authoritativeExhaustionKnown) return false
+    if (rounds >= sameKeyAttemptBudget) return false
+if (timer.now() - startedAt >= totalRetryBudgetMs) return false
+    const waitHint = retryAfterSeconds ?? await providers.earliestRetryAfterSeconds(providerId)
+    await retrySleep(retryBackoffMs(rounds, waitHint), requestSignal)
+    if (requestSignal.aborted) throw abortError()
+    attemptedKeys.length = 0
+    alternateUsed = false
+    sameKeyRetries = 0
+    ambiguousNetworkRetries = 0
+    retainedTarget = null
+    rounds++
+    metrics?.recordRetry()
+    return true
+  }
 
   const callerHeaders = headersOf(request)
   const inboundIdempotency = callerSuppliedIdempotency(callerHeaders, providerAdapterCapabilities.idempotencyHeader)
@@ -808,6 +850,24 @@ async function forwardGeneration(options: {
         resolved?.keyIds ?? [],
       )
       if (!resolution.ok) {
+        if (await startNextRound(lastUpstream === null ? null : numericRetryAfter(lastUpstream.headers))) continue
+        if (transientRetry && !authoritativeExhaustionKnown && lastTransientRefusal !== null) {
+          const terminal: Refusal = lastTransientStatus === 429
+            ? { status: 503, code: 'upstream_credentials_unavailable', message: 'No eligible Upstream Key is available for this connection.' }
+            : lastTransientRefusal
+          const retryAfter = lastTransientRetryAfter ?? await providers.earliestRetryAfterSeconds(providerId) ?? (lastTransientStatus === 429 ? 30 : null)
+          await history?.finalize({
+            status: terminal.status, outcome: 'failure', isStreaming: envelope.stream,
+            latencyMs: timer.now() - startedAt, keyId: lastAttemptKeyId,
+            promptTokens: null, completionTokens: null, totalTokens: null, errorCode: terminal.code,
+          })
+          return error(
+            terminal.status,
+            { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
+            terminal,
+            correlationId,
+          )
+        }
         const refusal = authoritativeExhaustionKnown && resolution.failure.code === 'no_eligible_key'
           ? providerCapacityExhaustedRefusal()
           : resolutionRefusal(resolution.failure, envelope.model)
@@ -934,6 +994,10 @@ async function forwardGeneration(options: {
         diagnostics: classification.diagnostics,
         at: new Date(),
       })
+      transientRetry ||= classification.kind === 'capacity_limited' || classification.kind === 'provider_failure'
+      lastTransientRefusal = refusal
+      lastTransientStatus = streamed.status
+      lastTransientRetryAfter = numericRetryAfter(streamed.headers) ?? classification.retryAfterSeconds ?? null
       const status = streamed.status
       const retrySameKey = classification.retryAction === 'retry_same' && sameKeyRetries < 1 &&
         sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
@@ -947,10 +1011,11 @@ async function forwardGeneration(options: {
       if (retrySameKey) {
         sameKeyRetries++
         retainedTarget = target
-        await retrySleep(100, requestSignal)
+        await retrySleep(retryBackoffMs(sameKeyRetries, classification.retryAfterSeconds), requestSignal)
         metrics?.recordRetry()
         continue
       }
+      if (await startNextRound(numericRetryAfter(streamed.headers) ?? classification.retryAfterSeconds)) continue
       await history?.finalize({
         status: streamed.status,
         outcome: 'failure',
@@ -1023,10 +1088,11 @@ async function forwardGeneration(options: {
       ) {
         ambiguousNetworkRetries++
         retainedTarget = target
-        await retrySleep(100, requestSignal)
+        await retrySleep(retryBackoffMs(ambiguousNetworkRetries), requestSignal)
         metrics?.recordRetry()
         continue
       }
+      if (await startNextRound(null)) continue
       await history?.finalize({
         status: 502,
         outcome: 'failure',
@@ -1089,6 +1155,10 @@ async function forwardGeneration(options: {
       lastUpstream,
       { keyId: target.keyId, observedAt: new Date() },
     )
+    transientRetry ||= classification.kind === 'capacity_limited' || classification.kind === 'provider_failure'
+    lastTransientRefusal = upstreamRefusal(lastUpstream.status, lastUpstream.headers)
+    lastTransientStatus = lastUpstream.status
+    lastTransientRetryAfter = numericRetryAfter(lastUpstream.headers) ?? classification.retryAfterSeconds ?? null
     authoritativeExhaustionKnown = await reconcileInferenceCapacity({
       providers, usageService, providerId, keyId: target.keyId,
       model: envelope.model, classification,
@@ -1124,10 +1194,11 @@ async function forwardGeneration(options: {
     if (retrySameKey) {
       sameKeyRetries++
       retainedTarget = target
-      await retrySleep(100, requestSignal)
+      await retrySleep(retryBackoffMs(sameKeyRetries, classification.retryAfterSeconds), requestSignal)
       metrics?.recordRetry()
       continue
     }
+    if (await startNextRound(numericRetryAfter(lastUpstream.headers) ?? classification.retryAfterSeconds)) continue
     break
   }
 
@@ -1354,6 +1425,29 @@ async function forwardAnthropicMessages(options: {
     let retainedTarget: InferenceTarget | null = null
     let lastAttemptRecorder: { readonly finalize: (outcome: AttemptTerminal) => Promise<void> } | null = null
     let lastAttemptKeyId: string | null = null
+    let authoritativeExhaustionKnown = false
+    let rounds = 1
+    let transientRetry = false
+    let lastTransientRefusal: Refusal | null = null
+    let lastTransientStatus: number | null = null
+    let lastTransientRetryAfter: number | null = null
+
+    const startNextRound = async (retryAfterSeconds?: number | null): Promise<boolean> => {
+      if (!transientRetry || authoritativeExhaustionKnown) return false
+      if (rounds >= sameKeyAttemptBudget) return false
+if (timer.now() - startedAt >= totalRetryBudgetMs) return false
+      const waitHint = retryAfterSeconds ?? await providers.earliestRetryAfterSeconds(providerId)
+      await retrySleep(retryBackoffMs(rounds, waitHint), requestSignal)
+      if (requestSignal.aborted) throw abortError()
+      attemptedKeys.length = 0
+      alternateUsed = false
+      sameKeyRetries = 0
+      ambiguousNetworkRetries = 0
+      retainedTarget = null
+      rounds++
+      metrics?.recordRetry()
+      return true
+    }
 
     const callerHeaders = headersOf(request)
     const providerAdapterCapabilities = anthropicAdapter.capabilities
@@ -1387,6 +1481,7 @@ async function forwardAnthropicMessages(options: {
           resolved?.keyIds ?? [],
         )
         if (!resolution.ok) {
+          if (await startNextRound(lastUpstream === null ? null : numericRetryAfter(lastUpstream.headers))) continue
           // For the Anthropic-shape route the Anthropic SDK expects to see
           // the upstream's actual error envelope, not an Iroha-shaped
           // `upstream_credentials_unavailable` wrapper. When the retry loop
@@ -1408,6 +1503,24 @@ async function forwardAnthropicMessages(options: {
             const retryAfter = numericRetryAfter(lastUpstream.headers) ?? (lastUpstream.status === 429 ? 30 : null)
             return returnLastUpstreamAsAnthropic(
               lastUpstream,
+              { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
+              correlationId,
+            )
+          }
+          if (transientRetry && !authoritativeExhaustionKnown && lastTransientRefusal !== null) {
+            const terminal: Refusal = lastTransientStatus === 429
+              ? { status: 503, code: 'upstream_credentials_unavailable', message: 'No eligible Upstream Key is available for this connection.' }
+              : lastTransientRefusal
+            const retryAfter = lastTransientRetryAfter ?? await providers.earliestRetryAfterSeconds(providerId) ?? (lastTransientStatus === 429 ? 30 : null)
+            await history?.finalize({
+              status: terminal.status, outcome: 'failure', isStreaming: envelope.stream,
+              latencyMs: timer.now() - startedAt, keyId: lastAttemptKeyId,
+              promptTokens: null, completionTokens: null, totalTokens: null, errorCode: terminal.code,
+            })
+            return anthropicMessagesErrorResponse(
+              terminal.status,
+              terminal.code,
+              terminal.message,
               { ...responseHeaders, ...(retryAfter === null ? {} : { 'retry-after': String(retryAfter) }) },
               correlationId,
             )
@@ -1527,10 +1640,14 @@ async function forwardAnthropicMessages(options: {
         const classification = upstreamFailure.classification ?? anthropicAdapter.classifyFailure({
           kind: 'buffered', status: streamed.status, headers: headerMap, body: '',
         })
-        await reconcileInferenceCapacity({
+transientRetry ||= classification.kind === 'capacity_limited' || classification.kind === 'provider_failure'
+        lastTransientRefusal = upstreamRefusal(streamed.status, headerMap)
+        lastTransientStatus = streamed.status
+        lastTransientRetryAfter = numericRetryAfter(streamed.headers) ?? classification.retryAfterSeconds ?? null
+        authoritativeExhaustionKnown = await reconcileInferenceCapacity({
           providers, usageService, providerId, keyId: target.keyId,
           model: envelope.model, classification,
-        })
+        }) || authoritativeExhaustionKnown
         await providers.recordInferenceFailure({
           keyId: target.keyId,
           model: envelope.model,
@@ -1559,10 +1676,11 @@ async function forwardAnthropicMessages(options: {
         if (retrySameKey) {
           sameKeyRetries++
           retainedTarget = target
-          await retrySleep(100, requestSignal)
+          await retrySleep(retryBackoffMs(sameKeyRetries, classification.retryAfterSeconds), requestSignal)
           metrics?.recordRetry()
           continue
         }
+        if (await startNextRound(numericRetryAfter(streamed.headers) ?? classification.retryAfterSeconds)) continue
         await history?.finalize({
           status: streamed.status,
           outcome: 'failure',
@@ -1639,10 +1757,11 @@ async function forwardAnthropicMessages(options: {
         ) {
           ambiguousNetworkRetries++
           retainedTarget = target
-          await retrySleep(100, requestSignal)
+          await retrySleep(retryBackoffMs(ambiguousNetworkRetries), requestSignal)
           metrics?.recordRetry()
           continue
         }
+        if (await startNextRound(null)) continue
         await history?.finalize({
           status: 502,
           outcome: 'failure',
@@ -1701,10 +1820,14 @@ async function forwardAnthropicMessages(options: {
 
       const status = lastUpstream.status
       const classification = upstreamFailure.classification ?? anthropicAdapter.classifyFailure(lastUpstream)
-      await reconcileInferenceCapacity({
+      transientRetry ||= classification.kind === 'capacity_limited' || classification.kind === 'provider_failure'
+      lastTransientRefusal = upstreamRefusal(lastUpstream.status, lastUpstream.headers)
+      lastTransientStatus = lastUpstream.status
+      lastTransientRetryAfter = numericRetryAfter(lastUpstream.headers) ?? classification.retryAfterSeconds ?? null
+      authoritativeExhaustionKnown = await reconcileInferenceCapacity({
         providers, usageService, providerId, keyId: target.keyId,
         model: envelope.model, classification,
-      })
+      }) || authoritativeExhaustionKnown
       await providers.recordInferenceFailure({
         keyId: target.keyId,
         model: envelope.model,
@@ -1736,10 +1859,11 @@ async function forwardAnthropicMessages(options: {
       if (retrySameKey) {
         sameKeyRetries++
         retainedTarget = target
-        await retrySleep(100, requestSignal)
+        await retrySleep(retryBackoffMs(sameKeyRetries, classification.retryAfterSeconds), requestSignal)
         metrics?.recordRetry()
         continue
       }
+      if (await startNextRound(numericRetryAfter(lastUpstream.headers) ?? classification.retryAfterSeconds)) continue
       break
     }
 

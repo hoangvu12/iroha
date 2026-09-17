@@ -17,7 +17,14 @@ describe('scoped inference retries', () => {
 
   beforeEach(async () => {
     upstream = mockUpstreamTransport()
-    iroha = await createTestApp({ upstreamTransport: upstream.fetch })
+    iroha = await createTestApp({
+      upstreamTransport: upstream.fetch,
+      // A round waits out the Key Health cooldown. Advancing the app clock lets a
+      // recovered key become eligible without sleeping on the wall clock.
+      retrySleep: async (ms) => {
+        iroha.clock.advance(ms / 1000)
+      },
+    })
     csrf = (await completeSetup(iroha)).csrf
     const created = await iroha.fetch('/api/v1/admin/providers', {
       method: 'POST',
@@ -80,16 +87,30 @@ describe('scoped inference retries', () => {
     expect(keys.map((key) => key.health).sort()).toEqual(['active', 'invalid_authentication'])
   })
 
-  test('generic unknown-scope 429 exhausts eligible keys without durable exhaustion', async () => {
+  test('generic unknown-scope 429 keeps trying the pool until the round budget is spent', async () => {
     upstream.respondWith(() => new Response('slow', { status: 429, headers: { 'retry-after': '17' } }))
 
     const response = await chat()
 
     expect(response.status).toBe(503)
     expect(response.headers.get('retry-after')).toBe('17')
-    expect(upstream.calls).toHaveLength(2)
+    // One round visits both eligible keys; the attempt budget allows three rounds.
+    expect(upstream.calls).toHaveLength(6)
     const keys = await iroha.database.providers.listKeys(providerId)
-    expect(keys.map((key) => key.health).sort()).toEqual(['active', 'active'])
+    // A generic 429 parks each key for a bounded cooldown, never durable exhaustion.
+    expect(keys.map((key) => key.health).sort()).toEqual(['cooling_down', 'cooling_down'])
+    expect(keys.every((key) => key.retryAfterAt !== null)).toBe(true)
+  })
+
+  test('keeps trying the pool and succeeds on a later round', async () => {
+    upstream.respondWith(() =>
+      upstream.calls.length <= 2 ? new Response('busy', { status: 429 }) : Response.json(completion()),
+    )
+
+    const response = await chat()
+
+    expect(response.status).toBe(200)
+    expect(upstream.calls).toHaveLength(3)
   })
 
   test('unrecognized 402 tries one alternate without durably exhausting either key', async () => {
@@ -172,7 +193,9 @@ describe('scoped inference retries', () => {
     const response = await chat()
 
     expect(response.status).toBe(200)
-    expect(delays).toEqual([100])
+    expect(delays).toHaveLength(1)
+    expect(delays[0]).toBeGreaterThanOrEqual(125)
+    expect(delays[0]).toBeLessThanOrEqual(500)
   })
 
   test('validation errors never retry', async () => {

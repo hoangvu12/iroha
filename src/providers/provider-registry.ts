@@ -244,6 +244,13 @@ const STATIC_HEADERS_BLANK = '[]'
 const PAYMENT_REQUIRED_RECHECK_SECONDS = 900
 
 /**
+ * How long a generic rate limit parks the Upstream Key that answered it when the
+ * Provider named no `Retry-After`. Long enough to stop one hot key being
+ * hammered on every round, short enough that recovery is noticed within a turn.
+ */
+const DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS = 5
+
+/**
  * How many Upstream Keys one probe pass tests at the same time.
  *
  * Sequential probing made every mutation that adds a key pay one upstream round
@@ -501,7 +508,7 @@ export class ProviderRegistry {
     const firstByteTimeoutMs = numericDefault(input.firstByteTimeoutMs, 20_000)
     const nonStreamingTotalTimeoutMs = numericDefault(input.nonStreamingTotalTimeoutMs, 120_000)
     const streamingIdleTimeoutMs = numericDefault(input.streamingIdleTimeoutMs, 30_000)
-    const totalRetryTimeoutMs = numericDefault(input.totalRetryTimeoutMs, 30_000)
+    const totalRetryTimeoutMs = numericDefault(input.totalRetryTimeoutMs, 120_000)
 
     const staticHeadersEncrypted = await this.#encryptStaticHeaders(staticHeadersResult)
     const at = this.#clock.now()
@@ -1708,6 +1715,33 @@ export class ProviderRegistry {
       return
     }
     if (classification.kind === 'capacity_limited') {
+      if (
+        input.classification !== undefined &&
+        classification.capacityEvidence === undefined &&
+        classification.capacityScope === 'unknown'
+      ) {
+        // A generic 429 names no durable capacity fact. The key that answered it
+        // must still not be hammered, so park it for a bounded cooldown: another
+        // key, or a later round, gets the next Attempt. Expiry is the only
+        // recovery and this is `cooling_down`, never `exhausted`.
+        await this.#database.providers.updateKey(
+          key.id,
+          healthPatch(
+            'cooling_down',
+            input.reason,
+            at,
+            new Date(
+              at.getTime() +
+                Math.max(1, classification.retryAfterSeconds ?? DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS) * 1000,
+            ),
+            'key',
+            key.id,
+            null,
+          ),
+          at,
+        )
+        return
+      }
       if (input.classification !== undefined && (classification.capacityEvidence === undefined
         || classification.capacityEvidence.authority !== 'authoritative')) return
       const scope = classification.capacityScope === 'account' && key.accountId !== null ? 'account' : 'unknown'

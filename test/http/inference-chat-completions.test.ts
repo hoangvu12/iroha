@@ -369,14 +369,15 @@ describe('provider-scoped Chat Completions', () => {
       expect((await openError(response)).error.code).toBe('upstream_credentials_unavailable')
     })
 
-    test('drops unusable upstream Retry-After text and returns the bounded fallback', async () => {
+    test('drops unusable upstream Retry-After text and returns the bounded cooldown', async () => {
       upstream.respondWith(() => new Response('slow down', { status: 429, headers: { 'retry-after': 'soon maybe' } }))
       const key = await connect()
 
       const response = await chat(key.secret, completionBody())
 
       expect(response.status).toBe(503)
-      expect(response.headers.get('retry-after')).toBe('30')
+      // Unusable text is dropped; the key's bounded transient cooldown becomes the fallback.
+      expect(response.headers.get('retry-after')).toBe('5')
     })
 
     test('sanitizes upstream detail and never echoes it', async () => {

@@ -2,6 +2,13 @@ import type { Database, UpstreamKeyHealth } from '../persistence/index.ts'
 
 export type MetricsSettings = { readonly enabled: boolean }
 
+/** The process-memory reading surfaced as Prometheus gauges. */
+export interface ProcessMemory {
+  readonly rss: number
+  readonly heapTotal: number
+  readonly heapUsed: number
+}
+
 export type KeyHealthCounts = Readonly<Record<UpstreamKeyHealth, number>>
 
 export const ALL_KEY_HEALTH_STATES: readonly UpstreamKeyHealth[] = [
@@ -17,6 +24,7 @@ const DURATION_BUCKETS_SECONDS = [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, Number.
 
 export class MetricsCollector {
   readonly #now: () => number
+  readonly #memory: () => ProcessMemory
   readonly #starts = new WeakMap<Request, number>()
   #successes = 0
   #failures = 0
@@ -29,8 +37,9 @@ export class MetricsCollector {
   readonly #durationBuckets = new Map<number, number>()
   #retries = 0
 
-  constructor(options: { readonly now?: () => number } = {}) {
+  constructor(options: { readonly now?: () => number; readonly memory?: () => ProcessMemory } = {}) {
     this.#now = options.now ?? (() => performance.now())
+    this.#memory = options.memory ?? (() => process.memoryUsage())
     for (const bucket of DURATION_BUCKETS_SECONDS) this.#durationBuckets.set(bucket, 0)
   }
 
@@ -90,6 +99,10 @@ export class MetricsCollector {
     for (const health of ALL_KEY_HEALTH_STATES) {
       lines.push(`iroha_upstream_key_health{health="${health}"} ${keyHealthCounts[health]}`)
     }
+    const memory = this.#memory()
+    lines.push('# HELP iroha_process_resident_memory_bytes Resident set size of the Iroha process.', '# TYPE iroha_process_resident_memory_bytes gauge', `iroha_process_resident_memory_bytes ${memory.rss}`)
+    lines.push('# HELP iroha_process_heap_used_bytes Heap bytes in use by the Iroha process.', '# TYPE iroha_process_heap_used_bytes gauge', `iroha_process_heap_used_bytes ${memory.heapUsed}`)
+    lines.push('# HELP iroha_process_heap_total_bytes Total heap bytes reserved by the Iroha process.', '# TYPE iroha_process_heap_total_bytes gauge', `iroha_process_heap_total_bytes ${memory.heapTotal}`)
     return `${lines.join('\n')}\n`
   }
 }

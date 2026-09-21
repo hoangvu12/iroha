@@ -2586,27 +2586,36 @@ function monitorResponse(response: Response, activity: InferenceActivity | undef
     completed = true
     activity.finish()
   }
+  // Pull-driven on purpose: exactly one upstream read per downstream demand, so
+  // a slow or stalled client bounds the in-flight queue instead of letting the
+  // whole upstream response buffer in memory. An eager `start` pump reads at its
+  // own pace and defeats backpressure even though the guarded stream underneath
+  // honors it.
+  const reader = response.body.getReader()
+  let cancelled = false
   const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const reader = response.body!.getReader()
+    async pull(controller) {
+      if (cancelled) return
+      let chunk
       try {
-        while (true) {
-          const chunk = await reader.read()
-          if (chunk.done) {
-            finish()
-            controller.close()
-            return
-          }
-          controller.enqueue(chunk.value)
-        }
+        chunk = await reader.read()
       } catch (cause) {
         finish()
         controller.error(cause)
+        return
       }
+      if (cancelled) return
+      if (chunk.done) {
+        finish()
+        controller.close()
+        return
+      }
+      controller.enqueue(chunk.value)
     },
     async cancel(reason) {
-      await response.body!.cancel(reason)
+      cancelled = true
       finish()
+      await reader.cancel(reason).catch(() => undefined)
     },
   })
   return new Response(stream, {

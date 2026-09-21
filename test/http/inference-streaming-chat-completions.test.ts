@@ -13,6 +13,7 @@ import {
   sseResponse,
 } from '../support/inference.ts'
 import { fakeTimer, type FakeTimer } from '../support/timer.ts'
+import { ShutdownController } from '../../src/runtime/shutdown.ts'
 
 const UPSTREAM_KEY = 'sk-upstream-secret-value-for-tests'
 const BASE_URL = 'https://api.example.com/v1'
@@ -63,6 +64,7 @@ describe('provider-scoped streaming Chat Completions', () => {
   let csrf: string
   let upstream: ReturnType<typeof mockUpstreamTransport>
   let timer: FakeTimer
+  let shutdown: ShutdownController
   let connection: ConnectionBody
   let path: string
   let key: { secret: string }
@@ -70,9 +72,13 @@ describe('provider-scoped streaming Chat Completions', () => {
   beforeEach(async () => {
     upstream = mockUpstreamTransport()
     timer = fakeTimer()
+    // A ShutdownController makes the run tracked activity, which is what puts
+    // `monitorResponse` (and therefore its backpressure discipline) on the path.
+    shutdown = new ShutdownController({ graceMs: 10_000, timer })
     iroha = await createTestApp({
       upstreamTransport: upstream.fetch,
       timer,
+      shutdown,
       streamingTimeouts: { streamingHeaderMs: 1_000, streamingIdleMs: 2_000 },
     })
     csrf = (await completeSetup(iroha)).csrf
@@ -328,6 +334,42 @@ describe('provider-scoped streaming Chat Completions', () => {
 
       expect(upstream.calls[baseline]?.signal?.aborted).toBe(true)
       expect(await reading).toBe(sseEvent(HELLO_CHUNK))
+    })
+  })
+
+  describe('streaming backpressure', () => {
+    test('a downstream consumer that never reads does not let the upstream run away', async () => {
+      // An endless pull-driven upstream: it produces one chunk per pull and
+      // never closes. An eager forwarder would drain it as fast as the event
+      // loop allows; a pull-driven one stops once the in-flight queue is full.
+      let pulls = 0
+      let source: ReadableStreamDefaultController<Uint8Array> | undefined
+      const chunkBytes = new TextEncoder().encode(sseEvent(HELLO_CHUNK))
+      const endless = new ReadableStream<Uint8Array>({
+        start(controller) {
+          source = controller
+        },
+        pull(controller) {
+          pulls += 1
+          controller.enqueue(chunkBytes)
+        },
+      })
+      upstream.respondWith(() =>
+        new Response(endless, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+      )
+      const baseline = upstream.calls.length
+
+      const response = await chat(key.secret, streamBody())
+      expect(response.status).toBe(200)
+
+      // Deliberately never read `response.body`.
+      await Bun.sleep(20)
+
+      expect(upstream.calls.length - baseline).toBe(1)
+      expect(pulls).toBeLessThanOrEqual(4)
+
+      source!.close()
+      await response.body?.cancel().catch(() => undefined)
     })
   })
 

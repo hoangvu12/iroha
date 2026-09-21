@@ -41,4 +41,23 @@ describe('metrics collector', () => {
     expect(text).not.toContain('/providers/one')
     expect(text).not.toContain('/providers/two')
   })
+
+  test('renders process memory gauges for the 900MB investigation', () => {
+    const collector = new MetricsCollector({
+      memory: () => ({ rss: 900_000_000, heapTotal: 456, heapUsed: 789 }),
+    })
+
+    const text = collector.render({
+      unverified: 0,
+      active: 0,
+      cooling_down: 0,
+      invalid_authentication: 0,
+      exhausted: 0,
+      disabled: 0,
+    })
+
+    expect(text).toContain('iroha_process_resident_memory_bytes 900000000')
+    expect(text).toContain('iroha_process_heap_used_bytes 789')
+    expect(text).toContain('iroha_process_heap_total_bytes 456')
+  })
 })

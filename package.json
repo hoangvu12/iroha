@@ -10,7 +10,7 @@
     "dev:ui": "bun run --cwd ui dev",
     "build": "bun run build:ui",
     "build:ui": "bun run --cwd ui build",
-    "start": "bun src/main.ts",
+    "start": "bun --smol src/main.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit && bun run --cwd ui typecheck",
     "db:generate": "bun run db:generate:sqlite && bun run db:generate:postgres",

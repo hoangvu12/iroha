@@ -215,6 +215,45 @@ describe('scoped inference retries', () => {
     expect(new Set(upstream.calls.map((call) => call.headers.authorization)).size).toBe(2)
   })
 
+  test.each([
+    ['chat/completions', false, false], ['chat/completions', true, false],
+    ['messages', false, false], ['messages', true, false],
+    ['chat/completions', false, true], ['chat/completions', true, true],
+    ['messages', false, true], ['messages', true, true],
+  ] as const)('a slow failure reaches a healthy key within the retry budget (%s, stream=%s, network=%s)', async (path, stream, network) => {
+    const settings = await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ totalRetryTimeoutMs: 30_000, retryAmbiguousNetwork: true }),
+    })
+    expect(settings.status).toBe(200)
+    upstream.respondWith((call) => {
+      if (call.headers.authorization === upstream.calls[0]?.headers.authorization) {
+        timer.advance(20_000)
+        if (network) throw new Error('upstream timeout')
+        return Response.json({ error: { code: 'upstream_unreachable' } }, { status: 502 })
+      }
+      timer.advance(1_000)
+      return Response.json(completion())
+    })
+
+    const response = await iroha.fetch(`/providers/${providerHandle}/v1/${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }], max_tokens: 32, stream }),
+    })
+    await response.text()
+
+    expect(response.status).toBe(200)
+    expect(upstream.calls).toHaveLength(2)
+    expect(upstream.calls[0]?.headers.authorization).not.toBe(upstream.calls[1]?.headers.authorization)
+    expect(timer.elapsedMs).toBe(21_000)
+    expect(retryDelays).toEqual([])
+    const attempts = await iroha.database.requestHistory.getAttempts(response.headers.get('x-request-id')!)
+    expect(attempts).toHaveLength(2)
+    expect(attempts[0]?.keyId).not.toBe(attempts[1]?.keyId)
+    expect(attempts[1]?.outcome).toBe('success')
+  })
+
   test.each([false, true])('502 failover stops when the retry time budget is spent (stream=%s)', async (stream) => {
     await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
@@ -232,7 +271,71 @@ describe('scoped inference retries', () => {
 
     expect(response.status).toBe(502)
     expect(upstream.calls).toHaveLength(2)
+    expect(upstream.calls[0]?.headers.authorization).not.toBe(upstream.calls[1]?.headers.authorization)
+  })
+
+  test.each([false, true])('a slow replay remains available when no eligible alternate exists (stream=%s)', async (stream) => {
+    const keys = await iroha.database.providers.listKeys(providerId)
+    await iroha.database.providers.updateKey(keys[1]!.id, { health: 'disabled' }, iroha.clock.now())
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ totalRetryTimeoutMs: 30_000 }),
+    })
+    upstream.respondWith(() => {
+      if (upstream.calls.length === 1) {
+        timer.advance(20_000)
+        return new Response('unavailable', { status: 502 })
+      }
+      return Response.json(completion())
+    })
+    const response = await iroha.fetch(`/providers/${providerHandle}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }], stream }),
+    })
+    await response.text()
+
+    expect(response.status).toBe(200)
+    expect(upstream.calls).toHaveLength(2)
     expect(upstream.calls[0]?.headers.authorization).toBe(upstream.calls[1]?.headers.authorization)
+  })
+
+  test.each([false, true])('an expired retry budget never starts an alternate (stream=%s)', async (stream) => {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ totalRetryTimeoutMs: 30_000 }),
+    })
+    upstream.respondWith(() => {
+      timer.advance(30_000)
+      return new Response('unavailable', { status: 502 })
+    })
+    const response = await iroha.fetch(`/providers/${providerHandle}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }], stream }),
+    })
+
+    expect(response.status).toBe(502)
+    expect(upstream.calls).toHaveLength(1)
+  })
+
+  test.each(['chat/completions', 'messages'])('slow ambiguous failures still require replay opt-in (%s)', async (path) => {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ totalRetryTimeoutMs: 30_000, retryAmbiguousNetwork: false }),
+    })
+    upstream.respondWith(() => {
+      timer.advance(20_000)
+      throw new Error('upstream timeout')
+    })
+    const response = await iroha.fetch(`/providers/${providerHandle}/v1/${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }], max_tokens: 32 }),
+    })
+
+    expect(response.status).toBe(502)
+    expect(upstream.calls).toHaveLength(1)
   })
 
   test('explicit server retry uses the bounded backoff seam', async () => {

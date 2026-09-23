@@ -800,9 +800,28 @@ async function forwardGeneration(options: {
   let lastTransientStatus: number | null = null
   let lastTransientRetryAfter: number | null = null
 
-  // Start another pass over the eligible Upstream Key pool after a full pass
-  // failed transiently. Bounded by the same attempt budget and the total retry
-  // budget so a Request keeps trying without ever parking indefinitely.
+  // A slow replay can consume the rest of the retry budget. Prefer an
+  // untried eligible key in that case; retain same-key retries for fast
+  // transient failures and Providers with no available alternative.
+  const preferUntriedKey = async (target: InferenceTarget, attemptStartedAt: number): Promise<boolean> => {
+    const now = timer.now()
+    const remainingMs = totalRetryBudgetMs - (now - startedAt)
+    if (remainingMs <= 0 || now - attemptStartedAt < remainingMs) return false
+    const alternate = await providers.resolveInference(
+      providerId, envelope.model, [...attemptedKeys, target.keyId], true, resolved?.keyIds ?? [],
+    )
+    if (!alternate.ok) return false
+    attemptedKeys.push(target.keyId)
+    retainedTarget = alternate.value
+    alternateUsed = true
+    sameKeyRetries = 0
+    ambiguousNetworkRetries = 0
+    metrics?.recordRetry()
+    return true
+  }
+
+  // Start another pass only after visiting the eligible pool, bounded by
+  // the round count and total retry time.
   const startNextRound = async (retryAfterSeconds?: number | null): Promise<boolean> => {
     if (!transientRetry || authoritativeExhaustionKnown) return false
     if (rounds >= sameKeyAttemptBudget) return false
@@ -893,6 +912,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
     }
 
     lastAttemptKeyId = target.keyId
+    const attemptStartedAt = timer.now()
     lastAttemptRecorder = (await history?.startAttempt({
       attemptNumber: attempt,
       keyId: target.keyId,
@@ -1015,6 +1035,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
         continue
       }
       if (retrySameKey) {
+        if (await preferUntriedKey(target, attemptStartedAt)) continue
         sameKeyRetries++
         retainedTarget = target
         await retrySleep(retryBackoffMs(sameKeyRetries, classification.retryAfterSeconds), requestSignal)
@@ -1092,6 +1113,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
         sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
         timer.now() - startedAt < totalRetryBudgetMs
       ) {
+        if (await preferUntriedKey(target, attemptStartedAt)) continue
         ambiguousNetworkRetries++
         retainedTarget = target
         await retrySleep(retryBackoffMs(ambiguousNetworkRetries), requestSignal)
@@ -1204,6 +1226,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
       continue
     }
     if (retrySameKey) {
+      if (await preferUntriedKey(target, attemptStartedAt)) continue
       sameKeyRetries++
       retainedTarget = target
       await retrySleep(retryBackoffMs(sameKeyRetries, classification.retryAfterSeconds), requestSignal)
@@ -1444,6 +1467,26 @@ async function forwardAnthropicMessages(options: {
     let lastTransientStatus: number | null = null
     let lastTransientRetryAfter: number | null = null
 
+    // A slow replay can consume the rest of the retry budget. Prefer an
+    // untried eligible key in that case; retain same-key retries for fast
+    // transient failures and Providers with no available alternative.
+    const preferUntriedKey = async (target: InferenceTarget, attemptStartedAt: number): Promise<boolean> => {
+      const now = timer.now()
+      const remainingMs = totalRetryBudgetMs - (now - startedAt)
+      if (remainingMs <= 0 || now - attemptStartedAt < remainingMs) return false
+      const alternate = await providers.resolveInference(
+        providerId, envelope.model, [...attemptedKeys, target.keyId], true, resolved?.keyIds ?? [],
+      )
+      if (!alternate.ok) return false
+      attemptedKeys.push(target.keyId)
+      retainedTarget = alternate.value
+      alternateUsed = true
+      sameKeyRetries = 0
+      ambiguousNetworkRetries = 0
+      metrics?.recordRetry()
+      return true
+    }
+
     const startNextRound = async (retryAfterSeconds?: number | null): Promise<boolean> => {
       if (!transientRetry || authoritativeExhaustionKnown) return false
       if (rounds >= sameKeyAttemptBudget) return false
@@ -1557,6 +1600,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
       }
 
       lastAttemptKeyId = target.keyId
+      const attemptStartedAt = timer.now()
       lastAttemptRecorder = (await history?.startAttempt({
         attemptNumber: attempt,
         keyId: target.keyId,
@@ -1692,6 +1736,7 @@ transientRetry ||= classification.kind === 'capacity_limited' || classification.
           continue
         }
         if (retrySameKey) {
+          if (await preferUntriedKey(target, attemptStartedAt)) continue
           sameKeyRetries++
           retainedTarget = target
           await retrySleep(retryBackoffMs(sameKeyRetries, classification.retryAfterSeconds), requestSignal)
@@ -1773,6 +1818,7 @@ transientRetry ||= classification.kind === 'capacity_limited' || classification.
           sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
           timer.now() - startedAt < totalRetryBudgetMs
         ) {
+          if (await preferUntriedKey(target, attemptStartedAt)) continue
           ambiguousNetworkRetries++
           retainedTarget = target
           await retrySleep(retryBackoffMs(ambiguousNetworkRetries), requestSignal)
@@ -1881,6 +1927,7 @@ transientRetry ||= classification.kind === 'capacity_limited' || classification.
         continue
       }
       if (retrySameKey) {
+        if (await preferUntriedKey(target, attemptStartedAt)) continue
         sameKeyRetries++
         retainedTarget = target
         await retrySleep(retryBackoffMs(sameKeyRetries, classification.retryAfterSeconds), requestSignal)

@@ -1002,9 +1002,15 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
       const retrySameKey = classification.retryAction === 'retry_same' && sameKeyRetries < 1 &&
         sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
         timer.now() - startedAt < totalRetryBudgetMs
-      if (classification.retryAction === 'try_alternate') {
+      // Visit untried keys before waiting for another cooldown round.
+      if (classification.retryAction === 'try_alternate' || (
+        classification.retryAction === 'retry_same' && !retrySameKey &&
+        timer.now() - startedAt < totalRetryBudgetMs
+      )) {
         alternateUsed = true
         attemptedKeys.push(target.keyId)
+        sameKeyRetries = 0
+        ambiguousNetworkRetries = 0
         metrics?.recordRetry()
         continue
       }
@@ -1185,9 +1191,15 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
     const retrySameKey = classification.retryAction === 'retry_same' && sameKeyRetries < 1 &&
       sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
       timer.now() - startedAt < totalRetryBudgetMs
-    if (classification.retryAction === 'try_alternate') {
+    // Visit untried keys before waiting for another cooldown round.
+    if (classification.retryAction === 'try_alternate' || (
+      classification.retryAction === 'retry_same' && !retrySameKey &&
+      timer.now() - startedAt < totalRetryBudgetMs
+    )) {
       alternateUsed = true
       attemptedKeys.push(target.keyId)
+      sameKeyRetries = 0
+      ambiguousNetworkRetries = 0
       metrics?.recordRetry()
       continue
     }
@@ -1667,9 +1679,15 @@ transientRetry ||= classification.kind === 'capacity_limited' || classification.
         const retrySameKey = classification.retryAction === 'retry_same' && sameKeyRetries < 1 &&
           sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
           timer.now() - startedAt < totalRetryBudgetMs
-        if (classification.retryAction === 'try_alternate') {
+        // Visit untried keys before waiting for another cooldown round.
+        if (classification.retryAction === 'try_alternate' || (
+          classification.retryAction === 'retry_same' && !retrySameKey &&
+          timer.now() - startedAt < totalRetryBudgetMs
+        )) {
           alternateUsed = true
           attemptedKeys.push(target.keyId)
+          sameKeyRetries = 0
+          ambiguousNetworkRetries = 0
           metrics?.recordRetry()
           continue
         }
@@ -1850,9 +1868,15 @@ transientRetry ||= classification.kind === 'capacity_limited' || classification.
       const retrySameKey = classification.retryAction === 'retry_same' && sameKeyRetries < 1 &&
         sameKeyRetries + ambiguousNetworkRetries < sameKeyAttemptBudget - 1 &&
         timer.now() - startedAt < totalRetryBudgetMs
-      if (classification.retryAction === 'try_alternate') {
+      // Visit untried keys before waiting for another cooldown round.
+      if (classification.retryAction === 'try_alternate' || (
+        classification.retryAction === 'retry_same' && !retrySameKey &&
+        timer.now() - startedAt < totalRetryBudgetMs
+      )) {
         alternateUsed = true
         attemptedKeys.push(target.keyId)
+        sameKeyRetries = 0
+        ambiguousNetworkRetries = 0
         metrics?.recordRetry()
         continue
       }

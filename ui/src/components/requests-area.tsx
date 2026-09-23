@@ -422,7 +422,7 @@ function AttemptLine({ attempt, totalAttempts }: {
     <li className="bg-muted/40 flex min-w-0 flex-col gap-2 rounded-md px-3 py-2.5">
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="font-mono">#{attempt.attemptNumber}</span>
-        {attempt.attemptNumber > 1 && <span className="text-muted-foreground">Alternate</span>}
+        {attempt.attemptNumber > 1 && <span className="text-muted-foreground">Retry</span>}
         <span className={tone}>{attempt.outcome}</span>
         {attempt.status !== null && <span className="font-mono">HTTP {attempt.status}</span>}
         {attempt.errorCode !== null && (

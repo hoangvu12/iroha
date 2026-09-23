@@ -35,7 +35,7 @@ describe('Z.ai inference error classification', () => {
 
   test.each(['1200', '1230', '1234'])('retries documented provider failure %s', (code) => {
     expect(createZaiInferenceAdapter().classifyFailure(failure(500, code), context)).toMatchObject({
-      kind: 'provider_failure', capacityScope: 'connection_model', retryAction: 'retry_same',
+      kind: 'provider_failure', capacityScope: 'key', retryAction: 'retry_same',
       diagnostics: { providerCode: code },
     })
   })

@@ -455,7 +455,11 @@ export function classifyGenericFailure(result: InferenceForwardResult): Inferenc
     return { kind: 'payment_required', capacityScope: 'unknown', retryAction: 'try_alternate', retryAfterSeconds }
   }
   if (result.status >= 500) {
-    return { kind: 'provider_failure', capacityScope: 'connection_model', retryAction: 'retry_same', retryAfterSeconds }
+    // A 5xx is an observation about one Attempt: the same key may simply
+    // succeed next time (`retryAction` is `retry_same`), so the capacity
+    // claim is key-scoped. Claiming `connection_model` here would let the
+    // cooldown engine disqualify every healthy sibling for the model.
+    return { kind: 'provider_failure', capacityScope: 'key', retryAction: 'retry_same', retryAfterSeconds }
   }
   // A 404 from an upstream that carries the model in its catalog means the
   // specific key lacks entitlement, not that the model doesn't exist — try an

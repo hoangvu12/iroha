@@ -83,17 +83,52 @@ describe('durable scoped Key Health', () => {
     )
   })
 
-  test('a connection-and-model cooldown blocks only that exact model', async () => {
+  test('a 5xx parks only the key that answered; the model stays routable', async () => {
+    // Regression: a provider_failure used to be written with a
+    // `connection_model` scope, so one key's 503 answered
+    // `model_keys_unavailable` for the whole model while its healthy
+    // siblings sat idle.
     await registry.recordInferenceFailure({
       keyId: keyIds[0]!,
       model: 'gpt-4o',
       status: 503,
       retryAfterSeconds: 30,
-      reason: 'model unavailable',
+      reason: 'upstream exploded',
     })
 
-    expect((await registry.resolveInference(providerId, 'gpt-4o')).ok).toBe(false)
-    expect((await registry.resolveInference(providerId, 'gpt-4o-mini')).ok).toBe(true)
+    const stored = await opened.database.providers.getKey(keyIds[0]!)
+    expect(stored).toMatchObject({
+      health: 'cooling_down',
+      healthScope: 'key',
+      healthScopeId: keyIds[0],
+    })
+    expect(stored?.retryAfterAt).not.toBeNull()
+    const target = await registry.resolveInference(providerId, 'gpt-4o')
+    if (!target.ok) throw new Error(target.failure.code)
+    expect(target.value.keyId).toBe(keyIds[1]!)
+  })
+
+  test('a bare status-derived 429 parks the answering key, never the provider', async () => {
+    // Regression: the legacy path (no adapter classification) fell through
+    // to the authoritative write with an `unknown` scope, whose cooldown
+    // froze every key on the Provider until it expired.
+    await registry.recordInferenceFailure({
+      keyId: keyIds[0]!,
+      model: 'gpt-4o',
+      status: 429,
+      retryAfterSeconds: 60,
+      reason: 'throttled',
+    })
+
+    const stored = await opened.database.providers.getKey(keyIds[0]!)
+    expect(stored).toMatchObject({
+      health: 'cooling_down',
+      healthScope: 'key',
+      healthScopeId: keyIds[0],
+    })
+    const target = await registry.resolveInference(providerId, 'gpt-4o')
+    if (!target.ok) throw new Error(target.failure.code)
+    expect(target.value.keyId).toBe(keyIds[1]!)
   })
 
   test('durable health survives registry restart', async () => {
@@ -140,28 +175,29 @@ describe('durable scoped Key Health', () => {
     expect((await opened.database.providers.getKey(trial.value.keyId))?.health).toBe('active')
   })
 
+  const paymentRequired = (keyId: string, observedAt: Date) => ({
+    kind: 'payment_required' as const,
+    capacityScope: 'key' as const,
+    retryAction: 'try_alternate' as const,
+    retryAfterSeconds: null,
+    capacityEvidence: {
+      availability: 'exhausted' as const,
+      authority: 'provisional' as const,
+      scope: { kind: 'key' as const, keyId },
+      reason: 'credit_exhausted' as const,
+      observedAt,
+      freshUntil: observedAt,
+      recheckAt: null,
+      facts: {},
+      diagnostics: {},
+    },
+  })
+
   describe('a Provider that named a billing condition', () => {
     // DashScope answers an overdue account with 400 Arrearage, Z.ai with 1113,
     // MiniMax with 402. Each is durable: the key will not serve again until
     // the Owner settles the account, so leaving it `active` feeds a dead
     // credential its full share of traffic until someone notices by hand.
-    const paymentRequired = (keyId: string, observedAt: Date) => ({
-      kind: 'payment_required' as const,
-      capacityScope: 'key' as const,
-      retryAction: 'try_alternate' as const,
-      retryAfterSeconds: null,
-      capacityEvidence: {
-        availability: 'exhausted' as const,
-        authority: 'provisional' as const,
-        scope: { kind: 'key' as const, keyId },
-        reason: 'credit_exhausted' as const,
-        observedAt,
-        freshUntil: observedAt,
-        recheckAt: null,
-        facts: {},
-        diagnostics: {},
-      },
-    })
 
     test('parks the key and leaves the rest of the Provider serving', async () => {
       await registry.recordInferenceFailure({
@@ -211,9 +247,8 @@ describe('durable scoped Key Health', () => {
     await registry.recordInferenceFailure({
       keyId: keyIds[0]!,
       model: 'gpt-4o',
-      status: 429,
-      retryAfterSeconds: 60,
-      reason: 'quota exhausted',
+      classification: paymentRequired(keyIds[0]!, clock.now()),
+      reason: 'upstream HTTP 400',
     })
 
     await registry.testKey(providerId, keyIds[0]!)

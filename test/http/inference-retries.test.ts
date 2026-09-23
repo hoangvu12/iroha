@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { completeSetup, createTestApp, type TestApp } from '../support/app.ts'
 import { mockUpstreamTransport } from '../support/inference.ts'
+import { fakeTimer } from '../support/timer.ts'
 
 const BASE_URL = 'https://api.example.com/v1'
 const MODEL = 'gpt-4o-mini'
@@ -14,14 +15,21 @@ describe('scoped inference retries', () => {
   let providerId: string
   let providerHandle: string
   let secret: string
+  let retryDelays: number[]
+  let timer: ReturnType<typeof fakeTimer>
 
   beforeEach(async () => {
     upstream = mockUpstreamTransport()
+    retryDelays = []
+    timer = fakeTimer()
     iroha = await createTestApp({
       upstreamTransport: upstream.fetch,
+      timer,
       // A round waits out the Key Health cooldown. Advancing the app clock lets a
       // recovered key become eligible without sleeping on the wall clock.
       retrySleep: async (ms) => {
+        retryDelays.push(ms)
+        timer.advance(ms)
         iroha.clock.advance(ms / 1000)
       },
     })
@@ -155,6 +163,74 @@ describe('scoped inference retries', () => {
     const response = await chat()
 
     expect(response.status).toBe(200)
+    expect(upstream.calls).toHaveLength(2)
+    expect(upstream.calls[0]?.headers.authorization).toBe(upstream.calls[1]?.headers.authorization)
+  })
+
+  test.each([
+    ['chat/completions', false], ['chat/completions', true],
+    ['messages', false], ['messages', true],
+  ] as const)('a repeated DashScope 502 reaches a healthy alternate (%s, stream=%s)', async (path, stream) => {
+    upstream.respondWith((call) =>
+      call.headers.authorization === upstream.calls[0]?.headers.authorization
+        ? Response.json({ error: { code: 'upstream_unreachable', type: 'api_error' } }, { status: 502 })
+        : Response.json(completion()),
+    )
+
+    const response = await iroha.fetch(`/providers/${providerHandle}/v1/${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }], max_tokens: 32, stream }),
+    })
+    await response.text()
+
+    expect(response.status).toBe(200)
+    expect(upstream.calls).toHaveLength(3)
+    expect(upstream.calls[0]?.headers.authorization).toBe(upstream.calls[1]?.headers.authorization)
+    expect(upstream.calls[2]?.headers.authorization).not.toBe(upstream.calls[0]?.headers.authorization)
+    // The healthy key is still untried: do not wait out the failed key's
+    // 30-second cooldown before selecting it.
+    expect(retryDelays.every((delay) => delay <= 500)).toBe(true)
+    const attempts = await iroha.database.requestHistory.getAttempts(response.headers.get('x-request-id')!)
+    expect(attempts[0]?.diagnostics).toMatchObject({
+      providerCode: 'upstream_unreachable', classification: 'provider_failure', capacityScope: 'key',
+    })
+    expect(attempts.map((attempt) => attempt.status)).toEqual([502, 502, 200])
+  })
+
+  test.each([false, true])('repeated 502s remain bounded when every key fails (stream=%s)', async (stream) => {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ retryMaxAttempts: 2 }),
+    })
+    upstream.respondWith(() => Response.json({ error: { code: 'upstream_unreachable' } }, { status: 502 }))
+    const response = await iroha.fetch(`/providers/${providerHandle}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }], stream }),
+    })
+
+    expect(response.status).toBe(502)
+    expect(upstream.calls).toHaveLength(8) // Two keys, two attempts each, two rounds.
+    expect(new Set(upstream.calls.map((call) => call.headers.authorization)).size).toBe(2)
+  })
+
+  test.each([false, true])('502 failover stops when the retry time budget is spent (stream=%s)', async (stream) => {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ totalRetryTimeoutMs: 30_000 }),
+    })
+    upstream.respondWith(() => {
+      timer.advance(20_000)
+      return Response.json({ error: { code: 'upstream_unreachable' } }, { status: 502 })
+    })
+    const response = await iroha.fetch(`/providers/${providerHandle}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'Hello' }], stream }),
+    })
+
+    expect(response.status).toBe(502)
     expect(upstream.calls).toHaveLength(2)
     expect(upstream.calls[0]?.headers.authorization).toBe(upstream.calls[1]?.headers.authorization)
   })

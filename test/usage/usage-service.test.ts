@@ -426,19 +426,31 @@ describe('UsageService authoritative plan adapter', () => {
     if (!added.ok) throw new Error(added.failure.code)
     const secondKeyId = added.value.keys.find((key) => key.id !== fixture.keyId)!.id
 
-    await fixture.registry.recordInferenceFailure({
+    // Model-scoped cooldowns come from authoritative usage evidence, not from
+    // inference failures: a 5xx parks only the key that answered.
+    const cooledAt = fixture.clock.now()
+    const modelCooldown = (model: string) => ({
+      availability: 'temporarily_limited' as const,
+      authority: 'authoritative' as const,
+      scope: { kind: 'connection_model' as const, model },
+      reason: 'window_exhausted' as const,
+      observedAt: cooledAt,
+      freshUntil: new Date(cooledAt.getTime() + 60_000),
+      recheckAt: new Date(cooledAt.getTime() + 30_000),
+      facts: {},
+      diagnostics: {},
+    })
+    await fixture.registry.reconcileCapacityEvidence({
+      providerId: fixture.providerId,
       keyId: fixture.keyId,
       model: 'gpt-4o',
-      status: 503,
-      retryAfterSeconds: 30,
-      reason: 'model unavailable',
+      capacityEvidence: [modelCooldown('gpt-4o')],
     })
-    await fixture.registry.recordInferenceFailure({
+    await fixture.registry.reconcileCapacityEvidence({
+      providerId: fixture.providerId,
       keyId: secondKeyId,
       model: 'gpt-4o-mini',
-      status: 503,
-      retryAfterSeconds: 30,
-      reason: 'a different model is unavailable',
+      capacityEvidence: [modelCooldown('gpt-4o-mini')],
     })
     fixture.clock.advance(31)
 

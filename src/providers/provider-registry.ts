@@ -1715,15 +1715,14 @@ export class ProviderRegistry {
       return
     }
     if (classification.kind === 'capacity_limited') {
-      if (
-        input.classification !== undefined &&
-        classification.capacityEvidence === undefined &&
-        classification.capacityScope === 'unknown'
-      ) {
+      if (classification.capacityEvidence === undefined && classification.capacityScope !== 'account') {
         // A generic 429 names no durable capacity fact. The key that answered it
         // must still not be hammered, so park it for a bounded cooldown: another
         // key, or a later round, gets the next Attempt. Expiry is the only
-        // recovery and this is `cooling_down`, never `exhausted`.
+        // recovery and this is `cooling_down`, never `exhausted`. The legacy
+        // status-derived path takes the same narrow treatment: a bare 429
+        // without a scope claim never speaks for its siblings, so it must never
+        // cool a whole provider through an `unknown` scope.
         await this.#database.providers.updateKey(
           key.id,
           healthPatch(
@@ -1744,8 +1743,21 @@ export class ProviderRegistry {
       }
       if (input.classification !== undefined && (classification.capacityEvidence === undefined
         || classification.capacityEvidence.authority !== 'authoritative')) return
-      const scope = classification.capacityScope === 'account' && key.accountId !== null ? 'account' : 'unknown'
-      const scopeId = key.accountId
+      // The evidence names the scope it speaks for, and the write must match
+      // it. Anything that cannot be resolved to a scope this key actually
+      // belongs to is written `key`: exhaustion must never disqualify a
+      // healthy sibling through a broader scope than the Provider justified,
+      // and the previous provider-wide `unknown` default did exactly that.
+      const claimed = classification.capacityEvidence?.scope.kind ?? classification.capacityScope
+      const scope = claimed === 'account' && key.accountId !== null
+        ? 'account'
+        : claimed === 'connection_model'
+          ? 'connection_model'
+          : claimed === 'provider'
+            ? 'provider'
+            : 'key'
+      const scopeId = scope === 'account' ? key.accountId : scope === 'key' ? key.id : null
+      const healthModel = scope === 'connection_model' ? input.model : null
       const affected =
         scope === 'account'
           ? (await this.#database.providers.listKeys(key.providerId)).filter(
@@ -1756,7 +1768,7 @@ export class ProviderRegistry {
         affected.map((candidate) =>
           this.#database.providers.updateKey(
             candidate.id,
-            healthPatch('exhausted', input.reason, at, retryAfterAt, scope, scopeId, null),
+            healthPatch('exhausted', input.reason, at, retryAfterAt, scope, scopeId, healthModel),
             at,
           ),
         ),
@@ -1792,17 +1804,15 @@ export class ProviderRegistry {
       return
     }
     if (classification.kind === 'provider_failure') {
+      // A 5xx is an observation about one Attempt, not a durable fact about
+      // the model — the classification itself says `retry_same`, meaning the
+      // same key may simply succeed next time. The cooldown is therefore
+      // key-scoped: a `connection_model` scope here would disqualify every
+      // healthy sibling for the whole window (via `scopeUnavailable`) and
+      // answer `model_keys_unavailable` while active keys sit idle.
       await this.#database.providers.updateKey(
         key.id,
-        healthPatch(
-          'cooling_down',
-          input.reason,
-          at,
-          retryAfterAt,
-          'connection_model',
-          key.providerId,
-          input.model,
-        ),
+        healthPatch('cooling_down', input.reason, at, retryAfterAt, 'key', key.id, null),
         at,
       )
     }
@@ -2436,11 +2446,12 @@ function scopeUnavailable(
   ignoreUnknownScope: boolean,
 ): boolean {
   return keys.some((candidate) => {
-    if (
-      candidate.health !== 'cooling_down' &&
-      candidate.health !== 'exhausted' &&
-      candidate.health !== 'invalid_authentication'
-    ) {
+    // Only a cooldown or an exhaustion carries a scope claim. An
+    // `invalid_authentication` verdict is a statement about one credential
+    // and is always written key-scoped, so it never disqualifies its
+    // siblings — counting it here would let one dead key freeze a whole
+    // provider forever, because its `retryAfterAt` is null.
+    if (candidate.health !== 'cooling_down' && candidate.health !== 'exhausted') {
       return false
     }
     if (candidate.retryAfterAt !== null && candidate.retryAfterAt <= at) return false
@@ -2782,6 +2793,6 @@ function legacyFailureClassification(
   if (status === 401) return { kind: 'authentication_invalid', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
   if (status === 403) return { kind: 'authentication_rejected', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
   if (status === 429) return { kind: 'capacity_limited', capacityScope: hasAccount ? 'account' : 'unknown', retryAction: 'try_alternate', retryAfterSeconds }
-  if (status !== undefined && status >= 500) return { kind: 'provider_failure', capacityScope: 'connection_model', retryAction: 'retry_same', retryAfterSeconds }
+  if (status !== undefined && status >= 500) return { kind: 'provider_failure', capacityScope: 'key', retryAction: 'retry_same', retryAfterSeconds }
   return null
 }

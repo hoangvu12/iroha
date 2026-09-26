@@ -1608,7 +1608,6 @@ function translateAnthropicToOpenAi(
     if (Array.isArray(content)) {
       const textSegments: string[] = []
       const imageParts: Array<Record<string, unknown>> = []
-      const callId = typeof message.id === 'string' ? message.id : null
       for (const block of content) {
         if (block === null || typeof block !== 'object' || Array.isArray(block)) continue
         const b = block as Record<string, unknown>
@@ -1673,8 +1672,12 @@ function translateAnthropicToOpenAi(
         }
       }
       const textContent = textSegments.join('')
+      // A replayed assistant turn still carries the `id` Anthropic gave it. The
+      // OpenAI-shape message has no such field, so forwarding it makes a
+      // Provider with a strict body validator reject the whole Request — the
+      // first turn of a conversation succeeds and every later one answers 422
+      // `extra_forbidden`. The id names a past response and routes nothing.
       const outMessage: Record<string, unknown> = { role }
-      if (callId !== null) outMessage.id = callId
       if (imageParts.length > 0) {
         const parts: Array<Record<string, unknown>> = []
         if (textContent.length > 0) parts.push({ type: 'text', text: textContent })

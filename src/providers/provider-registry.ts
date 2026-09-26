@@ -1494,11 +1494,26 @@ export class ProviderRegistry {
       return failed({ code: keys.some(carries) ? 'model_keys_unavailable' : 'no_eligible_key' })
     }
 
-    // Prefer the keys known to carry the model; the rest remain reachable once
-    // the preferred ones are exhausted, which is what the retry loop's growing
-    // `excludedKeyIds` eventually produces.
-    const preferred = eligible.filter(carries)
-    const key = this.#selector.select(providerId, preferred.length > 0 ? preferred : eligible)
+    // Two preferences order the eligible pool, and Key Health is the stronger
+    // of them. A key whose cooldown merely expired is here on a one-shot
+    // controlled trial, so it must not be tried ahead of a key carrying no
+    // adverse evidence: Key Model Availability is positive evidence about
+    // entitlement and says nothing about capacity. Within one health tier the
+    // keys known to carry the model come first, which is the preference
+    // ADR-0023 asks for. Both are orderings, never filters — every eligible key
+    // stays reachable once the tiers above it are exhausted, which is what the
+    // retry loop's growing `excludedKeyIds` eventually produces.
+    //
+    // Health first is what keeps a Provider holding dozens of spent keys from
+    // spending an Attempt on each of them while its one healthy credential,
+    // whose availability was never discovered, sits idle until the very end.
+    const byHealth = (active: boolean) => (candidate: UpstreamKeyRecord) =>
+      (candidate.health === 'active') === active
+    const tier = (active: boolean, carrying: boolean) =>
+      eligible.filter(byHealth(active)).filter((candidate) => carries(candidate) === carrying)
+    const candidates = [tier(true, true), tier(true, false), tier(false, true), tier(false, false)]
+      .find((group) => group.length > 0) ?? eligible
+    const key = this.#selector.select(providerId, candidates)
     if (key === null) return failed({ code: 'no_eligible_key' })
     if (key.health !== 'active') {
       const claim = healthClaim(key)

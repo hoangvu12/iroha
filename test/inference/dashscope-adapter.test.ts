@@ -120,9 +120,84 @@ describe('DashScope inference adapter', () => {
     })
   })
 
+  describe('a key whose free quota is spent', () => {
+    // The other billing signature, and it arrives as 403 rather than 400. The
+    // generic 403 reading is `authentication_rejected`, which cools the whole
+    // key down as if the credential had been refused — but the key is accepted,
+    // its free allowance is simply gone until the Owner adds payment.
+    const freeTierOnly = {
+      code: 'AllocationQuota.FreeTierOnly',
+      type: 'AllocationQuota.FreeTierOnly',
+      param: null,
+      message: 'Free quota exhausted. To continue accessing the model on a paid basis, please add funds or disable the "use free tier only" mode in the management console.',
+    }
+
+    test('reaches an alternate key instead of failing the Request', () => {
+      const classification = adapter.classifyFailure(
+        { kind: 'buffered', status: 403, headers: {}, body: JSON.stringify({ error: freeTierOnly }) },
+        context,
+      )
+
+      expect(classification).toMatchObject({
+        kind: 'payment_required',
+        capacityScope: 'key',
+        retryAction: 'try_alternate',
+      })
+    })
+
+    test('claims key-scoped exhaustion so Key Health can park the credential', () => {
+      const classification = adapter.classifyFailure(
+        { kind: 'buffered', status: 403, headers: {}, body: JSON.stringify({ error: freeTierOnly }) },
+        context,
+      )
+
+      expect(classification.capacityEvidence).toMatchObject({
+        availability: 'exhausted',
+        authority: 'provisional',
+        scope: { kind: 'key', keyId: 'uk_overdue' },
+        reason: 'credit_exhausted',
+        recheckAt: null,
+      })
+    })
+
+    test('claims nothing without the context that names the key', () => {
+      const classification = adapter.classifyFailure({
+        kind: 'buffered',
+        status: 403,
+        headers: {},
+        body: JSON.stringify({ error: freeTierOnly }),
+      })
+
+      expect(classification.capacityEvidence).toBeUndefined()
+    })
+  })
+
+  describe('a key refused by its own restrictions', () => {
+    // `access_denied` carries two unrelated meanings that only the message
+    // separates. This one is about the credential, not a model, so the generic
+    // key-scoped reading is correct and must survive the model-level special
+    // case added for the same code.
+    test('stays a key-scoped rejection rather than becoming a model refusal', () => {
+      const classification = adapter.classifyFailure(
+        {
+          kind: 'buffered',
+          status: 403,
+          headers: {},
+          body: JSON.stringify({
+            error: { code: 'access_denied', type: 'access_denied', param: null, message: 'Access denied by API-Key restrictions.' },
+          }),
+        },
+        context,
+      )
+
+      expect(classification.kind).toBe('authentication_rejected')
+      expect(classification.capacityScope).toBe('key')
+    })
+  })
+
   describe('a key that cannot call the requested model', () => {
-    // The three signatures observed across the entitlement tiers of one real
-    // DashScope Provider. All three must reach another Upstream Key.
+    // The four signatures observed across the entitlement tiers of one real
+    // DashScope Provider. All four must reach another Upstream Key.
     const signatures = [
       {
         name: '400 invalid_parameter_error',
@@ -138,6 +213,20 @@ describe('DashScope inference adapter', () => {
         name: '404 model_not_supported',
         status: 404,
         error: { code: 'model_not_supported', message: 'Unsupported model `text-embedding-v3` for OpenAI compatibility mode.', param: null, type: 'invalid_request_error' },
+      },
+      // The tier that lists a model it will not serve: `GET /models` returns
+      // the id, and inference answers 403. Body copied from a live refusal.
+      {
+        name: '403 Model.AccessDenied',
+        status: 403,
+        error: { code: 'Model.AccessDenied', message: 'Model access denied.', param: null, type: 'Model.AccessDenied' },
+      },
+      // The same model-level refusal spelled with the generic `access_denied`
+      // code, which only its message distinguishes from a key-level one.
+      {
+        name: '403 access_denied naming the model',
+        status: 403,
+        error: { code: 'access_denied', message: 'Model access denied', param: null, type: 'access_denied' },
       },
     ] as const
 

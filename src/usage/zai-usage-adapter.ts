@@ -4,6 +4,11 @@ import type { UsageAdapter, UsageAdapterRequest, UsagePollResult, UsageReading }
 const QUOTA_PATH = '/api/monitor/usage/quota/limit'
 const EVIDENCE_FRESHNESS_MS = 60_000
 
+/** The pay-as-you-go credit windows; a consumed one is the `1113` arrears refusal. */
+const CREDIT_LIMIT = 'CREDIT_LIMIT'
+/** The coding plan's token usage windows; a consumed one is the `1310` / `1308` refusal. */
+const TOKENS_LIMIT = 'TOKENS_LIMIT'
+
 export interface ZaiUsageAdapterOptions {
   readonly fetch?: typeof fetch
   readonly now?: () => Date
@@ -55,46 +60,82 @@ function resetAt(value: unknown): Date | null {
   return Number.isFinite(date.getTime()) ? date : null
 }
 
-/** Parse the bounded, documented portion of the Zhipu coding-plan response. */
+/**
+ * Whether a limit entry speaks for chat-completions capacity.
+ *
+ * The coding-plan response mixes three limit families, and only two of them
+ * bind a Chat Completions call:
+ *
+ *   - `CREDIT_LIMIT` — pay-as-you-go credit windows. A consumed one is the
+ *     `1113` insufficient-balance refusal.
+ *   - `TOKENS_LIMIT` — the plan's token usage windows. A consumed one is the
+ *     `1310` / `1308` window refusal.
+ *
+ * `TIME_LIMIT` is the tool-call quota (`usageDetails` names search-prime,
+ * web-reader, and zread). A key whose tool quota is spent still chats, and a
+ * key whose weekly token window is spent still reports the tool quota as
+ * unconsumed — reading `TIME_LIMIT` as entitlement is exactly what made
+ * production resurrect weekly-exhausted and arrears keys as "positive
+ * entitlement" while the inference endpoint refused them. Anything else the
+ * Provider may add is not a claim this adapter can justify, so it is skipped
+ * rather than guessed at.
+ */
+function isCapacityBearingLimit(entry: ZaiLimit): boolean {
+  return entry.type === CREDIT_LIMIT || entry.type === TOKENS_LIMIT
+}
+
+/**
+ * Parse the bounded, documented portion of the Zhipu coding-plan response.
+ *
+ * Every capacity-bearing entry becomes its own reading, so the shared
+ * reconciliation sees each window the Provider named and a consumed entry can
+ * dominate an unconsumed one regardless of the order the Provider used — the
+ * arrears body puts the unconsumed credit window first, and a single-entry
+ * reading would repeat the production resurrection on exactly that body. An
+ * envelope that parses but yields no capacity-bearing entry is an honest
+ * empty reading, not a parse failure: the tool-call quota alone says nothing
+ * about chat capacity.
+ */
 export function zaiUsageReadings(body: unknown): readonly UsageReading[] {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return []
   const root = body as Record<string, unknown>
   if (finiteNumber(root.code) !== 200) return []
   if (typeof root.data !== 'object' || root.data === null || Array.isArray(root.data)) return []
   const limits = (root.data as Record<string, unknown>).limits
-  if (!Array.isArray(limits) || limits.length === 0) return []
+  if (!Array.isArray(limits)) return []
 
   const entries = limits.filter(
     (value): value is ZaiLimit => typeof value === 'object' && value !== null && !Array.isArray(value),
   )
-  const primary = entries.find((entry) => entry.type === 'TIME_LIMIT') ?? entries[0]
-  if (primary === undefined) return []
-  const percent = remainingPercent(primary)
-  if (percent === null) return []
-
-  const total = finiteNumber(primary.usage) ?? finiteNumber(primary.number)
-  const used = finiteNumber(primary.currentValue)
-  const window = typeof primary.type === 'string' && primary.type.length <= 64
-    ? primary.type.toLowerCase()
-    : 'unknown'
-
-  return [{
-    unit: typeof primary.unit === 'string' ? primary.unit : 'requests',
-    balance: null,
-    used,
-    limit: total,
-    remainingPercent: percent,
-    plan: 'GLM Coding Plan',
-    resetAt: resetAt(primary.nextResetTime),
-    scope: { kind: 'key', keyId: '' },
-    keyId: null,
-    confidence: 'confirmed',
-    diagnostics: {
-      source: 'zai-usage-adapter',
-      kind: 'subscription',
-      limitingWindow: window,
-    },
-  }]
+  const readings: UsageReading[] = []
+  for (const entry of entries) {
+    if (!isCapacityBearingLimit(entry)) continue
+    const percent = remainingPercent(entry)
+    if (percent === null) continue
+    const credit = entry.type === CREDIT_LIMIT
+    const window = entry.type.toLowerCase()
+    readings.push({
+      unit: typeof entry.unit === 'string' ? entry.unit : window,
+      balance: credit ? finiteNumber(entry.remaining) : null,
+      // `usage` is the window's total and `currentValue` how much of it is
+      // spent. `number` is not a quota size — on the real bodies it is a plan
+      // tier count — so it never becomes a fact.
+      used: finiteNumber(entry.currentValue),
+      limit: finiteNumber(entry.usage),
+      remainingPercent: percent,
+      plan: 'GLM Coding Plan',
+      resetAt: resetAt(entry.nextResetTime),
+      scope: { kind: 'key', keyId: '' },
+      keyId: null,
+      confidence: 'confirmed',
+      diagnostics: {
+        source: 'zai-usage-adapter',
+        kind: credit ? 'credit' : 'subscription',
+        limitingWindow: window,
+      },
+    })
+  }
+  return readings
 }
 
 export function zaiCapacityEvidenceOf(
@@ -106,7 +147,14 @@ export function zaiCapacityEvidenceOf(
   const authoritative = reading.confidence === 'confirmed' && remaining !== null
   const available = authoritative && remaining > 0
   const exhausted = authoritative && remaining <= 0
-  const reason = available ? 'positive_entitlement' : exhausted ? 'window_exhausted' : 'unknown'
+  // A credit window reporting zero is the billing condition the inference
+  // endpoint spells `1113`; a token window at zero is the plan's usage window.
+  // Both reconcile to durable exhaustion, but the reason names which one, so
+  // the Owner sees arrears and window limits as themselves.
+  const credit = reading.diagnostics.kind === 'credit'
+  const reason = available ? 'positive_entitlement'
+    : exhausted ? credit ? 'credit_exhausted' : 'window_exhausted'
+    : 'unknown'
   const limitingWindow = typeof reading.diagnostics.limitingWindow === 'string'
     ? reading.diagnostics.limitingWindow.slice(0, 64)
     : undefined
@@ -171,10 +219,13 @@ export function createZaiUsageAdapter(options: ZaiUsageAdapterOptions = {}): Usa
       const readings = zaiUsageReadings(body)
       // A valid key without Coding Plan returns a provider code 500 in a 2xx
       // envelope. Credit is console-only, so an empty successful reading is
-      // the honest result instead of inventing a zero balance.
+      // the honest result instead of inventing a zero balance. The same honesty
+      // applies to a code-200 envelope whose limits are all tool-call quotas:
+      // the shape matched, there is just nothing that speaks for chat capacity.
       if (readings.length === 0 && typeof body === 'object' && body !== null) {
         const root = body as Record<string, unknown>
         if (root.success === false && finiteNumber(root.code) === 500) return { ok: true, readings: [] }
+        if (root.success === true && finiteNumber(root.code) === 200) return { ok: true, readings: [] }
       }
       if (readings.length === 0) {
         return { ok: false, failure: { code: 'unparseable_response', message: 'Z.ai quota response did not match the expected shape' } }

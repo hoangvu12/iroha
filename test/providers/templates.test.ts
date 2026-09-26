@@ -15,6 +15,7 @@ const REQUIRED_TEMPLATE_IDS = [
   'dashscope',
   'MiniMax',
   'zai',
+  'mistral',
 ] as const
 
 describe('the built-in Provider Templates', () => {

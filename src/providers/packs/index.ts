@@ -20,6 +20,7 @@ import { dashscopePack } from './dashscope.ts'
 import { minimaxPack } from './minimax.ts'
 import { anthropicPack } from './anthropic.ts'
 import { zaiPack } from './zai.ts'
+import { mistralPack } from './mistral.ts'
 
 export type { PackAdapterOptions, PackTemplate, ProviderPack } from './pack.ts'
 
@@ -36,6 +37,7 @@ export const BUILT_IN_PROVIDER_PACKS: readonly ProviderPack[] = [
   minimaxPack,
   anthropicPack,
   zaiPack,
+  mistralPack,
 ]
 
 /**

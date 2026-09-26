@@ -251,6 +251,15 @@ const PAYMENT_REQUIRED_RECHECK_SECONDS = 900
 const DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS = 5
 
 /**
+ * The longest a Provider's own structured reset may park a key that carries no
+ * authoritative evidence. Provider-named timing is honoured — a five-hour or
+ * seven-day window should not be re-probed in five seconds — but a wrong or
+ * hostile reset value must not retire real capacity indefinitely, so the wait
+ * never exceeds the billing recheck bound.
+ */
+const MAX_PROVISIONAL_KEY_COOLDOWN_SECONDS = PAYMENT_REQUIRED_RECHECK_SECONDS
+
+/**
  * How many Upstream Keys one probe pass tests at the same time.
  *
  * Sequential probing made every mutation that adds a key pay one upstream round
@@ -1730,24 +1739,28 @@ export class ProviderRegistry {
       return
     }
     if (classification.kind === 'capacity_limited') {
-      if (classification.capacityEvidence === undefined && classification.capacityScope !== 'account') {
-        // A generic 429 names no durable capacity fact. The key that answered it
-        // must still not be hammered, so park it for a bounded cooldown: another
-        // key, or a later round, gets the next Attempt. Expiry is the only
-        // recovery and this is `cooling_down`, never `exhausted`. The legacy
-        // status-derived path takes the same narrow treatment: a bare 429
-        // without a scope claim never speaks for its siblings, so it must never
-        // cool a whole provider through an `unknown` scope.
+      const provisionalKeyReading = provisionalKeyScopedReading(classification)
+      if (
+        (classification.capacityEvidence === undefined && classification.capacityScope !== 'account') ||
+        provisionalKeyReading
+      ) {
+        // Neither a generic 429 nor a Provider's own provisional reading names a
+        // durable capacity fact: provider-specific evidence stays provisional
+        // until an authoritative surface confirms it (ADR-0013). The key that
+        // answered must still not be hammered, so park it for a bounded
+        // cooldown: another key, or a later round, gets the next Attempt.
+        // Expiry is the only recovery and this is `cooling_down`, never
+        // `exhausted`. The legacy status-derived path takes the same narrow
+        // treatment: a bare 429 without a scope claim never speaks for its
+        // siblings, so it must never cool a whole provider through an
+        // `unknown` scope.
         await this.#database.providers.updateKey(
           key.id,
           healthPatch(
             'cooling_down',
             input.reason,
             at,
-            new Date(
-              at.getTime() +
-                Math.max(1, classification.retryAfterSeconds ?? DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS) * 1000,
-            ),
+            new Date(at.getTime() + provisionalCooldownSeconds(classification, at) * 1000),
             'key',
             key.id,
             null,
@@ -2451,6 +2464,37 @@ function keyServesModel(key: UpstreamKeyRecord, model: string): boolean {
 
 function healthClaim(key: UpstreamKeyRecord): string {
   return `${key.healthScope}:${key.healthScopeId ?? key.id}:${key.healthModel ?? ''}`
+}
+
+/**
+ * Whether a capacity reading describes one key without authority. Such a
+ * reading may cool that key down, but it may never exhaust anything: durable
+ * exhaustion is reserved for authoritative Provider evidence (ADR-0013).
+ */
+function provisionalKeyScopedReading(classification: InferenceFailureClassification): boolean {
+  const evidence = classification.capacityEvidence
+  return evidence !== undefined &&
+    evidence.authority !== 'authoritative' &&
+    evidence.scope.kind === 'key' &&
+    evidence.availability === 'temporarily_limited'
+}
+
+/**
+ * How long one provisional key-scoped capacity reading parks its key: the
+ * Provider's own structured reset when it named one, else its `Retry-After`,
+ * else the short generic default. Every path is bounded, so no single reading
+ * can retire a key beyond `MAX_PROVISIONAL_KEY_COOLDOWN_SECONDS`.
+ */
+function provisionalCooldownSeconds(classification: InferenceFailureClassification, at: Date): number {
+  const recheckAt = classification.capacityEvidence?.recheckAt ?? null
+  if (recheckAt !== null) {
+    const named = Math.ceil((recheckAt.getTime() - at.getTime()) / 1000)
+    if (named > 0) return Math.min(named, MAX_PROVISIONAL_KEY_COOLDOWN_SECONDS)
+  }
+  return Math.min(
+    Math.max(1, classification.retryAfterSeconds ?? DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS),
+    MAX_PROVISIONAL_KEY_COOLDOWN_SECONDS,
+  )
 }
 
 function scopeUnavailable(

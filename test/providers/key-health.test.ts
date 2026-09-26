@@ -243,6 +243,122 @@ describe('durable scoped Key Health', () => {
     })
   })
 
+  describe('a Provider that named a provisional key-scoped limit', () => {
+    // Z.ai answers fair-use throttling with 429 code 1313 and window limits
+    // with 1308/1310. Its adapter emits provisional key-scoped evidence
+    // (availability `temporarily_limited`, authority `provisional`). The
+    // reading names no durable capacity fact, but the key that answered must
+    // still not be hammered: a bounded `cooling_down` rotates the pool while
+    // expiry alone recovers it.
+    const provisionallyLimited = (
+      keyId: string,
+      observedAt: Date,
+      recheckAt: Date | null,
+      retryAfterSeconds: number | null = null,
+    ) => ({
+      kind: 'capacity_limited' as const,
+      capacityScope: 'key' as const,
+      retryAction: 'try_alternate' as const,
+      retryAfterSeconds,
+      capacityEvidence: {
+        availability: 'temporarily_limited' as const,
+        authority: 'provisional' as const,
+        scope: { kind: 'key' as const, keyId },
+        reason: 'temporarily_limited' as const,
+        observedAt,
+        freshUntil: observedAt,
+        recheckAt,
+        facts: {},
+        diagnostics: {},
+      },
+    })
+
+    test('parks the answering key for the named reset, never as exhaustion', async () => {
+      const at = clock.now()
+      await registry.recordInferenceFailure({
+        keyId: keyIds[0]!,
+        model: 'gpt-4o',
+        classification: provisionallyLimited(keyIds[0]!, at, new Date(at.getTime() + 42_000)),
+        reason: 'upstream HTTP 429',
+      })
+
+      const stored = await opened.database.providers.getKey(keyIds[0]!)
+      expect(stored).toMatchObject({ health: 'cooling_down', healthScope: 'key', healthScopeId: keyIds[0] })
+      expect(stored?.retryAfterAt?.getTime()).toBe(at.getTime() + 42_000)
+      const target = await registry.resolveInference(providerId, 'gpt-4o')
+      if (!target.ok) throw new Error(target.failure.code)
+      expect(target.value.keyId).toBe(keyIds[1]!)
+    })
+
+    test('clamps a wild reset to the billing recheck bound', async () => {
+      const at = clock.now()
+      await registry.recordInferenceFailure({
+        keyId: keyIds[0]!,
+        model: 'gpt-4o',
+        classification: provisionallyLimited(
+          keyIds[0]!, at, new Date(at.getTime() + 7 * 24 * 3600 * 1000)),
+        reason: 'upstream HTTP 429',
+      })
+
+      const stored = await opened.database.providers.getKey(keyIds[0]!)
+      expect(stored?.health).toBe('cooling_down')
+      expect(stored?.retryAfterAt?.getTime()).toBe(at.getTime() + 900_000)
+    })
+
+    test('honors Retry-After when the Provider named no reset', async () => {
+      const at = clock.now()
+      await registry.recordInferenceFailure({
+        keyId: keyIds[0]!,
+        model: 'gpt-4o',
+        classification: provisionallyLimited(keyIds[0]!, at, null, 17),
+        reason: 'upstream HTTP 429',
+      })
+
+      const stored = await opened.database.providers.getKey(keyIds[0]!)
+      expect(stored?.health).toBe('cooling_down')
+      expect(stored?.retryAfterAt?.getTime()).toBe(at.getTime() + 17_000)
+    })
+
+    test('uses the short default when the Provider named nothing', async () => {
+      const at = clock.now()
+      await registry.recordInferenceFailure({
+        keyId: keyIds[0]!,
+        model: 'gpt-4o',
+        classification: provisionallyLimited(keyIds[0]!, at, null),
+        reason: 'upstream HTTP 429',
+      })
+
+      const stored = await opened.database.providers.getKey(keyIds[0]!)
+      expect(stored?.health).toBe('cooling_down')
+      expect(stored?.retryAfterAt?.getTime()).toBe(at.getTime() + 5_000)
+    })
+
+    test('a provisional reading for a broader scope writes no Key Health', async () => {
+      // A provider-scoped or account-scoped provisional reading is a guess
+      // about one response; it may not cool, let alone exhaust, keys it did
+      // not name with key evidence.
+      const at = clock.now()
+      const providerScoped = {
+        ...provisionallyLimited(keyIds[0]!, at, new Date(at.getTime() + 60_000)),
+        capacityScope: 'provider' as const,
+        capacityEvidence: {
+          ...provisionallyLimited(keyIds[0]!, at, new Date(at.getTime() + 60_000)).capacityEvidence,
+          scope: { kind: 'provider' as const },
+        },
+      }
+      await registry.recordInferenceFailure({
+        keyId: keyIds[0]!,
+        model: 'gpt-4o',
+        classification: providerScoped,
+        reason: 'upstream HTTP 429',
+      })
+
+      const stored = await opened.database.providers.getKey(keyIds[0]!)
+      expect(stored?.health).toBe('active')
+      expect(stored?.retryAfterAt).toBeNull()
+    })
+  })
+
   test('manual authentication never clears authoritative exhaustion', async () => {
     await registry.recordInferenceFailure({
       keyId: keyIds[0]!,

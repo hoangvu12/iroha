@@ -84,12 +84,14 @@ describe('MiniMax text inference adapter', () => {
   })
 
   test('keeps bare and malformed 402/429 conservative', () => {
-    for (const [status, body] of [[402, 'not-json'], [429, '{}']] as const) {
+    // The generic readings: a bare 402 claims nothing, a bare 429 only the
+    // key-and-model pair that answered.
+    for (const [status, body, scope] of [[402, 'not-json', 'unknown'], [429, '{}', 'key_model']] as const) {
       const classification = adapter.classifyFailure(
         { kind: 'buffered', status, headers: {}, body },
         { keyId: 'key-3', observedAt },
       )
-      expect(classification.capacityScope).toBe('unknown')
+      expect(classification.capacityScope).toBe(scope)
       expect(classification.capacityEvidence).toBeUndefined()
       expect(classification.diagnostics).toBeUndefined()
     }

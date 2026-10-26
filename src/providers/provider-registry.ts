@@ -12,7 +12,11 @@ import type {
   UpstreamKeyPatch,
   UpstreamKeyRecord,
 } from '../persistence/index.ts'
-import type { InferenceAdapter, InferenceFailureClassification } from '../inference/index.ts'
+import type {
+  InferenceAdapter,
+  InferenceFailureClassification,
+  InferenceFailureKind,
+} from '../inference/index.ts'
 import { systemClock, type Clock } from '../runtime/clock.ts'
 import type { UsageRecoveryEvidence } from '../usage/adapter.ts'
 import type { AdapterRegistry } from './adapter-registry.ts'
@@ -251,6 +255,32 @@ const PAYMENT_REQUIRED_RECHECK_SECONDS = 900
 const DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS = 5
 
 /**
+ * How many distinct Upstream Models must fail the same ambiguous way on one
+ * key, within {@link KEY_MODEL_ESCALATION_WINDOW_MS}, before the failure is read
+ * as the key's rather than each model's. One or two models failing is what a
+ * per-model rate limit or one broken model backend looks like; three is a key
+ * (or a Provider) that is down for everything it is asked.
+ */
+const KEY_MODEL_ESCALATION_THRESHOLD = 3
+
+/** The window in which distinct-model failures on one key count toward escalation. */
+const KEY_MODEL_ESCALATION_WINDOW_MS = 5 * 60_000
+
+/** Failure kinds whose generic reading is ambiguous between one model and the whole key. */
+const KEY_MODEL_FAILURE_KINDS: ReadonlySet<InferenceFailureKind> = new Set([
+  'authentication_rejected',
+  'capacity_limited',
+  'provider_failure',
+])
+
+/** One ambiguous failure of one key for one model, held only in memory. */
+interface KeyModelFailure {
+  readonly kind: InferenceFailureKind
+  readonly at: Date
+  readonly until: Date
+}
+
+/**
  * How many Upstream Keys one probe pass tests at the same time.
  *
  * Sequential probing made every mutation that adds a key pay one upstream round
@@ -297,6 +327,14 @@ export class ProviderRegistry {
    */
   readonly #selector: RoundRobinSelector
   readonly #controlledTrials = new Set<string>()
+  /**
+   * Recent key-and-model failures, by key then model. It counts distinct models
+   * toward escalation and keeps each model's cooldown while the persisted
+   * `key_model` claim holds only the latest one. Like the controlled trials it
+   * is volatile: a restart forgets it, costing at most one re-learned failure
+   * per model.
+   */
+  readonly #keyModelFailures = new Map<string, Map<string, KeyModelFailure>>()
 
   constructor(options: ProviderRegistryOptions) {
     this.#database = options.database
@@ -1439,7 +1477,9 @@ export class ProviderRegistry {
    * volatile in-memory cursor. The winner's material is decrypted just long
    * enough for the request, the connection must be enabled and unarchived,
    * and an enabled connection with no eligible key is reported rather than
-   * guessed at. Selection never writes to the database.
+   * guessed at. Selection never writes to the database. A key cooling down for
+   * one model (`key_model`) is skipped for that model alone and serves every
+   * other model as an Active key.
    *
    * On a Provider whose Upstream Models are key-scoped, Key Model Availability
    * then *orders* the eligible keys — those known to carry the model rotate
@@ -1481,7 +1521,8 @@ export class ProviderRegistry {
       if (candidateKeyIds !== undefined && !candidateKeyIds.includes(candidate.id)) return false
       if (excluded.has(candidate.id) || !keyServesModel(candidate, model)) return false
       if (availability.get(candidate.id) !== undefined && !carries(candidate)) return false
-      if (candidate.health === 'active') {
+      if (this.#keyModelCoolingDown(candidate.id, model, at)) return false
+      if (servesAsActive(candidate, model)) {
         return !scopeUnavailable(candidate, keys, model, at, ignoreUnknownScope)
       }
       if (candidate.health !== 'cooling_down' && candidate.health !== 'exhausted') return false
@@ -1500,7 +1541,7 @@ export class ProviderRegistry {
     const preferred = eligible.filter(carries)
     const key = this.#selector.select(providerId, preferred.length > 0 ? preferred : eligible)
     if (key === null) return failed({ code: 'no_eligible_key' })
-    if (key.health !== 'active') {
+    if (!servesAsActive(key, model)) {
       const claim = healthClaim(key)
       if (this.#controlledTrials.has(claim)) return failed({ code: 'no_eligible_key' })
       this.#controlledTrials.add(claim)
@@ -1555,9 +1596,15 @@ export class ProviderRegistry {
     return seconds ?? null
   }
 
-  async recordInferenceSuccess(keyId: string): Promise<void> {
+  /**
+   * A success clears the key's health — unless the key is cooling down for a
+   * different model than the one that just succeeded, whose cooldown stands.
+   */
+  async recordInferenceSuccess(keyId: string, model?: string): Promise<void> {
     const key = await this.#database.providers.getKey(keyId)
     if (key === null) return
+    if (model !== undefined) this.#forgetKeyModelFailure(key.id, model)
+    if (model !== undefined && key.healthScope === 'key_model' && key.healthModel !== model) return
     this.#controlledTrials.delete(healthClaim(key))
     if (key.health === 'active') return
     const at = this.#clock.now()
@@ -1689,7 +1736,10 @@ export class ProviderRegistry {
   }): Promise<void> {
     const key = await this.#database.providers.getKey(input.keyId)
     if (key === null) return
-    this.#controlledTrials.delete(healthClaim(key))
+    // This Attempt ends a trial of its own model; another model's trial on the
+    // same key may still be in flight.
+    this.#controlledTrials.delete(keyModelClaim(key.id, input.model))
+    if (key.healthScope !== 'key_model') this.#controlledTrials.delete(healthClaim(key))
     const at = this.#clock.now()
     const classification = input.classification ?? legacyFailureClassification(
       input.status,
@@ -1697,6 +1747,14 @@ export class ProviderRegistry {
       key.accountId !== null,
     )
     if (classification === null) return
+    if (
+      classification.capacityScope === 'key_model' &&
+      classification.capacityEvidence === undefined &&
+      KEY_MODEL_FAILURE_KINDS.has(classification.kind)
+    ) {
+      await this.#recordKeyModelFailure(key, input.model, classification, input.reason, at)
+      return
+    }
     const retryAfterAt = new Date(at.getTime() + Math.max(1, classification.retryAfterSeconds ?? 30) * 1000)
     if (classification.kind === 'authentication_invalid') {
       await this.#database.providers.updateKey(
@@ -1806,7 +1864,8 @@ export class ProviderRegistry {
     if (classification.kind === 'provider_failure') {
       // A 5xx is an observation about one Attempt, not a durable fact about
       // the model — the classification itself says `retry_same`, meaning the
-      // same key may simply succeed next time. The cooldown is therefore
+      // same key may simply succeed next time. A generic 5xx claims
+      // `key_model` and was handled above; one that reaches here is
       // key-scoped: a `connection_model` scope here would disqualify every
       // healthy sibling for the whole window (via `scopeUnavailable`) and
       // answer `model_keys_unavailable` while active keys sit idle.
@@ -1816,6 +1875,77 @@ export class ProviderRegistry {
         at,
       )
     }
+  }
+
+  /**
+   * Parks one key for one model after an ambiguous failure, or the whole key
+   * once {@link KEY_MODEL_ESCALATION_THRESHOLD} distinct models have failed the
+   * same way within {@link KEY_MODEL_ESCALATION_WINDOW_MS}. Either claim is a
+   * `cooling_down` with a `retryAfterAt`, so it expires into a controlled trial
+   * like any other cooldown and can never become permanent.
+   */
+  async #recordKeyModelFailure(
+    key: UpstreamKeyRecord,
+    model: string,
+    classification: InferenceFailureClassification,
+    reason: string,
+    at: Date,
+  ): Promise<void> {
+    const seconds = classification.retryAfterSeconds ??
+      (classification.kind === 'capacity_limited' ? DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS : 30)
+    const until = new Date(at.getTime() + Math.max(1, seconds) * 1000)
+    const windowStart = at.getTime() - KEY_MODEL_ESCALATION_WINDOW_MS
+    const failures = this.#keyModelFailures.get(key.id) ?? new Map<string, KeyModelFailure>()
+    for (const [failedModel, failure] of failures) {
+      if (failure.at.getTime() < windowStart && failure.until <= at) failures.delete(failedModel)
+    }
+    failures.set(model, { kind: classification.kind, at, until })
+    this.#keyModelFailures.set(key.id, failures)
+
+    // An Attempt that was in flight when a broader claim landed must not
+    // narrow it, and escalation must not soften an exhaustion into a cooldown.
+    if (holdsBroaderClaim(key, at)) return
+
+    const failedSameWay = [...failures.values()].filter((failure) =>
+      failure.kind === classification.kind && failure.at.getTime() >= windowStart).length
+    if (failedSameWay >= KEY_MODEL_ESCALATION_THRESHOLD) {
+      // The failure follows the key, not the model. The ledger is kept, so a
+      // controlled trial that fails the same way within the window escalates
+      // again at once; a success clears the evidence it contradicts.
+      await this.#database.providers.updateKey(
+        key.id,
+        healthPatch('cooling_down', `${reason} on ${failedSameWay} models`, at, until, 'key', key.id, null),
+        at,
+      )
+      return
+    }
+    await this.#database.providers.updateKey(
+      key.id,
+      healthPatch('cooling_down', `${reason} for ${model}`, at, until, 'key_model', key.id, model),
+      at,
+    )
+  }
+
+  #keyModelCoolingDown(keyId: string, model: string, at: Date): boolean {
+    const failure = this.#keyModelFailures.get(keyId)?.get(model)
+    return failure !== undefined && failure.until > at
+  }
+
+  /**
+   * A success on one model ends that model's cooldown and trial, and discards
+   * the key's expired failures: the key has just shown it is not down for
+   * everything, so they no longer count toward escalation.
+   */
+  #forgetKeyModelFailure(keyId: string, model: string): void {
+    this.#controlledTrials.delete(keyModelClaim(keyId, model))
+    const failures = this.#keyModelFailures.get(keyId)
+    if (failures === undefined) return
+    failures.delete(model)
+    const at = this.#clock.now()
+    for (const [failedModel, failure] of failures) {
+      if (failure.until <= at) failures.delete(failedModel)
+    }
+    if (failures.size === 0) this.#keyModelFailures.delete(keyId)
   }
 
   async #locateKey(
@@ -2438,6 +2568,26 @@ function healthClaim(key: UpstreamKeyRecord): string {
   return `${key.healthScope}:${key.healthScopeId ?? key.id}:${key.healthModel ?? ''}`
 }
 
+/** The {@link healthClaim} a `key_model` cooldown of this key and model carries. */
+function keyModelClaim(keyId: string, model: string): string {
+  return `key_model:${keyId}:${model}`
+}
+
+/** Active, or cooling down for some other model only: the key serves `model` as Active. */
+function servesAsActive(key: UpstreamKeyRecord, model: string): boolean {
+  if (key.health === 'active') return true
+  return (key.health === 'cooling_down' || key.health === 'exhausted') &&
+    key.healthScope === 'key_model' && key.healthModel !== model
+}
+
+/** Whether the key is held out by something wider than one model that has not yet expired. */
+function holdsBroaderClaim(key: UpstreamKeyRecord, at: Date): boolean {
+  if (key.health === 'active') return false
+  if (key.health !== 'cooling_down' && key.health !== 'exhausted') return true
+  if (key.healthScope === 'key_model') return false
+  return key.retryAfterAt === null || key.retryAfterAt > at
+}
+
 function scopeUnavailable(
   key: UpstreamKeyRecord,
   keys: readonly UpstreamKeyRecord[],
@@ -2462,6 +2612,8 @@ function scopeUnavailable(
         return candidate.healthScopeId !== null && candidate.healthScopeId === key.accountId
       case 'connection_model':
         return candidate.providerId === key.providerId && candidate.healthModel === model
+      case 'key_model':
+        return candidate.id === key.id && candidate.healthModel === model
       case 'provider':
         return candidate.providerId === key.providerId
       case 'unknown':
@@ -2791,8 +2943,10 @@ function legacyFailureClassification(
   hasAccount: boolean,
 ): InferenceFailureClassification | null {
   if (status === 401) return { kind: 'authentication_invalid', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
-  if (status === 403) return { kind: 'authentication_rejected', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
-  if (status === 429) return { kind: 'capacity_limited', capacityScope: hasAccount ? 'account' : 'unknown', retryAction: 'try_alternate', retryAfterSeconds }
-  if (status !== undefined && status >= 500) return { kind: 'provider_failure', capacityScope: 'key', retryAction: 'retry_same', retryAfterSeconds }
+  // A bare status names no account condition, so 403, 429 and 5xx claim the
+  // key-and-model pair, exactly as the generic Inference Adapter does.
+  if (status === 403) return { kind: 'authentication_rejected', capacityScope: 'key_model', retryAction: 'try_alternate', retryAfterSeconds }
+  if (status === 429) return { kind: 'capacity_limited', capacityScope: hasAccount ? 'account' : 'key_model', retryAction: 'try_alternate', retryAfterSeconds }
+  if (status !== undefined && status >= 500) return { kind: 'provider_failure', capacityScope: 'key_model', retryAction: 'retry_same', retryAfterSeconds }
   return null
 }

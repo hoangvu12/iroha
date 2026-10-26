@@ -96,11 +96,13 @@ describe('durable scoped Key Health', () => {
       reason: 'upstream exploded',
     })
 
+    // A bare 5xx speaks for the key-and-model pair only.
     const stored = await opened.database.providers.getKey(keyIds[0]!)
     expect(stored).toMatchObject({
       health: 'cooling_down',
-      healthScope: 'key',
+      healthScope: 'key_model',
       healthScopeId: keyIds[0],
+      healthModel: 'gpt-4o',
     })
     expect(stored?.retryAfterAt).not.toBeNull()
     const target = await registry.resolveInference(providerId, 'gpt-4o')
@@ -123,8 +125,9 @@ describe('durable scoped Key Health', () => {
     const stored = await opened.database.providers.getKey(keyIds[0]!)
     expect(stored).toMatchObject({
       health: 'cooling_down',
-      healthScope: 'key',
+      healthScope: 'key_model',
       healthScopeId: keyIds[0],
+      healthModel: 'gpt-4o',
     })
     const target = await registry.resolveInference(providerId, 'gpt-4o')
     if (!target.ok) throw new Error(target.failure.code)

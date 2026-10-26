@@ -35,7 +35,8 @@ export interface ProviderDiagnostics {
   readonly providerCode?: string
   readonly providerType?: string
   readonly classification?: string
-  readonly capacityScope?: CapacityScope['kind']
+  /** Includes `key_model`, which a Failure Classification may claim but no Capacity Evidence carries. */
+  readonly capacityScope?: CapacityScope['kind'] | 'key_model'
   readonly limitingWindow?: string
   readonly retryAfterSeconds?: number
   readonly retryAt?: string

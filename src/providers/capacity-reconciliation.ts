@@ -1,4 +1,4 @@
-import type { UpstreamKeyHealth } from '../persistence/repository.ts'
+import type { CapacityScopeKind, UpstreamKeyHealth } from '../persistence/repository.ts'
 import type {
   CapacityEvidence,
   CapacityReason,
@@ -14,7 +14,7 @@ export interface DurableCapacityState {
   readonly health: UpstreamKeyHealth
   readonly reason: string | null
   readonly retryAfterAt: Date | null
-  readonly scope: CapacityScope['kind']
+  readonly scope: CapacityScopeKind
   readonly scopeId: string | null
   readonly model: string | null
 }
@@ -199,10 +199,15 @@ function preserve(input: CapacityReconciliationInput, evidenceFresh: boolean): C
 }
 
 function eligibleFromExisting(input: CapacityReconciliationInput): boolean {
-  if (input.existing.health === 'cooling_down' && input.existing.scope === 'connection_model') {
+  if (input.existing.health === 'cooling_down' && isModelScope(input.existing.scope)) {
     return input.existing.model === null || input.model !== input.existing.model
   }
   return input.existing.health === 'active' || input.existing.health === 'unverified'
+}
+
+/** A cooldown held for one model, whether on every key or on this key alone. */
+function isModelScope(scope: CapacityScopeKind): boolean {
+  return scope === 'connection_model' || scope === 'key_model'
 }
 
 function resultFrom(

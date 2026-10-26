@@ -102,7 +102,12 @@ export type InferenceFailureKind =
 
 export type InferenceFailureRetryAction = 'stop' | 'retry_same' | 'try_alternate'
 
-export type InferenceFailureCapacityScope = 'key' | 'account' | 'connection_model' | 'provider' | 'unknown'
+/**
+ * `key_model` is the one key-and-model pair that answered: the scope an
+ * ambiguous failure claims when nothing in it speaks for the whole key.
+ * `connection_model` is broader — that model on every key of the Provider.
+ */
+export type InferenceFailureCapacityScope = 'key' | 'account' | 'connection_model' | 'key_model' | 'provider' | 'unknown'
 
 /** Provider-owned meaning extracted from one non-success upstream answer. */
 export interface InferenceFailureClassification {

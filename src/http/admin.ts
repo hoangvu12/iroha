@@ -1021,6 +1021,7 @@ const keyResponse = t.Object({
     t.Literal('key'),
     t.Literal('account'),
     t.Literal('connection_model'),
+    t.Literal('key_model'),
     t.Literal('provider'),
     t.Literal('unknown'),
   ]),

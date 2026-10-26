@@ -439,27 +439,40 @@ export function createOpenAiStreamingNormalizer(): TransformStream<Uint8Array, U
   })
 }
 
-/** Conservative semantics shared by OpenAI-compatible adapters without a documented override. */
+/**
+ * Conservative semantics shared by OpenAI-compatible adapters without a documented override.
+ *
+ * A 403, 429 or 5xx is ambiguous on its own: Providers rate-limit, entitle and
+ * break individual models as often as whole keys. Unless the body names an
+ * account condition, the claim is therefore the narrowest one that is still
+ * true — `key_model`, the key that answered for the model it was asked — and
+ * the cooldown engine escalates to the whole key once several models fail the
+ * same way. A 401, or an account condition, speaks for the key at once.
+ */
 export function classifyGenericFailure(result: InferenceForwardResult): InferenceFailureClassification {
   const retryAfterSeconds = numericHeader(result.headers['retry-after'])
   if (result.status === 401) {
     return { kind: 'authentication_invalid', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
   }
   if (result.status === 403) {
-    return { kind: 'authentication_rejected', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }
+    const capacityScope = namesAccountCondition(result) ? 'key' : 'key_model'
+    return { kind: 'authentication_rejected', capacityScope, retryAction: 'try_alternate', retryAfterSeconds }
   }
   if (result.status === 429) {
-    return { kind: 'capacity_limited', capacityScope: 'unknown', retryAction: 'try_alternate', retryAfterSeconds }
+    const capacityScope = namesAccountCondition(result) ? 'key' : 'key_model'
+    return { kind: 'capacity_limited', capacityScope, retryAction: 'try_alternate', retryAfterSeconds }
   }
   if (result.status === 402) {
     return { kind: 'payment_required', capacityScope: 'unknown', retryAction: 'try_alternate', retryAfterSeconds }
   }
   if (result.status >= 500) {
     // A 5xx is an observation about one Attempt: the same key may simply
-    // succeed next time (`retryAction` is `retry_same`), so the capacity
-    // claim is key-scoped. Claiming `connection_model` here would let the
-    // cooldown engine disqualify every healthy sibling for the model.
-    return { kind: 'provider_failure', capacityScope: 'key', retryAction: 'retry_same', retryAfterSeconds }
+    // succeed next time (`retryAction` is `retry_same`). Backends fail per
+    // model, so the claim is the key-and-model pair; a Provider down for
+    // every model reaches the whole key through escalation. Claiming
+    // `connection_model` here would let the cooldown engine disqualify every
+    // healthy sibling for the model.
+    return { kind: 'provider_failure', capacityScope: 'key_model', retryAction: 'retry_same', retryAfterSeconds }
   }
   // A 404 from an upstream that carries the model in its catalog means the
   // specific key lacks entitlement, not that the model doesn't exist — try an
@@ -468,6 +481,49 @@ export function classifyGenericFailure(result: InferenceForwardResult): Inferenc
     return { kind: 'request_rejected', capacityScope: 'connection_model', retryAction: 'try_alternate', retryAfterSeconds }
   }
   return { kind: 'request_rejected', capacityScope: 'unknown', retryAction: 'stop', retryAfterSeconds }
+}
+
+/**
+ * Words with which a Provider describes the key itself or the account behind
+ * it rather than one model: a refused credential, an unverified profile, a
+ * suspension, spent credit or quota — e.g. ModelScope's 403 "please complete
+ * your profile via email verification".
+ * A refusal that also names a model ("your account cannot access this model")
+ * is about that model and stays narrow; escalation still catches a key that
+ * fails that way for every model.
+ */
+const ACCOUNT_CONDITION = /api[ _-]?key|credential|verif|profile|account|suspend|banned|deactivat|billing|balance|credit|quota|payment|arrear|subscription/i
+const NAMES_A_MODEL = /\bmodels?\b/i
+const ERROR_TEXT_MAXIMUM = 2_048
+
+function namesAccountCondition(result: InferenceForwardResult): boolean {
+  if (result.kind !== 'buffered') return false
+  const text = errorText(result.body)
+  return ACCOUNT_CONDITION.test(text) && !NAMES_A_MODEL.test(text)
+}
+
+/**
+ * The human- and machine-readable parts of an error body: the OpenAI-shaped
+ * `error` object or a flat envelope's `message`/`code`/`type`/`detail`. Only
+ * these are read, so a body that merely echoes the request's `model` field is
+ * not mistaken for a model-specific refusal. A non-JSON body is read as text.
+ */
+function errorText(body: string): string {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return body.slice(0, ERROR_TEXT_MAXIMUM)
+  }
+  if (typeof parsed !== 'object' || parsed === null) return ''
+  const root = parsed as Record<string, unknown>
+  const nested = typeof root.error === 'object' && root.error !== null
+    ? (root.error as Record<string, unknown>)
+    : {}
+  return [root.error, root.message, root.code, root.type, root.detail, nested.message, nested.code, nested.type]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ')
+    .slice(0, ERROR_TEXT_MAXIMUM)
 }
 
 function numericHeader(value: string | undefined): number | null {

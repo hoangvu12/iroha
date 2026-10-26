@@ -16,6 +16,8 @@ const WIDE_ONLY_MODEL = 'deepseek-v3.2'
 const NARROW_ONLY_MODEL = 'glm-5'
 const WIDE_KEY = 'sk-wide-entitlement-key'
 const NARROW_KEY = 'sk-narrow-entitlement-key'
+/** A key the fixture refuses to describe, so its availability stays unknown. */
+const UNDESCRIBED_KEY = 'sk-key-the-provider-will-not-describe'
 
 const CATALOGS: Record<string, readonly string[]> = {
   [`Bearer ${WIDE_KEY}`]: [SHARED_MODEL, WIDE_ONLY_MODEL],
@@ -158,6 +160,44 @@ describe('Key Model Availability', () => {
     }
 
     expect(new Set(attemptKeys())).toEqual(new Set([`Bearer ${WIDE_KEY}`, `Bearer ${NARROW_KEY}`]))
+  })
+
+  // Key Health outranks Key Model Availability. Availability is positive
+  // evidence about entitlement and says nothing about capacity, so a carrier
+  // whose cooldown merely expired must not be tried ahead of a key that
+  // carries no adverse evidence at all. Without this the Request walks every
+  // known-broke carrier first, and on a Provider with dozens of spent keys the
+  // one healthy credential is reached last.
+  test('prefers a healthy key with unknown availability over carriers on an expired cooldown', async () => {
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}/keys`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ upstreamKey: UNDESCRIBED_KEY }),
+      csrf,
+    })
+
+    // The two discovered carriers are spent: cooling down, but with the
+    // cooldown already behind them, so they are eligible on a controlled trial.
+    // The timestamp comes from the app's own clock, not the wall clock, or a
+    // "past" cooldown would still be in the Provider Registry's future.
+    const expired = new Date(iroha.clock.now().getTime() - 60_000)
+    for (const entry of await storedAvailability()) {
+      await iroha.database.providers.updateKey(entry.keyId, {
+        health: 'cooling_down',
+        healthReason: 'upstream HTTP 429',
+        healthChangedAt: expired,
+        retryAfterAt: expired,
+        healthScope: 'key',
+        healthScopeId: entry.keyId,
+        healthModel: null,
+      }, expired)
+    }
+    upstream.reset()
+
+    expect((await chat(SHARED_MODEL)).status).toBe(200)
+
+    // The very first Attempt, not the third, goes to the healthy key.
+    expect(attemptKeys()[0]).toBe(`Bearer ${UNDESCRIBED_KEY}`)
   })
 
   test('refuses a model no key carries without sending an Attempt', async () => {

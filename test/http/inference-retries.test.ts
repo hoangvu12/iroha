@@ -193,7 +193,7 @@ describe('scoped inference retries', () => {
     expect(retryDelays.every((delay) => delay <= 500)).toBe(true)
     const attempts = await iroha.database.requestHistory.getAttempts(response.headers.get('x-request-id')!)
     expect(attempts[0]?.diagnostics).toMatchObject({
-      providerCode: 'upstream_unreachable', classification: 'provider_failure', capacityScope: 'key',
+      providerCode: 'upstream_unreachable', classification: 'provider_failure', capacityScope: 'key_model',
     })
     expect(attempts.map((attempt) => attempt.status)).toEqual([502, 502, 200])
   })
@@ -595,6 +595,233 @@ describe('scoped inference retries', () => {
 
     expect(response.status).toBe(503)
     expect(upstream.calls).toHaveLength(2)
+  })
+})
+
+describe('key-and-model scoped Key Health', () => {
+  // Observed in production: Mistral rate-limits per model, so one model's 429
+  // cooled the key for every model and its siblings failed as
+  // `model_keys_unavailable` although they would have succeeded.
+  const MEDIUM = 'mistral-medium-latest'
+  const CODESTRAL = 'codestral-latest'
+  const MINISTRAL = 'ministral-8b-latest'
+  const SMALL = 'mistral-small-latest'
+
+  let iroha: TestApp
+  let upstream: ReturnType<typeof mockUpstreamTransport>
+  let csrf: string
+  let secret: string
+  let handle: string
+  let providerId: string
+
+  /** One key, one Attempt per Request: every call below lands on the same key. */
+  const createProvider = async (templateId?: string) => {
+    const created = await iroha.fetch('/api/v1/admin/providers', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({
+        handle: crypto.randomUUID(),
+        ...(templateId === undefined ? {} : { templateId }),
+        displayName: 'Per model',
+        baseUrl: BASE_URL,
+        keys: [{ upstreamKey: FIRST_KEY }],
+      }),
+    })
+    const provider = (await created.json()) as { id: string; handle: string }
+    providerId = provider.id
+    handle = provider.handle
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ retryMaxAttempts: 1 }),
+    })
+    const key = await iroha.fetch('/api/v1/admin/gateway-keys', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, csrf,
+      body: JSON.stringify({ name: 'Per model app', scope: [{ providerId }] }),
+    })
+    secret = ((await key.json()) as { secret: string }).secret
+    upstream.reset()
+  }
+
+  beforeEach(async () => {
+    upstream = mockUpstreamTransport()
+    iroha = await createTestApp({ upstreamTransport: upstream.fetch, retrySleep: async () => {} })
+    csrf = (await completeSetup(iroha)).csrf
+    await createProvider()
+  })
+
+  afterEach(async () => {
+    await iroha.dispose()
+  })
+
+  const chat = async (model: string) => {
+    const response = await iroha.fetch(`/providers/${handle}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Hello' }] }),
+    })
+    await response.text()
+    return response
+  }
+  const modelOf = (call: { body: string | null }) => (JSON.parse(call.body ?? '{}') as { model?: string }).model
+  /** Fails the listed models with `failure()`; every other model succeeds. */
+  const failing = (models: readonly string[], failure: () => Response) => {
+    upstream.respondWith((call) => {
+      const model = modelOf(call)
+      return model !== undefined && models.includes(model)
+        ? failure()
+        : Response.json({ ...completion(), model })
+    })
+  }
+  const storedKey = async () => (await iroha.database.providers.listKeys(providerId))[0]!
+  const rateLimited = () => Response.json(
+    { error: { message: 'Requests rate limit exceeded', type: 'rate_limited' } },
+    { status: 429, headers: { 'retry-after': '60' } },
+  )
+  const badGateway = () => Response.json({ error: { message: 'Bad gateway' } }, { status: 502 })
+  const forbidden = () => Response.json({ error: { message: 'Forbidden' } }, { status: 403 })
+
+  test.each([
+    ['429', rateLimited],
+    ['502', badGateway],
+    ['403 without an account condition', forbidden],
+  ] as const)('a %s on one model cools only that key-and-model pair', async (_, failure) => {
+    failing([MEDIUM], failure)
+
+    expect((await chat(MEDIUM)).status).not.toBe(200)
+    expect(await storedKey()).toMatchObject({
+      health: 'cooling_down', healthScope: 'key_model', healthModel: MEDIUM,
+    })
+
+    // The same key still serves its other models…
+    expect((await chat(CODESTRAL)).status).toBe(200)
+    expect(upstream.calls.map(modelOf)).toEqual([MEDIUM, CODESTRAL])
+    // …and a success on another model does not lift the cooled model's cooldown.
+    expect(await storedKey()).toMatchObject({ healthScope: 'key_model', healthModel: MEDIUM })
+    // The cooled pair is skipped without another Attempt until it expires.
+    expect((await chat(MEDIUM)).status).toBe(503)
+    expect(upstream.calls).toHaveLength(2)
+  })
+
+  test('each cooled model stays skipped while a later model takes the persisted claim', async () => {
+    failing([MEDIUM, CODESTRAL], rateLimited)
+
+    await chat(MEDIUM)
+    await chat(CODESTRAL)
+    expect(await storedKey()).toMatchObject({ healthScope: 'key_model', healthModel: CODESTRAL })
+
+    expect((await chat(MEDIUM)).status).toBe(503)
+    expect((await chat(SMALL)).status).toBe(200)
+    expect(upstream.calls.map(modelOf)).toEqual([MEDIUM, CODESTRAL, SMALL])
+  })
+
+  test.each([
+    ['429', rateLimited],
+    ['5xx', badGateway],
+  ] as const)('the same %s on three distinct models escalates to the whole key', async (_, failure) => {
+    failing([MEDIUM, CODESTRAL, MINISTRAL], failure)
+
+    await chat(MEDIUM)
+    await chat(CODESTRAL)
+    expect(await storedKey()).toMatchObject({ healthScope: 'key_model', healthModel: CODESTRAL })
+    await chat(MINISTRAL)
+
+    const key = await storedKey()
+    expect(key).toMatchObject({ health: 'cooling_down', healthScope: 'key', healthModel: null })
+    expect(key.retryAfterAt).not.toBeNull()
+    // A model that never failed is no longer routed to the key.
+    expect((await chat(SMALL)).status).toBe(503)
+    expect(upstream.calls).toHaveLength(3)
+  })
+
+  test('a Provider down for every model reaches the whole key within the window', async () => {
+    failing([MEDIUM, CODESTRAL, MINISTRAL], () => new Response('internal error', { status: 500 }))
+
+    await chat(MEDIUM)
+    iroha.clock.advance(60)
+    await chat(CODESTRAL)
+    iroha.clock.advance(60)
+    await chat(MINISTRAL)
+
+    expect(await storedKey()).toMatchObject({ health: 'cooling_down', healthScope: 'key' })
+  })
+
+  test('failures outside the escalation window or of different kinds do not escalate', async () => {
+    failing([MEDIUM, CODESTRAL], rateLimited)
+    await chat(MEDIUM)
+    await chat(CODESTRAL)
+    failing([MINISTRAL], badGateway)
+    await chat(MINISTRAL)
+    expect(await storedKey()).toMatchObject({ healthScope: 'key_model', healthModel: MINISTRAL })
+
+    // Five minutes on, the earlier 429s no longer count toward a third.
+    iroha.clock.advance(5 * 60 + 1)
+    failing([SMALL], rateLimited)
+    await chat(SMALL)
+    expect(await storedKey()).toMatchObject({ healthScope: 'key_model', healthModel: SMALL })
+  })
+
+  test.each([
+    ['401', () => new Response('invalid', { status: 401 }), 'invalid_authentication'],
+    ['403 naming an account condition', () => Response.json(
+      { error: { message: 'please complete your profile via email verification' } },
+      { status: 403 },
+    ), 'cooling_down'],
+    ['429 naming spent quota', () => Response.json(
+      { error: { message: 'You exceeded your current quota, please check your plan and billing details.', type: 'insufficient_quota' } },
+      { status: 429 },
+    ), 'cooling_down'],
+  ] as const)('a %s speaks for the whole key at once', async (_, failure, health) => {
+    failing([MEDIUM], failure)
+
+    await chat(MEDIUM)
+
+    expect(await storedKey()).toMatchObject({ health, healthScope: 'key', healthModel: null })
+    expect((await chat(CODESTRAL)).status).toBe(503)
+    expect(upstream.calls).toHaveLength(1)
+  })
+
+  test('a key-and-model cooldown expires into a controlled trial that recovers the key', async () => {
+    failing([MEDIUM], rateLimited)
+    await chat(MEDIUM)
+    expect((await chat(MEDIUM)).status).toBe(503)
+
+    iroha.clock.advance(61)
+    failing([], rateLimited)
+
+    expect((await chat(MEDIUM)).status).toBe(200)
+    expect(await storedKey()).toMatchObject({ health: 'active', healthScope: 'key', healthModel: null })
+    expect(upstream.calls.map(modelOf)).toEqual([MEDIUM, MEDIUM])
+  })
+
+  test('an escalated key recovers through the same expiry and trial', async () => {
+    failing([MEDIUM, CODESTRAL, MINISTRAL], rateLimited)
+    await chat(MEDIUM)
+    await chat(CODESTRAL)
+    await chat(MINISTRAL)
+    expect(await storedKey()).toMatchObject({ healthScope: 'key' })
+
+    iroha.clock.advance(61)
+    failing([], rateLimited)
+
+    expect((await chat(SMALL)).status).toBe(200)
+    expect(await storedKey()).toMatchObject({ health: 'active' })
+    // The success discarded the expired failures: one more 429 cools one model.
+    failing([MEDIUM], rateLimited)
+    await chat(MEDIUM)
+    expect(await storedKey()).toMatchObject({ healthScope: 'key_model', healthModel: MEDIUM })
+  })
+
+  test('a precise Inference Adapter classification still speaks for the whole key', async () => {
+    // Z.ai answers a credential issued for another Z.ai product with 429 code
+    // 1315. Its adapter reads that as a key-scoped refusal, which must win over
+    // the generic per-model reading of a 429.
+    await createProvider('zai')
+    failing([MEDIUM], () => Response.json({ error: { code: '1315', message: 'wrong product' } }, { status: 429 }))
+
+    await chat(MEDIUM)
+
+    expect(await storedKey()).toMatchObject({ health: 'cooling_down', healthScope: 'key', healthModel: null })
+    expect((await chat(CODESTRAL)).status).toBe(503)
+    expect(upstream.calls).toHaveLength(1)
   })
 })
 

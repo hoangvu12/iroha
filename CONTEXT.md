@@ -33,7 +33,7 @@ A legacy grouping of Upstream Keys believed to share one Provider billing accoun
 _Avoid_: Owner, key pool
 
 **Capacity Scope**:
-The resource affected by an upstream limit: one key, an Upstream Account, a provider-and-model pair, an entire Provider, or an unknown scope.
+The resource affected by an upstream limit: one key, a key-and-model pair, an Upstream Account, a provider-and-model pair, an entire Provider, or an unknown scope. A failure that names no account condition claims the narrowest true scope, the key-and-model pair; it escalates to the key when the same failure reaches several distinct models of that key within a short window.
 _Avoid_: Rate limit, quota
 
 **Capacity Evidence**:

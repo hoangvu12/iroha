@@ -21,7 +21,8 @@ export interface KeyView {
   readonly healthReason: string | null
   readonly healthChangedAt: string
   readonly retryAfterAt: string | null
-  readonly healthScope: 'key' | 'account' | 'connection_model' | 'provider' | 'unknown'
+  /** `key_model`: cooling down for `healthModel` only; the key still serves its other models. */
+  readonly healthScope: 'key' | 'account' | 'connection_model' | 'key_model' | 'provider' | 'unknown'
   readonly healthScopeId: string | null
   readonly healthModel: string | null
   readonly accountId: string | null

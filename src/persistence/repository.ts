@@ -199,7 +199,12 @@ export type UpstreamKeyHealth =
   | 'exhausted'
   | 'disabled'
 
-export type CapacityScopeKind = 'key' | 'account' | 'connection_model' | 'provider' | 'unknown'
+/**
+ * `key_model` holds one key's cooldown for one model (`healthModel`) and leaves
+ * the key routable for its others; `connection_model` holds that model on every
+ * key of the Provider. Neither needs its own column.
+ */
+export type CapacityScopeKind = 'key' | 'account' | 'connection_model' | 'key_model' | 'provider' | 'unknown'
 
 /**
  * One Owner-configured group of Upstream Keys that share Provider billing or

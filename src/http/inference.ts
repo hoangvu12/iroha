@@ -967,7 +967,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
         },
       )
       if (streamed.status >= 200 && streamed.status < 300) {
-        await providers.recordInferenceSuccess(target.keyId)
+        await providers.recordInferenceSuccess(target.keyId, envelope.model)
         await lastAttemptRecorder?.finalize({
           status: streamed.status,
           outcome: 'success',
@@ -1142,7 +1142,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
     }
 
     if (lastUpstream.status >= 200 && lastUpstream.status < 300) {
-      await providers.recordInferenceSuccess(target.keyId)
+      await providers.recordInferenceSuccess(target.keyId, envelope.model)
       const usage = lastUpstream.kind === 'buffered' ? parseUsage(lastUpstream.body) : { promptTokens: null, completionTokens: null, totalTokens: null }
       await lastAttemptRecorder?.finalize({
         status: lastUpstream.status,
@@ -1671,7 +1671,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
           correlationId,
         )
         if (streamed.status >= 200 && streamed.status < 300) {
-          await providers.recordInferenceSuccess(target.keyId)
+          await providers.recordInferenceSuccess(target.keyId, envelope.model)
           await lastAttemptRecorder?.finalize({
             status: streamed.status,
             outcome: 'success',
@@ -1848,7 +1848,7 @@ transientRetry ||= classification.kind === 'capacity_limited' || classification.
       }
 
       if (lastUpstream.status >= 200 && lastUpstream.status < 300) {
-        await providers.recordInferenceSuccess(target.keyId)
+        await providers.recordInferenceSuccess(target.keyId, envelope.model)
         await lastAttemptRecorder?.finalize({
           status: lastUpstream.status,
           outcome: 'success',

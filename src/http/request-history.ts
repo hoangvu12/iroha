@@ -157,6 +157,7 @@ const attemptDto = t.Object({
     status: t.Optional(t.Number()),
     providerCode: t.Optional(t.String()),
     providerType: t.Optional(t.String()),
+    providerField: t.Optional(t.String()),
     classification: t.Optional(t.String()),
     capacityScope: t.Optional(t.String()),
     limitingWindow: t.Optional(t.String()),

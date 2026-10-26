@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core'
 
 /**
  * The PostgreSQL schema. It has its own migration history under
@@ -26,24 +26,32 @@ export const owner = pgTable('owner', {
   }).notNull(),
 })
 
-export const ownerSessions = pgTable('owner_sessions', {
-  id: text('id').primaryKey(),
-  secretHash: text('secret_hash').notNull(),
-  csrfToken: text('csrf_token').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
-  lastSeenAt: timestamp('last_seen_at', { withTimezone: true, mode: 'date' }).notNull(),
-  expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
-  userAgent: text('user_agent'),
-})
+export const ownerSessions = pgTable(
+  'owner_sessions',
+  {
+    id: text('id').primaryKey(),
+    secretHash: text('secret_hash').notNull(),
+    csrfToken: text('csrf_token').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true, mode: 'date' }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    userAgent: text('user_agent'),
+  },
+  (table) => ({ expiresAtIdx: index('owner_sessions_expires_at_idx').on(table.expiresAt) }),
+)
 
-export const auditEvents = pgTable('audit_events', {
-  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-  occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
-  action: text('action').notNull(),
-  outcome: text('outcome').notNull(),
-  /** Never holds a secret value. */
-  detail: jsonb('detail'),
-})
+export const auditEvents = pgTable(
+  'audit_events',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
+    action: text('action').notNull(),
+    outcome: text('outcome').notNull(),
+    /** Never holds a secret value. */
+    detail: jsonb('detail'),
+  },
+  (table) => ({ occurredAtIdx: index('audit_events_occurred_at_idx').on(table.occurredAt) }),
+)
 
 /**
  * One Owner-configured upstream brand the Gateway reaches. The ID is immutable
@@ -98,15 +106,19 @@ export const providers = pgTable('providers', {
  * billing or capacity. Deleting an account ungroups its keys instead of
  * deleting them.
  */
-export const upstreamAccounts = pgTable('upstream_accounts', {
-  id: text('id').primaryKey(),
-  providerId: text('provider_id')
-    .notNull()
-    .references(() => providers.id, { onDelete: 'cascade' }),
-  displayName: text('display_name').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
-})
+export const upstreamAccounts = pgTable(
+  'upstream_accounts',
+  {
+    id: text('id').primaryKey(),
+    providerId: text('provider_id')
+      .notNull()
+      .references(() => providers.id, { onDelete: 'cascade' }),
+    displayName: text('display_name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (table) => ({ providerIdIdx: index('upstream_accounts_provider_id_idx').on(table.providerId) }),
+)
 
 /**
  * An Upstream Key attached to one Provider. Only cipher output is stored, so a
@@ -115,32 +127,36 @@ export const upstreamAccounts = pgTable('upstream_accounts', {
  * endpoints (e.g. distinct regional or branded deployments). Model allow/deny
  * lists are JSON arrays, owned by the repository.
  */
-export const upstreamKeys = pgTable('upstream_keys', {
-  id: text('id').primaryKey(),
-  providerId: text('provider_id')
-    .notNull()
-    .references(() => providers.id, { onDelete: 'cascade' }),
-  /** Per-Key override of the Provider's base URL; null means inherit the Provider's. */
-  baseUrl: text('base_url'),
-  accountId: text('account_id').references(() => upstreamAccounts.id, {
-    onDelete: 'set null',
-  }),
-  encryptedKey: text('encrypted_key').notNull(),
-  health: text('health').notNull(),
-  lastProbeAt: timestamp('last_probe_at', { withTimezone: true, mode: 'date' }),
-  lastProbeVerdict: text('last_probe_verdict'),
-  lastProbeReason: text('last_probe_reason'),
-  healthReason: text('health_reason'),
-  healthChangedAt: timestamp('health_changed_at', { withTimezone: true, mode: 'date' }),
-  retryAfterAt: timestamp('retry_after_at', { withTimezone: true, mode: 'date' }),
-  healthScope: text('health_scope').notNull().default('key'),
-  healthScopeId: text('health_scope_id'),
-  healthModel: text('health_model'),
-  allowedModels: jsonb('allowed_models'),
-  deniedModels: jsonb('denied_models'),
-  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
-})
+export const upstreamKeys = pgTable(
+  'upstream_keys',
+  {
+    id: text('id').primaryKey(),
+    providerId: text('provider_id')
+      .notNull()
+      .references(() => providers.id, { onDelete: 'cascade' }),
+    /** Per-Key override of the Provider's base URL; null means inherit the Provider's. */
+    baseUrl: text('base_url'),
+    accountId: text('account_id').references(() => upstreamAccounts.id, {
+      onDelete: 'set null',
+    }),
+    encryptedKey: text('encrypted_key').notNull(),
+    health: text('health').notNull(),
+    lastProbeAt: timestamp('last_probe_at', { withTimezone: true, mode: 'date' }),
+    lastProbeVerdict: text('last_probe_verdict'),
+    lastProbeReason: text('last_probe_reason'),
+    healthReason: text('health_reason'),
+    healthChangedAt: timestamp('health_changed_at', { withTimezone: true, mode: 'date' }),
+    retryAfterAt: timestamp('retry_after_at', { withTimezone: true, mode: 'date' }),
+    healthScope: text('health_scope').notNull().default('key'),
+    healthScopeId: text('health_scope_id'),
+    healthModel: text('health_model'),
+    allowedModels: jsonb('allowed_models'),
+    deniedModels: jsonb('denied_models'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (table) => ({ providerIdIdx: index('upstream_keys_provider_id_idx').on(table.providerId) }),
+)
 
 /**
  * An application credential the Owner issues. The secret itself never lands
@@ -208,19 +224,25 @@ export const modelCatalogSync = pgTable('model_catalog_sync', {
  * it. `stale` marks a list retained through a failed rediscovery, which stays
  * usable — the previous answer beats no answer.
  */
-export const keyModelAvailability = pgTable('key_model_availability', {
-  keyId: text('key_id')
-    .primaryKey()
-    .references(() => upstreamKeys.id, { onDelete: 'cascade' }),
-  providerId: text('provider_id')
-    .notNull()
-    .references(() => providers.id, { onDelete: 'cascade' }),
-  /** JSON array of exact model IDs. */
-  models: jsonb('models').notNull(),
-  /** When the Provider last answered; drives the age limit that forces a re-read. */
-  discoveredAt: timestamp('discovered_at', { withTimezone: true, mode: 'date' }).notNull(),
-  stale: boolean('stale').notNull().default(false),
-})
+export const keyModelAvailability = pgTable(
+  'key_model_availability',
+  {
+    keyId: text('key_id')
+      .primaryKey()
+      .references(() => upstreamKeys.id, { onDelete: 'cascade' }),
+    providerId: text('provider_id')
+      .notNull()
+      .references(() => providers.id, { onDelete: 'cascade' }),
+    /** JSON array of exact model IDs. */
+    models: jsonb('models').notNull(),
+    /** When the Provider last answered; drives the age limit that forces a re-read. */
+    discoveredAt: timestamp('discovered_at', { withTimezone: true, mode: 'date' }).notNull(),
+    stale: boolean('stale').notNull().default(false),
+  },
+  (table) => ({
+    providerIdIdx: index('key_model_availability_provider_id_idx').on(table.providerId),
+  }),
+)
 
 /**
  * The last usage polling outcome of one Provider. `result` holds the last
@@ -258,32 +280,46 @@ export const usageSnapshots = pgTable('usage_snapshots', {
  * when the Provider supplied it. No prompts, no responses, no upstream
  * message bodies.
  */
-export const requestEvents = pgTable('request_events', {
-  id: text('id').primaryKey(),
-  /** Internal lifecycle; only completed rows are Owner-visible. */
-  lifecycle: text('lifecycle').notNull().default('completed'),
-  occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
-  providerId: text('provider_id')
-    .notNull()
-    .references(() => providers.id, { onDelete: 'cascade' }),
-  providerHandle: text('provider_handle'),
-  model: text('model').notNull(),
-  /** Public identity of the Gateway Key the application presented. */
-  gatewayKeyId: text('gateway_key_id'),
-  gatewayKeyName: text('gateway_key_name'),
-  /** Public identity of the Upstream Key the request actually used. */
-  keyId: text('key_id'),
-  /** Final HTTP status Iroha returned to the caller. */
-  status: integer('status').notNull(),
-  outcome: text('outcome').notNull(),
-  latencyMs: integer('latency_ms').notNull(),
-  isStreaming: boolean('is_streaming').notNull(),
-  promptTokens: integer('prompt_tokens'),
-  completionTokens: integer('completion_tokens'),
-  totalTokens: integer('total_tokens'),
-  /** Stable Iroha error code on failure; null on success. */
-  errorCode: text('error_code'),
-})
+export const requestEvents = pgTable(
+  'request_events',
+  {
+    id: text('id').primaryKey(),
+    /** Internal lifecycle; only completed rows are Owner-visible. */
+    lifecycle: text('lifecycle').notNull().default('completed'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
+    providerId: text('provider_id')
+      .notNull()
+      .references(() => providers.id, { onDelete: 'cascade' }),
+    providerHandle: text('provider_handle'),
+    model: text('model').notNull(),
+    /** Public identity of the Gateway Key the application presented. */
+    gatewayKeyId: text('gateway_key_id'),
+    gatewayKeyName: text('gateway_key_name'),
+    /** Public identity of the Upstream Key the request actually used. */
+    keyId: text('key_id'),
+    /** Final HTTP status Iroha returned to the caller. */
+    status: integer('status').notNull(),
+    outcome: text('outcome').notNull(),
+    latencyMs: integer('latency_ms').notNull(),
+    isStreaming: boolean('is_streaming').notNull(),
+    promptTokens: integer('prompt_tokens'),
+    completionTokens: integer('completion_tokens'),
+    totalTokens: integer('total_tokens'),
+    /** Stable Iroha error code on failure; null on success. */
+    errorCode: text('error_code'),
+  },
+  (table) => ({
+    occurredAtIdx: index('request_events_occurred_at_idx').on(table.occurredAt),
+    lifecycleOccurredAtIdx: index('request_events_lifecycle_occurred_at_idx').on(
+      table.lifecycle,
+      table.occurredAt,
+    ),
+    providerOccurredAtIdx: index('request_events_provider_id_occurred_at_idx').on(
+      table.providerId,
+      table.occurredAt,
+    ),
+  }),
+)
 
 /**
  * One attempt within an inference call's retry trail. Each row describes one
@@ -291,23 +327,27 @@ export const requestEvents = pgTable('request_events', {
  * produced, and what Iroha decided to do with it next (retry, skip, succeed).
  * No upstream bodies, no headers, no secrets.
  */
-export const requestAttempts = pgTable('request_attempts', {
-  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-  requestId: text('request_id')
-    .notNull()
-    .references(() => requestEvents.id, { onDelete: 'cascade' }),
-  attemptNumber: integer('attempt_number').notNull(),
-  /** Public identity of the Upstream Key tried on this attempt. */
-  keyId: text('key_id'),
-  startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull(),
-  completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
-  status: integer('status'),
-  /** 'success' | 'failure' | 'skipped' (skipped when no key was eligible) */
-  outcome: text('outcome').notNull(),
-  errorCode: text('error_code'),
-  retryAfterSeconds: integer('retry_after_seconds'),
-  diagnostics: jsonb('provider_diagnostics').notNull().default({}),
-})
+export const requestAttempts = pgTable(
+  'request_attempts',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    requestId: text('request_id')
+      .notNull()
+      .references(() => requestEvents.id, { onDelete: 'cascade' }),
+    attemptNumber: integer('attempt_number').notNull(),
+    /** Public identity of the Upstream Key tried on this attempt. */
+    keyId: text('key_id'),
+    startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+    status: integer('status'),
+    /** 'success' | 'failure' | 'skipped' (skipped when no key was eligible) */
+    outcome: text('outcome').notNull(),
+    errorCode: text('error_code'),
+    retryAfterSeconds: integer('retry_after_seconds'),
+    diagnostics: jsonb('provider_diagnostics').notNull().default({}),
+  },
+  (table) => ({ requestIdIdx: index('request_attempts_request_id_idx').on(table.requestId) }),
+)
 
 /**
  * One background job's durable status. The scheduler writes one row per job and
@@ -317,15 +357,19 @@ export const requestAttempts = pgTable('request_attempts', {
  * recent completed run. `last_error_message` is structural text only, never
  * upstream body content that could echo a secret.
  */
-export const backgroundJobs = pgTable('background_jobs', {
-  jobId: text('job_id').primaryKey(),
-  lastStartedAt: timestamp('last_started_at', { withTimezone: true, mode: 'date' }),
-  lastCompletedAt: timestamp('last_completed_at', { withTimezone: true, mode: 'date' }),
-  status: text('status').notNull(),
-  lastOutcome: text('last_outcome'),
-  lastErrorCode: text('last_error_code'),
-  lastErrorMessage: text('last_error_message'),
-  lastDurationMs: integer('last_duration_ms'),
-  lastAffectedCount: integer('last_affected_count'),
-  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
-})
+export const backgroundJobs = pgTable(
+  'background_jobs',
+  {
+    jobId: text('job_id').primaryKey(),
+    lastStartedAt: timestamp('last_started_at', { withTimezone: true, mode: 'date' }),
+    lastCompletedAt: timestamp('last_completed_at', { withTimezone: true, mode: 'date' }),
+    status: text('status').notNull(),
+    lastOutcome: text('last_outcome'),
+    lastErrorCode: text('last_error_code'),
+    lastErrorMessage: text('last_error_message'),
+    lastDurationMs: integer('last_duration_ms'),
+    lastAffectedCount: integer('last_affected_count'),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (table) => ({ statusIdx: index('background_jobs_status_idx').on(table.status) }),
+)

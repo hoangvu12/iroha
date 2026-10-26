@@ -17,6 +17,7 @@
 
 import { adapterBlockedHeaders } from './blocked-headers.ts'
 import { classifyGenericFailure, upstreamUrl } from './generic-adapter.ts'
+import { redirectPolicy, upstreamFetch } from './upstream-transport.ts'
 import type {
   AnthropicForwardRequest,
   InferenceAdapter,
@@ -119,19 +120,27 @@ export function createAnthropicInferenceAdapter(
         stream: wantStream,
       })
 
-      const response = await fetchImpl(upstreamUrl(request.baseUrl, upstreamPath), {
+      const policy = redirectPolicy(request)
+      const upstream = await upstreamFetch(fetchImpl, {
+        url: upstreamUrl(request.baseUrl, upstreamPath),
         method: 'POST',
         headers: callHeaders,
         body: JSON.stringify(translatedBody),
+        follow: policy.follow,
+        origin: policy.origin,
         signal: request.signal ?? null,
+        headerTimeoutMs: request.firstByteTimeoutMs,
+        totalTimeoutMs: request.nonStreamingTotalTimeoutMs,
       })
+      const response = upstream.response
 
       if (wantStream) {
         return translateStreamingResponse(response, model, toolNameReverseMap)
       }
 
       const responseHeaders: Record<string, string> = Object.fromEntries(response.headers.entries())
-      const rawBody = await response.text()
+      const rawBody = await upstream.readText()
+      upstream.dispose()
 
       if (response.status < 200 || response.status >= 300) {
         return translateErrorResponse(response.status, rawBody, responseHeaders)
@@ -147,6 +156,7 @@ export function createAnthropicInferenceAdapter(
       const passthrough = request.passthrough === true
 
       if (passthrough) {
+        const policy = redirectPolicy(request)
         const callHeaders = buildAnthropicPassthroughHeaders({
           callerHeaders: request.headers,
           authHeader: request.authHeader,
@@ -156,12 +166,18 @@ export function createAnthropicInferenceAdapter(
           stream: wantStream,
         })
 
-        const response = await fetchImpl(upstreamUrl(request.baseUrl, '/messages'), {
+        const upstream = await upstreamFetch(fetchImpl, {
+          url: upstreamUrl(request.baseUrl, '/messages'),
           method: 'POST',
           headers: callHeaders,
-          body: request.body,
+          body: request.body ?? undefined,
+          follow: policy.follow,
+          origin: policy.origin,
           signal: request.signal ?? null,
+          headerTimeoutMs: request.firstByteTimeoutMs,
+          totalTimeoutMs: request.nonStreamingTotalTimeoutMs,
         })
+        const response = upstream.response
 
         if (response.status < 200 || response.status >= 300) {
           return await passthroughErrorResponseBody(response)
@@ -172,7 +188,8 @@ export function createAnthropicInferenceAdapter(
         }
 
         const responseHeaders: Record<string, string> = Object.fromEntries(response.headers.entries())
-        const rawBody = await response.text()
+        const rawBody = await upstream.readText()
+        upstream.dispose()
         return {
           kind: 'buffered',
           status: response.status,
@@ -1544,17 +1561,25 @@ async function forwardAnthropicAsOpenAi(
     staticHeaders: request.staticHeaders,
     stream: wantStream,
   })
-  delete (callHeaders as Record<string, string>)['anthropic-version']
+delete (callHeaders as Record<string, string>)['anthropic-version']
 
-  const response = await fetchImpl(upstreamUrl(request.baseUrl, '/chat/completions'), {
+  const policy = redirectPolicy(request)
+  const upstream = await upstreamFetch(fetchImpl, {
+    url: upstreamUrl(request.baseUrl, '/chat/completions'),
     method: 'POST',
     headers: callHeaders,
     body: JSON.stringify(openAiBody),
+    follow: policy.follow,
+    origin: policy.origin,
     signal: request.signal ?? null,
+    headerTimeoutMs: request.firstByteTimeoutMs,
+    totalTimeoutMs: request.nonStreamingTotalTimeoutMs,
   })
+  const response = upstream.response
 
   if (response.status < 200 || response.status >= 300) {
-    const rawBody = await response.text()
+    const rawBody = await upstream.readText()
+    upstream.dispose()
     request.onUpstreamFailure?.({
       kind: 'buffered', status: response.status,
       headers: Object.fromEntries(response.headers.entries()), body: rawBody,
@@ -1567,7 +1592,8 @@ async function forwardAnthropicAsOpenAi(
   }
 
   const responseHeaders: Record<string, string> = Object.fromEntries(response.headers.entries())
-  const rawBody = await response.text()
+  const rawBody = await upstream.readText()
+  upstream.dispose()
   return openAiToAnthropicCompletionResponse(rawBody, model, toolNameReverseMap, responseHeaders)
 }
 
@@ -1608,7 +1634,6 @@ function translateAnthropicToOpenAi(
     if (Array.isArray(content)) {
       const textSegments: string[] = []
       const imageParts: Array<Record<string, unknown>> = []
-      const callId = typeof message.id === 'string' ? message.id : null
       for (const block of content) {
         if (block === null || typeof block !== 'object' || Array.isArray(block)) continue
         const b = block as Record<string, unknown>
@@ -1673,8 +1698,12 @@ function translateAnthropicToOpenAi(
         }
       }
       const textContent = textSegments.join('')
+      // A replayed assistant turn still carries the `id` Anthropic gave it. The
+      // OpenAI-shape message has no such field, so forwarding it makes a
+      // Provider with a strict body validator reject the whole Request — the
+      // first turn of a conversation succeeds and every later one answers 422
+      // `extra_forbidden`. The id names a past response and routes nothing.
       const outMessage: Record<string, unknown> = { role }
-      if (callId !== null) outMessage.id = callId
       if (imageParts.length > 0) {
         const parts: Array<Record<string, unknown>> = []
         if (textContent.length > 0) parts.push({ type: 'text', text: textContent })

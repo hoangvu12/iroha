@@ -12,6 +12,9 @@ import {
   flushStreamingReasoning,
   type StreamingReasoningState,
 } from './streaming-reasoning.ts'
+import type { ProviderDiagnostics } from '../providers/provider-evidence.ts'
+import { redirectPolicy, upstreamFetch } from './upstream-transport.ts'
+import { safeUpstreamErrorFields } from './upstream-error-fields.ts'
 
 export { appendStreamingReasoning as splitStreamingReasoning } from './streaming-reasoning.ts'
 
@@ -99,37 +102,42 @@ export function createGenericInferenceAdapter(
       mergeStaticHeaders(forwarded, request.staticHeaders, request.authHeader)
 
       const upstreamHeaders = { ...forwarded }
-      const signal = request.signal ?? null
-
-      const follow = request.redirectAllowSameOrigin ? 'follow-same-origin' : 'manual'
-      const response = await fetchWithSameOriginRedirects(fetchImpl, {
+      const policy = redirectPolicy(request)
+      const upstream = await upstreamFetch(fetchImpl, {
         url: upstreamUrl(request.baseUrl, request.path),
         method: request.method,
         headers: upstreamHeaders,
         body: request.body ?? undefined,
-        signal,
-        follow,
-        origin: sameOriginOf(request.baseUrl),
+        follow: policy.follow,
+        origin: policy.origin,
+        signal: request.signal ?? null,
+        // The header deadline is the first-byte budget: time to response
+        // headers, which includes connection establishment. A custom transport
+        // would be needed to bound connect separately.
+        headerTimeoutMs: request.firstByteTimeoutMs,
+        totalTimeoutMs: request.nonStreamingTotalTimeoutMs,
       })
 
       if (request.stream === true) {
-        const upstream = response.body ?? new ReadableStream<Uint8Array>()
-        const contentType = response.headers.get('content-type') ?? ''
+        // No total deadline: the route's deadlineGuard owns streaming idleness.
+        const upstreamBody = upstream.response.body ?? new ReadableStream<Uint8Array>()
+        const contentType = upstream.response.headers.get('content-type') ?? ''
         return {
           kind: 'stream',
-          status: response.status,
-          headers: Object.fromEntries(response.headers.entries()),
+          status: upstream.response.status,
+          headers: Object.fromEntries(upstream.response.headers.entries()),
           stream: contentType.toLowerCase().includes('text/event-stream')
-            ? upstream.pipeThrough(createOpenAiStreamingNormalizer())
-            : upstream,
+            ? upstreamBody.pipeThrough(createOpenAiStreamingNormalizer())
+            : upstreamBody,
         }
       }
 
-      const rawBody = await response.text()
+      const rawBody = await upstream.readText()
+      upstream.dispose()
       return {
         kind: 'buffered',
-        status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
+        status: upstream.response.status,
+        headers: Object.fromEntries(upstream.response.headers.entries()),
         body: normalizeOpenAiResponseBody(rawBody),
       }
     },
@@ -270,76 +278,6 @@ function mergeStaticHeaders(
 }
 
 /**
- * A manually-redirected fetch the same-origin path walks. The transport is
- * `redirect: 'manual'` on every call; the wrapper inspects each response and,
- * when the Owner enabled same-origin redirects, follows it as long as the
- * `Location` stays on the configured origin. A cross-origin hop returns the
- * redirect response itself so the routing layer can map it to `upstream_redirect`.
- */
-async function fetchWithSameOriginRedirects(
-  fetchImpl: typeof fetch,
-  options: {
-    url: string
-    method: InferenceForwardRequest['method']
-    headers: Readonly<Record<string, string>>
-    body: string | undefined
-    signal: AbortSignal | null
-    follow: 'manual' | 'follow-same-origin'
-    origin: string | null
-  },
-): Promise<Response> {
-  let currentUrl = options.url
-  let currentHeaders: Record<string, string> = { ...options.headers }
-
-  while (true) {
-    const response = await fetchImpl(currentUrl, {
-      method: options.method,
-      headers: currentHeaders,
-      body: options.body,
-      redirect: 'manual',
-      signal: options.signal,
-    })
-
-    if (response.status < 300 || response.status >= 400) return response
-    if (options.follow !== 'follow-same-origin') return response
-    if (options.origin === null) return response
-
-    const location = response.headers.get('location')
-    if (location === null) return response
-    void response.body?.cancel().catch(() => undefined)
-
-    const nextUrl = new URL(location, currentUrl).href
-    if (!sameOrigin(nextUrl, options.origin)) return response
-
-    // Credentials and static headers stay in place because the resolved URL
-    // remains on the configured origin. Iroha never propagates them across a
-    // host change; this branch is exactly the "same-origin only" path.
-    currentUrl = nextUrl
-  }
-}
-
-/** The `{scheme}://{host}:{port}` portion of a base URL, or null when invalid. */
-function sameOriginOf(baseUrl: string): string | null {
-  try {
-    const parsed = new URL(baseUrl)
-    return `${parsed.protocol}//${parsed.host}`
-  } catch {
-    return null
-  }
-}
-
-/** Two URLs share an origin when their scheme, host, and port match. */
-function sameOrigin(url: string, origin: string): boolean {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return false
-  }
-  return `${parsed.protocol}//${parsed.host}` === origin
-}
-
-/**
  * Looks at the caller's headers and reports whether the request already carries
  * an idempotency value. The header name lookup is case-insensitive so a caller
  * writing `Idempotency-Key` or `idempotency-key` is the same Iroha read.
@@ -441,6 +379,30 @@ export function createOpenAiStreamingNormalizer(): TransformStream<Uint8Array, U
 
 /** Conservative semantics shared by OpenAI-compatible adapters without a documented override. */
 export function classifyGenericFailure(result: InferenceForwardResult): InferenceFailureClassification {
+  const status = classifyGenericStatus(result)
+  const diagnostics = genericDiagnostics(result)
+  return diagnostics === undefined ? status : { ...status, diagnostics }
+}
+
+/**
+ * The bounded facts a generic Provider named about its own rejection: the
+ * Provider's error code and type, and the request field a strict validator
+ * refused. A body that named none of them contributes no diagnostics at all,
+ * so an unrecognized failure stays as empty as before rather than growing a
+ * bare status the Attempt row already carries.
+ */
+function genericDiagnostics(result: InferenceForwardResult): ProviderDiagnostics | undefined {
+  if (result.kind !== 'buffered' || result.body === '') return undefined
+  const fields = safeUpstreamErrorFields(result.body)
+  if (fields.code === null && fields.type === null && fields.field === null) return undefined
+  return {
+    ...(fields.code === null ? {} : { providerCode: fields.code }),
+    ...(fields.type === null ? {} : { providerType: fields.type }),
+    ...(fields.field === null ? {} : { providerField: fields.field }),
+  }
+}
+
+function classifyGenericStatus(result: InferenceForwardResult): InferenceFailureClassification {
   const retryAfterSeconds = numericHeader(result.headers['retry-after'])
   if (result.status === 401) {
     return { kind: 'authentication_invalid', capacityScope: 'key', retryAction: 'try_alternate', retryAfterSeconds }

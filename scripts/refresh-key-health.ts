@@ -96,7 +96,7 @@ try {
     let patch: Record<string, unknown>
     if (key.health === 'disabled') {
       patch = { lastProbeAt: at, lastProbeVerdict: verdict, lastProbeReason: reason }
-    } else if (verdict === 'usable') {
+    } else if (verdict === 'authenticated') {
       patch = {
         health: 'active',
         healthReason: 'manual test confirmed usable',

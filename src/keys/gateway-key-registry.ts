@@ -440,7 +440,46 @@ export class GatewayKeyRegistry {
   ): Promise<ConnectionAuthorization> {
     const key = await this.#locateKey(token)
     if (key === null) return { ok: false, code: 'gateway_key_invalid' }
+    return await this.#authorizeScopeWithKey(key, providerId)
+  }
 
+  /**
+   * Authenticates a presented credential without recording a use or reading
+   * scope. Callers that need to authorize more than one thing against the same
+   * credential (the global Qualified Model path authorizes provider then model)
+   * locate once through this method and reuse the record, instead of paying a
+   * fresh lookup and hash per check.
+   */
+  async authenticate(token: string | null): Promise<GatewayKeyRecord | null> {
+    return await this.#locateKey(token)
+  }
+
+  /** Authorizes one provider-scoped Models list against an already-located Key. */
+  async authorizeProviderWithKey(
+    key: GatewayKeyRecord,
+    providerId: string,
+  ): Promise<ConnectionAuthorization> {
+    return await this.#authorizeScopeWithKey(key, providerId)
+  }
+
+  /** Authorizes one provider-scoped inference call against an already-located Key. */
+  async authorizeInferenceWithKey(
+    key: GatewayKeyRecord,
+    providerId: string,
+    model: string,
+  ): Promise<InferenceAuthorization> {
+    const located = await this.#authorizeScopeWithKey(key, providerId)
+    if (!located.ok) return located
+    if (located.models !== null && !located.models.includes(model)) {
+      return { ok: false, code: 'model_not_allowed' }
+    }
+    return { ok: true, keyId: key.id, keyName: key.name }
+  }
+
+  async #authorizeScopeWithKey(
+    key: GatewayKeyRecord,
+    providerId: string,
+  ): Promise<ConnectionAuthorization> {
     const access = accessOf(key)
     let entry: GatewayKeyScopeEntry | undefined
     if (access.mode === 'all') {

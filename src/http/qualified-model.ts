@@ -37,16 +37,19 @@ export async function authorizeQualifiedModel(options: {
   const parsed = parseQualifiedModelId(options.input)
   if (!parsed.ok) return parsed
 
-  const authentication = await options.gatewayKeys.discover(options.token ?? '')
-  if (!authentication.ok) return { ok: false, code: 'gateway_key_invalid' }
+  // Authenticate the credential once. Discovery is not used here: this path only
+// needs to know the key is live, and running the full directory would scan
+// every Provider for a result that is discarded.
+  const key = await options.gatewayKeys.authenticate(options.token)
+  if (key === null) return { ok: false, code: 'gateway_key_invalid' }
 
   const provider = await options.providers.resolveHandle(parsed.providerHandle)
   if (!provider.ok) return provider
-  const providerAuthorization = await options.gatewayKeys.authorizeProvider(provider.providerId, options.token)
+  const providerAuthorization = await options.gatewayKeys.authorizeProviderWithKey(key, provider.providerId)
   if (!providerAuthorization.ok) {
     return { ok: false, code: providerAuthorization.code === 'gateway_key_invalid' ? 'gateway_key_invalid' : 'provider_not_allowed' }
   }
-  const modelAuthorization = await options.gatewayKeys.authorizeInference(provider.providerId, parsed.modelId, options.token)
+  const modelAuthorization = await options.gatewayKeys.authorizeInferenceWithKey(key, provider.providerId, parsed.modelId)
   if (!modelAuthorization.ok) {
     return { ok: false, code: modelAuthorization.code === 'model_not_allowed' ? 'model_not_allowed' : 'provider_not_allowed' }
   }

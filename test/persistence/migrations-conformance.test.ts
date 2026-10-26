@@ -256,6 +256,49 @@ describe('SQLite forward migration from every released schema version', () => {
     }
   })
 
+  test('a clean database carries the hot-path indexes', async () => {
+    const file = freshSqliteFile('hot-path-indexes')
+    const database = openDatabase({
+      dialect: 'sqlite',
+      file,
+      ephemeral: false,
+      describe: 'sqlite (hot-path indexes)',
+    })
+    try {
+      await database.migrate()
+    } finally {
+      await database.close()
+    }
+
+    const client = new BunSqlite(file, { readonly: true })
+    try {
+      const names = (
+        client
+          .query("select name from sqlite_master where type = 'index' order by name")
+          .all() as { name: string }[]
+      ).map((row) => row.name)
+      // Every column the inference, history, audit, and session hot paths
+      // filter or order on must have a supporting index, or those reads fall
+      // back to a full table scan.
+      for (const expected of [
+        'audit_events_occurred_at_idx',
+        'background_jobs_status_idx',
+        'key_model_availability_provider_id_idx',
+        'owner_sessions_expires_at_idx',
+        'request_attempts_request_id_idx',
+        'request_events_lifecycle_occurred_at_idx',
+        'request_events_occurred_at_idx',
+        'request_events_provider_id_occurred_at_idx',
+        'upstream_accounts_provider_id_idx',
+        'upstream_keys_provider_id_idx',
+      ]) {
+        expect(names).toContain(expected)
+      }
+    } finally {
+      client.close()
+    }
+  })
+
   test('backfills transliterated, length-safe deterministic Provider Handles', () => {
     const file = freshSqliteFile('provider-handles-backfill')
     const client = new BunSqlite(file, { create: true })

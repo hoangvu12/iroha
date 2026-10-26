@@ -23,6 +23,7 @@ import { createAuthRoutes } from './auth.ts'
 import { createBackgroundRoutes } from './background-jobs.ts'
 import { type SchedulerSurface, StaticScheduler } from './background-scheduler-surface.ts'
 import { createBrandLogoRoutes } from './brand-logos.ts'
+import { compressResponse } from './compression.ts'
 import { createCatalogRoutes } from './catalog.ts'
 import { createDirectoryRoutes } from './directory.ts'
 import { createFrontendHandler, type FrontendHandler } from './frontend.ts'
@@ -170,10 +171,12 @@ export function createApp(options: AppOptions) {
     .onRequest(({ request }) => {
       if (isTrackedInferenceRequest(request)) metrics.begin(request)
     })
-    .mapResponse(({ request, responseValue }) => {
+    .mapResponse(async ({ request, responseValue }): Promise<void | Response> => {
       if (isTrackedInferenceRequest(request)) {
         metrics.finish(request, responseValue instanceof Response ? responseValue.status : null)
       }
+      if (!(responseValue instanceof Response)) return
+      return await compressResponse(request, responseValue)
     })
     .use(openapi({
       path: '/docs',

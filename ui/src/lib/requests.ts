@@ -14,6 +14,8 @@ export interface RequestAttemptView {
     readonly status?: number
     readonly providerCode?: string
     readonly providerType?: string
+    /** The request field the Provider rejected, e.g. `store`. */
+    readonly providerField?: string
     readonly classification?: string
     readonly capacityScope?: string
     readonly limitingWindow?: string

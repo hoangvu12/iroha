@@ -461,9 +461,15 @@ describe(`${engine.name} retention cleanup boundaries`, () => {
    */
   function makeHistoryStub(batches: number[]) {
     const calls: number[] = []
+    let abandonCalls = 0
     let index = 0
     return {
       calls,
+      abandonCount: () => abandonCalls,
+      async abandonStaleRequests(): Promise<number> {
+        abandonCalls += 1
+        return 0
+      },
       async pruneBounded(batchSize: number): Promise<number> {
         calls.push(batchSize)
         const value = batches[index] ?? 0
@@ -494,6 +500,9 @@ describe(`${engine.name} retention cleanup boundaries`, () => {
     expect(result.outcome).toBe('success')
     expect(result.affectedCount).toBe(500)
     expect(history.calls).toEqual([1000])
+    // Abandoning stale requests is housekeeping the retention tick owns now,
+    // not something each history read does.
+    expect(history.abandonCount()).toBe(1)
   })
 
   test('consecutive full batches run until one returns short', async () => {

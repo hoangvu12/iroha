@@ -695,6 +695,33 @@ describe('Anthropic-compatible /v1/messages public surface', () => {
     expect(upstream.calls).toHaveLength(0)
   })
 
+  // A caller that replays a prior assistant turn sends it back with the `id`
+  // Anthropic gave it. The OpenAI-shape message has no such field, and a
+  // Provider with a strict body validator answers 422 `extra_forbidden` for it,
+  // so a conversation would succeed on its first turn and fail on every one
+  // after. The id describes a past response and never routes anything.
+  test('translate: drops the Anthropic message id instead of forwarding it to an OpenAI Provider', async () => {
+    upstream.respondWith(() => new Response(openAiCompletionBody(), { status: 200 }))
+    const { secret } = await createKey([{ providerId: openAiConnection.id }])
+
+    await messages(openAiPath, secret, anthropicMessageBody({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'Hello' }] },
+        { id: 'msg_01ReplayedAssistantTurn', role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
+        { role: 'user', content: [{ type: 'text', text: 'Again' }] },
+      ],
+    }))
+
+    expect(upstream.calls).toHaveLength(1)
+    const sent = JSON.parse(upstream.calls[0]!.body!) as Record<string, unknown>
+    expect(sent.messages).toEqual([
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi' },
+      { role: 'user', content: 'Again' },
+    ])
+    expect(upstream.calls[0]!.body).not.toContain('msg_01ReplayedAssistantTurn')
+  })
+
   test('translate: hits /chat/completions (not /messages) when the target is OpenAI', async () => {
     upstream.respondWith(() => new Response(openAiCompletionBody(), { status: 200 }))
     const { secret } = await createKey([{ providerId: openAiConnection.id }])

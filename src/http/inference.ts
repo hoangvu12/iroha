@@ -3,6 +3,7 @@ import { Elysia, t } from 'elysia'
 import type { RequestHistoryService } from '../history/index.ts'
 import type { AttemptOutcome } from '../persistence/index.ts'
 import { adapterBlockedHeaders } from '../inference/blocked-headers.ts'
+import { safeUpstreamErrorFields } from '../inference/upstream-error-fields.ts'
 import {
   callerSuppliedIdempotency,
   generateIdempotencyValue,
@@ -2509,6 +2510,11 @@ function upstreamRefusal(status: number, headers: Readonly<Record<string, string
       return { status: 403, code: 'upstream_forbidden', message: 'The Provider refused the request (HTTP 403).' }
     case 404:
       return { status: 404, code: 'upstream_not_found', message: 'The Provider has no such endpoint (HTTP 404).' }
+    // A 422 is the Provider refusing the caller's own request — a strict body
+    // validator, most often — not an upstream fault. Naming it a request
+    // rejection keeps a caller-side mistake from reading as Provider breakage.
+    case 422:
+      return { status: 422, code: 'upstream_bad_request', message: 'The Provider rejected the request (HTTP 422).' }
     case 429: {
       const retryAfter = safeRetryAfter(headers)
       return {
@@ -2838,6 +2844,7 @@ export function upstreamFailureDiagnostic(input: UpstreamFailureDiagnosticInput)
     status: input.status,
     upstreamCode: fields.code,
     upstreamType: fields.type,
+    upstreamField: fields.field,
     upstreamRequestId: fields.requestId,
   }
 }
@@ -2861,33 +2868,6 @@ async function readBoundedUpstreamError(answer: InferenceForwardResult): Promise
     reader.releaseLock()
   }
   return out.slice(0, UPSTREAM_ERROR_BODY_LIMIT)
-}
-
-function safeUpstreamErrorFields(body: string): { code: string | null; type: string | null; requestId: string | null } {
-  let root: unknown
-  try { root = JSON.parse(body) } catch { return { code: null, type: null, requestId: null } }
-  if (root === null || typeof root !== 'object' || Array.isArray(root)) {
-    return { code: null, type: null, requestId: null }
-  }
-  const record = root as Record<string, unknown>
-  const nested = record.error !== null && typeof record.error === 'object' && !Array.isArray(record.error)
-    ? record.error as Record<string, unknown>
-    : record
-  return {
-    code: safeDiagnosticField(nested.code, 80),
-    type: safeDiagnosticField(nested.type, 80),
-    requestId: safeDiagnosticField(record.request_id ?? record.requestId, 120),
-  }
-}
-
-function safeDiagnosticField(value: unknown, limit: number): string | null {
-  if (typeof value !== 'string' && typeof value !== 'number') return null
-  const text = String(value)
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
-    .replace(/\b(?:sk|key|token)-[A-Za-z0-9_-]{8,}\b/gi, '<REDACTED>')
-    .replace(/Bearer\s+\S+/gi, 'Bearer <REDACTED>')
-    .trim()
-  return text === '' ? null : text.slice(0, limit)
 }
 
 function safeHostname(baseUrl: string): string | null {

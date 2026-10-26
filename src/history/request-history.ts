@@ -313,17 +313,24 @@ export class RequestHistoryService {
   }
 
   async listEvents(options?: RequestHistoryListOptions): Promise<RequestHistoryListResult> {
-    await this.#database.requestHistory.abandonRequests(
-      new Date(this.#clock.now().getTime() - ABANDONED_REQUEST_AFTER_MS),
-    )
     return await this.#database.requestHistory.listEvents(options)
   }
 
   async getEvent(id: string): Promise<RequestEventRecord | null> {
-    await this.#database.requestHistory.abandonRequests(
+    return await this.#database.requestHistory.getEvent(id)
+  }
+
+  /**
+   * Marks requests that never reached a terminal state as abandoned, so a
+   * crashed or cancelled request stops counting as in progress. This is
+   * housekeeping, not a read concern: the scheduled retention job runs it,
+   * rather than every list/get call, which used to take the writer lock and
+   * scan the table on each history view.
+   */
+  async abandonStaleRequests(): Promise<number> {
+    return await this.#database.requestHistory.abandonRequests(
       new Date(this.#clock.now().getTime() - ABANDONED_REQUEST_AFTER_MS),
     )
-    return await this.#database.requestHistory.getEvent(id)
   }
 
   async getAttempts(requestId: string): Promise<readonly RequestAttemptRecord[]> {

@@ -1,4 +1,4 @@
-import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 /**
  * The SQLite schema. It has its own migration history under
@@ -26,24 +26,32 @@ export const owner = sqliteTable('owner', {
   passwordChangedAt: integer('password_changed_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
-export const ownerSessions = sqliteTable('owner_sessions', {
-  id: text('id').primaryKey(),
-  secretHash: text('secret_hash').notNull(),
-  csrfToken: text('csrf_token').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull(),
-  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
-  userAgent: text('user_agent'),
-})
+export const ownerSessions = sqliteTable(
+  'owner_sessions',
+  {
+    id: text('id').primaryKey(),
+    secretHash: text('secret_hash').notNull(),
+    csrfToken: text('csrf_token').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    userAgent: text('user_agent'),
+  },
+  (table) => ({ expiresAtIdx: index('owner_sessions_expires_at_idx').on(table.expiresAt) }),
+)
 
-export const auditEvents = sqliteTable('audit_events', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(),
-  action: text('action').notNull(),
-  outcome: text('outcome').notNull(),
-  /** JSON text, like `settings.value`. Never holds a secret value. */
-  detail: text('detail'),
-})
+export const auditEvents = sqliteTable(
+  'audit_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(),
+    action: text('action').notNull(),
+    outcome: text('outcome').notNull(),
+    /** JSON text, like `settings.value`. Never holds a secret value. */
+    detail: text('detail'),
+  },
+  (table) => ({ occurredAtIdx: index('audit_events_occurred_at_idx').on(table.occurredAt) }),
+)
 
 /**
  * One Owner-configured upstream brand the Gateway reaches. The ID is immutable
@@ -103,15 +111,19 @@ export const providers = sqliteTable('providers', {
  * billing or capacity. Deleting an account ungroups its keys instead of
  * deleting them.
  */
-export const upstreamAccounts = sqliteTable('upstream_accounts', {
-  id: text('id').primaryKey(),
-  providerId: text('provider_id')
-    .notNull()
-    .references(() => providers.id, { onDelete: 'cascade' }),
-  displayName: text('display_name').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-})
+export const upstreamAccounts = sqliteTable(
+  'upstream_accounts',
+  {
+    id: text('id').primaryKey(),
+    providerId: text('provider_id')
+      .notNull()
+      .references(() => providers.id, { onDelete: 'cascade' }),
+    displayName: text('display_name').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => ({ providerIdIdx: index('upstream_accounts_provider_id_idx').on(table.providerId) }),
+)
 
 /**
  * An Upstream Key attached to one Provider. Only cipher output is stored, so a
@@ -120,32 +132,36 @@ export const upstreamAccounts = sqliteTable('upstream_accounts', {
  * endpoints (e.g. distinct regional or branded deployments). Model allow/deny
  * lists are JSON text, owned by the repository like settings.
  */
-export const upstreamKeys = sqliteTable('upstream_keys', {
-  id: text('id').primaryKey(),
-  providerId: text('provider_id')
-    .notNull()
-    .references(() => providers.id, { onDelete: 'cascade' }),
-  /** Per-Key override of the Provider's base URL; null means inherit the Provider's. */
-  baseUrl: text('base_url'),
-  accountId: text('account_id').references(() => upstreamAccounts.id, {
-    onDelete: 'set null',
-  }),
-  encryptedKey: text('encrypted_key').notNull(),
-  health: text('health').notNull(),
-  lastProbeAt: integer('last_probe_at', { mode: 'timestamp_ms' }),
-  lastProbeVerdict: text('last_probe_verdict'),
-  lastProbeReason: text('last_probe_reason'),
-  healthReason: text('health_reason'),
-  healthChangedAt: integer('health_changed_at', { mode: 'timestamp_ms' }),
-  retryAfterAt: integer('retry_after_at', { mode: 'timestamp_ms' }),
-  healthScope: text('health_scope').notNull().default('key'),
-  healthScopeId: text('health_scope_id'),
-  healthModel: text('health_model'),
-  allowedModels: text('allowed_models'),
-  deniedModels: text('denied_models'),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-})
+export const upstreamKeys = sqliteTable(
+  'upstream_keys',
+  {
+    id: text('id').primaryKey(),
+    providerId: text('provider_id')
+      .notNull()
+      .references(() => providers.id, { onDelete: 'cascade' }),
+    /** Per-Key override of the Provider's base URL; null means inherit the Provider's. */
+    baseUrl: text('base_url'),
+    accountId: text('account_id').references(() => upstreamAccounts.id, {
+      onDelete: 'set null',
+    }),
+    encryptedKey: text('encrypted_key').notNull(),
+    health: text('health').notNull(),
+    lastProbeAt: integer('last_probe_at', { mode: 'timestamp_ms' }),
+    lastProbeVerdict: text('last_probe_verdict'),
+    lastProbeReason: text('last_probe_reason'),
+    healthReason: text('health_reason'),
+    healthChangedAt: integer('health_changed_at', { mode: 'timestamp_ms' }),
+    retryAfterAt: integer('retry_after_at', { mode: 'timestamp_ms' }),
+    healthScope: text('health_scope').notNull().default('key'),
+    healthScopeId: text('health_scope_id'),
+    healthModel: text('health_model'),
+    allowedModels: text('allowed_models'),
+    deniedModels: text('denied_models'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => ({ providerIdIdx: index('upstream_keys_provider_id_idx').on(table.providerId) }),
+)
 
 /**
  * An application credential the Owner issues. The secret itself never lands
@@ -213,19 +229,25 @@ export const modelCatalogSync = sqliteTable('model_catalog_sync', {
  * it. `stale` marks a list retained through a failed rediscovery, which stays
  * usable — the previous answer beats no answer.
  */
-export const keyModelAvailability = sqliteTable('key_model_availability', {
-  keyId: text('key_id')
-    .primaryKey()
-    .references(() => upstreamKeys.id, { onDelete: 'cascade' }),
-  providerId: text('provider_id')
-    .notNull()
-    .references(() => providers.id, { onDelete: 'cascade' }),
-  /** JSON array of exact model IDs. The repository owns encoding. */
-  models: text('models').notNull(),
-  /** When the Provider last answered; drives the age limit that forces a re-read. */
-  discoveredAt: integer('discovered_at', { mode: 'timestamp_ms' }).notNull(),
-  stale: integer('stale', { mode: 'boolean' }).notNull().default(false),
-})
+export const keyModelAvailability = sqliteTable(
+  'key_model_availability',
+  {
+    keyId: text('key_id')
+      .primaryKey()
+      .references(() => upstreamKeys.id, { onDelete: 'cascade' }),
+    providerId: text('provider_id')
+      .notNull()
+      .references(() => providers.id, { onDelete: 'cascade' }),
+    /** JSON array of exact model IDs. The repository owns encoding. */
+    models: text('models').notNull(),
+    /** When the Provider last answered; drives the age limit that forces a re-read. */
+    discoveredAt: integer('discovered_at', { mode: 'timestamp_ms' }).notNull(),
+    stale: integer('stale', { mode: 'boolean' }).notNull().default(false),
+  },
+  (table) => ({
+    providerIdIdx: index('key_model_availability_provider_id_idx').on(table.providerId),
+  }),
+)
 
 /**
  * The last usage polling outcome of one Provider. `result` holds the last
@@ -263,32 +285,46 @@ export const usageSnapshots = sqliteTable('usage_snapshots', {
  * when the Provider supplied it. No prompts, no responses, no upstream
  * message bodies.
  */
-export const requestEvents = sqliteTable('request_events', {
-  id: text('id').primaryKey(),
-  /** Internal lifecycle; only completed rows are Owner-visible. */
-  lifecycle: text('lifecycle').notNull().default('completed'),
-  occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(),
-  providerId: text('provider_id')
-    .notNull()
-    .references(() => providers.id, { onDelete: 'cascade' }),
-  providerHandle: text('provider_handle'),
-  model: text('model').notNull(),
-  /** Public identity of the Gateway Key the application presented. */
-  gatewayKeyId: text('gateway_key_id'),
-  gatewayKeyName: text('gateway_key_name'),
-  /** Public identity of the Upstream Key the request actually used. */
-  keyId: text('key_id'),
-  /** Final HTTP status Iroha returned to the caller. */
-  status: integer('status').notNull(),
-  outcome: text('outcome').notNull(),
-  latencyMs: integer('latency_ms').notNull(),
-  isStreaming: integer('is_streaming', { mode: 'boolean' }).notNull(),
-  promptTokens: integer('prompt_tokens'),
-  completionTokens: integer('completion_tokens'),
-  totalTokens: integer('total_tokens'),
-  /** Stable Iroha error code on failure; null on success. */
-  errorCode: text('error_code'),
-})
+export const requestEvents = sqliteTable(
+  'request_events',
+  {
+    id: text('id').primaryKey(),
+    /** Internal lifecycle; only completed rows are Owner-visible. */
+    lifecycle: text('lifecycle').notNull().default('completed'),
+    occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(),
+    providerId: text('provider_id')
+      .notNull()
+      .references(() => providers.id, { onDelete: 'cascade' }),
+    providerHandle: text('provider_handle'),
+    model: text('model').notNull(),
+    /** Public identity of the Gateway Key the application presented. */
+    gatewayKeyId: text('gateway_key_id'),
+    gatewayKeyName: text('gateway_key_name'),
+    /** Public identity of the Upstream Key the request actually used. */
+    keyId: text('key_id'),
+    /** Final HTTP status Iroha returned to the caller. */
+    status: integer('status').notNull(),
+    outcome: text('outcome').notNull(),
+    latencyMs: integer('latency_ms').notNull(),
+    isStreaming: integer('is_streaming', { mode: 'boolean' }).notNull(),
+    promptTokens: integer('prompt_tokens'),
+    completionTokens: integer('completion_tokens'),
+    totalTokens: integer('total_tokens'),
+    /** Stable Iroha error code on failure; null on success. */
+    errorCode: text('error_code'),
+  },
+  (table) => ({
+    occurredAtIdx: index('request_events_occurred_at_idx').on(table.occurredAt),
+    lifecycleOccurredAtIdx: index('request_events_lifecycle_occurred_at_idx').on(
+      table.lifecycle,
+      table.occurredAt,
+    ),
+    providerOccurredAtIdx: index('request_events_provider_id_occurred_at_idx').on(
+      table.providerId,
+      table.occurredAt,
+    ),
+  }),
+)
 
 /**
  * One attempt within an inference call's retry trail. Each row describes one
@@ -315,7 +351,10 @@ export const requestAttempts = sqliteTable(
     retryAfterSeconds: integer('retry_after_seconds'),
     diagnostics: text('provider_diagnostics', { mode: 'json' }).notNull().default({}),
   },
-  (table) => ({ pkRequestAttempt: primaryKey({ columns: [table.id] }) }),
+  (table) => ({
+    pkRequestAttempt: primaryKey({ columns: [table.id] }),
+    requestIdIdx: index('request_attempts_request_id_idx').on(table.requestId),
+  }),
 )
 
 /**
@@ -326,15 +365,19 @@ export const requestAttempts = sqliteTable(
  * recent completed run. `last_error_message` is structural text only, never
  * upstream body content that could echo a secret.
  */
-export const backgroundJobs = sqliteTable('background_jobs', {
-  jobId: text('job_id').primaryKey(),
-  lastStartedAt: integer('last_started_at', { mode: 'timestamp_ms' }),
-  lastCompletedAt: integer('last_completed_at', { mode: 'timestamp_ms' }),
-  status: text('status').notNull(),
-  lastOutcome: text('last_outcome'),
-  lastErrorCode: text('last_error_code'),
-  lastErrorMessage: text('last_error_message'),
-  lastDurationMs: integer('last_duration_ms'),
-  lastAffectedCount: integer('last_affected_count'),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-})
+export const backgroundJobs = sqliteTable(
+  'background_jobs',
+  {
+    jobId: text('job_id').primaryKey(),
+    lastStartedAt: integer('last_started_at', { mode: 'timestamp_ms' }),
+    lastCompletedAt: integer('last_completed_at', { mode: 'timestamp_ms' }),
+    status: text('status').notNull(),
+    lastOutcome: text('last_outcome'),
+    lastErrorCode: text('last_error_code'),
+    lastErrorMessage: text('last_error_message'),
+    lastDurationMs: integer('last_duration_ms'),
+    lastAffectedCount: integer('last_affected_count'),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => ({ statusIdx: index('background_jobs_status_idx').on(table.status) }),
+)

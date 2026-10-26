@@ -202,6 +202,9 @@ export function buildDefaultJobs(): BackgroundJob[] {
       intervalSeconds: (settings) => settings.retentionCleanup.intervalSeconds,
       async run({ jobs, schedule }: BackgroundJobContext): Promise<BackgroundJobRunResult> {
         const batchSize = schedule.retentionCleanup.requestBatchSize
+        // Abandoning stale in-progress requests is housekeeping that belongs on
+        // this schedule, not on every history read.
+        await jobs.requestHistory.abandonStaleRequests()
         let removed = 0
         for (let guard = 0; guard < MAX_CLEANUP_ITERATIONS; guard += 1) {
           const deleted = await jobs.requestHistory.pruneBounded(batchSize)

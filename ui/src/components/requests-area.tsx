@@ -445,6 +445,7 @@ function AttemptDiagnostics({ attempt, totalAttempts }: {
   const facts = [
     diagnostics.providerCode === undefined ? null : ['Provider code', diagnostics.providerCode],
     diagnostics.providerType === undefined ? null : ['Provider type', diagnostics.providerType],
+    diagnostics.providerField === undefined ? null : ['Rejected field', diagnostics.providerField],
     diagnostics.classification === undefined ? null : ['Classification', diagnostics.classification],
     diagnostics.capacityScope === undefined ? null : ['Capacity scope', diagnostics.capacityScope],
     diagnostics.limitingWindow === undefined ? null : ['Limiting window', diagnostics.limitingWindow.replaceAll('_', ' ')],

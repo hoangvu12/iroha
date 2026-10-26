@@ -99,8 +99,12 @@ describe('MiniMax text inference adapter', () => {
     const classification = adapter.classifyFailure({
       kind: 'buffered', status: 400, headers: {}, body: JSON.stringify(inference402),
     }, { keyId: 'key-4', observedAt })
-    expect(classification).toEqual({
+    expect(classification).toMatchObject({
       kind: 'request_rejected', capacityScope: 'unknown', retryAction: 'stop', retryAfterSeconds: null,
     })
+    // The envelope may still travel as Provider Diagnostics: that is the generic
+    // adapter reporting what the Provider named, not MiniMax capacity handling.
+    // What must not happen is a capacity claim built from an unhandled status.
+    expect(classification.capacityEvidence).toBeUndefined()
   })
 })

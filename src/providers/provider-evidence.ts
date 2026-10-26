@@ -34,6 +34,8 @@ export interface ProviderDiagnostics {
   readonly status?: number
   readonly providerCode?: string
   readonly providerType?: string
+  /** The request field a Provider rejected, e.g. `store`. Never its message. */
+  readonly providerField?: string
   readonly classification?: string
   readonly capacityScope?: CapacityScope['kind']
   readonly limitingWindow?: string
@@ -74,6 +76,7 @@ const MAX_DIAGNOSTIC_TEXT = 64
 const DIAGNOSTIC_TEXT_FIELDS = [
   'providerCode',
   'providerType',
+  'providerField',
   'classification',
   'capacityScope',
   'limitingWindow',

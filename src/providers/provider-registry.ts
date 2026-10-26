@@ -251,6 +251,15 @@ const PAYMENT_REQUIRED_RECHECK_SECONDS = 900
 const DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS = 5
 
 /**
+ * The longest a Provider's own structured reset may park a key that carries no
+ * authoritative evidence. Provider-named timing is honoured — a five-hour or
+ * seven-day window should not be re-probed in five seconds — but a wrong or
+ * hostile reset value must not retire real capacity indefinitely, so the wait
+ * never exceeds the billing recheck bound.
+ */
+const MAX_PROVISIONAL_KEY_COOLDOWN_SECONDS = PAYMENT_REQUIRED_RECHECK_SECONDS
+
+/**
  * How many Upstream Keys one probe pass tests at the same time.
  *
  * Sequential probing made every mutation that adds a key pay one upstream round
@@ -1494,11 +1503,26 @@ export class ProviderRegistry {
       return failed({ code: keys.some(carries) ? 'model_keys_unavailable' : 'no_eligible_key' })
     }
 
-    // Prefer the keys known to carry the model; the rest remain reachable once
-    // the preferred ones are exhausted, which is what the retry loop's growing
-    // `excludedKeyIds` eventually produces.
-    const preferred = eligible.filter(carries)
-    const key = this.#selector.select(providerId, preferred.length > 0 ? preferred : eligible)
+    // Two preferences order the eligible pool, and Key Health is the stronger
+    // of them. A key whose cooldown merely expired is here on a one-shot
+    // controlled trial, so it must not be tried ahead of a key carrying no
+    // adverse evidence: Key Model Availability is positive evidence about
+    // entitlement and says nothing about capacity. Within one health tier the
+    // keys known to carry the model come first, which is the preference
+    // ADR-0023 asks for. Both are orderings, never filters — every eligible key
+    // stays reachable once the tiers above it are exhausted, which is what the
+    // retry loop's growing `excludedKeyIds` eventually produces.
+    //
+    // Health first is what keeps a Provider holding dozens of spent keys from
+    // spending an Attempt on each of them while its one healthy credential,
+    // whose availability was never discovered, sits idle until the very end.
+    const byHealth = (active: boolean) => (candidate: UpstreamKeyRecord) =>
+      (candidate.health === 'active') === active
+    const tier = (active: boolean, carrying: boolean) =>
+      eligible.filter(byHealth(active)).filter((candidate) => carries(candidate) === carrying)
+    const candidates = [tier(true, true), tier(true, false), tier(false, true), tier(false, false)]
+      .find((group) => group.length > 0) ?? eligible
+    const key = this.#selector.select(providerId, candidates)
     if (key === null) return failed({ code: 'no_eligible_key' })
     if (key.health !== 'active') {
       const claim = healthClaim(key)
@@ -1715,24 +1739,28 @@ export class ProviderRegistry {
       return
     }
     if (classification.kind === 'capacity_limited') {
-      if (classification.capacityEvidence === undefined && classification.capacityScope !== 'account') {
-        // A generic 429 names no durable capacity fact. The key that answered it
-        // must still not be hammered, so park it for a bounded cooldown: another
-        // key, or a later round, gets the next Attempt. Expiry is the only
-        // recovery and this is `cooling_down`, never `exhausted`. The legacy
-        // status-derived path takes the same narrow treatment: a bare 429
-        // without a scope claim never speaks for its siblings, so it must never
-        // cool a whole provider through an `unknown` scope.
+      const provisionalKeyReading = provisionalKeyScopedReading(classification)
+      if (
+        (classification.capacityEvidence === undefined && classification.capacityScope !== 'account') ||
+        provisionalKeyReading
+      ) {
+        // Neither a generic 429 nor a Provider's own provisional reading names a
+        // durable capacity fact: provider-specific evidence stays provisional
+        // until an authoritative surface confirms it (ADR-0013). The key that
+        // answered must still not be hammered, so park it for a bounded
+        // cooldown: another key, or a later round, gets the next Attempt.
+        // Expiry is the only recovery and this is `cooling_down`, never
+        // `exhausted`. The legacy status-derived path takes the same narrow
+        // treatment: a bare 429 without a scope claim never speaks for its
+        // siblings, so it must never cool a whole provider through an
+        // `unknown` scope.
         await this.#database.providers.updateKey(
           key.id,
           healthPatch(
             'cooling_down',
             input.reason,
             at,
-            new Date(
-              at.getTime() +
-                Math.max(1, classification.retryAfterSeconds ?? DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS) * 1000,
-            ),
+            new Date(at.getTime() + provisionalCooldownSeconds(classification, at) * 1000),
             'key',
             key.id,
             null,
@@ -2436,6 +2464,37 @@ function keyServesModel(key: UpstreamKeyRecord, model: string): boolean {
 
 function healthClaim(key: UpstreamKeyRecord): string {
   return `${key.healthScope}:${key.healthScopeId ?? key.id}:${key.healthModel ?? ''}`
+}
+
+/**
+ * Whether a capacity reading describes one key without authority. Such a
+ * reading may cool that key down, but it may never exhaust anything: durable
+ * exhaustion is reserved for authoritative Provider evidence (ADR-0013).
+ */
+function provisionalKeyScopedReading(classification: InferenceFailureClassification): boolean {
+  const evidence = classification.capacityEvidence
+  return evidence !== undefined &&
+    evidence.authority !== 'authoritative' &&
+    evidence.scope.kind === 'key' &&
+    evidence.availability === 'temporarily_limited'
+}
+
+/**
+ * How long one provisional key-scoped capacity reading parks its key: the
+ * Provider's own structured reset when it named one, else its `Retry-After`,
+ * else the short generic default. Every path is bounded, so no single reading
+ * can retire a key beyond `MAX_PROVISIONAL_KEY_COOLDOWN_SECONDS`.
+ */
+function provisionalCooldownSeconds(classification: InferenceFailureClassification, at: Date): number {
+  const recheckAt = classification.capacityEvidence?.recheckAt ?? null
+  if (recheckAt !== null) {
+    const named = Math.ceil((recheckAt.getTime() - at.getTime()) / 1000)
+    if (named > 0) return Math.min(named, MAX_PROVISIONAL_KEY_COOLDOWN_SECONDS)
+  }
+  return Math.min(
+    Math.max(1, classification.retryAfterSeconds ?? DEFAULT_TRANSIENT_CAPACITY_COOLDOWN_SECONDS),
+    MAX_PROVISIONAL_KEY_COOLDOWN_SECONDS,
+  )
 }
 
 function scopeUnavailable(

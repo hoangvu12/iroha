@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { gunzipSync } from 'node:zlib'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -82,6 +83,36 @@ describe('management UI serving', () => {
     const get = await appWith(directory)
 
     expect((await get('/')).headers.get('cache-control')).toBe('no-cache')
+  })
+
+  test('gzip-compresses a large asset when the caller accepts it', async () => {
+    const { directory } = builtFrontend()
+    writeFileSync(join(directory, 'assets', 'app-abc123.js'), 'console.log("iroha")\n'.repeat(200))
+
+    const { database, dispose } = await sqliteEngine.open()
+    cleanups.push(dispose)
+    const readiness = new ReadinessState()
+    readiness.markMigrated()
+    const app = createApp({
+      database,
+      readiness,
+      identity: new OwnerIdentity({ database }),
+      providers: providerRegistryFor(database),
+      gatewayKeys: gatewayKeyRegistryFor(database),
+      modelCatalog: modelCatalogFor(database),
+      usageService: usageServiceFor(database),
+      frontendDirectory: directory,
+    })
+
+    const response = await app.handle(
+      new Request('http://iroha.test/assets/app-abc123.js', {
+        headers: { 'accept-encoding': 'gzip, deflate' },
+      }),
+    )
+
+    expect(response.headers.get('content-encoding')).toBe('gzip')
+    const decoded = gunzipSync(Buffer.from(await response.arrayBuffer())).toString('utf8')
+    expect(decoded).toContain('iroha')
   })
 
   test('falls back to the entry document for client-side routes', async () => {

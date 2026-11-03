@@ -4,6 +4,7 @@ import type {
   ProviderCapabilities,
   Database,
   KeyProbeVerdict,
+  ModelDiscoveryMode,
   ProviderRecord,
   ProviderRepository,
   ProviderStaticHeader,
@@ -167,6 +168,10 @@ export interface ProviderView {
   readonly templateId: string | null
   readonly authHeader: string
   readonly authPrefix: string
+  /** False when the upstream needs no secret and keys may carry an empty one. */
+  readonly requiresUpstreamKey: boolean
+  /** The Owner's model discovery override, or null to inherit the template. */
+  readonly modelDiscovery: ModelDiscoveryMode | null
   /** Static header names only; the values stay encrypted at rest. */
   readonly staticHeaders: readonly { readonly name: string }[]
   readonly redirectAllowSameOrigin: boolean
@@ -469,6 +474,8 @@ export class ProviderRegistry {
     allowInsecureHttp?: unknown
     authHeader?: unknown
     authPrefix?: unknown
+    requiresUpstreamKey?: unknown
+    modelDiscovery?: unknown
     staticHeaders?: unknown
     redirectAllowSameOrigin?: unknown
     connectionTimeoutMs?: unknown
@@ -486,6 +493,7 @@ export class ProviderRegistry {
       ? 'Idempotency-Key'
       : (input.idempotencyHeader as string)
     const redirectAllowSameOrigin = input.redirectAllowSameOrigin === true
+    const requiresUpstreamKey = input.requiresUpstreamKey !== false
 
     const problems: FieldProblem[] = []
     problems.push(...providerHandleProblems(input.handle))
@@ -498,7 +506,13 @@ export class ProviderRegistry {
     const providerBaseUrlForKeyInheritance = typeof input.baseUrl === 'string'
       ? input.baseUrl.trim()
       : ''
-    const keyInputs = readCreateKeys(input.keys, providerBaseUrlForKeyInheritance, problems)
+    const keyInputs = readCreateKeys(
+      input.keys,
+      providerBaseUrlForKeyInheritance,
+      requiresUpstreamKey,
+      problems,
+    )
+    const modelDiscovery = readModelDiscovery(input.modelDiscovery, problems)
     problems.push(...authHeaderProblems(authHeader))
     problems.push(...authPrefixProblems(authPrefix))
     problems.push(...idempotencyHeaderProblems(idempotencyHeader))
@@ -607,6 +621,8 @@ export class ProviderRegistry {
         capabilities,
         authHeader: authHeaderName,
         authPrefix: authPrefixValue,
+        requiresUpstreamKey,
+        modelDiscovery: modelDiscovery ?? null,
         staticHeadersEncrypted,
         redirectAllowSameOrigin,
         connectionTimeoutMs,
@@ -667,6 +683,8 @@ export class ProviderRegistry {
       retryAmbiguousNetwork?: unknown
       authHeader?: unknown
       authPrefix?: unknown
+      requiresUpstreamKey?: unknown
+      modelDiscovery?: unknown
       staticHeaders?: unknown
       redirectAllowSameOrigin?: unknown
       connectionTimeoutMs?: unknown
@@ -691,6 +709,8 @@ export class ProviderRegistry {
       retryAmbiguousNetwork?: boolean
       authHeader?: string
       authPrefix?: string
+      requiresUpstreamKey?: boolean
+      modelDiscovery?: ModelDiscoveryMode | null
       staticHeadersEncrypted?: string
       redirectAllowSameOrigin?: boolean
       connectionTimeoutMs?: number
@@ -763,6 +783,13 @@ export class ProviderRegistry {
     if (patch.authPrefix !== undefined) {
       advancedProblems.push(...authPrefixProblems(patch.authPrefix))
       changes.authPrefix = patch.authPrefix as string
+    }
+    if (patch.requiresUpstreamKey !== undefined) {
+      changes.requiresUpstreamKey = patch.requiresUpstreamKey !== false
+    }
+    if (patch.modelDiscovery !== undefined) {
+      const modelDiscovery = readModelDiscovery(patch.modelDiscovery, advancedProblems)
+      if (modelDiscovery !== undefined) changes.modelDiscovery = modelDiscovery
     }
     if (patch.idempotencyHeader !== undefined) {
       advancedProblems.push(...idempotencyHeaderProblems(patch.idempotencyHeader))
@@ -844,6 +871,16 @@ export class ProviderRegistry {
         at,
       })
     })
+
+    // Turning the model list off withdraws the only evidence the key test had,
+    // so a key that test rejected is trusted again like any untested key.
+    if (changes.modelDiscovery === 'unsupported') await this.#trustProbeRejectedKeys(id)
+
+    // A Provider that stops needing a key still routes through one.
+    const seeded = changes.requiresUpstreamKey === false && await this.#seedKeylessKey(id)
+
+    // A new discovery mode decides how Unverified keys are tested.
+    if (changes.modelDiscovery !== undefined || seeded) await this.#probeConnectionKeys(id)
 
     return { ok: true, value: await this.#viewOf(id) }
   }
@@ -933,6 +970,8 @@ export class ProviderRegistry {
         capabilities: source.capabilities,
         authHeader: source.authHeader,
         authPrefix: source.authPrefix,
+        requiresUpstreamKey: source.requiresUpstreamKey,
+        modelDiscovery: source.modelDiscovery,
         staticHeadersEncrypted: source.staticHeadersEncrypted,
         redirectAllowSameOrigin: source.redirectAllowSameOrigin,
         connectionTimeoutMs: source.connectionTimeoutMs,
@@ -1019,6 +1058,9 @@ export class ProviderRegistry {
     if (!located.ok) return located
 
     const { connection, key } = located.value
+    if (this.#modelDiscoveryOf(connection) === 'unsupported') {
+      return await this.#recordUntestable(providerId, key)
+    }
     // The manual test must hit the URL the key will actually use at inference
     // time — a key with its own override URL is meaningless if its health
     // verdict was earned against a different endpoint. Mirrors the inheritance
@@ -1178,7 +1220,7 @@ export class ProviderRegistry {
     if (connection === null) return failed({ code: 'provider_not_found' })
     if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
 
-    const upstreamProblems = upstreamKeyProblems(input.upstreamKey)
+    const upstreamProblems = upstreamKeyProblems(input.upstreamKey, connection.requiresUpstreamKey)
     const problems: FieldProblem[] = [...upstreamProblems]
     const baseUrl = readKeyBaseUrl(input.baseUrl, connection.baseUrl, problems)
     const settings = await readKeySettings(this.#database.providers, providerId, input, problems)
@@ -1192,7 +1234,7 @@ export class ProviderRegistry {
         providerId,
         baseUrl,
         accountId: settings.accountId === undefined ? null : settings.accountId,
-        encryptedKey: await this.#cipher.encrypt((input.upstreamKey as string).trim()),
+        encryptedKey: await this.#cipher.encrypt(upstreamKeyValue(input.upstreamKey)),
         health: 'unverified',
         lastProbeAt: null,
         lastProbeVerdict: null,
@@ -1266,7 +1308,7 @@ export class ProviderRegistry {
         continue
       }
 
-      problems.push(...upstreamKeyProblems(entry.upstreamKey))
+      problems.push(...upstreamKeyProblems(entry.upstreamKey, connection.requiresUpstreamKey))
       const baseUrl = readKeyBaseUrl(entry.baseUrl, connection.baseUrl, problems)
       if (problems.length > 0) {
         failedEntries.push({ index, problems })
@@ -1281,7 +1323,7 @@ export class ProviderRegistry {
           providerId,
           baseUrl,
           accountId: null,
-          encryptedKey: await this.#cipher.encrypt((entry.upstreamKey as string).trim()),
+          encryptedKey: await this.#cipher.encrypt(upstreamKeyValue(entry.upstreamKey)),
           health: 'unverified',
           lastProbeAt: null,
           lastProbeVerdict: null,
@@ -1323,6 +1365,18 @@ export class ProviderRegistry {
   async removeKey(providerId: string, keyId: string): Promise<ProviderResult<ProviderView>> {
     const located = await this.#locateKey(providerId, keyId)
     if (!located.ok) return located
+
+    // Needing no key still means routing through one, so the last one stays.
+    if (!located.value.connection.requiresUpstreamKey &&
+      (await this.#database.providers.listKeys(providerId)).length <= 1) {
+      return failed({
+        code: 'validation_failed',
+        problems: [{
+          field: 'keyId',
+          message: 'is the last key of a provider that needs no key; requests route through it, so it cannot be removed',
+        }],
+      })
+    }
 
     const at = this.#clock.now()
     await this.#database.transaction(async (repositories) => {
@@ -2010,6 +2064,17 @@ export class ProviderRegistry {
       (key) => key.health === 'unverified',
     )
 
+    // The key test reads `GET /models`. A Provider without one would answer
+    // with a refusal that says nothing about the key, so its keys are trusted
+    // until a real request proves otherwise.
+    if (this.#modelDiscoveryOf(connection) === 'unsupported') {
+      const at = this.#clock.now()
+      for (const key of unverified) {
+        await this.#database.providers.updateKey(key.id, untestedPatch(at), at)
+      }
+      return
+    }
+
     await forEachWithConcurrency(unverified, PROBE_CONCURRENCY, async (key) => {
       // The probe must hit the URL the key will actually use at inference
       // time, not always the Provider's default — a key with its own
@@ -2027,6 +2092,105 @@ export class ProviderRegistry {
         at,
       )
     })
+  }
+
+  /**
+   * Trusts again every key whose only adverse evidence is a rejection by the
+   * `GET /models` key test: its health reason is still the test's own reason.
+   */
+  async #trustProbeRejectedKeys(providerId: string): Promise<void> {
+    const at = this.#clock.now()
+    for (const key of await this.#database.providers.listKeys(providerId)) {
+      if (key.health !== 'invalid_authentication' || key.lastProbeVerdict !== 'rejected') continue
+      if (key.healthReason !== key.lastProbeReason) continue
+      await this.#database.providers.updateKey(key.id, untestedPatch(at), at)
+    }
+  }
+
+  /**
+   * Gives a Provider that needs no key the one empty-secret key it routes
+   * through, when it has none. Reports whether a key was added.
+   */
+  async #seedKeylessKey(providerId: string): Promise<boolean> {
+    if ((await this.#database.providers.listKeys(providerId)).length > 0) return false
+
+    const at = this.#clock.now()
+    const keyId = newId('uk')
+    const encryptedKey = await this.#cipher.encrypt('')
+    await this.#database.transaction(async (repositories) => {
+      await repositories.providers.insertKey({
+        id: keyId,
+        providerId,
+        baseUrl: null,
+        accountId: null,
+        encryptedKey,
+        health: 'unverified',
+        lastProbeAt: null,
+        lastProbeVerdict: null,
+        lastProbeReason: null,
+        healthReason: null,
+        healthChangedAt: at,
+        retryAfterAt: null,
+        healthScope: 'key',
+        healthScopeId: null,
+        healthModel: null,
+        allowedModels: null,
+        deniedModels: null,
+        createdAt: at,
+        updatedAt: at,
+      })
+      await repositories.audit.record({
+        action: 'key.created',
+        outcome: 'success',
+        detail: { providerId, keyId, seededForKeylessProvider: true },
+        at,
+      })
+    })
+    return true
+  }
+
+  /** The Owner's discovery override, else the template's, else `supported`. */
+  #modelDiscoveryOf(connection: ProviderRecord): ModelDiscoveryMode {
+    return connection.modelDiscovery ??
+      this.#adapterRegistry.providerTemplate(connection.templateId ?? '')?.modelDiscovery ??
+      'supported'
+  }
+
+  /**
+   * A manual test of a key whose Provider has no models endpoint. Nothing is
+   * sent; the reason is recorded so the Owner sees why. Asking for a test the
+   * Provider cannot answer is asking to use the key, so any key but a disabled
+   * one is trusted again, exactly as an untested key is; a real request still
+   * demotes it if the upstream refuses it.
+   */
+  async #recordUntestable(
+    providerId: string,
+    key: UpstreamKeyRecord,
+  ): Promise<ProviderResult<ProviderView>> {
+    const at = this.#clock.now()
+    const patch: UpstreamKeyPatch = {
+      ...(key.health === 'disabled' ? {} : untestedPatch(at)),
+      lastProbeAt: at,
+      lastProbeVerdict: 'inconclusive',
+      lastProbeReason: UNTESTABLE_REASON,
+    }
+    await this.#database.transaction(async (repositories) => {
+      await repositories.providers.updateKey(key.id, patch, at)
+      await repositories.audit.record({
+        action: 'key.tested',
+        outcome: 'failure',
+        detail: {
+          providerId,
+          keyId: key.id,
+          verdict: 'inconclusive',
+          reason: UNTESTABLE_REASON,
+          previousHealth: key.health,
+          ...(patch.health === undefined ? {} : { newHealth: patch.health }),
+        },
+        at,
+      })
+    })
+    return { ok: true, value: await this.#viewOf(providerId) }
   }
 
   async #runProbe(
@@ -2206,6 +2370,25 @@ type ProbeRun =
   | { readonly readable: false }
   | { readonly readable: true; readonly verdict: KeyProbeVerdict; readonly reason: string | null }
 
+const UNTESTABLE_REASON =
+  'model discovery is off for this Provider, so there is no endpoint to test the key against; its next request verifies it'
+
+/**
+ * Trusts a key that cannot be tested. It routes as Active, and the reactive
+ * evidence of its first real request demotes it if the upstream refuses it.
+ */
+function untestedPatch(at: Date): UpstreamKeyPatch {
+  return {
+    health: 'active',
+    healthReason: 'not tested: model discovery is off for this Provider',
+    healthChangedAt: at,
+    retryAfterAt: null,
+    healthScope: 'key',
+    healthScopeId: null,
+    healthModel: null,
+  }
+}
+
 /** The stored result of one probe; optionally activating an unverified key. */
 /**
  * Computes the post-test patch from the probe verdict and the key's current
@@ -2289,6 +2472,8 @@ function summaryOf(provider: {
   logoDomain: string | null
   authHeader: string
   authPrefix: string
+  requiresUpstreamKey: boolean
+  modelDiscovery: ModelDiscoveryMode | null
   staticHeadersEncrypted: string
   redirectAllowSameOrigin: boolean
   connectionTimeoutMs: number
@@ -2314,6 +2499,8 @@ function summaryOf(provider: {
     templateId: provider.templateId,
     authHeader: provider.authHeader,
     authPrefix: provider.authPrefix,
+    requiresUpstreamKey: provider.requiresUpstreamKey,
+    modelDiscovery: provider.modelDiscovery,
     redirectAllowSameOrigin: provider.redirectAllowSameOrigin,
     connectionTimeoutMs: provider.connectionTimeoutMs,
     firstByteTimeoutMs: provider.firstByteTimeoutMs,
@@ -2418,8 +2605,13 @@ function baseUrlProblems(input: unknown, allowInsecureHttp: boolean): readonly F
   return []
 }
 
-function upstreamKeyProblems(input: unknown): readonly FieldProblem[] {
-  if (typeof input !== 'string' || input.trim().length === 0) {
+/**
+ * A Provider that needs no secret accepts an absent or empty key: the key is
+ * then a routing slot whose requests carry no authentication header.
+ */
+function upstreamKeyProblems(input: unknown, required = true): readonly FieldProblem[] {
+  if (!required && (input === undefined || input === null)) return []
+  if (typeof input !== 'string' || (required && input.trim().length === 0)) {
     return [{ field: 'upstreamKey', message: 'is required' }]
   }
 
@@ -2428,6 +2620,26 @@ function upstreamKeyProblems(input: unknown): readonly FieldProblem[] {
   }
 
   return []
+}
+
+/** The secret to store for an already-validated key input; absent means none. */
+function upstreamKeyValue(input: unknown): string {
+  return typeof input === 'string' ? input.trim() : ''
+}
+
+/** Reads a model discovery override: a known mode, or null to inherit the template. */
+function readModelDiscovery(
+  input: unknown,
+  problems: FieldProblem[],
+): ModelDiscoveryMode | null | undefined {
+  if (input === undefined) return undefined
+  if (input === null) return null
+  if (input === 'supported' || input === 'best_effort' || input === 'unsupported') return input
+  problems.push({
+    field: 'modelDiscovery',
+    message: 'must be supported, best_effort, unsupported, or null to inherit the template',
+  })
+  return undefined
 }
 
 /**
@@ -2758,8 +2970,16 @@ function readModelList(
 function readCreateKeys(
   input: unknown,
   providerBaseUrl: string,
+  requiresUpstreamKey: boolean,
   problems: FieldProblem[],
 ): readonly { readonly upstreamKey: string; readonly baseUrl: string | null }[] {
+  // A Provider that needs no secret still routes through a key, so omitting
+  // the keys seeds the one empty-secret key it needs.
+  if (!requiresUpstreamKey && (input === undefined || input === null ||
+    (Array.isArray(input) && input.length === 0))) {
+    return [{ upstreamKey: '', baseUrl: null }]
+  }
+
   if (!Array.isArray(input)) {
     problems.push({ field: 'keys', message: 'must be a non-empty list of Upstream Keys' })
     return []
@@ -2790,7 +3010,7 @@ function readCreateKeys(
     }
 
     const candidate = entry as { upstreamKey?: unknown; baseUrl?: unknown }
-    const keyProblems = upstreamKeyProblems(candidate.upstreamKey)
+    const keyProblems = upstreamKeyProblems(candidate.upstreamKey, requiresUpstreamKey)
     for (const problem of keyProblems) {
       problems.push({ field: `keys[${index}].${problem.field}`, message: problem.message })
     }
@@ -2801,7 +3021,7 @@ function readCreateKeys(
     const baseUrl = readCreateKeyBaseUrl(candidate.baseUrl, providerBaseUrl, allowInsecureHttp, index, problems)
     if (baseUrl === undefined) return
 
-    out.push({ upstreamKey: (candidate.upstreamKey as string).trim(), baseUrl })
+    out.push({ upstreamKey: upstreamKeyValue(candidate.upstreamKey), baseUrl })
   })
 
   return out

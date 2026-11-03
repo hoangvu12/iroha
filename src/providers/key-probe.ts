@@ -54,11 +54,16 @@ export function createGenericKeyProbe(options: KeyProbeOptions = {}): UpstreamKe
         return { verdict: 'inconclusive', reason: 'the stored base URL is not a usable URL' }
       }
 
+      // An empty key belongs to a Provider that needs no secret, so the test
+      // sends none, and a refusal cannot be blamed on a key that was not sent.
+      const keyless = upstreamKey === ''
       let response: Response
       try {
         response = await fetchImpl(modelsUrl, {
           method: 'GET',
-          headers: { authorization: `Bearer ${upstreamKey}`, accept: 'application/json' },
+          headers: keyless
+            ? { accept: 'application/json' }
+            : { authorization: `Bearer ${upstreamKey}`, accept: 'application/json' },
           // Following a redirect could carry the key to another origin; the
           // transport rules decide that later, so the probe reports it instead.
           redirect: 'manual',
@@ -79,6 +84,12 @@ export function createGenericKeyProbe(options: KeyProbeOptions = {}): UpstreamKe
       const { status } = response
 
       if (status >= 200 && status < 300) return { verdict: 'authenticated', reason: null }
+      if (status === 401 && keyless) {
+        return {
+          verdict: 'inconclusive',
+          reason: 'the provider requires authentication for its models endpoint (HTTP 401), and this key sends none',
+        }
+      }
       if (status === 401) {
         return { verdict: 'rejected', reason: 'the provider rejected the key (HTTP 401)' }
       }

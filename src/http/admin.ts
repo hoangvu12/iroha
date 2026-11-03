@@ -160,6 +160,8 @@ export function createAdminRoutes({
           allowInsecureHttp: input.allowInsecureHttp,
           ...('authHeader' in input ? { authHeader: input.authHeader } : {}),
           ...('authPrefix' in input ? { authPrefix: input.authPrefix } : {}),
+          ...('requiresUpstreamKey' in input ? { requiresUpstreamKey: input.requiresUpstreamKey } : {}),
+          ...('modelDiscovery' in input ? { modelDiscovery: input.modelDiscovery } : {}),
           ...('staticHeaders' in input ? { staticHeaders: input.staticHeaders } : {}),
           ...('redirectAllowSameOrigin' in input
             ? { redirectAllowSameOrigin: input.redirectAllowSameOrigin }
@@ -262,6 +264,8 @@ export function createAdminRoutes({
             : {}),
           ...('authHeader' in input ? { authHeader: input.authHeader } : {}),
           ...('authPrefix' in input ? { authPrefix: input.authPrefix } : {}),
+          ...('requiresUpstreamKey' in input ? { requiresUpstreamKey: input.requiresUpstreamKey } : {}),
+          ...('modelDiscovery' in input ? { modelDiscovery: input.modelDiscovery } : {}),
           ...('staticHeaders' in input ? { staticHeaders: input.staticHeaders } : {}),
           ...('redirectAllowSameOrigin' in input
             ? { redirectAllowSameOrigin: input.redirectAllowSameOrigin }
@@ -1059,6 +1063,13 @@ const providerResponse = t.Object({
   templateId: t.Union([t.Null(), t.String()]),
   authHeader: t.String(),
   authPrefix: t.String(),
+  requiresUpstreamKey: t.Boolean(),
+  modelDiscovery: t.Union([
+    t.Null(),
+    t.Literal('supported'),
+    t.Literal('best_effort'),
+    t.Literal('unsupported'),
+  ]),
   staticHeaders: t.Array(staticHeaderNameResponse),
   redirectAllowSameOrigin: t.Boolean(),
   connectionTimeoutMs: t.Number(),
@@ -1202,6 +1213,8 @@ function toProviderDto(view: ProviderView): ProviderDto {
     templateId: view.templateId,
     authHeader: view.authHeader,
     authPrefix: view.authPrefix,
+    requiresUpstreamKey: view.requiresUpstreamKey,
+    modelDiscovery: view.modelDiscovery,
     staticHeaders: view.staticHeaders.map((header) => ({ name: header.name })),
     redirectAllowSameOrigin: view.redirectAllowSameOrigin,
     connectionTimeoutMs: view.connectionTimeoutMs,

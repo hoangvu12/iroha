@@ -28,6 +28,7 @@ export type {
   ModelCatalogRepository,
   ModelCatalogSource,
   ModelCatalogSyncRecord,
+  ModelDiscoveryMode,
   OwnerRecord,
   OwnerRepository,
   ProviderCapabilities,

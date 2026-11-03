@@ -63,7 +63,9 @@ export function createSecretCipher(masterKey: string): SecretCipher {
 
         const iv = Buffer.from(ivPart, 'base64url')
         const payload = Buffer.from(payloadPart, 'base64url')
-        if (iv.length !== IV_BYTES || payload.length <= TAG_BYTES) {
+        // A tag alone is a whole stored form: the empty secret of a Provider
+        // that needs no key, still authenticated by the tag.
+        if (iv.length !== IV_BYTES || payload.length < TAG_BYTES) {
           throw new Error('truncated stored form')
         }
 

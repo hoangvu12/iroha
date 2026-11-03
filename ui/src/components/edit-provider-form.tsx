@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { LogoDomainField } from '@/components/logo-domain-field'
+import { ModelDiscoverySelect } from '@/components/model-discovery-select'
 import { logoDomainFromBaseUrl, normalizeLogoDomainInput } from '@/lib/logo-domain'
 import { ApiError, toApiError } from '@/lib/api-client'
 import { GENERIC_PROVIDER_TEMPLATE_ID, type ProviderView } from '@/lib/providers'
@@ -27,6 +28,8 @@ export function EditProviderForm({
   const logoDomainTouched = useRef(false)
   const [authHeader, setAuthHeader] = useState(provider.authHeader)
   const [authPrefix, setAuthPrefix] = useState(provider.authPrefix)
+  const [requiresUpstreamKey, setRequiresUpstreamKey] = useState(provider.requiresUpstreamKey)
+  const [modelDiscovery, setModelDiscovery] = useState(provider.modelDiscovery)
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(provider.allowInsecureHttp)
   const [enabled, setEnabled] = useState(provider.enabled)
   const [retryMaxAttempts, setRetryMaxAttempts] = useState(String(provider.retryMaxAttempts))
@@ -53,6 +56,8 @@ export function EditProviderForm({
         ...(logoDomainTouched.current ? { logoDomain: normalizedLogoDomain } : {}),
         authHeader,
         authPrefix,
+        requiresUpstreamKey,
+        modelDiscovery,
         allowInsecureHttp,
         enabled,
         retryMaxAttempts: Number(retryMaxAttempts),
@@ -94,6 +99,14 @@ export function EditProviderForm({
         onChange={(value) => { logoDomainTouched.current = true; setLogoDomain(value) }}
         problem={form.problemFor('logoDomain')}
       />
+      <label className="text-muted-foreground flex items-center gap-2 text-xs">
+        <Checkbox
+          checked={!requiresUpstreamKey}
+          onCheckedChange={(value) => setRequiresUpstreamKey(value !== true)}
+        />
+        No API key required. Keys may be left empty, and an empty key sends no
+        authentication header.
+      </label>
       <Field
         id={`edit-${provider.id}-auth-header`}
         label="Authentication header"
@@ -113,6 +126,12 @@ export function EditProviderForm({
             : 'Enter a header name above to see the format.'
         }
         problem={form.problemFor('authPrefix')}
+      />
+      <ModelDiscoverySelect
+        id={`edit-${provider.id}-model-discovery`}
+        value={modelDiscovery}
+        onChange={setModelDiscovery}
+        problem={form.problemFor('modelDiscovery')}
       />
       <div className="flex flex-col gap-1.5">
         <label className="text-muted-foreground flex items-center gap-2 text-xs">

@@ -45,6 +45,8 @@ import { MoreHorizontal } from 'lucide-react'
 import { ProviderIcon } from '@/components/provider-icon'
 import { EditProviderForm } from '@/components/edit-provider-form'
 import { ModelListPicker } from '@/components/model-list-picker'
+import { MODEL_DISCOVERY_LABELS } from '@/components/model-discovery-select'
+import { ProviderModelsCard } from '@/components/provider-models-card'
 import { CodeSnippetCard } from '@/components/code-snippet-card'
 import { BulkKeyInput } from '@/components/bulk-key-input'
 import {
@@ -172,6 +174,8 @@ export function ProviderDetail({
         readings={usageDialogReadings}
         onOpenChange={(open) => !open && setUsageDialogReadings(null)}
       />
+
+      <ProviderModelsCard provider={provider} csrfToken={csrfToken} />
 
       <CodeSnippetCard provider={provider} csrfToken={csrfToken} />
 
@@ -593,7 +597,7 @@ function AddKeyDialog({
     if (busy) return
     setBulkPartialResult(null)
     if (keyInputMode === 'single') {
-      if (value === '') return
+      if (value === '' && provider.requiresUpstreamKey) return
       add.mutate(
         {
           ...target,
@@ -698,6 +702,12 @@ function AddKeyDialog({
                   onChange={(event) => setValue(event.target.value)}
                   className="border-input bg-background h-9 rounded-md border px-2 text-sm"
                 />
+                {!provider.requiresUpstreamKey && (
+                  <p className="text-muted-foreground text-xs">
+                    Optional. This provider needs no key; leave it empty to send no
+                    authentication header.
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-col gap-1.5">
@@ -787,7 +797,7 @@ function AddKeyDialog({
               disabled={
                 busy ||
                 (keyInputMode === 'single'
-                  ? value === ''
+                  ? value === '' && provider.requiresUpstreamKey
                   : totalEntries === 0)
               }
             >
@@ -1345,6 +1355,14 @@ function ProviderDetailsCard({ provider }: { readonly provider: ProviderView }) 
         <DetailRow label="Internal ID"><span className="text-muted-foreground font-mono">{provider.id}</span></DetailRow>
         <DetailRow label="Base URL">
           <span className="font-mono break-all">{provider.baseUrl}</span>
+        </DetailRow>
+        <DetailRow label="Authentication">
+          {provider.requiresUpstreamKey
+            ? `${provider.authHeader}: ${provider.authPrefix}<key>`
+            : 'No key required'}
+        </DetailRow>
+        <DetailRow label="Model list">
+          {MODEL_DISCOVERY_LABELS[provider.modelDiscovery ?? 'inherit']}
         </DetailRow>
         <DetailRow label="Retry policy">
           All eligible keys · Same-key retries {provider.retryMaxAttempts === 1 ? 'off' : 'on'}

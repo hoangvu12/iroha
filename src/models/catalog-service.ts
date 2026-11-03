@@ -6,6 +6,7 @@ import type {
   ModelCatalogSource,
   ModelCatalogMetadata,
   ModelCatalogSyncRecord,
+  ModelDiscoveryMode,
   ProviderRecord,
 } from '../persistence/index.ts'
 import type { AdapterRegistry } from '../providers/adapter-registry.ts'
@@ -229,8 +230,9 @@ export class ModelCatalogService {
     if (connection.archivedAt !== null) return failed({ code: 'provider_archived' })
 
     const at = this.#clock.now()
-    if (this.#templateDiscovery(connection.templateId ?? '') === 'unsupported') {
+    if (this.#discoveryOf(connection) === 'unsupported') {
       await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
+      await this.#supplementUndiscovered(providerId, connection.handle)
       await this.#database.modelCatalog.putSync({
         providerId,
         syncedAt: at,
@@ -270,8 +272,9 @@ export class ModelCatalogService {
 
     const answered = attempts.filter((attempt) => attempt.outcome.ok)
     if (answered.length === 0) {
-      if (this.#templateDiscovery(connection.templateId ?? '') === 'best_effort') {
+      if (this.#discoveryOf(connection) === 'best_effort') {
         await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
+        await this.#supplementUndiscovered(providerId, connection.handle)
         await this.#database.modelCatalog.putSync({
           providerId,
           syncedAt: at,
@@ -334,6 +337,7 @@ export class ModelCatalogService {
     await this.#fillMissingMetadata(connection.handle, discovered, metadataByModel)
     await this.#database.modelCatalog.syncDiscovered(providerId, discovered, at, metadataByModel)
     await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
+    await this.#supplementUndiscovered(providerId, connection.handle)
 
     // A partly successful round still refreshed the catalog, so the success
     // advances; the failure is recorded beside it rather than instead of it.
@@ -411,6 +415,11 @@ export class ModelCatalogService {
     await this.#syncTemplateKnowledge(providerId, connection.templateId, at)
   }
 
+  /** The Owner's override when set, otherwise what the Provider Template declares. */
+  #discoveryOf(connection: ProviderRecord): ModelDiscoveryMode {
+    return connection.modelDiscovery ?? this.#templateDiscovery(connection.templateId ?? '')
+  }
+
   /** One read-only discovery GET against one Upstream Key. Never throws. */
   async #discover(target: DiscoveryTarget): Promise<DiscoveryOutcome> {
     let upstream
@@ -471,6 +480,7 @@ export class ModelCatalogService {
         at,
       })
     })
+    await this.#supplementUndiscovered(providerId, connection.value.handle)
     return await this.#viewOf(providerId)
   }
 
@@ -697,6 +707,34 @@ export class ModelCatalogService {
     }
   }
 
+  /**
+   * Supplements the rows discovery never describes — Owner additions and
+   * template knowledge — from the external metadata catalog. Without this an
+   * undiscoverable Provider's models carry no context length at all. Retained
+   * facts still win, and only rows the catalog actually adds to are written.
+   */
+  async #supplementUndiscovered(providerId: string, providerHandle: string): Promise<void> {
+    const entries = (await this.#database.modelCatalog.listEntries(providerId))
+      .filter((entry) => entry.source !== 'discovered' && !entry.excluded)
+    if (entries.length === 0) return
+
+    const metadataByModel: Record<string, ModelCatalogMetadata> = {}
+    for (const entry of entries) {
+      if (entry.metadata !== null) metadataByModel[entry.modelId] = entry.metadata
+    }
+    await this.#fillMissingMetadata(providerHandle, entries.map((entry) => entry.modelId), metadataByModel)
+
+    const supplemented: Record<string, ModelCatalogMetadata> = {}
+    for (const entry of entries) {
+      const metadata = metadataByModel[entry.modelId]
+      if (metadata !== undefined && !sameMetadata(entry.metadata, metadata)) {
+        supplemented[entry.modelId] = metadata
+      }
+    }
+    if (Object.keys(supplemented).length === 0) return
+    await this.#database.modelCatalog.putMetadata(providerId, supplemented)
+  }
+
   async #recordedFailure(
     providerId: string,
     prior: ModelCatalogSyncRecord | null,
@@ -815,6 +853,14 @@ function readModelMetadata(model: Record<string, unknown>): ModelCatalogMetadata
     inputModalities,
     outputModalities,
   }
+}
+
+/** Field-wise, because a JSONB column does not keep the key order it was given. */
+function sameMetadata(stored: ModelCatalogMetadata | null, next: ModelCatalogMetadata): boolean {
+  if (stored === null) return false
+  return (Object.keys(next) as (keyof ModelCatalogMetadata)[]).every(
+    (field) => JSON.stringify(stored[field] ?? null) === JSON.stringify(next[field] ?? null),
+  )
 }
 
 function nestedRecord(value: unknown): Record<string, unknown> {

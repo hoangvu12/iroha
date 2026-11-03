@@ -86,6 +86,10 @@ export const providers = pgTable('providers', {
   authHeader: text('auth_header').notNull().default('authorization'),
   /** Plain-text prefix (e.g. "Bearer "); empty string means none. */
   authPrefix: text('auth_prefix').notNull().default('Bearer '),
+  /** Whether the upstream needs a secret; false lets keys carry an empty one. */
+  requiresUpstreamKey: boolean('requires_upstream_key').notNull().default(true),
+  /** Owner override of template model discovery; null inherits the template. */
+  modelDiscovery: text('model_discovery'),
   /** Encrypted JSON text of static [{name, value}] headers. Default is []. */
   staticHeadersEncrypted: text('static_headers_encrypted').notNull().default('[]'),
   /** Whether same-origin redirects are allowed. Default false: redirects rejected. */

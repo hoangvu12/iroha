@@ -38,6 +38,8 @@ export const queryKeys = {
    */
   auditAll: () => ['audit'] as const,
   usage: (providerId: string) => ['usage', providerId] as const,
+  /** One Provider's Model Catalog, as its Models card reads it. */
+  catalog: (providerId: string) => ['catalog', providerId] as const,
 }
 
 /**

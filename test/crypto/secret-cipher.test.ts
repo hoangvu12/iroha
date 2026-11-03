@@ -18,6 +18,12 @@ describe('the secret cipher', () => {
     expect(await cipher.decrypt(await cipher.encrypt(awkward))).toBe(awkward)
   })
 
+  test('round-trips the empty secret of a Provider that needs no key', async () => {
+    const cipher = createSecretCipher(MASTER_KEY)
+
+    expect(await cipher.decrypt(await cipher.encrypt(''))).toBe('')
+  })
+
   test('never lets the plaintext travel inside the stored form', async () => {
     const cipher = createSecretCipher(MASTER_KEY)
 

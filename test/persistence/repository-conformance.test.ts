@@ -378,6 +378,8 @@ for (const engine of availableEngines) {
         },
         authHeader: 'authorization',
         authPrefix: 'Bearer ',
+        requiresUpstreamKey: true,
+        modelDiscovery: null,
         staticHeadersEncrypted: '[]',
         redirectAllowSameOrigin: false,
         connectionTimeoutMs: 10_000,
@@ -814,6 +816,8 @@ for (const engine of availableEngines) {
         },
         authHeader: 'authorization',
         authPrefix: 'Bearer ',
+        requiresUpstreamKey: true,
+        modelDiscovery: null,
         staticHeadersEncrypted: '[]',
         redirectAllowSameOrigin: false,
         connectionTimeoutMs: 10_000,
@@ -914,6 +918,30 @@ for (const engine of availableEngines) {
           streaming: false,
         })
       })
+
+      test('puts metadata on existing rows without creating or reclassifying any', async () => {
+        await database.providers.insertProvider(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_two'))
+        await database.modelCatalog.addOwnerModel('pc_one', 'custom-model', at)
+        await database.modelCatalog.updateOverrides('pc_one', 'custom-model', { chat: true }, at)
+        await database.modelCatalog.addOwnerModel('pc_two', 'custom-model', at)
+        const metadata = {
+          normalizedName: 'Custom Model',
+          contextLength: 1_050_000,
+          maxInputTokens: 922_000,
+          maxOutputTokens: 128_000,
+        }
+
+        await database.modelCatalog.putMetadata('pc_one', {
+          'custom-model': metadata,
+          'unknown-model': metadata,
+        })
+
+        const one = await database.modelCatalog.listEntries('pc_one')
+        expect(one.map((entry) => entry.modelId)).toEqual(['custom-model'])
+        expect(one[0]).toMatchObject({ source: 'owner_added', excluded: false, overrides: { chat: true }, metadata })
+        expect((await database.modelCatalog.listEntries('pc_two'))[0]?.metadata).toBeNull()
+      })
     })
 
     describe('usage snapshots', () => {
@@ -944,6 +972,8 @@ for (const engine of availableEngines) {
         },
         authHeader: 'authorization',
         authPrefix: 'Bearer ',
+        requiresUpstreamKey: true,
+        modelDiscovery: null,
         staticHeadersEncrypted: '[]',
         redirectAllowSameOrigin: false,
         connectionTimeoutMs: 10_000,
@@ -1118,6 +1148,8 @@ for (const engine of availableEngines) {
         },
         authHeader: 'authorization',
         authPrefix: 'Bearer ',
+        requiresUpstreamKey: true,
+        modelDiscovery: null,
         staticHeadersEncrypted: '[]',
         redirectAllowSameOrigin: false,
         connectionTimeoutMs: 10_000,

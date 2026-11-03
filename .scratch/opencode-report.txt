@@ -1,7 +1,10 @@
 SKIPPED (non-chat)
 bevansatria/openrouter/google/lyria-3-clip-preview
 bevansatria/openrouter/google/lyria-3-pro-preview
+dashscope/fun-asr-flash-2026-06-15
 dashscope/qwen-audio-3.0-asr-flash
+dashscope/qwen-audio-3.0-realtime-flash
+dashscope/qwen-audio-3.0-realtime-plus
 dashscope/qwen-image-2.0
 dashscope/qwen-image-2.0-2026-03-03
 dashscope/qwen-image-2.0-pro
@@ -24,7 +27,10 @@ dashscope/qwen-mt-flash
 dashscope/qwen-mt-lite
 dashscope/qwen-mt-plus
 dashscope/qwen-mt-turbo
+dashscope/qwen-tts-2025-05-22
+dashscope/qwen-vl-ocr
 dashscope/qwen-vl-ocr-2025-11-20
+dashscope/qwen-vl-ocr-latest
 dashscope/qwen3-asr-flash-2026-02-10
 dashscope/qwen3-asr-flash-realtime
 dashscope/qwen3-asr-flash-realtime-2025-10-27
@@ -38,6 +44,7 @@ dashscope/qwen3-omni-flash-realtime
 dashscope/qwen3-omni-flash-realtime-2025-09-15
 dashscope/qwen3-omni-flash-realtime-2025-12-01
 dashscope/qwen3-s2s-flash-realtime
+dashscope/qwen3-s2s-flash-realtime-2025-09-22
 dashscope/qwen3-tts-flash
 dashscope/qwen3-tts-flash-2025-09-18
 dashscope/qwen3-tts-flash-2025-11-27
@@ -56,6 +63,7 @@ dashscope/qwen3-tts-vd-realtime-2025-12-16
 dashscope/qwen3-tts-vd-realtime-2026-01-15
 dashscope/qwen3.5-livetranslate-flash-realtime
 dashscope/qwen3.5-livetranslate-flash-realtime-2026-05-19
+dashscope/qwen3.5-ocr
 dashscope/qwen3.5-omni-flash-realtime
 dashscope/qwen3.5-omni-flash-realtime-2026-03-15
 dashscope/qwen3.5-omni-plus-realtime
@@ -64,11 +72,16 @@ dashscope/qwen3.7-text-embedding
 dashscope/text-embedding-v3
 dashscope/text-embedding-v4
 dashscope/tongyi-tingwu-slp
+dashscope/vanchin/deepseek-ocr
 dashscope/wan2.7-image
 dashscope/wan2.7-image-pro
 dashscope/z-image-turbo
 
 FALLBACK LIMITS
+bevansatria/af/anthropic/claude-3.7-sonnet -> 200000
+bevansatria/af/deepseek/deepseek-v3 -> 163840
+bevansatria/af/x-ai/grok-2-1212 -> 256000
+bevansatria/af/x-ai/grok-3 -> 256000
 bevansatria/ag/gemini-3-flash -> 1048576
 bevansatria/ag/gemini-3-flash-agent -> 1048576
 bevansatria/ag/gemini-3.1-pro-low -> 1048576
@@ -107,7 +120,6 @@ bevansatria/gh/mai-code-1-flash -> 131072
 bevansatria/gh/mai-code-1-flash-4th -> 131072
 bevansatria/gh/mai-code-1-flash-picker -> 131072
 bevansatria/gh/mai-code-1-flash-secondary -> 131072
-bevansatria/gh/mai-code-1-flash-tertiary -> 131072
 bevansatria/gh/mai-code-1.1-flash -> 131072
 bevansatria/gh/oswe-vscode-prime -> 131072
 bevansatria/gh/trajectory-compaction -> 131072
@@ -130,6 +142,9 @@ bevansatria/oc/mimo-v2.5-free -> 131072
 bevansatria/oc/nemotron-3-ultra-free -> 131072
 bevansatria/oc/nemotron-3.5-lightning-free -> 131072
 bevansatria/oc/north-mini-code-free -> 131072
+bevansatria/oc/x-preview-f-free -> 131072
+bevansatria/ocg/mimo-v2.5 -> 131072
+bevansatria/ocg/mimo-v2.5-pro -> 131072
 bevansatria/openrouter/nvidia/nemotron-3-nano-30b-a3b:free -> 131072
 bevansatria/openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free -> 131072
 bevansatria/openrouter/nvidia/nemotron-3-super-120b-a12b:free -> 131072
@@ -151,12 +166,58 @@ bevansatria/qd/qmodel_38max -> 131072
 bevansatria/qd/qmodel_latest -> 131072
 bevansatria/qd/qmodel_preview -> 131072
 bevansatria/qd/ultimate -> 131072
+dashscope/MiniMax/speech-02-hd -> 131072
+dashscope/MiniMax/speech-02-turbo -> 131072
+dashscope/MiniMax/speech-2.8-hd -> 131072
+dashscope/MiniMax/speech-2.8-turbo -> 131072
+dashscope/ZHIPU/GLM-5.3 -> 200000
 dashscope/ccai-pro -> 131072
+dashscope/codeqwen1.5-7b-chat -> 131072
+dashscope/deepseek-r1 -> 163840
+dashscope/deepseek-r1-distill-llama-70b -> 163840
+dashscope/deepseek-r1-distill-llama-8b -> 163840
+dashscope/deepseek-r1-distill-qwen-1.5b -> 163840
+dashscope/deepseek-r1-distill-qwen-14b -> 163840
+dashscope/deepseek-r1-distill-qwen-32b -> 163840
+dashscope/deepseek-r1-distill-qwen-7b -> 163840
+dashscope/deepseek-v3 -> 163840
+dashscope/deepseek-v3.1 -> 163840
 dashscope/deepseek-v3.2 -> 163840
+dashscope/gui-plus -> 131072
+dashscope/qvq-plus -> 131072
+dashscope/qwen-1.8b-chat -> 131072
+dashscope/qwen-1.8b-longcontext-chat -> 131072
+dashscope/qwen-14b-chat -> 131072
+dashscope/qwen-72b-chat -> 131072
+dashscope/qwen-7b-chat -> 131072
 dashscope/qwen-coder-plus -> 131072
+dashscope/qwen-coder-plus-1106 -> 131072
+dashscope/qwen-coder-turbo -> 131072
+dashscope/qwen-deep-research-2025-12-15 -> 131072
+dashscope/qwen-deep-search-planning -> 131072
 dashscope/qwen-flash-character -> 131072
+dashscope/qwen-flash-character-2026-02-26 -> 131072
+dashscope/qwen-long -> 131072
+dashscope/qwen-math-plus -> 131072
+dashscope/qwen-math-plus-0919 -> 131072
+dashscope/qwen-math-plus-latest -> 131072
+dashscope/qwen-math-turbo -> 131072
+dashscope/qwen-max-longcontext -> 262144
 dashscope/qwen-plus-character -> 131072
+dashscope/qwen1.5-0.5b-chat -> 131072
+dashscope/qwen1.5-1.8b-chat -> 131072
+dashscope/qwen1.5-110b-chat -> 131072
+dashscope/qwen1.5-14b-chat -> 131072
+dashscope/qwen1.5-32b-chat -> 131072
+dashscope/qwen1.5-72b-chat -> 131072
+dashscope/qwen1.5-7b-chat -> 131072
+dashscope/qwen2-0.5b-instruct -> 131072
+dashscope/qwen2-1.5b-instruct -> 131072
+dashscope/qwen2-57b-a14b-instruct -> 131072
 dashscope/qwen2-7b-instruct -> 131072
+dashscope/qwen2.5-0.5b-instruct -> 131072
+dashscope/qwen2.5-1.5b-instruct -> 131072
+dashscope/qwen2.5-math-1.5b-instruct -> 131072
 dashscope/qwen3-235b-a22b-instruct-2507 -> 131072
 dashscope/qwen3-30b-a3b -> 131072
 dashscope/qwen3-30b-a3b-instruct-2507 -> 131072
@@ -175,4 +236,18 @@ dashscope/qwen3.5-omni-plus-2026-03-15 -> 131072
 dashscope/qwen3.7-flash -> 131072
 dashscope/qwen3.7-flash-2026-07-15 -> 131072
 dashscope/qwen3.8-2.4t-a95b -> 131072
+dashscope/qwen3.8-27b -> 131072
+dashscope/siliconflow/deepseek-r1-0528 -> 163840
+dashscope/siliconflow/deepseek-v3-0324 -> 163840
+dashscope/siliconflow/deepseek-v3.1-terminus -> 163840
+dashscope/siliconflow/deepseek-v3.2 -> 163840
+dashscope/sre-gpu-auto-handle -> 131072
+dashscope/test-sre-gpu-auto-handle -> 131072
+dashscope/tongyi-xiaomi-analysis-flash -> 131072
+dashscope/tongyi-xiaomi-analysis-pro -> 131072
+dashscope/vanchin/deepseek-r1 -> 163840
+dashscope/vanchin/deepseek-v3 -> 163840
+dashscope/vanchin/deepseek-v3.1-terminus -> 163840
+dashscope/vanchin/deepseek-v3.2-think -> 163840
+dashscope/xiaomi/mimo-v2.5-pro -> 131072
 z-ai/glm-5-turbo -> 200000

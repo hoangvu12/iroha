@@ -282,6 +282,85 @@ describe('the provider-scoped Models API', () => {
     }))
   })
 
+  describe('metadata for models discovery never reports', () => {
+    let catalogAvailable: boolean
+
+    beforeEach(async () => {
+      await iroha.dispose()
+      catalogAvailable = true
+      upstream = mockUpstreamTransport(() => discoveryBody([]))
+      iroha = await createTestApp({
+        upstreamTransport: upstream.fetch,
+        modelMetadataFallback: async (_handle, modelIds) => {
+          if (!catalogAvailable) throw new Error('models.dev is unreachable')
+          return Object.fromEntries(modelIds.map((modelId) => [modelId, {
+            normalizedName: 'GPT-6.1 Sol',
+            contextLength: 1_050_000,
+            maxInputTokens: 922_000,
+            maxOutputTokens: 128_000,
+          }]))
+        },
+      })
+      csrf = (await completeSetup(iroha)).csrf
+      const response = await iroha.fetch('/api/v1/admin/providers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          handle: crypto.randomUUID(),
+          displayName: 'Undiscoverable',
+          baseUrl: BASE_URL,
+          keys: [{ upstreamKey: UPSTREAM_KEY }],
+          modelDiscovery: 'unsupported',
+        }),
+        csrf,
+      })
+      connection = (await response.json()) as ConnectionBody
+    })
+
+    const addModel = async (modelId: string) => {
+      const response = await iroha.fetch(`/api/v1/admin/providers/${connection.id}/catalog/models`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ modelId }),
+        csrf,
+      })
+      expect(response.status).toBe(200)
+      return (await response.json()) as { entries: { modelId: string; metadata: Record<string, unknown> | null }[] }
+    }
+
+    test('supplements an Owner-added model from the external catalog', async () => {
+      const body = await addModel('gpt-6.1-sol')
+
+      expect(body.entries.find((entry) => entry.modelId === 'gpt-6.1-sol')?.metadata).toMatchObject({
+        normalizedName: 'GPT-6.1 Sol',
+        contextLength: 1_050_000,
+        maxOutputTokens: 128_000,
+      })
+      const key = await createKey([{ providerId: connection.id }])
+      const listed = (await (await listModels(key)).json()) as { data: Record<string, unknown>[] }
+      expect(listed.data).toContainEqual(expect.objectContaining({
+        id: 'gpt-6.1-sol',
+        context_length: 1_050_000,
+        max_output_tokens: 128_000,
+      }))
+    })
+
+    test('a refresh fills an Owner-added model the catalog missed earlier', async () => {
+      catalogAvailable = false
+      const added = await addModel('gpt-6.1-sol')
+      expect(added.entries.find((entry) => entry.modelId === 'gpt-6.1-sol')?.metadata).toBeNull()
+
+      catalogAvailable = true
+      const refreshed = await refreshCatalog() as unknown as {
+        entries: { modelId: string; source: string; metadata: Record<string, unknown> | null }[]
+      }
+
+      const entry = refreshed.entries.find((candidate) => candidate.modelId === 'gpt-6.1-sol')
+      expect(entry?.source).toBe('owner_added')
+      expect(entry?.metadata).toMatchObject({ contextLength: 1_050_000 })
+    })
+  })
+
   test('catalog discovery hits a key\'s own base URL override', async () => {
     upstream.calls.length = 0
     const overrideUrl = 'https://override.example.com/v1'

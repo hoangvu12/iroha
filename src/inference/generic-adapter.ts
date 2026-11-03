@@ -95,8 +95,11 @@ export function createGenericInferenceAdapter(
       // The configured authentication header always wins over any caller-supplied
       // value: the prefix and key together form one atomic value the Owner
       // chose, and an existing header in the same slot is overwritten rather
-      // than appended so a caller cannot smuggle a second credential.
-      forwarded[request.authHeader.toLowerCase()] = `${request.authPrefix}${request.upstreamKey}`
+      // than appended so a caller cannot smuggle a second credential. An empty
+      // key belongs to a Provider that needs no secret: the slot is cleared,
+      // never filled with a bare prefix.
+      if (request.upstreamKey === '') delete forwarded[request.authHeader.toLowerCase()]
+      else forwarded[request.authHeader.toLowerCase()] = `${request.authPrefix}${request.upstreamKey}`
       forwarded['content-type'] ??= 'application/json'
       if (!('accept' in forwarded)) forwarded['accept'] = 'application/json'
       mergeStaticHeaders(forwarded, request.staticHeaders, request.authHeader)

@@ -33,6 +33,7 @@ import {
   type ModelCatalogSyncRecord,
   type OwnerRecord,
   type OwnerRepository,
+  type ModelDiscoveryMode,
   type ProviderPatch,
   type ProviderRecord,
   type ProviderRepository,
@@ -720,6 +721,8 @@ function toProvider(row: ProviderRow): ProviderRecord {
     capabilities: parseCapabilities(row.capabilities),
     authHeader: row.authHeader,
     authPrefix: row.authPrefix,
+    requiresUpstreamKey: row.requiresUpstreamKey,
+    modelDiscovery: toModelDiscovery(row.modelDiscovery),
     staticHeadersEncrypted: row.staticHeadersEncrypted,
     redirectAllowSameOrigin: row.redirectAllowSameOrigin,
     connectionTimeoutMs: row.connectionTimeoutMs,
@@ -755,6 +758,8 @@ function encodeProviderRow(provider: ProviderRecord): {
   capabilities: string
   authHeader: string
   authPrefix: string
+  requiresUpstreamKey: boolean
+  modelDiscovery: ModelDiscoveryMode | null
   staticHeadersEncrypted: string
   redirectAllowSameOrigin: boolean
   connectionTimeoutMs: number
@@ -781,6 +786,8 @@ function encodeProviderRow(provider: ProviderRecord): {
     capabilities: JSON.stringify(provider.capabilities),
     authHeader: provider.authHeader,
     authPrefix: provider.authPrefix,
+    requiresUpstreamKey: provider.requiresUpstreamKey,
+    modelDiscovery: provider.modelDiscovery,
     staticHeadersEncrypted: provider.staticHeadersEncrypted,
     redirectAllowSameOrigin: provider.redirectAllowSameOrigin,
     connectionTimeoutMs: provider.connectionTimeoutMs,
@@ -792,6 +799,11 @@ function encodeProviderRow(provider: ProviderRecord): {
     createdAt: provider.createdAt,
     updatedAt: provider.updatedAt,
   }
+}
+
+/** Reads the stored discovery override; anything unrecognised inherits the template. */
+function toModelDiscovery(raw: string | null): ModelDiscoveryMode | null {
+  return raw === 'supported' || raw === 'best_effort' || raw === 'unsupported' ? raw : null
 }
 
 function encodeProviderPatch(patch: ProviderPatch): Partial<ReturnType<typeof encodeProviderRow>> {
@@ -942,6 +954,23 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
         createdAt: at,
         updatedAt: at,
       })
+    }
+  }
+
+  async putMetadata(
+    providerId: string,
+    metadataByModel: Readonly<Record<string, ModelCatalogMetadata>>,
+  ): Promise<void> {
+    for (const [modelId, metadata] of Object.entries(metadataByModel)) {
+      await this.handle
+        .update(modelCatalogEntries)
+        .set({ metadata })
+        .where(
+          and(
+            eq(modelCatalogEntries.providerId, providerId),
+            eq(modelCatalogEntries.modelId, modelId),
+          ),
+        )
     }
   }
 

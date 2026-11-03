@@ -274,7 +274,9 @@ function buildUpstreamHeaders(options: {
     if (isBlockedHeader(name)) continue
     out[name.toLowerCase()] = value
   }
-  out[options.authHeader.toLowerCase()] = `${options.authPrefix}${options.upstreamKey}`
+  // An empty key belongs to a Provider that needs no secret: no auth header.
+  if (options.upstreamKey === '') delete out[options.authHeader.toLowerCase()]
+  else out[options.authHeader.toLowerCase()] = `${options.authPrefix}${options.upstreamKey}`
   for (const [name, value] of Object.entries(options.staticHeaders)) {
     if (name.toLowerCase() === options.authHeader.toLowerCase()) continue
     out[name.toLowerCase()] = value
@@ -1462,7 +1464,9 @@ function buildAnthropicPassthroughHeaders(options: {
     if (isBlockedHeader(name)) continue
     out[name.toLowerCase()] = value
   }
-  out[options.authHeader.toLowerCase()] = `${options.authPrefix}${options.upstreamKey}`
+  // An empty key belongs to a Provider that needs no secret: no auth header.
+  if (options.upstreamKey === '') delete out[options.authHeader.toLowerCase()]
+  else out[options.authHeader.toLowerCase()] = `${options.authPrefix}${options.upstreamKey}`
   for (const [name, value] of Object.entries(options.staticHeaders)) {
     if (name.toLowerCase() === options.authHeader.toLowerCase()) continue
     out[name.toLowerCase()] = value

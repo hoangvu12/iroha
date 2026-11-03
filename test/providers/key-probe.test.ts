@@ -90,6 +90,30 @@ describe('the generic key probe', () => {
     expect(result.reason).not.toBeNull()
   })
 
+  test('sends no credential for a key with no secret', async () => {
+    const { seen, fetch } = fakeFetch(async () => new Response('{}', { status: 200 }))
+
+    const result = await createGenericKeyProbe({ fetch }).test({
+      baseUrl: 'https://api.example.com/v1',
+      upstreamKey: '',
+    })
+
+    const headers = (seen[0]?.init?.headers ?? {}) as Record<string, string>
+    expect(headers.authorization).toBeUndefined()
+    expect(result.verdict).toBe('authenticated')
+  })
+
+  test('does not reject a key with no secret on a 401', async () => {
+    const { fetch } = fakeFetch(async () => new Response('{}', { status: 401 }))
+
+    const result = await createGenericKeyProbe({ fetch }).test({
+      baseUrl: 'https://api.example.com/v1',
+      upstreamKey: '',
+    })
+
+    expect(result.verdict).toBe('inconclusive')
+  })
+
   test('reports an unreachable provider as inconclusive', async () => {
     const { fetch } = fakeFetch(() => {
       throw new TypeError('fetch failed')

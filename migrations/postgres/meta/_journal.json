@@ -176,6 +176,13 @@
       "when": 1789775281158,
       "tag": "0024_messy_swordsman",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793132219324,
+      "tag": "0025_provider_key_and_discovery_settings",
+      "breakpoints": true
     }
   ]
 }

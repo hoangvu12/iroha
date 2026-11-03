@@ -53,6 +53,10 @@ export interface ProviderView {
   readonly templateId: string | null
   readonly authHeader: string
   readonly authPrefix: string
+  /** False when the upstream needs no secret and keys may be left empty. */
+  readonly requiresUpstreamKey: boolean
+  /** The Owner's model discovery override, or null to inherit the template. */
+  readonly modelDiscovery: ModelDiscoveryMode | null
   readonly staticHeaders: readonly { readonly name: string }[]
   readonly redirectAllowSameOrigin: boolean
   readonly connectionTimeoutMs: number
@@ -67,6 +71,14 @@ export interface ProviderView {
   readonly keys: readonly KeyView[]
   readonly accounts: readonly UpstreamAccountView[]
 }
+
+/**
+ * How far a Provider's `GET /models` can be trusted: `supported` reads it,
+ * `best_effort` falls back to template knowledge when it fails, and
+ * `unsupported` never calls it — models are then added by hand, and keys are
+ * trusted until a real request refuses them.
+ */
+export type ModelDiscoveryMode = 'supported' | 'best_effort' | 'unsupported'
 
 export interface ProviderTemplateCapabilities {
   readonly chat: boolean
@@ -173,6 +185,8 @@ export interface NewProviderInput {
   readonly templateId: string | null
   readonly authHeader?: string
   readonly authPrefix?: string
+  readonly requiresUpstreamKey?: boolean
+  readonly modelDiscovery?: ModelDiscoveryMode | null
 }
 
 export async function createProvider(
@@ -201,6 +215,8 @@ export async function createProvider(
   if (input.templateId !== null) body.templateId = input.templateId
   if (input.authHeader !== undefined) body.authHeader = input.authHeader
   if (input.authPrefix !== undefined) body.authPrefix = input.authPrefix
+  if (input.requiresUpstreamKey !== undefined) body.requiresUpstreamKey = input.requiresUpstreamKey
+  if (input.modelDiscovery !== undefined) body.modelDiscovery = input.modelDiscovery
   return await request<ProviderView>('POST', '/providers', {
     body,
     csrfToken,
@@ -218,6 +234,8 @@ export interface ProviderPatch {
   readonly retryAmbiguousNetwork?: boolean
   readonly authHeader?: string
   readonly authPrefix?: string
+  readonly requiresUpstreamKey?: boolean
+  readonly modelDiscovery?: ModelDiscoveryMode | null
 }
 
 export async function updateProvider(

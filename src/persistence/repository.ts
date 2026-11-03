@@ -143,6 +143,17 @@ export interface ProviderRecord {
   /** Plain-text prefix for the authentication header; empty string means none. */
   readonly authPrefix: string
   /**
+   * Whether the upstream needs a secret. When false the Provider's Upstream
+   * Keys may carry an empty secret, and an empty secret sends no
+   * authentication header at all.
+   */
+  readonly requiresUpstreamKey: boolean
+  /**
+   * The Owner's override of the Provider Template's model discovery support,
+   * or null to inherit it. `unsupported` also stops the `GET /models` key test.
+   */
+  readonly modelDiscovery: ModelDiscoveryMode | null
+  /**
    * The stored encrypted blob of the Provider's static headers. Decryption is
    * the registry's responsibility: this column carries cipher output, and the
    * registry surfaces a decrypted `staticHeaders` view to callers.
@@ -165,6 +176,13 @@ export interface ProviderRecord {
   readonly createdAt: Date
   readonly updatedAt: Date
 }
+
+/**
+ * How far a Provider's OpenAI `GET /models` can be trusted: `supported` reads
+ * it and treats a refusal as a failure, `best_effort` falls back to template
+ * knowledge when it fails, and `unsupported` never calls it.
+ */
+export type ModelDiscoveryMode = 'supported' | 'best_effort' | 'unsupported'
 
 /**
  * The inference capabilities a Provider claims by default. Every one is a
@@ -274,6 +292,10 @@ export interface ProviderPatch {
   readonly authHeader?: string
   /** Replaces the authentication header prefix. */
   readonly authPrefix?: string
+  /** Replaces whether the upstream needs a secret. */
+  readonly requiresUpstreamKey?: boolean
+  /** Replaces the model discovery override; null inherits the template again. */
+  readonly modelDiscovery?: ModelDiscoveryMode | null
   /** Replaces the encrypted static headers blob (already encrypted by the caller). */
   readonly staticHeadersEncrypted?: string
   /** Replaces the same-origin redirect flag. */
@@ -525,6 +547,15 @@ export interface ModelCatalogRepository {
    * overriding discovery, additions, or intent.
    */
   syncTemplate(providerId: string, modelIds: readonly string[], at: Date): Promise<void>
+  /**
+   * Replaces the retained metadata of models already in the catalog. Unknown
+   * models are ignored and no source, exclusion, or override changes, so
+   * metadata learned outside discovery never creates or reclassifies a row.
+   */
+  putMetadata(
+    providerId: string,
+    metadataByModel: Readonly<Record<string, ModelCatalogMetadata>>,
+  ): Promise<void>
   /** Marks a model as an Owner addition. Unknown models become `owner_added`. */
   addOwnerModel(providerId: string, modelId: string, at: Date): Promise<void>
   /** Removes an Owner addition. Returns whether an owner-added row was removed. */

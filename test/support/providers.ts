@@ -36,6 +36,8 @@ export function providerRecord(
     },
     authHeader: 'authorization',
     authPrefix: 'Bearer ',
+    requiresUpstreamKey: true,
+    modelDiscovery: null,
     staticHeadersEncrypted: '[]',
     redirectAllowSameOrigin: false,
     connectionTimeoutMs: 10_000,

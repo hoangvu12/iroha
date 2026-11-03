@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { MoreHorizontal, Plus, Server, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -42,6 +43,10 @@ import {
   useSubmission,
 } from '@/components/edit-provider-form'
 import { BulkKeyInput } from '@/components/bulk-key-input'
+import { ModelDiscoverySelect } from '@/components/model-discovery-select'
+import { MODEL_IDS_TEXTAREA_CLASS } from '@/components/provider-models-card'
+import { addOwnerModel } from '@/lib/catalog'
+import { parseModelIds } from '@/lib/use-catalog'
 import { ApiError, toApiError } from '@/lib/api-client'
 import { describeProviderStatus } from '@/lib/provider-status'
 import {
@@ -49,6 +54,7 @@ import {
   GENERIC_PROVIDER_TEMPLATE,
   GENERIC_PROVIDER_TEMPLATE_BASE_URL,
   GENERIC_PROVIDER_TEMPLATE_ID,
+  type ModelDiscoveryMode,
   type ProviderView,
 } from '@/lib/providers'
 import { useProviderTemplates } from '@/lib/use-provider-templates'
@@ -409,6 +415,9 @@ function CreateProviderForm({
   const logoDomainTouched = useRef(false)
   const [authHeader, setAuthHeader] = useState(GENERIC_PROVIDER_TEMPLATE.authHeader)
   const [authPrefix, setAuthPrefix] = useState(GENERIC_PROVIDER_TEMPLATE.authPrefix)
+  const [requiresUpstreamKey, setRequiresUpstreamKey] = useState(true)
+  const [modelDiscovery, setModelDiscovery] = useState<ModelDiscoveryMode | null>(null)
+  const [models, setModels] = useState('')
   const create = useCreateProvider(csrfToken)
   const templateList = useProviderTemplates()
   // Until the list arrives the selector still offers the Generic template, which
@@ -529,22 +538,37 @@ function CreateProviderForm({
         { field: 'logoDomain', message: 'Enter a valid hostname or HTTP(S) URL.' },
       ])
     }
-    await create.mutateAsync({
+    const created = await create.mutateAsync({
       input: {
         displayName,
         handle,
         baseUrl,
         logoDomain: normalizedLogoDomain,
-        keys:
-          keyInputMode === 'bulk'
+        // A Provider that needs no key gets its one empty-secret key from
+        // the server, so none is sent.
+        keys: !requiresUpstreamKey
+          ? []
+          : keyInputMode === 'bulk'
             ? bulkKeys.map((b) => ({ upstreamKey: b.upstreamKey, baseUrl: b.baseUrl }))
             : keys.map((row) => ({ upstreamKey: row.upstreamKey, baseUrl: row.baseUrl })),
         allowInsecureHttp,
         templateId,
         authHeader,
         authPrefix,
+        requiresUpstreamKey,
+        modelDiscovery,
       },
     })
+    // The Provider exists by now, so a model that fails to add is reported
+    // rather than failing the form: submitting again would create a twin.
+    const modelIds = modelDiscovery === 'unsupported' ? parseModelIds(models) : []
+    try {
+      for (const modelId of modelIds) await addOwnerModel(created.id, modelId, csrfToken)
+    } catch (cause) {
+      toast.error(`Created ${displayName}, but could not add its models`, {
+        description: toApiError(cause).message,
+      })
+    }
     onCreated()
   })
 
@@ -631,92 +655,132 @@ function CreateProviderForm({
         problem={form.problemFor('logoDomain')}
       />
 
-      <Field
-        id="new-auth-header"
-        label="Authentication header"
-        value={authHeader}
-        onChange={setAuthHeader}
-        hint="The HTTP header name for authentication."
-        problem={form.problemFor('authHeader')}
+      <ModelDiscoverySelect
+        id="new-model-discovery"
+        value={modelDiscovery}
+        onChange={setModelDiscovery}
+        problem={form.problemFor('modelDiscovery')}
       />
 
-      <Field
-        id="new-auth-prefix"
-        label="Authentication prefix"
-        value={authPrefix}
-        onChange={setAuthPrefix}
-        hint={
-          authHeader
-            ? `Sent as: ${authHeader}: ${authPrefix}<your-key>`
-            : 'Enter a header name above to see the format.'
-        }
-        problem={form.problemFor('authPrefix')}
-      />
-
-      <div className="flex flex-col gap-2">
-        <Label>Upstream keys</Label>
-        <div
-          role="group"
-          aria-label="Upstream key input mode"
-          className="border-border bg-muted/40 inline-flex w-fit items-center gap-1 rounded-md border p-1"
-        >
-          <Button
-            type="button"
-            size="xs"
-            variant={keyInputMode === 'single' ? 'secondary' : 'ghost'}
-            aria-pressed={keyInputMode === 'single'}
-            onClick={() => setKeyInputMode('single')}
-          >
-            Single entry
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant={keyInputMode === 'bulk' ? 'secondary' : 'ghost'}
-            aria-pressed={keyInputMode === 'bulk'}
-            onClick={() => setKeyInputMode('bulk')}
-          >
-            Bulk paste
-          </Button>
-        </div>
-        {keyInputMode === 'single' ? (
-          <>
-            <ul className="flex flex-col gap-3">
-              {keys.map((row, index) => (
-                <CreateProviderKeyRowFields
-                  key={row.rowId}
-                  index={index}
-                  row={row}
-                  defaultBaseUrl={baseUrl}
-                  canRemove={keys.length > 1}
-                  onChange={(patch) => updateKeyRow(row.rowId, patch)}
-                  onRemove={() => removeKeyRow(row.rowId)}
-                  upstreamKeyProblem={form.problemFor(`keys[${index}].upstreamKey`)}
-                  baseUrlProblem={form.problemFor(`keys[${index}].baseUrl`)}
-                />
-              ))}
-            </ul>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={addKeyRow}
-              className="self-start"
-            >
-              <Plus className="size-3.5" aria-hidden />
-              Add another key
-            </Button>
-          </>
-        ) : (
-          <BulkKeyInput
-            onParsed={(result) => setBulkKeys(result.entries)}
-            defaultBaseUrl={baseUrl}
+      {modelDiscovery === 'unsupported' && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="new-models">Models</Label>
+          <textarea
+            id="new-models"
+            className={MODEL_IDS_TEXTAREA_CLASS}
+            rows={3}
+            placeholder="gpt-6.1-sol, another-model — one per line or comma-separated"
+            value={models}
+            onChange={(event) => setModels(event.target.value)}
           />
-        )}
-        {topLevelKeysProblem !== undefined && (
-          <p className="text-status-danger text-xs">{topLevelKeysProblem}</p>
-        )}
-      </div>
+          <p className="text-muted-foreground text-xs">
+            The model IDs this provider serves. They are what /v1/models lists; you can change
+            them later on the provider page.
+          </p>
+        </div>
+      )}
+
+      <label className="text-muted-foreground flex items-start gap-2 text-xs">
+        <Checkbox
+          checked={!requiresUpstreamKey}
+          onCheckedChange={(value) => setRequiresUpstreamKey(value !== true)}
+          className="mt-0.5"
+        />
+        <span>
+          No API key required. Requests to this provider carry no authentication header.
+        </span>
+      </label>
+
+      {requiresUpstreamKey && (
+        <>
+          <Field
+            id="new-auth-header"
+            label="Authentication header"
+            value={authHeader}
+            onChange={setAuthHeader}
+            hint="The HTTP header name for authentication."
+            problem={form.problemFor('authHeader')}
+          />
+
+          <Field
+            id="new-auth-prefix"
+            label="Authentication prefix"
+            value={authPrefix}
+            onChange={setAuthPrefix}
+            hint={
+              authHeader
+                ? `Sent as: ${authHeader}: ${authPrefix}<your-key>`
+                : 'Enter a header name above to see the format.'
+            }
+            problem={form.problemFor('authPrefix')}
+          />
+
+          <div className="flex flex-col gap-2">
+            <Label>Upstream keys</Label>
+            <div
+              role="group"
+              aria-label="Upstream key input mode"
+              className="border-border bg-muted/40 inline-flex w-fit items-center gap-1 rounded-md border p-1"
+            >
+              <Button
+                type="button"
+                size="xs"
+                variant={keyInputMode === 'single' ? 'secondary' : 'ghost'}
+                aria-pressed={keyInputMode === 'single'}
+                onClick={() => setKeyInputMode('single')}
+              >
+                Single entry
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant={keyInputMode === 'bulk' ? 'secondary' : 'ghost'}
+                aria-pressed={keyInputMode === 'bulk'}
+                onClick={() => setKeyInputMode('bulk')}
+              >
+                Bulk paste
+              </Button>
+            </div>
+            {keyInputMode === 'single' ? (
+              <>
+                <ul className="flex flex-col gap-3">
+                  {keys.map((row, index) => (
+                    <CreateProviderKeyRowFields
+                      key={row.rowId}
+                      index={index}
+                      row={row}
+                      defaultBaseUrl={baseUrl}
+                      canRemove={keys.length > 1}
+                      onChange={(patch) => updateKeyRow(row.rowId, patch)}
+                      onRemove={() => removeKeyRow(row.rowId)}
+                      upstreamKeyProblem={form.problemFor(`keys[${index}].upstreamKey`)}
+                      baseUrlProblem={form.problemFor(`keys[${index}].baseUrl`)}
+                    />
+                  ))}
+                </ul>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addKeyRow}
+                  className="self-start"
+                >
+                  <Plus className="size-3.5" aria-hidden />
+                  Add another key
+                </Button>
+              </>
+            ) : (
+              <BulkKeyInput
+                onParsed={(result) => setBulkKeys(result.entries)}
+                defaultBaseUrl={baseUrl}
+              />
+            )}
+            {topLevelKeysProblem !== undefined && (
+              <p className="text-status-danger text-xs">{topLevelKeysProblem}</p>
+            )}
+          </div>
+        </>
+      )}
 
       <label className="text-muted-foreground flex items-start gap-2 text-xs">
         <Checkbox
@@ -739,7 +803,9 @@ function CreateProviderForm({
         <Button
           type="submit"
           size="sm"
-          disabled={form.busy || (keyInputMode === 'bulk' && bulkKeys.length === 0)}
+          disabled={
+            form.busy || (requiresUpstreamKey && keyInputMode === 'bulk' && bulkKeys.length === 0)
+          }
         >
           {form.busy ? 'Creating…' : 'Create provider'}
         </Button>

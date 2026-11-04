@@ -1,0 +1,1 @@
+ALTER TABLE "upstream_keys" ADD COLUMN "model_rewrites" jsonb;

@@ -48,26 +48,25 @@ export function parseBulkKeyInput(text: string): ParseBulkResult {
 
 function parseDataLine(rawLine: string): BulkKeyEntry | null {
   const pipeIdx = rawLine.indexOf('|')
-  if (pipeIdx !== -1) {
-    const upstreamKey = rawLine.slice(0, pipeIdx).trim()
-    const baseUrl = rawLine.slice(pipeIdx + 1).trim()
-    if (upstreamKey === '') return null
-    if (baseUrl === '') return { upstreamKey }
-    return { upstreamKey, baseUrl }
-  }
+  if (pipeIdx !== -1) return parsePair(rawLine, pipeIdx)
 
   const commaIdx = rawLine.indexOf(',')
-  if (commaIdx !== -1) {
-    const upstreamKey = rawLine.slice(0, commaIdx).trim()
-    const baseUrl = rawLine.slice(commaIdx + 1).trim()
-    if (upstreamKey === '') return null
-    if (baseUrl === '') return { upstreamKey }
-    return { upstreamKey, baseUrl }
-  }
+  if (commaIdx !== -1) return parsePair(rawLine, commaIdx)
 
   const upstreamKey = rawLine.trim()
   if (upstreamKey === '') return null
   return { upstreamKey }
+}
+
+/**
+ * A blank key with a base URL is kept: it is an endpoint of a Provider that
+ * needs no key, and the server refuses it for a Provider that needs one.
+ */
+function parsePair(rawLine: string, separatorIdx: number): BulkKeyEntry | null {
+  const upstreamKey = rawLine.slice(0, separatorIdx).trim()
+  const baseUrl = rawLine.slice(separatorIdx + 1).trim()
+  if (baseUrl === '') return upstreamKey === '' ? null : { upstreamKey }
+  return { upstreamKey, baseUrl }
 }
 
 export function parseBulkKeyJson(text: string): ParseBulkResult {

@@ -105,6 +105,8 @@ export interface KeyView {
   readonly allowedModels: readonly string[] | null
   /** Exact models the key never serves; null means nothing is excluded. */
   readonly deniedModels: readonly string[] | null
+  /** Maps a requested model ID to the native ID this endpoint serves it as; null for none. */
+  readonly modelRewrites: Readonly<Record<string, string>> | null
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -122,6 +124,11 @@ export interface InferenceTarget {
   readonly keyId: string
   readonly accountId: string | null
   readonly baseUrl: string
+  /**
+   * The model ID to send upstream to this endpoint. It is the requested model
+   * unless the chosen key's rewrite map maps it to a different native ID.
+   */
+  readonly upstreamModelId: string
   readonly allowInsecureHttp: boolean
   readonly retryMaxAttempts: number
   readonly retryAmbiguousNetwork: boolean
@@ -499,16 +506,9 @@ export class ProviderRegistry {
     problems.push(...providerHandleProblems(input.handle))
     problems.push(...displayNameProblems(input.displayName))
     problems.push(...baseUrlProblems(input.baseUrl, allowInsecureHttp))
-    // Per-Key URL overrides need the Provider's base URL for http-vs-https
-    // inheritance; only thread it through when the Provider URL itself was
-    // parseable so a malformed Provider URL does not produce cascading
-    // per-key errors before the early-return below catches it.
-    const providerBaseUrlForKeyInheritance = typeof input.baseUrl === 'string'
-      ? input.baseUrl.trim()
-      : ''
     const keyInputs = readCreateKeys(
       input.keys,
-      providerBaseUrlForKeyInheritance,
+      allowInsecureHttp,
       requiresUpstreamKey,
       problems,
     )
@@ -599,6 +599,7 @@ export class ProviderRegistry {
         healthModel: null,
         allowedModels: null,
         deniedModels: null,
+        modelRewrites: key.modelRewrites,
         createdAt: at,
         updatedAt: at,
       })),
@@ -852,6 +853,23 @@ export class ProviderRegistry {
       }
     }
 
+    // Keys inherit the exception for their own base URLs, so a key still on
+    // plain HTTP holds it in place just as the Provider's URL does.
+    if (changes.allowInsecureHttp === false) {
+      const keys = await this.#database.providers.listKeys(id)
+      if (keys.some((key) => key.baseUrl !== null && key.baseUrl.startsWith('http:'))) {
+        return failed({
+          code: 'validation_failed',
+          problems: [
+            {
+              field: 'allowInsecureHttp',
+              message: 'cannot be withdrawn while an upstream key still uses a plain HTTP base URL',
+            },
+          ],
+        })
+      }
+    }
+
     if (newStaticHeaders !== null) {
       changes.staticHeadersEncrypted = await this.#encryptStaticHeaders(newStaticHeaders)
     }
@@ -1003,6 +1021,7 @@ export class ProviderRegistry {
           healthModel: null,
           allowedModels: null,
           deniedModels: null,
+          modelRewrites: null,
           createdAt: at,
           updatedAt: at,
         })
@@ -1222,7 +1241,7 @@ export class ProviderRegistry {
 
     const upstreamProblems = upstreamKeyProblems(input.upstreamKey, connection.requiresUpstreamKey)
     const problems: FieldProblem[] = [...upstreamProblems]
-    const baseUrl = readKeyBaseUrl(input.baseUrl, connection.baseUrl, problems)
+    const baseUrl = readKeyBaseUrl(input.baseUrl, connection.allowInsecureHttp, problems)
     const settings = await readKeySettings(this.#database.providers, providerId, input, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
@@ -1247,6 +1266,7 @@ export class ProviderRegistry {
         healthModel: null,
         allowedModels: settings.allowedModels === undefined ? null : settings.allowedModels,
         deniedModels: settings.deniedModels === undefined ? null : settings.deniedModels,
+        modelRewrites: settings.modelRewrites === undefined ? null : settings.modelRewrites,
         createdAt: at,
         updatedAt: at,
       })
@@ -1309,7 +1329,7 @@ export class ProviderRegistry {
       }
 
       problems.push(...upstreamKeyProblems(entry.upstreamKey, connection.requiresUpstreamKey))
-      const baseUrl = readKeyBaseUrl(entry.baseUrl, connection.baseUrl, problems)
+      const baseUrl = readKeyBaseUrl(entry.baseUrl, connection.allowInsecureHttp, problems)
       if (problems.length > 0) {
         failedEntries.push({ index, problems })
         continue
@@ -1336,6 +1356,7 @@ export class ProviderRegistry {
           healthModel: null,
           allowedModels: null,
           deniedModels: null,
+          modelRewrites: null,
           createdAt: at,
           updatedAt: at,
         })
@@ -1412,18 +1433,20 @@ export class ProviderRegistry {
     const baseUrl =
       patch.baseUrl === undefined
         ? undefined
-        : readKeyBaseUrl(patch.baseUrl, located.value.connection.baseUrl, problems)
+        : readKeyBaseUrl(patch.baseUrl, located.value.connection.allowInsecureHttp, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
     const changes: {
       accountId?: string | null
       allowedModels?: readonly string[] | null
       deniedModels?: readonly string[] | null
+      modelRewrites?: Readonly<Record<string, string>> | null
       baseUrl?: string | null
     } = {}
     if (settings.accountId !== undefined) changes.accountId = settings.accountId
     if (settings.allowedModels !== undefined) changes.allowedModels = settings.allowedModels
     if (settings.deniedModels !== undefined) changes.deniedModels = settings.deniedModels
+    if (settings.modelRewrites !== undefined) changes.modelRewrites = settings.modelRewrites
     if (baseUrl !== undefined) changes.baseUrl = baseUrl
 
     if (Object.keys(changes).length > 0) {
@@ -1643,6 +1666,7 @@ export class ProviderRegistry {
           keyId: key.id,
           accountId: key.accountId,
           baseUrl: key.baseUrl ?? connection.baseUrl,
+          upstreamModelId: key.modelRewrites?.[model] ?? model,
         allowInsecureHttp: connection.allowInsecureHttp,
         retryMaxAttempts: connection.retryMaxAttempts,
         retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
@@ -2136,6 +2160,7 @@ export class ProviderRegistry {
         healthModel: null,
         allowedModels: null,
         deniedModels: null,
+        modelRewrites: null,
         createdAt: at,
         updatedAt: at,
       })
@@ -2242,6 +2267,7 @@ export class ProviderRegistry {
       accountId: key.accountId,
       allowedModels: key.allowedModels,
       deniedModels: key.deniedModels,
+      modelRewrites: key.modelRewrites,
       createdAt: key.createdAt,
       updatedAt: key.updatedAt,
     }))
@@ -2969,15 +2995,19 @@ function readModelList(
  */
 function readCreateKeys(
   input: unknown,
-  providerBaseUrl: string,
+  allowInsecureHttp: boolean,
   requiresUpstreamKey: boolean,
   problems: FieldProblem[],
-): readonly { readonly upstreamKey: string; readonly baseUrl: string | null }[] {
+): readonly {
+  readonly upstreamKey: string
+  readonly baseUrl: string | null
+  readonly modelRewrites: Readonly<Record<string, string>> | null
+}[] {
   // A Provider that needs no secret still routes through a key, so omitting
   // the keys seeds the one empty-secret key it needs.
   if (!requiresUpstreamKey && (input === undefined || input === null ||
     (Array.isArray(input) && input.length === 0))) {
-    return [{ upstreamKey: '', baseUrl: null }]
+    return [{ upstreamKey: '', baseUrl: null, modelRewrites: null }]
   }
 
   if (!Array.isArray(input)) {
@@ -2990,18 +3020,14 @@ function readCreateKeys(
     return []
   }
 
-  // Per-key base URL overrides inherit the Provider's http allowance: a
-  // Provider on plain HTTP lets its keys point at any plain-HTTP endpoint.
-  // Mirrors the rule `addKey` enforces so the two flows feel identical.
-  const allowInsecureHttp = (() => {
-    try {
-      return new URL(providerBaseUrl).protocol === 'http:'
-    } catch {
-      return false
-    }
-  })()
-
-  const out: { upstreamKey: string; baseUrl: string | null }[] = []
+  // Per-key base URL overrides inherit the Provider's plain-HTTP allowance,
+  // whatever scheme the Provider's own base URL uses. Mirrors the rule
+  // `addKey` enforces so the two flows feel identical.
+  const out: {
+    upstreamKey: string
+    baseUrl: string | null
+    modelRewrites: Readonly<Record<string, string>> | null
+  }[] = []
 
   input.forEach((entry, index) => {
     if (entry === null || typeof entry !== 'object') {
@@ -3009,7 +3035,7 @@ function readCreateKeys(
       return
     }
 
-    const candidate = entry as { upstreamKey?: unknown; baseUrl?: unknown }
+    const candidate = entry as { upstreamKey?: unknown; baseUrl?: unknown; modelRewrites?: unknown }
     const keyProblems = upstreamKeyProblems(candidate.upstreamKey, requiresUpstreamKey)
     for (const problem of keyProblems) {
       problems.push({ field: `keys[${index}].${problem.field}`, message: problem.message })
@@ -3018,10 +3044,17 @@ function readCreateKeys(
 
     // Per-Key base URL override is optional; the same inheritance rules as
     // `addKey` apply (blank string -> inherit Provider default -> null).
-    const baseUrl = readCreateKeyBaseUrl(candidate.baseUrl, providerBaseUrl, allowInsecureHttp, index, problems)
+    const baseUrl = readCreateKeyBaseUrl(candidate.baseUrl, allowInsecureHttp, index, problems)
     if (baseUrl === undefined) return
 
-    out.push({ upstreamKey: upstreamKeyValue(candidate.upstreamKey), baseUrl })
+    const rewrites = readModelRewrites(candidate.modelRewrites, `keys[${index}].modelRewrites`, problems)
+    if (rewrites === undefined && candidate.modelRewrites !== undefined) return
+
+    out.push({
+      upstreamKey: upstreamKeyValue(candidate.upstreamKey),
+      baseUrl,
+      modelRewrites: rewrites ?? null,
+    })
   })
 
   return out
@@ -3038,7 +3071,6 @@ function readCreateKeys(
  */
 function readCreateKeyBaseUrl(
   input: unknown,
-  providerBaseUrl: string,
   allowInsecureHttp: boolean,
   index: number,
   problems: FieldProblem[],
@@ -3067,7 +3099,7 @@ function readCreateKeyBaseUrl(
  */
 function readKeyBaseUrl(
   input: unknown,
-  providerBaseUrl: string,
+  allowInsecureHttp: boolean,
   problems: FieldProblem[],
 ): string | null {
   if (input === undefined || input === null) return null
@@ -3079,13 +3111,6 @@ function readKeyBaseUrl(
   if (trimmed === '') return null
   // Reuse the connection-level validation so the Owner UI applies the same
   // http-vs-https rules to per-Key URLs as to the Provider URL itself.
-  const allowInsecureHttp = (() => {
-    try {
-      return new URL(providerBaseUrl).protocol === 'http:'
-    } catch {
-      return false
-    }
-  })()
   const fieldProblems = baseUrlProblems(trimmed, allowInsecureHttp)
   for (const problem of fieldProblems) {
     problems.push({ field: 'baseUrl', message: problem.message })
@@ -3105,17 +3130,24 @@ function readKeyBaseUrl(
 async function readKeySettings(
   providers: ProviderRepository,
   providerId: string,
-  input: { accountId?: unknown; allowedModels?: unknown; deniedModels?: unknown },
+  input: {
+    accountId?: unknown
+    allowedModels?: unknown
+    deniedModels?: unknown
+    modelRewrites?: unknown
+  },
   problems: FieldProblem[],
 ): Promise<{
   accountId?: string | null
   allowedModels?: readonly string[] | null
   deniedModels?: readonly string[] | null
+  modelRewrites?: Readonly<Record<string, string>> | null
 }> {
   const result: {
     accountId?: string | null
     allowedModels?: readonly string[] | null
     deniedModels?: readonly string[] | null
+    modelRewrites?: Readonly<Record<string, string>> | null
   } = {}
 
   if (input.accountId !== undefined) {
@@ -3146,7 +3178,57 @@ async function readKeySettings(
     if (parsed !== undefined) result.deniedModels = parsed
   }
 
+  if (input.modelRewrites !== undefined) {
+    const parsed = readModelRewrites(input.modelRewrites, 'modelRewrites', problems)
+    if (parsed !== undefined) result.modelRewrites = parsed
+  }
+
   return result
+}
+
+/**
+ * Reads a per-Key model rewrite map: `{ requestedId: nativeId }`. `null` clears
+ * every rewrite; `undefined` leaves it alone. Both sides are trimmed and length
+ * checked like a model ID, blank entries are dropped, and an empty map is
+ * normalised to `null` so "no rewrites" has one representation.
+ */
+function readModelRewrites(
+  input: unknown,
+  field: string,
+  problems: FieldProblem[],
+): Readonly<Record<string, string>> | null | undefined {
+  if (input === undefined) return undefined
+  if (input === null) return null
+
+  if (typeof input !== 'object' || Array.isArray(input)) {
+    problems.push({ field, message: 'must be an object mapping requested model IDs to native IDs, or null' })
+    return undefined
+  }
+
+  const map: Record<string, string> = {}
+  let count = 0
+  for (const [rawFrom, rawTo] of Object.entries(input)) {
+    const from = rawFrom.trim()
+    if (from === '') continue
+    if (typeof rawTo !== 'string') {
+      problems.push({ field, message: 'each native model ID must be text' })
+      continue
+    }
+    const to = rawTo.trim()
+    if (to === '') continue
+    if (from.length > MODEL_ID_MAXIMUM || to.length > MODEL_ID_MAXIMUM) {
+      problems.push({ field, message: `model IDs are at most ${MODEL_ID_MAXIMUM} characters` })
+      continue
+    }
+    map[from] = to
+    count += 1
+  }
+
+  if (count > MODEL_LIST_MAXIMUM) {
+    problems.push({ field, message: `holds at most ${MODEL_LIST_MAXIMUM} rewrites` })
+  }
+
+  return count === 0 ? null : map
 }
 
 /** A duplicate gets a recognisably related name without colliding silently. */

@@ -45,6 +45,12 @@ import { MoreHorizontal } from 'lucide-react'
 import { ProviderIcon } from '@/components/provider-icon'
 import { EditProviderForm } from '@/components/edit-provider-form'
 import { ModelListPicker } from '@/components/model-list-picker'
+import {
+  ModelRewritesEditor,
+  rewriteMapFromRows,
+  rewriteRowsFromMap,
+  type RewriteRow,
+} from '@/components/model-rewrites-editor'
 import { MODEL_DISCOVERY_LABELS } from '@/components/model-discovery-select'
 import { ProviderModelsCard } from '@/components/provider-models-card'
 import { CodeSnippetCard } from '@/components/code-snippet-card'
@@ -568,6 +574,7 @@ function AddKeyDialog({
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl)
   const [allowedModels, setAllowedModels] = useState<readonly string[]>([])
   const [deniedModels, setDeniedModels] = useState<readonly string[]>([])
+  const [rewriteRows, setRewriteRows] = useState<readonly RewriteRow[]>(() => rewriteRowsFromMap(null))
   const [bulkKeys, setBulkKeys] = useState<readonly BulkKeyEntry[]>([])
   const [bulkPartialResult, setBulkPartialResult] = useState<{
     readonly added: number
@@ -607,6 +614,7 @@ function AddKeyDialog({
             accountId: null,
             allowedModels: allowedModels.length === 0 ? null : allowedModels,
             deniedModels: deniedModels.length === 0 ? null : deniedModels,
+            modelRewrites: rewriteMapFromRows(rewriteRows),
           },
         },
         {
@@ -763,6 +771,17 @@ function AddKeyDialog({
                   onChange={setDeniedModels}
                 />
               </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-foreground text-sm font-medium">
+                  Rename models for this endpoint
+                </label>
+                <p className="text-muted-foreground text-xs">
+                  When this endpoint addresses a model under a different ID, map it here. Leave the
+                  right side blank to send the requested ID unchanged.
+                </p>
+                <ModelRewritesEditor rows={rewriteRows} onChange={setRewriteRows} />
+              </div>
             </>
           ) : (
             <>
@@ -837,6 +856,9 @@ function ConfigureKeyDialog({
   const [baseUrl, setBaseUrl] = useState(keyView.baseUrl ?? '')
   const [allowedModels, setAllowedModels] = useState<readonly string[]>(keyView.allowedModels ?? [])
   const [deniedModels, setDeniedModels] = useState<readonly string[]>(keyView.deniedModels ?? [])
+  const [rewriteRows, setRewriteRows] = useState<readonly RewriteRow[]>(() =>
+    rewriteRowsFromMap(keyView.modelRewrites),
+  )
   const save = useUpdateKeySettings(csrfToken)
 
   const trimmedBaseUrl = baseUrl.trim()
@@ -851,6 +873,7 @@ function ConfigureKeyDialog({
       baseUrl: explicitOverride ? trimmedBaseUrl : clearingOverride ? null : undefined,
       allowedModels: allowedModels.length === 0 ? null : [...allowedModels],
       deniedModels: deniedModels.length === 0 ? null : [...deniedModels],
+      modelRewrites: rewriteMapFromRows(rewriteRows),
     }
     // The row behind the dialog changes the moment this fires, but the dialog
     // waits for the response before closing: a rejected model list would
@@ -934,6 +957,17 @@ function ConfigureKeyDialog({
               selected={deniedModels}
               onChange={setDeniedModels}
             />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-foreground text-sm font-medium">
+              Rename models for this endpoint
+            </label>
+            <p className="text-muted-foreground text-xs">
+              When this endpoint addresses a model under a different ID, map it here. Leave the
+              right side blank to send the requested ID unchanged.
+            </p>
+            <ModelRewritesEditor rows={rewriteRows} onChange={setRewriteRows} />
           </div>
 
           <div className="flex items-center gap-2">

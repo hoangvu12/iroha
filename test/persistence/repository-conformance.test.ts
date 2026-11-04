@@ -415,6 +415,7 @@ for (const engine of availableEngines) {
         healthModel: null,
         allowedModels: null,
         deniedModels: null,
+        modelRewrites: null,
         createdAt: at,
         updatedAt: at,
         ...overrides,

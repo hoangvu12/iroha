@@ -163,6 +163,8 @@ export const upstreamKeys = sqliteTable(
     healthModel: text('health_model'),
     allowedModels: text('allowed_models'),
     deniedModels: text('denied_models'),
+    /** JSON object mapping a requested model ID to the native ID this endpoint serves it as. */
+    modelRewrites: text('model_rewrites'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },

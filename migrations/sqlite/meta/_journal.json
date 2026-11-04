@@ -176,6 +176,13 @@
       "when": 1793132218564,
       "tag": "0024_provider_key_and_discovery_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1793810063673,
+      "tag": "0025_previous_nightcrawler",
+      "breakpoints": true
     }
   ]
 }

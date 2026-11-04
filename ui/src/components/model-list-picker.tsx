@@ -39,6 +39,7 @@ export function ModelListPicker({
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [draftError, setDraftError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -87,6 +88,22 @@ export function ModelListPicker({
   const totalKnown = available.length + customSelected.length
   const hasChips = totalKnown > 0
 
+  // A large catalog must never render every chip at once. Search narrows it and
+  // the rendered set is capped; selected models stay visible so a filter never
+  // hides a current choice.
+  const RENDER_CAP = 60
+  const SEARCH_THRESHOLD = 24
+  const trimmedQuery = query.trim().toLowerCase()
+  const matches =
+    trimmedQuery === ''
+      ? available
+      : available.filter((entry) => entry.modelId.toLowerCase().includes(trimmedQuery))
+  const visible = [
+    ...matches.filter((entry) => selectedSet.has(entry.modelId)),
+    ...matches.filter((entry) => !selectedSet.has(entry.modelId)),
+  ].slice(0, RENDER_CAP)
+  const hiddenCount = matches.length - visible.length
+
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       {/*
@@ -126,9 +143,19 @@ export function ModelListPicker({
                 ? 'All models'
                 : `${selectedSet.size} of ${totalKnown} models`}
             </p>
+            {available.length > SEARCH_THRESHOLD && (
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={`Search ${available.length} models…`}
+                aria-label="Search models"
+                className="border-input bg-background h-8 w-full rounded-md border px-2 font-mono text-xs"
+              />
+            )}
             {available.length > 0 && (
               <div className="flex flex-wrap gap-1">
-                {available.map((entry) => {
+                {visible.map((entry) => {
                   const isSelected = selectedSet.has(entry.modelId)
                   return (
                     <button
@@ -148,6 +175,14 @@ export function ModelListPicker({
                   )
                 })}
               </div>
+            )}
+            {available.length > 0 && matches.length === 0 && (
+              <p className="text-muted-foreground text-xs">No models match “{query.trim()}”.</p>
+            )}
+            {hiddenCount > 0 && (
+              <p className="text-muted-foreground text-xs">
+                +{hiddenCount} more — refine the search to narrow the list.
+              </p>
             )}
             {customSelected.length > 0 && (
               <ul className="flex flex-wrap gap-1">

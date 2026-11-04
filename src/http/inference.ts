@@ -933,7 +933,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
       allowInsecureHttp: target.allowInsecureHttp,
       path: upstreamPath,
       method: 'POST',
-      body: envelope.raw,
+      body: bodyForUpstreamModel(envelope.raw, envelope.model, target.upstreamModelId),
       headers: upstreamHeaders,
       upstreamKey: target.upstreamKey,
       signal: requestSignal,
@@ -1621,7 +1621,7 @@ if (timer.now() - startedAt >= totalRetryBudgetMs) return false
         allowInsecureHttp: target.allowInsecureHttp,
         path: '/messages',
         method: 'POST',
-        body: envelope.raw,
+        body: bodyForUpstreamModel(envelope.raw, envelope.model, target.upstreamModelId),
         headers: upstreamHeaders,
         upstreamKey: target.upstreamKey,
         signal: requestSignal,
@@ -2369,6 +2369,24 @@ function abortError(): Error {
 type Envelope =
   | { readonly ok: true; readonly model: string; readonly raw: string; readonly stream: boolean }
   | { readonly ok: false; readonly status: 400; readonly code: string; readonly message: string }
+
+/**
+ * Rewrites the outbound body's `model` to the native ID a chosen endpoint
+ * serves it as. When the endpoint uses the requested ID unchanged — the common
+ * case — the original body text is returned byte-for-byte; a rewrite is the
+ * only reason to re-serialize, and it is resolved per attempt so a failover to
+ * another endpoint re-maps. A body that will not parse is forwarded as-is.
+ */
+function bodyForUpstreamModel(raw: string, requestedModel: string, upstreamModel: string): string {
+  if (upstreamModel === requestedModel) return raw
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return raw
+    return JSON.stringify({ ...(parsed as Record<string, unknown>), model: upstreamModel })
+  } catch {
+    return raw
+  }
+}
 
 function readEnvelope(raw: string): Envelope {
   if (raw === '') {

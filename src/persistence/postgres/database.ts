@@ -835,6 +835,7 @@ function toKey(row: KeyRow): UpstreamKeyRecord {
     healthModel: row.healthModel,
     allowedModels: row.allowedModels as readonly string[] | null,
     deniedModels: row.deniedModels as readonly string[] | null,
+    modelRewrites: (row.modelRewrites as Readonly<Record<string, string>> | null) ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }

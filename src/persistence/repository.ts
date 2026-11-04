@@ -272,6 +272,11 @@ export interface UpstreamKeyRecord {
   readonly allowedModels: readonly string[] | null
   /** Exact models the key never serves, or null for no exclusion. */
   readonly deniedModels: readonly string[] | null
+  /**
+   * Maps a requested model ID to the native ID this endpoint serves it as, or
+   * null for no rewrites. A requested ID absent from the map is sent unchanged.
+   */
+  readonly modelRewrites: Readonly<Record<string, string>> | null
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -331,6 +336,8 @@ export interface UpstreamKeyPatch {
   readonly allowedModels?: readonly string[] | null
   /** Replaces the exact-model deny list; null means nothing is excluded. */
   readonly deniedModels?: readonly string[] | null
+  /** Replaces the per-Key model rewrite map; null clears every rewrite. */
+  readonly modelRewrites?: Readonly<Record<string, string>> | null
   /**
    * Replaces the per-Key base URL override; null clears the override so the
    * Key inherits the Provider's default base URL.

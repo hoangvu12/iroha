@@ -156,6 +156,8 @@ export const upstreamKeys = pgTable(
     healthModel: text('health_model'),
     allowedModels: jsonb('allowed_models'),
     deniedModels: jsonb('denied_models'),
+    /** JSON object mapping a requested model ID to the native ID this endpoint serves it as. */
+    modelRewrites: jsonb('model_rewrites'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
   },

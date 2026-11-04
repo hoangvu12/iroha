@@ -105,6 +105,8 @@ export interface KeyView {
   readonly allowedModels: readonly string[] | null
   /** Exact models the key never serves; null means nothing is excluded. */
   readonly deniedModels: readonly string[] | null
+  /** Maps a requested model ID to the native ID this endpoint serves it as; null for none. */
+  readonly modelRewrites: Readonly<Record<string, string>> | null
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -122,6 +124,11 @@ export interface InferenceTarget {
   readonly keyId: string
   readonly accountId: string | null
   readonly baseUrl: string
+  /**
+   * The model ID to send upstream to this endpoint. It is the requested model
+   * unless the chosen key's rewrite map maps it to a different native ID.
+   */
+  readonly upstreamModelId: string
   readonly allowInsecureHttp: boolean
   readonly retryMaxAttempts: number
   readonly retryAmbiguousNetwork: boolean
@@ -592,6 +599,7 @@ export class ProviderRegistry {
         healthModel: null,
         allowedModels: null,
         deniedModels: null,
+        modelRewrites: key.modelRewrites,
         createdAt: at,
         updatedAt: at,
       })),
@@ -1013,6 +1021,7 @@ export class ProviderRegistry {
           healthModel: null,
           allowedModels: null,
           deniedModels: null,
+          modelRewrites: null,
           createdAt: at,
           updatedAt: at,
         })
@@ -1257,6 +1266,7 @@ export class ProviderRegistry {
         healthModel: null,
         allowedModels: settings.allowedModels === undefined ? null : settings.allowedModels,
         deniedModels: settings.deniedModels === undefined ? null : settings.deniedModels,
+        modelRewrites: settings.modelRewrites === undefined ? null : settings.modelRewrites,
         createdAt: at,
         updatedAt: at,
       })
@@ -1346,6 +1356,7 @@ export class ProviderRegistry {
           healthModel: null,
           allowedModels: null,
           deniedModels: null,
+          modelRewrites: null,
           createdAt: at,
           updatedAt: at,
         })
@@ -1429,11 +1440,13 @@ export class ProviderRegistry {
       accountId?: string | null
       allowedModels?: readonly string[] | null
       deniedModels?: readonly string[] | null
+      modelRewrites?: Readonly<Record<string, string>> | null
       baseUrl?: string | null
     } = {}
     if (settings.accountId !== undefined) changes.accountId = settings.accountId
     if (settings.allowedModels !== undefined) changes.allowedModels = settings.allowedModels
     if (settings.deniedModels !== undefined) changes.deniedModels = settings.deniedModels
+    if (settings.modelRewrites !== undefined) changes.modelRewrites = settings.modelRewrites
     if (baseUrl !== undefined) changes.baseUrl = baseUrl
 
     if (Object.keys(changes).length > 0) {
@@ -1653,6 +1666,7 @@ export class ProviderRegistry {
           keyId: key.id,
           accountId: key.accountId,
           baseUrl: key.baseUrl ?? connection.baseUrl,
+          upstreamModelId: key.modelRewrites?.[model] ?? model,
         allowInsecureHttp: connection.allowInsecureHttp,
         retryMaxAttempts: connection.retryMaxAttempts,
         retryAmbiguousNetwork: connection.retryAmbiguousNetwork,
@@ -2146,6 +2160,7 @@ export class ProviderRegistry {
         healthModel: null,
         allowedModels: null,
         deniedModels: null,
+        modelRewrites: null,
         createdAt: at,
         updatedAt: at,
       })
@@ -2252,6 +2267,7 @@ export class ProviderRegistry {
       accountId: key.accountId,
       allowedModels: key.allowedModels,
       deniedModels: key.deniedModels,
+      modelRewrites: key.modelRewrites,
       createdAt: key.createdAt,
       updatedAt: key.updatedAt,
     }))
@@ -2982,12 +2998,16 @@ function readCreateKeys(
   allowInsecureHttp: boolean,
   requiresUpstreamKey: boolean,
   problems: FieldProblem[],
-): readonly { readonly upstreamKey: string; readonly baseUrl: string | null }[] {
+): readonly {
+  readonly upstreamKey: string
+  readonly baseUrl: string | null
+  readonly modelRewrites: Readonly<Record<string, string>> | null
+}[] {
   // A Provider that needs no secret still routes through a key, so omitting
   // the keys seeds the one empty-secret key it needs.
   if (!requiresUpstreamKey && (input === undefined || input === null ||
     (Array.isArray(input) && input.length === 0))) {
-    return [{ upstreamKey: '', baseUrl: null }]
+    return [{ upstreamKey: '', baseUrl: null, modelRewrites: null }]
   }
 
   if (!Array.isArray(input)) {
@@ -3003,7 +3023,11 @@ function readCreateKeys(
   // Per-key base URL overrides inherit the Provider's plain-HTTP allowance,
   // whatever scheme the Provider's own base URL uses. Mirrors the rule
   // `addKey` enforces so the two flows feel identical.
-  const out: { upstreamKey: string; baseUrl: string | null }[] = []
+  const out: {
+    upstreamKey: string
+    baseUrl: string | null
+    modelRewrites: Readonly<Record<string, string>> | null
+  }[] = []
 
   input.forEach((entry, index) => {
     if (entry === null || typeof entry !== 'object') {
@@ -3011,7 +3035,7 @@ function readCreateKeys(
       return
     }
 
-    const candidate = entry as { upstreamKey?: unknown; baseUrl?: unknown }
+    const candidate = entry as { upstreamKey?: unknown; baseUrl?: unknown; modelRewrites?: unknown }
     const keyProblems = upstreamKeyProblems(candidate.upstreamKey, requiresUpstreamKey)
     for (const problem of keyProblems) {
       problems.push({ field: `keys[${index}].${problem.field}`, message: problem.message })
@@ -3023,7 +3047,14 @@ function readCreateKeys(
     const baseUrl = readCreateKeyBaseUrl(candidate.baseUrl, allowInsecureHttp, index, problems)
     if (baseUrl === undefined) return
 
-    out.push({ upstreamKey: upstreamKeyValue(candidate.upstreamKey), baseUrl })
+    const rewrites = readModelRewrites(candidate.modelRewrites, `keys[${index}].modelRewrites`, problems)
+    if (rewrites === undefined && candidate.modelRewrites !== undefined) return
+
+    out.push({
+      upstreamKey: upstreamKeyValue(candidate.upstreamKey),
+      baseUrl,
+      modelRewrites: rewrites ?? null,
+    })
   })
 
   return out
@@ -3099,17 +3130,24 @@ function readKeyBaseUrl(
 async function readKeySettings(
   providers: ProviderRepository,
   providerId: string,
-  input: { accountId?: unknown; allowedModels?: unknown; deniedModels?: unknown },
+  input: {
+    accountId?: unknown
+    allowedModels?: unknown
+    deniedModels?: unknown
+    modelRewrites?: unknown
+  },
   problems: FieldProblem[],
 ): Promise<{
   accountId?: string | null
   allowedModels?: readonly string[] | null
   deniedModels?: readonly string[] | null
+  modelRewrites?: Readonly<Record<string, string>> | null
 }> {
   const result: {
     accountId?: string | null
     allowedModels?: readonly string[] | null
     deniedModels?: readonly string[] | null
+    modelRewrites?: Readonly<Record<string, string>> | null
   } = {}
 
   if (input.accountId !== undefined) {
@@ -3140,7 +3178,57 @@ async function readKeySettings(
     if (parsed !== undefined) result.deniedModels = parsed
   }
 
+  if (input.modelRewrites !== undefined) {
+    const parsed = readModelRewrites(input.modelRewrites, 'modelRewrites', problems)
+    if (parsed !== undefined) result.modelRewrites = parsed
+  }
+
   return result
+}
+
+/**
+ * Reads a per-Key model rewrite map: `{ requestedId: nativeId }`. `null` clears
+ * every rewrite; `undefined` leaves it alone. Both sides are trimmed and length
+ * checked like a model ID, blank entries are dropped, and an empty map is
+ * normalised to `null` so "no rewrites" has one representation.
+ */
+function readModelRewrites(
+  input: unknown,
+  field: string,
+  problems: FieldProblem[],
+): Readonly<Record<string, string>> | null | undefined {
+  if (input === undefined) return undefined
+  if (input === null) return null
+
+  if (typeof input !== 'object' || Array.isArray(input)) {
+    problems.push({ field, message: 'must be an object mapping requested model IDs to native IDs, or null' })
+    return undefined
+  }
+
+  const map: Record<string, string> = {}
+  let count = 0
+  for (const [rawFrom, rawTo] of Object.entries(input)) {
+    const from = rawFrom.trim()
+    if (from === '') continue
+    if (typeof rawTo !== 'string') {
+      problems.push({ field, message: 'each native model ID must be text' })
+      continue
+    }
+    const to = rawTo.trim()
+    if (to === '') continue
+    if (from.length > MODEL_ID_MAXIMUM || to.length > MODEL_ID_MAXIMUM) {
+      problems.push({ field, message: `model IDs are at most ${MODEL_ID_MAXIMUM} characters` })
+      continue
+    }
+    map[from] = to
+    count += 1
+  }
+
+  if (count > MODEL_LIST_MAXIMUM) {
+    problems.push({ field, message: `holds at most ${MODEL_LIST_MAXIMUM} rewrites` })
+  }
+
+  return count === 0 ? null : map
 }
 
 /** A duplicate gets a recognisably related name without colliding silently. */

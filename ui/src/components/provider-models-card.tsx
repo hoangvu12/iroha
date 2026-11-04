@@ -42,11 +42,26 @@ export function ProviderModelsCard({
   const refresh = useRefreshProviderCatalog(provider.id, csrfToken)
   const [draft, setDraft] = useState('')
 
+  const [query, setQuery] = useState('')
+
   const discoveryOff = provider.modelDiscovery === 'unsupported'
   const entries = catalog.data?.entries ?? []
   const failure = catalog.data?.sync.lastFailureMessage ?? null
   const pending = parseModelIds(draft)
   const editable = !provider.archived
+
+  // A big catalog (some providers list thousands) must never render every chip
+  // at once: a search narrows it, and the rendered set is capped so the page
+  // stays responsive. The count and the "more" line keep the whole size visible.
+  const RENDER_CAP = 60
+  const SEARCH_THRESHOLD = 24
+  const trimmedQuery = query.trim().toLowerCase()
+  const filtered =
+    trimmedQuery === ''
+      ? entries
+      : entries.filter((entry) => entry.modelId.toLowerCase().includes(trimmedQuery))
+  const shown = filtered.slice(0, RENDER_CAP)
+  const hiddenCount = filtered.length - shown.length
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault()
@@ -85,6 +100,17 @@ export function ProviderModelsCard({
         <p className="text-status-warning mt-2 text-xs">Last refresh: {failure}</p>
       )}
 
+      {entries.length > SEARCH_THRESHOLD && (
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={`Search ${entries.length} models…`}
+          aria-label="Search models"
+          className="border-input bg-background mt-3 h-8 w-full rounded-md border px-2 font-mono text-xs"
+        />
+      )}
+
       <div className="mt-3 min-h-5">
         {catalog.isPending ? (
           <span className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -94,9 +120,11 @@ export function ProviderModelsCard({
           <span className="text-status-danger text-xs">{toApiError(catalog.error).message}</span>
         ) : entries.length === 0 ? (
           <span className="text-muted-foreground text-xs">No models yet.</span>
+        ) : filtered.length === 0 ? (
+          <span className="text-muted-foreground text-xs">No models match “{query.trim()}”.</span>
         ) : (
           <ul className="flex flex-wrap gap-1">
-            {entries.map((entry) => (
+            {shown.map((entry) => (
               <li key={entry.modelId}>
                 <span
                   title={SOURCE_LABELS[entry.excluded ? 'excluded' : entry.source]}
@@ -124,6 +152,12 @@ export function ProviderModelsCard({
               </li>
             ))}
           </ul>
+        )}
+        {hiddenCount > 0 && (
+          <p className="text-muted-foreground mt-2 text-xs">
+            Showing {shown.length} of {filtered.length}
+            {trimmedQuery === '' ? '' : ' matches'} — refine the search to narrow the list.
+          </p>
         )}
       </div>
 

@@ -15,6 +15,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Card } from '@/components/card'
+import {
+  ModelRewritesEditor,
+  rewriteMapFromRows,
+  rewriteRowsFromMap,
+  type RewriteRow,
+} from '@/components/model-rewrites-editor'
 import { EmptyState } from '@/components/empty-state'
 import { StatusBadge } from '@/components/status-badge'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -382,6 +388,7 @@ interface CreateProviderKeyRow {
   readonly rowId: string
   readonly upstreamKey: string
   readonly baseUrl: string
+  readonly rewriteRows: readonly RewriteRow[]
 }
 
 function CreateProviderForm({
@@ -398,7 +405,7 @@ function CreateProviderForm({
   const [handleCustomized, setHandleCustomized] = useState(false)
   const [handleSuggestion, setHandleSuggestion] = useState<string | null>(null)
   const [keys, setKeys] = useState<readonly CreateProviderKeyRow[]>(() => [
-    { rowId: makeRowId(), upstreamKey: '', baseUrl: '' },
+    { rowId: makeRowId(), upstreamKey: '', baseUrl: '', rewriteRows: rewriteRowsFromMap(null) },
   ])
   // Bulk-mode parsed entries live alongside `keys` so toggling between Single
   // and Bulk does not destroy either. The submit handler picks which array
@@ -517,7 +524,7 @@ function CreateProviderForm({
   const addKeyRow = useCallback(() => {
     setKeys((current) => [
       ...current,
-      { rowId: makeRowId(), upstreamKey: '', baseUrl: '' },
+      { rowId: makeRowId(), upstreamKey: '', baseUrl: '', rewriteRows: rewriteRowsFromMap(null) },
     ])
   }, [])
 
@@ -547,10 +554,18 @@ function CreateProviderForm({
         // A Provider that needs no key still routes through one empty-secret
         // key per endpoint; a blank row's key inherits the default base URL.
         keys: !requiresUpstreamKey
-          ? keys.map((row) => ({ upstreamKey: '', baseUrl: row.baseUrl }))
+          ? keys.map((row) => ({
+              upstreamKey: '',
+              baseUrl: row.baseUrl,
+              modelRewrites: rewriteMapFromRows(row.rewriteRows),
+            }))
           : keyInputMode === 'bulk'
             ? bulkKeys.map((b) => ({ upstreamKey: b.upstreamKey, baseUrl: b.baseUrl }))
-            : keys.map((row) => ({ upstreamKey: row.upstreamKey, baseUrl: row.baseUrl })),
+            : keys.map((row) => ({
+                upstreamKey: row.upstreamKey,
+                baseUrl: row.baseUrl,
+                modelRewrites: rewriteMapFromRows(row.rewriteRows),
+              })),
         allowInsecureHttp,
         templateId,
         authHeader,
@@ -710,6 +725,7 @@ function CreateProviderForm({
                 onRemove={() => removeKeyRow(row.rowId)}
                 upstreamKeyProblem={form.problemFor(`keys[${index}].upstreamKey`)}
                 baseUrlProblem={form.problemFor(`keys[${index}].baseUrl`)}
+                rewriteProblem={form.problemFor(`keys[${index}].modelRewrites`)}
               />
             ))}
           </ul>
@@ -793,6 +809,7 @@ function CreateProviderForm({
                       onRemove={() => removeKeyRow(row.rowId)}
                       upstreamKeyProblem={form.problemFor(`keys[${index}].upstreamKey`)}
                       baseUrlProblem={form.problemFor(`keys[${index}].baseUrl`)}
+                      rewriteProblem={form.problemFor(`keys[${index}].modelRewrites`)}
                     />
                   ))}
                 </ul>
@@ -862,6 +879,7 @@ function CreateProviderKeyRowFields({
   onRemove,
   upstreamKeyProblem,
   baseUrlProblem,
+  rewriteProblem,
 }: {
   readonly index: number
   readonly row: CreateProviderKeyRow
@@ -873,6 +891,7 @@ function CreateProviderKeyRowFields({
   readonly onRemove: () => void
   readonly upstreamKeyProblem: string | undefined
   readonly baseUrlProblem: string | undefined
+  readonly rewriteProblem: string | undefined
 }) {
   const upstreamKeyId = `new-upstream-key-${row.rowId}`
   const baseUrlId = `new-key-base-url-${row.rowId}`
@@ -926,6 +945,24 @@ function CreateProviderKeyRowFields({
         }
         problem={baseUrlProblem}
       />
+
+      <details className="group">
+        <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-xs">
+          <span className="group-open:hidden">+ Rename models for this endpoint</span>
+          <span className="hidden group-open:inline">Rename models for this endpoint</span>
+        </summary>
+        <p className="text-muted-foreground mt-1.5 mb-2 text-xs">
+          Only needed when this endpoint addresses a model under a different ID. Leave the right
+          side blank to send the requested ID unchanged.
+        </p>
+        <ModelRewritesEditor
+          rows={row.rewriteRows}
+          onChange={(next) => onChange({ rewriteRows: next })}
+        />
+        {rewriteProblem !== undefined && (
+          <p className="text-status-danger mt-1 text-xs">{rewriteProblem}</p>
+        )}
+      </details>
     </li>
   )
 }

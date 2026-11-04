@@ -567,6 +567,7 @@ export function createAdminRoutes({
           ...('accountId' in input ? { accountId: input.accountId } : {}),
           ...('allowedModels' in input ? { allowedModels: input.allowedModels } : {}),
           ...('deniedModels' in input ? { deniedModels: input.deniedModels } : {}),
+          ...('modelRewrites' in input ? { modelRewrites: input.modelRewrites } : {}),
         })
         if (!result.ok) {
           const failure = toFailure(result.failure)
@@ -654,6 +655,7 @@ export function createAdminRoutes({
           ...('accountId' in input ? { accountId: input.accountId } : {}),
           ...('allowedModels' in input ? { allowedModels: input.allowedModels } : {}),
           ...('deniedModels' in input ? { deniedModels: input.deniedModels } : {}),
+          ...('modelRewrites' in input ? { modelRewrites: input.modelRewrites } : {}),
           ...('baseUrl' in input ? { baseUrl: input.baseUrl } : {}),
         })
         if (!result.ok) {
@@ -1034,6 +1036,7 @@ const keyResponse = t.Object({
   accountId: t.Union([t.Null(), t.String()]),
   allowedModels: modelList,
   deniedModels: modelList,
+  modelRewrites: t.Union([t.Null(), t.Record(t.String(), t.String())]),
   createdAt: t.String(),
   updatedAt: t.String(),
 })
@@ -1270,6 +1273,7 @@ function toKeyDto(key: KeyView): KeyDto {
     accountId: key.accountId,
     allowedModels: key.allowedModels === null ? null : [...key.allowedModels],
     deniedModels: key.deniedModels === null ? null : [...key.deniedModels],
+    modelRewrites: key.modelRewrites === null ? null : { ...key.modelRewrites },
     createdAt: key.createdAt.toISOString(),
     updatedAt: key.updatedAt.toISOString(),
   }

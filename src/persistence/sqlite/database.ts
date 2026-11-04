@@ -603,6 +603,7 @@ function encodeKey(key: UpstreamKeyRecord): KeyRow {
     ...key,
     allowedModels: encodeModels(key.allowedModels),
     deniedModels: encodeModels(key.deniedModels),
+    modelRewrites: encodeRewrites(key.modelRewrites),
   }
 }
 
@@ -614,6 +615,9 @@ function encodePatch(patch: UpstreamKeyPatch): Partial<KeyRow> {
   }
   if (patch.deniedModels !== undefined) {
     encoded.deniedModels = encodeModels(patch.deniedModels)
+  }
+  if (patch.modelRewrites !== undefined) {
+    encoded.modelRewrites = encodeRewrites(patch.modelRewrites)
   }
   return encoded as Partial<KeyRow>
 }
@@ -889,9 +893,27 @@ function toKey(row: KeyRow): UpstreamKeyRecord {
     healthModel: row.healthModel,
     allowedModels: decodeModels(row.allowedModels),
     deniedModels: decodeModels(row.deniedModels),
+    modelRewrites: decodeRewrites(row.modelRewrites),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
+}
+
+function decodeRewrites(raw: string | null): Readonly<Record<string, string>> | null {
+  if (raw === null) return null
+  const parsed = JSON.parse(raw) as unknown
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const out: Record<string, string> = {}
+  for (const [from, to] of Object.entries(parsed)) {
+    if (typeof to === 'string') out[from] = to
+  }
+  return out
+}
+
+function encodeRewrites(
+  rewrites: Readonly<Record<string, string>> | null | undefined,
+): string | null {
+  return rewrites === null || rewrites === undefined ? null : JSON.stringify(rewrites)
 }
 
 function decodeModels(raw: string | null): readonly string[] | null {

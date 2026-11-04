@@ -28,6 +28,8 @@ export interface KeyView {
   readonly accountId: string | null
   readonly allowedModels: readonly string[] | null
   readonly deniedModels: readonly string[] | null
+  /** Maps a requested model ID to the native ID this endpoint serves it as; null for none. */
+  readonly modelRewrites: Readonly<Record<string, string>> | null
   readonly createdAt: string
   readonly updatedAt: string
 }
@@ -179,7 +181,11 @@ export interface NewProviderInput {
   readonly handle: string
   readonly displayName: string
   readonly baseUrl: string
-  readonly keys: readonly { readonly upstreamKey: string; readonly baseUrl?: string }[]
+  readonly keys: readonly {
+    readonly upstreamKey: string
+    readonly baseUrl?: string
+    readonly modelRewrites?: Readonly<Record<string, string>> | null
+  }[]
   readonly allowInsecureHttp: boolean
   readonly logoDomain?: string | null
   readonly templateId: string | null
@@ -199,7 +205,11 @@ export async function createProvider(
     baseUrl: input.baseUrl,
     keys: input.keys.map((entry) => {
       const trimmedBaseUrl = entry.baseUrl?.trim() ?? ''
-      const keyBody: { upstreamKey: string; baseUrl?: string } = {
+      const keyBody: {
+        upstreamKey: string
+        baseUrl?: string
+        modelRewrites?: Readonly<Record<string, string>>
+      } = {
         upstreamKey: entry.upstreamKey,
       }
       // A blank per-key URL means "inherit the Provider default" — the
@@ -207,6 +217,9 @@ export async function createProvider(
       // than send an empty string and let the server's `readKeyBaseUrl`
       // do the inheritance.
       if (trimmedBaseUrl !== '') keyBody.baseUrl = trimmedBaseUrl
+      if (entry.modelRewrites != null && Object.keys(entry.modelRewrites).length > 0) {
+        keyBody.modelRewrites = entry.modelRewrites
+      }
       return keyBody
     }),
     allowInsecureHttp: input.allowInsecureHttp,
@@ -321,6 +334,7 @@ export interface NewKeyInput {
   readonly accountId: string | null
   readonly allowedModels: readonly string[] | null
   readonly deniedModels: readonly string[] | null
+  readonly modelRewrites?: Readonly<Record<string, string>> | null
 }
 
 export async function addKey(
@@ -334,6 +348,9 @@ export async function addKey(
     ...(input.accountId !== null ? { accountId: input.accountId } : {}),
     ...(input.allowedModels !== null ? { allowedModels: input.allowedModels } : {}),
     ...(input.deniedModels !== null ? { deniedModels: input.deniedModels } : {}),
+    ...(input.modelRewrites != null && Object.keys(input.modelRewrites).length > 0
+      ? { modelRewrites: input.modelRewrites }
+      : {}),
   }
   return await request<ProviderView>(
     'POST',
@@ -381,6 +398,8 @@ export interface KeySettingsPatch {
   readonly allowedModels: readonly string[] | null
   readonly deniedModels: readonly string[] | null
   readonly baseUrl?: string | null
+  /** undefined leaves the rewrites alone; an object (empty to clear) replaces them. */
+  readonly modelRewrites?: Readonly<Record<string, string>> | null
 }
 
 export async function updateKeySettings(
@@ -394,6 +413,7 @@ export async function updateKeySettings(
     ...(settings.allowedModels !== null ? { allowedModels: settings.allowedModels } : {}),
     ...(settings.deniedModels !== null ? { deniedModels: settings.deniedModels } : {}),
     ...(settings.baseUrl !== undefined ? { baseUrl: settings.baseUrl } : {}),
+    ...(settings.modelRewrites !== undefined ? { modelRewrites: settings.modelRewrites } : {}),
   }
   return await request<ProviderView>(
     'PATCH',

@@ -161,6 +161,74 @@ describe('Providers that need no key or expose no model list', () => {
     })
   })
 
+  describe('a Provider that needs no key, spread over several endpoints', () => {
+    const PLAIN_HTTP_ENDPOINT = 'http://203.0.113.7:20128'
+
+    test('is created with one empty-secret key per endpoint', async () => {
+      const provider = await created({
+        requiresUpstreamKey: false,
+        keys: [{ baseUrl: '' }, { baseUrl: 'https://mirror.example.com/v1' }],
+      })
+
+      expect(provider.keys).toHaveLength(2)
+      expect(probe.calls.map((call) => call.upstreamKey)).toEqual(['', ''])
+    })
+
+    test('lets a key reach a plain-HTTP endpoint once the Provider allows plain HTTP', async () => {
+      const provider = await created({
+        requiresUpstreamKey: false,
+        allowInsecureHttp: true,
+        keys: [{ baseUrl: '' }, { baseUrl: PLAIN_HTTP_ENDPOINT }],
+      })
+
+      expect(provider.keys).toHaveLength(2)
+    })
+
+    test('refuses a plain-HTTP key endpoint while the Provider does not allow plain HTTP', async () => {
+      const response = await create({
+        requiresUpstreamKey: false,
+        keys: [{ baseUrl: PLAIN_HTTP_ENDPOINT }],
+      })
+
+      expect(response.status).toBe(400)
+      const failure = (await response.json()) as { error: { problems: { field: string }[] } }
+      expect(failure.error.problems.map((problem) => problem.field)).toEqual(['keys[0].baseUrl'])
+    })
+
+    test('accepts an added plain-HTTP key once the Provider allows plain HTTP', async () => {
+      const provider = await created({ requiresUpstreamKey: false, allowInsecureHttp: true })
+
+      const response = await iroha.fetch(`${BASE}/${provider.id}/keys`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ baseUrl: PLAIN_HTTP_ENDPOINT }),
+        csrf,
+      })
+
+      expect(response.status).toBe(201)
+      expect(((await response.json()) as ProviderBody).keys).toHaveLength(2)
+    })
+
+    test('keeps the plain-HTTP allowance while a key still uses it', async () => {
+      const provider = await created({
+        requiresUpstreamKey: false,
+        allowInsecureHttp: true,
+        keys: [{ baseUrl: PLAIN_HTTP_ENDPOINT }],
+      })
+
+      const response = await iroha.fetch(`${BASE}/${provider.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ allowInsecureHttp: false }),
+        csrf,
+      })
+
+      expect(response.status).toBe(400)
+      const failure = (await response.json()) as { error: { problems: { field: string }[] } }
+      expect(failure.error.problems.map((problem) => problem.field)).toEqual(['allowInsecureHttp'])
+    })
+  })
+
   describe('a Provider whose model discovery is off', () => {
     test('trusts its keys without the models key test', async () => {
       probe.respondWith({ verdict: 'rejected', reason: 'the provider rejected the key (HTTP 401)' })

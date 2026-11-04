@@ -28,6 +28,8 @@ const PASTE_PLACEHOLDER = [
   'sk-abc',
   'sk-def,https://my-proxy.example.com/v1',
   'sk-ghi|https://other-endpoint.example.com/v2',
+  '# A provider that needs no key takes a base URL with an empty key.',
+  '|https://keyless-endpoint.example.com/v1',
 ].join('\n')
 
 type Tab = 'paste' | 'upload'

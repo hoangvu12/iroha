@@ -544,10 +544,10 @@ function CreateProviderForm({
         handle,
         baseUrl,
         logoDomain: normalizedLogoDomain,
-        // A Provider that needs no key gets its one empty-secret key from
-        // the server, so none is sent.
+        // A Provider that needs no key still routes through one empty-secret
+        // key per endpoint; a blank row's key inherits the default base URL.
         keys: !requiresUpstreamKey
-          ? []
+          ? keys.map((row) => ({ upstreamKey: '', baseUrl: row.baseUrl }))
           : keyInputMode === 'bulk'
             ? bulkKeys.map((b) => ({ upstreamKey: b.upstreamKey, baseUrl: b.baseUrl }))
             : keys.map((row) => ({ upstreamKey: row.upstreamKey, baseUrl: row.baseUrl })),
@@ -691,6 +691,44 @@ function CreateProviderForm({
         </span>
       </label>
 
+      {!requiresUpstreamKey && (
+        <div className="flex flex-col gap-2">
+          <Label>Endpoints</Label>
+          <p className="text-muted-foreground text-xs">
+            Requests rotate across these endpoints. Leave a base URL blank to use the default above.
+          </p>
+          <ul className="flex flex-col gap-3">
+            {keys.map((row, index) => (
+              <CreateProviderKeyRowFields
+                key={row.rowId}
+                index={index}
+                row={row}
+                defaultBaseUrl={baseUrl}
+                keyless
+                canRemove={keys.length > 1}
+                onChange={(patch) => updateKeyRow(row.rowId, patch)}
+                onRemove={() => removeKeyRow(row.rowId)}
+                upstreamKeyProblem={form.problemFor(`keys[${index}].upstreamKey`)}
+                baseUrlProblem={form.problemFor(`keys[${index}].baseUrl`)}
+              />
+            ))}
+          </ul>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addKeyRow}
+            className="self-start"
+          >
+            <Plus className="size-3.5" aria-hidden />
+            Add another endpoint
+          </Button>
+          {topLevelKeysProblem !== undefined && (
+            <p className="text-status-danger text-xs">{topLevelKeysProblem}</p>
+          )}
+        </div>
+      )}
+
       {requiresUpstreamKey && (
         <>
           <Field
@@ -789,8 +827,8 @@ function CreateProviderForm({
           className="mt-0.5"
         />
         <span>
-          Allow plain HTTP for this provider. Only for private or local servers — the Upstream
-          Key travels unencrypted.
+          Allow plain HTTP for this provider and its keys' base URLs. Only for private or local
+          servers — the Upstream Key travels unencrypted.
         </span>
       </label>
 
@@ -818,6 +856,7 @@ function CreateProviderKeyRowFields({
   index,
   row,
   defaultBaseUrl,
+  keyless = false,
   canRemove,
   onChange,
   onRemove,
@@ -827,6 +866,8 @@ function CreateProviderKeyRowFields({
   readonly index: number
   readonly row: CreateProviderKeyRow
   readonly defaultBaseUrl: string
+  /** A Provider that needs no key shows its rows as endpoints: a base URL only. */
+  readonly keyless?: boolean
   readonly canRemove: boolean
   readonly onChange: (patch: Partial<CreateProviderKeyRow>) => void
   readonly onRemove: () => void
@@ -839,8 +880,11 @@ function CreateProviderKeyRowFields({
   return (
     <li className="border-border bg-muted/30 flex flex-col gap-3 rounded-lg border p-3">
       <div className="flex items-center justify-between">
-        <Label htmlFor={upstreamKeyId} className="text-muted-foreground text-xs tracking-wide uppercase">
-          Key {index + 1}
+        <Label
+          htmlFor={keyless ? baseUrlId : upstreamKeyId}
+          className="text-muted-foreground text-xs tracking-wide uppercase"
+        >
+          {keyless ? 'Endpoint' : 'Key'} {index + 1}
         </Label>
         {canRemove && (
           <Button
@@ -848,7 +892,7 @@ function CreateProviderKeyRowFields({
             variant="ghost"
             size="xs"
             onClick={onRemove}
-            aria-label={`Remove key ${index + 1}`}
+            aria-label={`Remove ${keyless ? 'endpoint' : 'key'} ${index + 1}`}
           >
             <Trash2 className="size-3.5" aria-hidden />
             Remove
@@ -856,19 +900,21 @@ function CreateProviderKeyRowFields({
         )}
       </div>
 
-      <Field
-        id={upstreamKeyId}
-        label="Upstream key"
-        type="password"
-        autoComplete="off"
-        value={row.upstreamKey}
-        onChange={(value) => onChange({ upstreamKey: value })}
-        problem={upstreamKeyProblem}
-      />
+      {!keyless && (
+        <Field
+          id={upstreamKeyId}
+          label="Upstream key"
+          type="password"
+          autoComplete="off"
+          value={row.upstreamKey}
+          onChange={(value) => onChange({ upstreamKey: value })}
+          problem={upstreamKeyProblem}
+        />
+      )}
 
       <Field
         id={baseUrlId}
-        label="Base URL override"
+        label={keyless ? 'Base URL' : 'Base URL override'}
         type="url"
         autoComplete="off"
         value={row.baseUrl}

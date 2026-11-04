@@ -499,16 +499,9 @@ export class ProviderRegistry {
     problems.push(...providerHandleProblems(input.handle))
     problems.push(...displayNameProblems(input.displayName))
     problems.push(...baseUrlProblems(input.baseUrl, allowInsecureHttp))
-    // Per-Key URL overrides need the Provider's base URL for http-vs-https
-    // inheritance; only thread it through when the Provider URL itself was
-    // parseable so a malformed Provider URL does not produce cascading
-    // per-key errors before the early-return below catches it.
-    const providerBaseUrlForKeyInheritance = typeof input.baseUrl === 'string'
-      ? input.baseUrl.trim()
-      : ''
     const keyInputs = readCreateKeys(
       input.keys,
-      providerBaseUrlForKeyInheritance,
+      allowInsecureHttp,
       requiresUpstreamKey,
       problems,
     )
@@ -846,6 +839,23 @@ export class ProviderRegistry {
             {
               field: 'allowInsecureHttp',
               message: 'cannot be withdrawn while the base URL still uses plain HTTP',
+            },
+          ],
+        })
+      }
+    }
+
+    // Keys inherit the exception for their own base URLs, so a key still on
+    // plain HTTP holds it in place just as the Provider's URL does.
+    if (changes.allowInsecureHttp === false) {
+      const keys = await this.#database.providers.listKeys(id)
+      if (keys.some((key) => key.baseUrl !== null && key.baseUrl.startsWith('http:'))) {
+        return failed({
+          code: 'validation_failed',
+          problems: [
+            {
+              field: 'allowInsecureHttp',
+              message: 'cannot be withdrawn while an upstream key still uses a plain HTTP base URL',
             },
           ],
         })
@@ -1222,7 +1232,7 @@ export class ProviderRegistry {
 
     const upstreamProblems = upstreamKeyProblems(input.upstreamKey, connection.requiresUpstreamKey)
     const problems: FieldProblem[] = [...upstreamProblems]
-    const baseUrl = readKeyBaseUrl(input.baseUrl, connection.baseUrl, problems)
+    const baseUrl = readKeyBaseUrl(input.baseUrl, connection.allowInsecureHttp, problems)
     const settings = await readKeySettings(this.#database.providers, providerId, input, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
@@ -1309,7 +1319,7 @@ export class ProviderRegistry {
       }
 
       problems.push(...upstreamKeyProblems(entry.upstreamKey, connection.requiresUpstreamKey))
-      const baseUrl = readKeyBaseUrl(entry.baseUrl, connection.baseUrl, problems)
+      const baseUrl = readKeyBaseUrl(entry.baseUrl, connection.allowInsecureHttp, problems)
       if (problems.length > 0) {
         failedEntries.push({ index, problems })
         continue
@@ -1412,7 +1422,7 @@ export class ProviderRegistry {
     const baseUrl =
       patch.baseUrl === undefined
         ? undefined
-        : readKeyBaseUrl(patch.baseUrl, located.value.connection.baseUrl, problems)
+        : readKeyBaseUrl(patch.baseUrl, located.value.connection.allowInsecureHttp, problems)
     if (problems.length > 0) return failed({ code: 'validation_failed', problems })
 
     const changes: {
@@ -2969,7 +2979,7 @@ function readModelList(
  */
 function readCreateKeys(
   input: unknown,
-  providerBaseUrl: string,
+  allowInsecureHttp: boolean,
   requiresUpstreamKey: boolean,
   problems: FieldProblem[],
 ): readonly { readonly upstreamKey: string; readonly baseUrl: string | null }[] {
@@ -2990,17 +3000,9 @@ function readCreateKeys(
     return []
   }
 
-  // Per-key base URL overrides inherit the Provider's http allowance: a
-  // Provider on plain HTTP lets its keys point at any plain-HTTP endpoint.
-  // Mirrors the rule `addKey` enforces so the two flows feel identical.
-  const allowInsecureHttp = (() => {
-    try {
-      return new URL(providerBaseUrl).protocol === 'http:'
-    } catch {
-      return false
-    }
-  })()
-
+  // Per-key base URL overrides inherit the Provider's plain-HTTP allowance,
+  // whatever scheme the Provider's own base URL uses. Mirrors the rule
+  // `addKey` enforces so the two flows feel identical.
   const out: { upstreamKey: string; baseUrl: string | null }[] = []
 
   input.forEach((entry, index) => {
@@ -3018,7 +3020,7 @@ function readCreateKeys(
 
     // Per-Key base URL override is optional; the same inheritance rules as
     // `addKey` apply (blank string -> inherit Provider default -> null).
-    const baseUrl = readCreateKeyBaseUrl(candidate.baseUrl, providerBaseUrl, allowInsecureHttp, index, problems)
+    const baseUrl = readCreateKeyBaseUrl(candidate.baseUrl, allowInsecureHttp, index, problems)
     if (baseUrl === undefined) return
 
     out.push({ upstreamKey: upstreamKeyValue(candidate.upstreamKey), baseUrl })
@@ -3038,7 +3040,6 @@ function readCreateKeys(
  */
 function readCreateKeyBaseUrl(
   input: unknown,
-  providerBaseUrl: string,
   allowInsecureHttp: boolean,
   index: number,
   problems: FieldProblem[],
@@ -3067,7 +3068,7 @@ function readCreateKeyBaseUrl(
  */
 function readKeyBaseUrl(
   input: unknown,
-  providerBaseUrl: string,
+  allowInsecureHttp: boolean,
   problems: FieldProblem[],
 ): string | null {
   if (input === undefined || input === null) return null
@@ -3079,13 +3080,6 @@ function readKeyBaseUrl(
   if (trimmed === '') return null
   // Reuse the connection-level validation so the Owner UI applies the same
   // http-vs-https rules to per-Key URLs as to the Provider URL itself.
-  const allowInsecureHttp = (() => {
-    try {
-      return new URL(providerBaseUrl).protocol === 'http:'
-    } catch {
-      return false
-    }
-  })()
   const fieldProblems = baseUrlProblems(trimmed, allowInsecureHttp)
   for (const problem of fieldProblems) {
     problems.push({ field: 'baseUrl', message: problem.message })

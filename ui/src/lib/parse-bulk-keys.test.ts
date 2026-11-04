@@ -271,8 +271,21 @@ describe('parseBulkKeyInput', () => {
     })
   })
 
-  test('a line whose upstream key is blank after trim is omitted', () => {
-    const result = parseBulkKeyInput(',https://a.example.com')
+  test('a line with a base URL but no upstream key keeps the URL as a keyless entry', () => {
+    const result = parseBulkKeyInput(',https://a.example.com\n|http://203.0.113.7:20128')
+    expect(result).toEqual({
+      ok: true,
+      entries: [
+        { upstreamKey: '', baseUrl: 'https://a.example.com' },
+        { upstreamKey: '', baseUrl: 'http://203.0.113.7:20128' },
+      ],
+      skippedHeader: false,
+      comments: 0,
+    })
+  })
+
+  test('a line with neither an upstream key nor a base URL is omitted', () => {
+    const result = parseBulkKeyInput(' , \n|')
     expect(result).toEqual({
       ok: true,
       entries: [],

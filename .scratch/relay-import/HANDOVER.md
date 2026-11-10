@@ -90,4 +90,19 @@ the retry budget is nearly spent, so a fast failure ends the request.
 
 The five Gateway Keys that were scoped to a rebuilt Provider were replaced.
 Their secrets were printed once, at replacement. The six unscoped keys
-(`scope: []`) are unaffected — they resolve the Provider at call time.
+(`scope: []`) are unaffected — they resolve the Provider at call time. The
+superseded revoked keys were deleted afterwards, so 11 keys remain and all of
+them are live.
+
+## End to end
+
+Through the public gateway, with a Gateway Key scoped to `claude` and
+`gemini`:
+
+```
+claude/claude-opus-5.5   -> 200, served claude-opus-5-5
+gemini/gemini-3.8-flash  -> 200, served gemini-3.8-flash-high
+claude/gpt-6.1-sol       -> 503  (gpt-6.1-sol is not on the claude Provider)
+```
+
+The third line is the rule working: one model, one Provider.

@@ -136,7 +136,8 @@ Deployed to `ms02-Ultra` (`100.126.99.55`), the host behind
 - Written and read back: this document, sha256
   `5b3c3de1b1a03aa5a1c5c43b4bd1e23083889174c2bdd27bf7931a3cc3bf85b3`, equal to
   the repository version.
-- `.iroha-deployed-commit.json` records `ab0a2b7`, branch `main`, PR 4.
+- `.iroha-deployed-commit.json` names the commit this record was written in, branch
+  `main`, PR 4.
 - The data changes went in through the admin API before the deploy: the chat
   overrides, the failover setting on the eight curated Providers, and the
   refreshed plan (six keys dropped, four added, `kimi-k3` in, `gemini-4-argon`

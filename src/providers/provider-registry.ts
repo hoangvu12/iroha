@@ -1590,16 +1590,28 @@ export class ProviderRegistry {
     const at = this.#clock.now()
 
     const availability = await this.#availabilityFor(connection, keys)
-    const carries = (candidate: UpstreamKeyRecord): boolean =>
-      availability.get(candidate.id)?.includes(model) === true
+    // An explicit allow-list is the Owner's statement of what this Key serves,
+    // so it outranks a discovered list. The discovered list may be stale, may
+    // live in the upstream's id space rather than the gateway's (ADR-0028
+    // rewrites), and may simply be wrong (ADR-0023). A Key with no allow-list
+    // falls back to the discovered list, read in the id the Request will
+    // actually carry.
+    const carries = (candidate: UpstreamKeyRecord): boolean => {
+      if (candidate.allowedModels !== null) return candidate.allowedModels.includes(model)
+      const upstream = candidate.modelRewrites?.[model] ?? model
+      const discovered = availability.get(candidate.id)
+      return discovered !== undefined && (discovered.includes(upstream) || discovered.includes(model))
+    }
 
     // A model absent from every *known* availability cannot be served by any
     // key, so no Attempt is worth sending. When at least one key has been
     // discovered and none carry the model, treat it as unroutable regardless
     // of keys with unknown availability — trying them would guarantee an
     // upstream failure on key-scoped providers where data is authoritative.
-    if (availability.size > 0 && !keys.some((candidate) =>
-      availability.has(candidate.id) && carries(candidate))) {
+    // A Provider whose every Key carries an explicit allow-list is fully
+    // described in the same way: no Key can serve a model its list omits.
+    const fullyCurated = keys.length > 0 && keys.every((candidate) => candidate.allowedModels !== null)
+    if ((availability.size > 0 || fullyCurated) && !keys.some((candidate) => carries(candidate))) {
       return failed({ code: 'model_unroutable' })
     }
 

@@ -382,7 +382,18 @@ export class ModelCatalogService {
     )
     const targets = await this.#discoveryTargets(providerId, true)
     if (!targets.ok) return
-    const missing = targets.value.filter((target) => !known.has(target.keyId))
+    // A Key with an explicit allow-list already states what it serves: the
+    // Owner's answer, in the gateway's id space. Discovering a second answer
+    // for it would put the upstream's advertised ids into the Model Catalog and
+    // let a discovered list outrank the Owner's list at inference (ADR-0023).
+    const curated = new Set(
+      (await this.#database.providers.listKeys(providerId))
+        .filter((key) => key.allowedModels !== null)
+        .map((key) => key.id),
+    )
+    const missing = targets.value.filter(
+      (target) => !known.has(target.keyId) && !curated.has(target.keyId),
+    )
     if (missing.length === 0) return
 
     const at = this.#clock.now()

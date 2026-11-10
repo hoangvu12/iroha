@@ -203,3 +203,20 @@ setting, 200 after. The curated models that answer went from 29 of 39 to
 The curate script now turns the setting on for every Provider it owns, in both
 modes. `POST /providers` does not accept it, so a rebuilt Provider starts with
 it off and the script sets it immediately after the create.
+
+## The plan was a day old, so the list carried dead models
+
+Refreshed on 2026-11-10 with `tools/model_plan.py --probe-production` against
+the live endpoints, 411 production-size asks: 295 answers, 64 connect
+failures, 33 refusals of a request without a token budget, 17 rate limits.
+Two hosts answered nothing — `52.66.181.17` and the
+`sandesh-thapa-omniroute-space.hf.space` Space — and they carried four models.
+Applied with the curate script in `--mode in-place`: six keys dropped, four
+added, `kimi-k3` arrived, `gemini-4-argon` left because no live endpoint
+serves it. 40 curated models now, was 39.
+
+The same evening reported 29 curated models answering, then 34 of 40 ten
+minutes later. The six that differ are hosts that blink, not models that are
+broken, so the list is left as measured and the failover does the rest. The
+plan, the production-size probe rows and the run log are in
+`../relay-hunt/pool/` (`model-plan.json`, `refresh-2026-11-11/`).

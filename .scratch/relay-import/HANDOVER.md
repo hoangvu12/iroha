@@ -141,3 +141,82 @@ claude/gpt-6.1-sol       -> 503  (gpt-6.1-sol is not on the claude Provider)
 ```
 
 The third line is the rule working: one model, one Provider.
+
+## The curated models were invisible to every client that filters on chat support
+
+Found and fixed on 2026-11-10. pi's iroha extension
+(`~/.pi/agent/extensions/iroha.ts`) keeps only the models whose directory row
+carries chat support:
+
+```ts
+if (!m || typeof m.id !== "string" || !m.id || m.chat !== "ok") continue
+```
+
+`GET /v1/models` reports `chat` only when the Provider, an unambiguous catalog
+entry, or the Owner established it (ADR-0025). The curated rows are
+`owner_added` and had been created with a model id alone, so the directory had
+no chat evidence for them: 12 of the 14 `claude` models carried no `chat`
+field at all, and pi loaded 2 of 14. The same held for every other curated
+family — `gpt` 0 of 9 with an override, `gemini` 0 of 7 — and the curated
+Provider ids were already in production, so the models were routable the whole
+time and only invisible.
+
+The gap was in this import, not in the Gateway. The plan the script consumes
+lists only the models that answered a real chat completion, so the Owner
+evidence existed and was dropped on the way in. The stock Providers were left
+alone on purpose: of the 219 `dashscope` rows, the 101 without chat evidence
+are speech, audio, image and `pre-mock_*` upstream fixtures, which are
+genuinely not chat models.
+
+**Fix.** `scripts/curate-shared-model-lists.ts` now establishes the chat
+capability for every curated model it owns, with
+`PATCH /providers/:id/catalog/models/:modelId` and
+`{"overrides": {"chat": true}}`. The override is merged into the existing one
+instead of replacing it, and it is written in both `--mode in-place` and
+`--mode rebuild`, so a rebuild cannot lose it again. ADR-0025 makes the Owner
+override authoritative, and per-model overrides are read only by the two
+Models surfaces (`global-models.ts`, `inference.ts`), so routing does not
+change.
+
+Applied to production on 2026-11-10: 39 models across the eight curated
+Providers, no key, Provider or Gateway Key touched. `/v1/models` now reports
+`chat: "ok"` for 186 of 294 rows (was 174), all 14 `claude` rows included, and
+pi lists all 14 `claude` models against 2 before.
+
+The 12 newly visible `claude` models carry no context length, so pi falls back
+to its own 128K/16.4K defaults. Their real limits are unknown to the Gateway:
+models.dev has no row for a relay-only model id.
+
+## A dead endpoint ended the request even when a second endpoint served the same model
+
+Found and fixed on 2026-11-10, while checking which curated models answer.
+The eight curated Providers carried `retryAmbiguousNetwork: false`; the stock
+Providers (`dashscope`, `minimax`) carry `true`. That setting is what lets the
+Gateway spend one attempt on another endpoint when a network failure is
+ambiguous. With it off, a dead relay returned 502 for a model four other
+endpoints were serving — this was open issue 2 in this handover.
+
+`claude/claude-sonnet-5.5` is served by eight endpoints: 502 before the
+setting, 200 after. The curated models that answer went from 29 of 39 to
+32 of 39.
+
+The curate script now turns the setting on for every Provider it owns, in both
+modes. `POST /providers` does not accept it, so a rebuilt Provider starts with
+it off and the script sets it immediately after the create.
+
+## The plan was a day old, so the list carried dead models
+
+Refreshed on 2026-11-10 with `tools/model_plan.py --probe-production` against
+the live endpoints, 411 production-size asks: 295 answers, 64 connect
+failures, 33 refusals of a request without a token budget, 17 rate limits.
+Two hosts answered nothing — `52.66.181.17` and the
+`sandesh-thapa-omniroute-space.hf.space` Space — and they carried four models.
+Applied with the curate script in `--mode in-place`: six keys dropped, four
+added, `kimi-k3` arrived, `gemini-4-argon` left because no live endpoint
+serves it. 40 curated models now, was 39.
+
+The same evening reported 29 curated models answering, then 34 of 40 ten
+minutes later. The six that differ are hosts that blink, not models that are
+broken, so the list is left as measured and the failover does the rest. The
+plan, the production-size probe rows and the run log are in
+`../relay-hunt/pool/` (`model-plan.json`, `refresh-2026-11-11/`).

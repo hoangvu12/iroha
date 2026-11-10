@@ -84,6 +84,7 @@ interface ProviderDto {
   readonly allowInsecureHttp: boolean
   readonly requiresUpstreamKey: boolean
   readonly modelDiscovery: string | null
+  readonly retryAmbiguousNetwork?: boolean
   readonly keys: ReadonlyArray<{
     readonly id: string
     readonly baseUrl: string | null
@@ -194,6 +195,22 @@ const ensureChatEvidence = async (
     written.push(model)
   }
   return written
+}
+
+/**
+ * Turns on the failover for an endpoint that cannot be reached.
+ *
+ * A curated Provider holds several endpoints for one model, because a relay
+ * dies and the model must not. With the setting off, a dead endpoint ends the
+ * request with 502 even when a second endpoint serves the same model: the
+ * network failure is ambiguous, so the Gateway refuses to spend an attempt.
+ * The stock Providers carry the setting; the curated ones did not, which is
+ * why a single dead relay took whole models down.
+ */
+const ensureFailover = async (providerId: string, current: ProviderDto | undefined): Promise<boolean> => {
+  if (current?.retryAmbiguousNetwork === true) return false
+  await admin('PATCH', `/providers/${providerId}`, { retryAmbiguousNetwork: true })
+  return true
 }
 
 const sameModels = (a: readonly string[] | null, b: readonly string[]): boolean => {
@@ -341,6 +358,10 @@ const main = async (): Promise<void> => {
       })
       replacedProviderIds.set(current.id, created.id)
       report.push(`  rebuilt: ${current.id} -> ${created.id}`)
+      // A created Provider starts with the failover off, so it is turned on
+      // here rather than left to the Owner's next visit.
+      await ensureFailover(created.id, undefined)
+      report.push('  failover on unreachable endpoints: enabled')
 
       for (const k of wanted.keys) {
         const createdKey = (created.keys ?? []).find(
@@ -393,6 +414,9 @@ const main = async (): Promise<void> => {
       const freshCatalog = await catalogOf(current.id)
       const withChat = await ensureChatEvidence(current.id, wanted.models, freshCatalog)
       report.push(`  chat evidence established on ${withChat.length} models ${JSON.stringify(withChat)}`)
+      if (await ensureFailover(current.id, current)) {
+        report.push('  failover on unreachable endpoints: enabled')
+      }
     }
   }
 

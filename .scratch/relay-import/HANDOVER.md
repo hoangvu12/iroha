@@ -186,3 +186,20 @@ pi lists all 14 `claude` models against 2 before.
 The 12 newly visible `claude` models carry no context length, so pi falls back
 to its own 128K/16.4K defaults. Their real limits are unknown to the Gateway:
 models.dev has no row for a relay-only model id.
+
+## A dead endpoint ended the request even when a second endpoint served the same model
+
+Found and fixed on 2026-11-10, while checking which curated models answer.
+The eight curated Providers carried `retryAmbiguousNetwork: false`; the stock
+Providers (`dashscope`, `minimax`) carry `true`. That setting is what lets the
+Gateway spend one attempt on another endpoint when a network failure is
+ambiguous. With it off, a dead relay returned 502 for a model four other
+endpoints were serving — this was open issue 2 in this handover.
+
+`claude/claude-sonnet-5.5` is served by eight endpoints: 502 before the
+setting, 200 after. The curated models that answer went from 29 of 39 to
+32 of 39.
+
+The curate script now turns the setting on for every Provider it owns, in both
+modes. `POST /providers` does not accept it, so a rebuilt Provider starts with
+it off and the script sets it immediately after the create.

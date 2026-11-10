@@ -70,21 +70,56 @@ sweep, `pool/plan-probe-prod.jsonl` the production-size one.
 
 ## Two product issues this work found
 
-**1. Key Model Availability gates a Provider whose discovery is off.**
-`ModelCatalogService.discoverMissingKeys` writes Key Model Availability without
+**1. Key Model Availability gated a Provider whose model list is managed by
+hand.** FIXED AND DEPLOYED — PR #2, `5c7bf3a`, merged as `8859192`.
+
+`ModelCatalogService.discoverMissingKeys` wrote Key Model Availability without
 checking the Provider's `modelDiscovery`, unlike `refresh` and
 `#probeConnectionKeys`, which both honour `unsupported`. Stored availability
-then outranks the allow-list at inference (`provider-registry.ts:1601` returns
-`model_unroutable`; `:1609` filters those keys out), so a Provider whose list
-is managed by hand cannot route anything. Worse, the comparison is against the
-canonical model id while the stored list holds upstream ids, so a rewritten
-model can never match. Either skip the availability write when discovery is
-`unsupported`, or compare the rewritten id.
+then outranked the allow-list at inference (`provider-registry.ts:1601` returned
+`model_unroutable`; `:1609` filtered those keys out), so a Provider whose list
+is managed by hand could not route anything. The comparison was also against
+the canonical model id while the stored list holds upstream ids, so a rewritten
+model could never match.
+
+ADR-0029 records the decision: an explicit per-Key allow-list outranks a
+discovered list, and a Key without one keeps exactly the ADR-0023 behaviour.
+The stock Providers leave their Keys' lists empty, so their entitlement,
+ordering and refusals do not move.
 
 **2. A dead endpoint is not replaced by another endpoint for the same model.**
-`claude-opus-4.8` was served by five endpoints and failed when the round-robin
-landed on one that was down. The retry path visits an alternate key only after
-the retry budget is nearly spent, so a fast failure ends the request.
+OPEN. `claude-opus-4.8` was served by five endpoints and failed when the
+round-robin landed on one that was down. The retry path visits an alternate
+key only after the retry budget is nearly spent, so a fast failure ends the
+request. This is why the failing set shifts between verification runs.
+
+## Deployment record
+
+Deployed to `ms02-Ultra` (`100.126.99.55`), the host behind
+`iroha.nguyenvu.dev`, on 2026-11-10.
+
+- Pushed `feat/endpoint-model-rewrites`, opened PR #2, merged to `main` as
+  `8859192`.
+- The deployment tree is a copy of `main`, not a checkout, and several files on
+  it differ from the repository only by line endings. Before writing, both
+  touched files were confirmed equal to the repository version; the host was
+  refused if it had a local change, and the patched file was read back and
+  compared with the tested tree.
+- Backed up to `/home/ms02/iroha-backups/20261110-081417-availability-fix/`:
+  the touched sources and a consistent SQLite copy (`VACUUM INTO`, then
+  `PRAGMA quick_check` = ok).
+- On-host tests: 45 pass, 0 fail over the four affected suites, run against
+  the patched sources on the host itself.
+- Restarted `iroha.service`; active, local and public readiness 200.
+- Proof in production: adding a Key to a curated Provider no longer writes a
+  Key Model Availability row and no longer adds a discovered row to the Model
+  Catalog, and the curated model still routes. The scratch Provider used for
+  that check was purged.
+- Control: the stock Providers' availability rows are unchanged (minimax 87,
+  z-ai 59, dashscope 42, mistral 27, sensenova 12, tencent-lkeap 10), and
+  dashscope, minimax and z-ai still answer.
+- `.iroha-deployed-commit.json` records `8859192`, branch `main`, PR 2.
+
 
 ## Gateway Keys
 

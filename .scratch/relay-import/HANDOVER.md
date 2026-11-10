@@ -120,6 +120,30 @@ Deployed to `ms02-Ultra` (`100.126.99.55`), the host behind
   dashscope, minimax and z-ai still answer.
 - `.iroha-deployed-commit.json` records `8859192`, branch `main`, PR 2.
 
+### PR 4 — chat evidence and failover (2026-11-10)
+
+- Pushed `fix/curated-chat-evidence`, opened PR #4, merged to `main` as
+  `ab0a2b7`.
+- PR #4 touches no runtime file: only `scripts/curate-shared-model-lists.ts`
+  and this document. The running tree was proved to be `main` before anything
+  was written — 401 files under `src/`, `migrations/`, `ui/src/` and
+  `ui/public/` hashed to `91454f0b2016bedac8255f47cdea61252927b58d89af7cf738a7250b877c9f4a`
+  on the host and in the repository, both normalised for line endings. The
+  service was therefore **not restarted**: it was already running this code.
+- Backed up to `/home/ms02/iroha-backups/20261111-015814-chat-evidence/`:
+  the previous handover, the previous deployment record, and a consistent
+  SQLite copy (`VACUUM INTO`, then `PRAGMA quick_check` = ok, 71 providers).
+- Written and read back: this document, sha256
+  `5b3c3de1b1a03aa5a1c5c43b4bd1e23083889174c2bdd27bf7931a3cc3bf85b3`, equal to
+  the repository version.
+- `.iroha-deployed-commit.json` records `ab0a2b7`, branch `main`, PR 4.
+- The data changes went in through the admin API before the deploy: the chat
+  overrides, the failover setting on the eight curated Providers, and the
+  refreshed plan (six keys dropped, four added, `kimi-k3` in, `gemini-4-argon`
+  out).
+- Readiness after the deploy: local and public `/health/live` 200,
+  `/health/ready` 200 (`sqlite`), `iroha.service` active, no restart.
+
 
 ## Gateway Keys
 

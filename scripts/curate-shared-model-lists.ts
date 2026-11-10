@@ -96,6 +96,13 @@ interface CatalogEntry {
   readonly modelId: string
   readonly source: 'discovered' | 'template' | 'owner_added' | 'excluded'
   readonly excluded: boolean
+  readonly overrides: {
+    readonly chat?: boolean
+    readonly streaming?: boolean
+    readonly tools?: boolean
+    readonly structuredOutput?: boolean
+    readonly responses?: boolean
+  } | null
 }
 interface GatewayKeyDto {
   readonly id: string
@@ -155,6 +162,38 @@ const snapshot = async (providers: ProviderDto[]): Promise<void> => {
 const catalogOf = async (providerId: string): Promise<CatalogEntry[]> => {
   const view = await admin('GET', `/providers/${providerId}/catalog`)
   return view.entries ?? []
+}
+
+/**
+ * Establishes chat support for the curated models that do not carry it yet.
+ *
+ * ADR-0025: the Models surfaces report chat support only when the Provider,
+ * an unambiguous catalog entry, or the Owner established it. A curated model
+ * was measured answering a real chat completion, so the Owner establishes it
+ * here. Without this the curated rows stay unknown and every client that
+ * filters on chat support (pi's iroha extension) drops them from its list,
+ * even though the Gateway can route them.
+ *
+ * The override replaces the whole override object, so the existing one is
+ * merged rather than discarded.
+ */
+const ensureChatEvidence = async (
+  providerId: string,
+  models: readonly string[],
+  catalog: readonly CatalogEntry[],
+): Promise<readonly string[]> => {
+  const byId = new Map(catalog.map((entry) => [entry.modelId, entry]))
+  const written: string[] = []
+  for (const model of models) {
+    const entry = byId.get(model)
+    if (entry === undefined) continue
+    if (entry.overrides?.chat === true) continue
+    await admin('PATCH', `/providers/${providerId}/catalog/models/${encodeURIComponent(model)}`, {
+      overrides: { ...(entry.overrides ?? {}), chat: true },
+    })
+    written.push(model)
+  }
+  return written
 }
 
 const sameModels = (a: readonly string[] | null, b: readonly string[]): boolean => {
@@ -255,6 +294,14 @@ const main = async (): Promise<void> => {
     )
     report.push(`    models to add: ${missingModels.length} ${JSON.stringify(missingModels)}`)
     report.push(`    owner models to drop: ${staleOwner.length} ${JSON.stringify(staleOwner.map((e) => e.modelId))}`)
+    const withoutChatEvidence = wanted.models.filter((model) => {
+      const entry = catalog.find((e) => e.modelId === model)
+      return entry !== undefined && entry.overrides?.chat !== true
+    })
+    report.push(
+      `    chat evidence to establish: ${withoutChatEvidence.length}` +
+        (withoutChatEvidence.length > 0 ? ` ${JSON.stringify(withoutChatEvidence)}` : ''),
+    )
     if (discovered.length > 0) {
       report.push(
         `    discovered entries: ${discovered.length}` +
@@ -311,6 +358,9 @@ const main = async (): Promise<void> => {
       for (const model of wanted.models) {
         await admin('POST', `/providers/${created.id}/catalog/models`, { modelId: model })
       }
+      const createdCatalog = await catalogOf(created.id)
+      const withChat = await ensureChatEvidence(created.id, wanted.models, createdCatalog)
+      report.push(`  chat evidence established on ${withChat.length} models ${JSON.stringify(withChat)}`)
     } else {
       for (const url of drop) {
         const key = currentKeys.get(url)!
@@ -340,6 +390,9 @@ const main = async (): Promise<void> => {
       for (const model of missingModels) {
         await admin('POST', `/providers/${current.id}/catalog/models`, { modelId: model })
       }
+      const freshCatalog = await catalogOf(current.id)
+      const withChat = await ensureChatEvidence(current.id, wanted.models, freshCatalog)
+      report.push(`  chat evidence established on ${withChat.length} models ${JSON.stringify(withChat)}`)
     }
   }
 

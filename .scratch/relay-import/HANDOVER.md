@@ -141,3 +141,48 @@ claude/gpt-6.1-sol       -> 503  (gpt-6.1-sol is not on the claude Provider)
 ```
 
 The third line is the rule working: one model, one Provider.
+
+## The curated models were invisible to every client that filters on chat support
+
+Found and fixed on 2026-11-10. pi's iroha extension
+(`~/.pi/agent/extensions/iroha.ts`) keeps only the models whose directory row
+carries chat support:
+
+```ts
+if (!m || typeof m.id !== "string" || !m.id || m.chat !== "ok") continue
+```
+
+`GET /v1/models` reports `chat` only when the Provider, an unambiguous catalog
+entry, or the Owner established it (ADR-0025). The curated rows are
+`owner_added` and had been created with a model id alone, so the directory had
+no chat evidence for them: 12 of the 14 `claude` models carried no `chat`
+field at all, and pi loaded 2 of 14. The same held for every other curated
+family — `gpt` 0 of 9 with an override, `gemini` 0 of 7 — and the curated
+Provider ids were already in production, so the models were routable the whole
+time and only invisible.
+
+The gap was in this import, not in the Gateway. The plan the script consumes
+lists only the models that answered a real chat completion, so the Owner
+evidence existed and was dropped on the way in. The stock Providers were left
+alone on purpose: of the 219 `dashscope` rows, the 101 without chat evidence
+are speech, audio, image and `pre-mock_*` upstream fixtures, which are
+genuinely not chat models.
+
+**Fix.** `scripts/curate-shared-model-lists.ts` now establishes the chat
+capability for every curated model it owns, with
+`PATCH /providers/:id/catalog/models/:modelId` and
+`{"overrides": {"chat": true}}`. The override is merged into the existing one
+instead of replacing it, and it is written in both `--mode in-place` and
+`--mode rebuild`, so a rebuild cannot lose it again. ADR-0025 makes the Owner
+override authoritative, and per-model overrides are read only by the two
+Models surfaces (`global-models.ts`, `inference.ts`), so routing does not
+change.
+
+Applied to production on 2026-11-10: 39 models across the eight curated
+Providers, no key, Provider or Gateway Key touched. `/v1/models` now reports
+`chat: "ok"` for 186 of 294 rows (was 174), all 14 `claude` rows included, and
+pi lists all 14 `claude` models against 2 before.
+
+The 12 newly visible `claude` models carry no context length, so pi falls back
+to its own 128K/16.4K defaults. Their real limits are unknown to the Gateway:
+models.dev has no row for a relay-only model id.

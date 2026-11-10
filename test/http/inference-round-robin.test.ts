@@ -237,8 +237,13 @@ describe('round-robin key selection on the inference path', () => {
     await connect()
     await configureKey(connection.id, connection.keys[0]!.id, { allowedModels: [OTHER_MODEL] })
 
+    // The Key's own list says which models it serves, and this one is not
+    // among them. No Upstream Key on this Provider carries the model, so the
+    // answer is permanent rather than retryable: `model_unroutable` (ADR-0023).
     const refused = await chat(MODEL)
-    expect(refused.status).toBe(503)
+    expect(refused.status).toBe(404)
+    const body = (await refused.json()) as { error?: { code?: string } }
+    expect(body.error?.code).toBe('model_unroutable')
 
     const accepted = await chat(OTHER_MODEL)
     expect(accepted.status).toBe(200)

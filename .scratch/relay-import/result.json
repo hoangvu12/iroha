@@ -1,0 +1,998 @@
+{
+  "generatedAt": "2026-11-10T03:10:19.047Z",
+  "mode": "apply",
+  "adminBase": "https://iroha.nguyenvu.dev",
+  "manifest": "C:\\Users\\ADMIN\\Desktop\\nguyenvu\\relay-hunt\\pool\\import-manifest.json",
+  "planned": {
+    "providers": 18,
+    "endpoints": 19,
+    "canonicalIds": [
+      "claude-fable-5-1",
+      "claude-fable-5-2",
+      "claude-haiku-4-5",
+      "claude-haiku-5-5",
+      "claude-opus-4-6",
+      "claude-opus-4-7",
+      "claude-opus-4-8",
+      "claude-opus-5",
+      "claude-opus-5-5",
+      "claude-sonnet-4-6",
+      "claude-sonnet-5",
+      "claude-sonnet-5-5",
+      "deepseek-v3-2",
+      "deepseek-v4-1-flash",
+      "deepseek-v4-pro-0813",
+      "gemini-2-5-flash",
+      "gemini-3-1-flash-lite",
+      "gemini-3-1-pro",
+      "gemini-3-5-flash",
+      "gemini-3-6-flash",
+      "gemini-3-7-flash",
+      "gemini-3-8-flash",
+      "gemini-3-flash",
+      "gemini-4-argon",
+      "glm-5-2",
+      "gpt-4o",
+      "gpt-5-2-pro",
+      "gpt-5-4",
+      "gpt-5-5",
+      "gpt-5-5-pro",
+      "gpt-5-6-sol",
+      "gpt-5-6-terra",
+      "gpt-6-1-sol",
+      "gpt-6-1-terra",
+      "gpt-6-astra",
+      "gpt-6-luna",
+      "gpt-6-sol",
+      "gpt-oss-120b",
+      "grok-4-6",
+      "kimi-k3",
+      "minimax-m3",
+      "muse-spark-1-1",
+      "muse-spark-1-2",
+      "qwen3-8-max"
+    ],
+    "rewrites": [
+      {
+        "endpoint": "103.160.145.120:20128",
+        "canonical": "gpt-5-6-terra",
+        "native": "gpt-5.6-terra"
+      },
+      {
+        "endpoint": "103.160.145.120:20128",
+        "canonical": "claude-opus-4-8",
+        "native": "auto/best-reasoning"
+      },
+      {
+        "endpoint": "103.160.145.120:20128",
+        "canonical": "claude-sonnet-5",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "105.96.3.44:443",
+        "canonical": "gemini-3-6-flash",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "105.96.3.44:443",
+        "canonical": "claude-opus-4-6",
+        "native": "no-think/antigravity/claude-opus-4-6-thinking"
+      },
+      {
+        "endpoint": "105.96.3.44:443",
+        "canonical": "claude-sonnet-4-6",
+        "native": "no-think/antigravity/claude-sonnet-4-6"
+      },
+      {
+        "endpoint": "144.22.238.16:20128",
+        "canonical": "gemini-3-8-flash",
+        "native": "gemini-3.8-flash"
+      },
+      {
+        "endpoint": "144.22.238.16:20128",
+        "canonical": "deepseek-v4-pro-0813",
+        "native": "auto/deepseek"
+      },
+      {
+        "endpoint": "144.22.238.16:20128",
+        "canonical": "glm-5-2",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "144.22.238.16:20128",
+        "canonical": "gemini-3-flash",
+        "native": "auto/gemini"
+      },
+      {
+        "endpoint": "150.241.102.68:443",
+        "canonical": "minimax-m3",
+        "native": "auto/minimax"
+      },
+      {
+        "endpoint": "150.241.102.68:443",
+        "canonical": "gemini-2-5-flash",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "150.241.73.11:443",
+        "canonical": "gemini-2-5-flash",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "161.118.212.102:443",
+        "canonical": "gpt-5-6-sol",
+        "native": "agentrouter/gpt-5.6-sol"
+      },
+      {
+        "endpoint": "161.118.212.102:443",
+        "canonical": "gemini-2-5-flash",
+        "native": "auto/gemini"
+      },
+      {
+        "endpoint": "161.118.212.102:443",
+        "canonical": "gpt-4o",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "180.76.170.223:20128",
+        "canonical": "deepseek-v4-pro-0813",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "180.76.170.223:20128",
+        "canonical": "deepseek-v3-2",
+        "native": "ds-web/DeepSeek V3.2"
+      },
+      {
+        "endpoint": "192.227.179.46:443",
+        "canonical": "gpt-5-6-terra",
+        "native": "gpt-5.6-terra"
+      },
+      {
+        "endpoint": "192.227.179.46:443",
+        "canonical": "gpt-6-luna",
+        "native": "auto/best-reasoning"
+      },
+      {
+        "endpoint": "192.227.179.46:443",
+        "canonical": "claude-opus-4-6",
+        "native": "auto/minimax"
+      },
+      {
+        "endpoint": "217.60.245.205:20128",
+        "canonical": "claude-fable-5-2",
+        "native": "claude/claude-fable-5-xhigh"
+      },
+      {
+        "endpoint": "217.60.245.205:20128",
+        "canonical": "claude-opus-5-5",
+        "native": "claude/claude-opus-5-5-xhigh"
+      },
+      {
+        "endpoint": "217.60.245.205:20128",
+        "canonical": "claude-sonnet-5-5",
+        "native": "auto/best-reasoning"
+      },
+      {
+        "endpoint": "217.60.245.205:20128",
+        "canonical": "claude-opus-5",
+        "native": "auto/claude-opus"
+      },
+      {
+        "endpoint": "52.66.181.17:443",
+        "canonical": "claude-sonnet-5-5",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "52.66.181.17:443",
+        "canonical": "minimax-m3",
+        "native": "auto/minimax"
+      },
+      {
+        "endpoint": "52.66.181.17:80",
+        "canonical": "claude-sonnet-5-5",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "52.66.181.17:80",
+        "canonical": "minimax-m3",
+        "native": "auto/minimax"
+      },
+      {
+        "endpoint": "9router.iweka-internal.my.id:443",
+        "canonical": "claude-fable-5-2",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "9router.iweka-internal.my.id:443",
+        "canonical": "claude-opus-4-7",
+        "native": "auto/claude-opus"
+      },
+      {
+        "endpoint": "9router.iweka-internal.my.id:443",
+        "canonical": "claude-sonnet-5",
+        "native": "auto/claude-sonnet"
+      },
+      {
+        "endpoint": "9router.iweka-internal.my.id:443",
+        "canonical": "gpt-oss-120b",
+        "native": "auto/minimax"
+      },
+      {
+        "endpoint": "9router.iweka-internal.my.id:443",
+        "canonical": "claude-haiku-4-5",
+        "native": "auto/best-reasoning"
+      },
+      {
+        "endpoint": "ai.track360.net.in:443",
+        "canonical": "claude-fable-5-2",
+        "native": "claude/claude-fable-5"
+      },
+      {
+        "endpoint": "ai.track360.net.in:443",
+        "canonical": "gemini-3-6-flash",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "desktop-as3dt75.tail2daffa.ts.net:443",
+        "canonical": "claude-opus-5-5",
+        "native": "auto/claude-opus"
+      },
+      {
+        "endpoint": "desktop-as3dt75.tail2daffa.ts.net:443",
+        "canonical": "gpt-6-1-sol",
+        "native": "gpt-6.1-sol"
+      },
+      {
+        "endpoint": "desktop-as3dt75.tail2daffa.ts.net:443",
+        "canonical": "gpt-6-1-terra",
+        "native": "gpt-6.1-terra"
+      },
+      {
+        "endpoint": "desktop-as3dt75.tail2daffa.ts.net:443",
+        "canonical": "gpt-5-6-sol",
+        "native": "gpt-5.6-sol"
+      },
+      {
+        "endpoint": "desktop-as3dt75.tail2daffa.ts.net:443",
+        "canonical": "gpt-5-6-terra",
+        "native": "gpt-5.6-terra"
+      },
+      {
+        "endpoint": "desktop-as3dt75.tail2daffa.ts.net:443",
+        "canonical": "gemini-3-8-flash",
+        "native": "gemini-3.8-flash"
+      },
+      {
+        "endpoint": "desktop-as3dt75.tail2daffa.ts.net:443",
+        "canonical": "claude-sonnet-4-6",
+        "native": "auto/claude-sonnet"
+      },
+      {
+        "endpoint": "desktop-as3dt75.tail2daffa.ts.net:443",
+        "canonical": "gemini-3-flash",
+        "native": "auto/minimax"
+      },
+      {
+        "endpoint": "desktop-as3dt75.tail2daffa.ts.net:443",
+        "canonical": "gpt-oss-120b",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "omni.vietnamtutor.com:443",
+        "canonical": "gemini-3-7-flash",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "omni.vietnamtutor.com:443",
+        "canonical": "gemini-3-1-pro",
+        "native": "auto/gemini"
+      },
+      {
+        "endpoint": "omni.vietnamtutor.com:443",
+        "canonical": "claude-sonnet-4-6",
+        "native": "auto/best-reasoning"
+      },
+      {
+        "endpoint": "omniroute.nexacore.my.id:443",
+        "canonical": "claude-fable-5-1",
+        "native": "claude-fable-5.1"
+      },
+      {
+        "endpoint": "omniroute.nexacore.my.id:443",
+        "canonical": "claude-opus-4-8",
+        "native": "claude-opus-4.8"
+      },
+      {
+        "endpoint": "omniroute.nexacore.my.id:443",
+        "canonical": "deepseek-v4-1-flash",
+        "native": "deepseek-v4.1-flash"
+      },
+      {
+        "endpoint": "omniroute.nexacore.my.id:443",
+        "canonical": "gemini-3-1-flash-lite",
+        "native": "auto/gemini"
+      },
+      {
+        "endpoint": "omniroute.v-nance.com:443",
+        "canonical": "gemini-3-1-pro",
+        "native": "agy/gemini-3.1-pro-high"
+      },
+      {
+        "endpoint": "omniroute.v-nance.com:443",
+        "canonical": "claude-opus-4-6",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "omniroute.v-nance.com:443",
+        "canonical": "gemini-3-5-flash",
+        "native": "agy/gemini-3.5-flash-low"
+      },
+      {
+        "endpoint": "omniroute.v-nance.com:443",
+        "canonical": "claude-sonnet-4-6",
+        "native": "no-think/agy/claude-sonnet-4-6"
+      },
+      {
+        "endpoint": "or.elija-labs.com:443",
+        "canonical": "gpt-4o",
+        "native": "auto/best-coding"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gpt-6-astra",
+        "native": "openrouter/gpt-6-astra"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gemini-4-argon",
+        "native": "openrouter/gemini-4-argon"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gpt-6-sol",
+        "native": "openrouter/gpt-6-sol"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gpt-5-6-sol",
+        "native": "gpt-5.6-sol"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gpt-5-5-pro",
+        "native": "gpt-5.5-pro"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gpt-5-6-terra",
+        "native": "gpt-5.6-terra"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "kimi-k3",
+        "native": "openrouter/kimi-k3"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "claude-opus-4-8",
+        "native": "claude-opus-4.8"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gpt-5-5",
+        "native": "gpt-5.5"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gemini-3-8-flash",
+        "native": "gemini-3.8-flash"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "grok-4-6",
+        "native": "grok-4.6"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gemini-3-7-flash",
+        "native": "gemini-3.7-flash"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gpt-5-2-pro",
+        "native": "gpt-5.2-pro"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gpt-5-4",
+        "native": "gpt-5.4"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "muse-spark-1-1",
+        "native": "muse-spark-1.1"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "muse-spark-1-2",
+        "native": "muse-spark-1.2"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "claude-opus-4-7",
+        "native": "claude-opus-4.7"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "qwen3-8-max",
+        "native": "qwen3.8-max"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "claude-sonnet-5",
+        "native": "auto/claude-sonnet"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "deepseek-v4-pro-0813",
+        "native": "auto/deepseek"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "minimax-m3",
+        "native": "auto/minimax"
+      },
+      {
+        "endpoint": "sandesh-thapa-omniroute-space.hf.space:443",
+        "canonical": "gemini-2-5-flash",
+        "native": "auto/best-coding"
+      }
+    ]
+  },
+  "outcomes": [
+    {
+      "kind": "provider_reused",
+      "handle": "relay-103-160-145-120-20128",
+      "providerId": "pr_kvGSvgHpQBg2PwnR8gy8Jw",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-103-160-145-120-20128",
+      "providerId": "pr_kvGSvgHpQBg2PwnR8gy8Jw",
+      "endpointId": "103.160.145.120:20128",
+      "keyId": "uk_RXgREsQ9w6Joc_zDNnTc-Q"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-105-96-3-44",
+      "providerId": "pr_k4SiDv2emA4rmUTY67h7-w",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-105-96-3-44",
+      "providerId": "pr_k4SiDv2emA4rmUTY67h7-w",
+      "endpointId": "105.96.3.44:443",
+      "keyId": "uk_wjWIyEcyvNUq3A7L_YBvSQ"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-144-22-238-16-20128",
+      "providerId": "pr_NvoKXMUFUCKMmsrmZ_msSA",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-144-22-238-16-20128",
+      "providerId": "pr_NvoKXMUFUCKMmsrmZ_msSA",
+      "endpointId": "144.22.238.16:20128",
+      "keyId": "uk_kKlr6F1fApddhCDGP4WyNA"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-150-241-102-68",
+      "providerId": "pr_rf-fEbhRtzOypl2dataaaA",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-150-241-102-68",
+      "providerId": "pr_rf-fEbhRtzOypl2dataaaA",
+      "endpointId": "150.241.102.68:443",
+      "keyId": "uk_0NCBbuzIA1pmPXxnq_YxEA"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-150-241-73-11",
+      "providerId": "pr_mQIEe_XCxjyLKSW901rm-w",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-150-241-73-11",
+      "providerId": "pr_mQIEe_XCxjyLKSW901rm-w",
+      "endpointId": "150.241.73.11:443",
+      "keyId": "uk_dBC9eHcZBnbclLMrZ7Cm9A"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-161-118-212-102",
+      "providerId": "pr_nSB-qhw8Cy4ke3VpM8knuQ",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-161-118-212-102",
+      "providerId": "pr_nSB-qhw8Cy4ke3VpM8knuQ",
+      "endpointId": "161.118.212.102:443",
+      "keyId": "uk_N4hNEMchtaFBxwla4ojEJQ"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-180-76-170-223-20128",
+      "providerId": "pr_hDZtp3Y3l7GqAZ6n9rkVxA",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-180-76-170-223-20128",
+      "providerId": "pr_hDZtp3Y3l7GqAZ6n9rkVxA",
+      "endpointId": "180.76.170.223:20128",
+      "keyId": "uk_5QcDEqOgVzhDihdlN_vk0w"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-192-227-179-46",
+      "providerId": "pr_AzvbVu0kadXQ9Gd0XSGyug",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-192-227-179-46",
+      "providerId": "pr_AzvbVu0kadXQ9Gd0XSGyug",
+      "endpointId": "192.227.179.46:443",
+      "keyId": "uk_wOk-CTCOhvLL0kBDslhShA"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-217-60-245-205-20128",
+      "providerId": "pr_1fNwSfY8qVscZjg8JKH5lQ",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-217-60-245-205-20128",
+      "providerId": "pr_1fNwSfY8qVscZjg8JKH5lQ",
+      "endpointId": "217.60.245.205:20128",
+      "keyId": "uk_PmR-jpn7OceWE-2hdSkyeQ"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-52-66-181-17",
+      "providerId": "pr_etwVpeT_w9Ov5EXCcoLzyw",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-52-66-181-17",
+      "providerId": "pr_etwVpeT_w9Ov5EXCcoLzyw",
+      "endpointId": "52.66.181.17:443",
+      "keyId": "uk_6Y-P4VrVQGevnI4_7ew3wQ"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-52-66-181-17",
+      "providerId": "pr_etwVpeT_w9Ov5EXCcoLzyw",
+      "endpointId": "52.66.181.17:80",
+      "keyId": "uk_TyU-OhUHxt-XhkmmeuYQZg"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-9router-iweka-internal-my-id",
+      "providerId": "pr_chWLetLn2dpY7VhyR28d_Q",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-9router-iweka-internal-my-id",
+      "providerId": "pr_chWLetLn2dpY7VhyR28d_Q",
+      "endpointId": "9router.iweka-internal.my.id:443",
+      "keyId": "uk_kfnnaaBER8k3NEc1Tn8vtw"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-ai-track360-net-in",
+      "providerId": "pr_oPddvoOGZIfwMteQX2M4Yw",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-ai-track360-net-in",
+      "providerId": "pr_oPddvoOGZIfwMteQX2M4Yw",
+      "endpointId": "ai.track360.net.in:443",
+      "keyId": "uk_ku2BU8rfLD_25nB9qE617g"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-desktop-as3dt75-tail2daffa-ts-net",
+      "providerId": "pr_cMuXUYk0e5oJPQzxqBTznw",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-desktop-as3dt75-tail2daffa-ts-net",
+      "providerId": "pr_cMuXUYk0e5oJPQzxqBTznw",
+      "endpointId": "desktop-as3dt75.tail2daffa.ts.net:443",
+      "keyId": "uk_TvTG_gNV8zShX_Iu8X17xA"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-omni-vietnamtutor-com",
+      "providerId": "pr_d7icYRPLcGNB7AJfGl64jw",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-omni-vietnamtutor-com",
+      "providerId": "pr_d7icYRPLcGNB7AJfGl64jw",
+      "endpointId": "omni.vietnamtutor.com:443",
+      "keyId": "uk_yzqK9tWMPuPTkATKnea49A"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-omniroute-nexacore-my-id",
+      "providerId": "pr_WRaraoj-1QD89HsMBvEKeQ",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-omniroute-nexacore-my-id",
+      "providerId": "pr_WRaraoj-1QD89HsMBvEKeQ",
+      "endpointId": "omniroute.nexacore.my.id:443",
+      "keyId": "uk_J0hNS9kEgQ5uy-vfVh-APg"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-omniroute-v-nance-com",
+      "providerId": "pr_RJIe9XGg2G3boJ51CP71sg",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-omniroute-v-nance-com",
+      "providerId": "pr_RJIe9XGg2G3boJ51CP71sg",
+      "endpointId": "omniroute.v-nance.com:443",
+      "keyId": "uk_JbEx9Xk172SHf0uYXXBxxQ"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-or-elija-labs-com",
+      "providerId": "pr_p2uxvc87NHBFF5Y7ysoM_Q",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-or-elija-labs-com",
+      "providerId": "pr_p2uxvc87NHBFF5Y7ysoM_Q",
+      "endpointId": "or.elija-labs.com:443",
+      "keyId": "uk_B57mt2GgxG6Z9zxrBV6BjA"
+    },
+    {
+      "kind": "provider_reused",
+      "handle": "relay-sandesh-thapa-omniroute-space-hf-space",
+      "providerId": "pr_NDjyS_mLNpGxCPk8OMMS8w",
+      "note": "live"
+    },
+    {
+      "kind": "endpoint_unchanged",
+      "handle": "relay-sandesh-thapa-omniroute-space-hf-space",
+      "providerId": "pr_NDjyS_mLNpGxCPk8OMMS8w",
+      "endpointId": "sandesh-thapa-omniroute-space.hf.space:443",
+      "keyId": "uk_6L84TrUd0r4voDYIPsn2pA"
+    }
+  ],
+  "verification": [
+    {
+      "handle": "relay-103-160-145-120-20128",
+      "endpointId": "103.160.145.120:20128",
+      "model": "claude-fable-5-2",
+      "status": 200,
+      "ok": true,
+      "served": "claude-fable-5-2",
+      "text": "Hello! How can I help you today?",
+      "error": null
+    },
+    {
+      "handle": "relay-105-96-3-44",
+      "endpointId": "105.96.3.44:443",
+      "model": "gemini-3-6-flash",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-105-96-3-44",
+      "endpointId": "105.96.3.44:443",
+      "model": "claude-opus-4-6",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-105-96-3-44",
+      "endpointId": "105.96.3.44:443",
+      "model": "claude-sonnet-4-6",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-144-22-238-16-20128",
+      "endpointId": "144.22.238.16:20128",
+      "model": "claude-opus-5-5",
+      "status": 200,
+      "ok": true,
+      "served": "claude-opus-5-5-high",
+      "text": "Hello! I'm Antigravity, your pair programming assistant. I c",
+      "error": null
+    },
+    {
+      "handle": "relay-150-241-102-68",
+      "endpointId": "150.241.102.68:443",
+      "model": "minimax-m3",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-150-241-102-68",
+      "endpointId": "150.241.102.68:443",
+      "model": "gemini-2-5-flash",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-150-241-73-11",
+      "endpointId": "150.241.73.11:443",
+      "model": "gemini-2-5-flash",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-161-118-212-102",
+      "endpointId": "161.118.212.102:443",
+      "model": "gpt-5-6-sol",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-161-118-212-102",
+      "endpointId": "161.118.212.102:443",
+      "model": "gemini-2-5-flash",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-161-118-212-102",
+      "endpointId": "161.118.212.102:443",
+      "model": "gpt-4o",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-180-76-170-223-20128",
+      "endpointId": "180.76.170.223:20128",
+      "model": "deepseek-v4-pro-0813",
+      "status": 200,
+      "ok": true,
+      "served": "deepseek-v4-pro",
+      "text": "Hello! How can I help you today?",
+      "error": null
+    },
+    {
+      "handle": "relay-192-227-179-46",
+      "endpointId": "192.227.179.46:443",
+      "model": "gpt-5-6-terra",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-192-227-179-46",
+      "endpointId": "192.227.179.46:443",
+      "model": "gpt-6-luna",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-192-227-179-46",
+      "endpointId": "192.227.179.46:443",
+      "model": "claude-opus-4-6",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-217-60-245-205-20128",
+      "endpointId": "217.60.245.205:20128",
+      "model": "claude-fable-5-2",
+      "status": 200,
+      "ok": true,
+      "served": "claude-fable-5",
+      "text": "Hello. What task?",
+      "error": null
+    },
+    {
+      "handle": "relay-52-66-181-17",
+      "endpointId": "52.66.181.17:443",
+      "model": "claude-sonnet-5-5",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-52-66-181-17",
+      "endpointId": "52.66.181.17:443",
+      "model": "claude-opus-5",
+      "status": 200,
+      "ok": true,
+      "served": "claude-opus-5",
+      "text": "Hello! How can I help you today?",
+      "error": null
+    },
+    {
+      "handle": "relay-52-66-181-17",
+      "endpointId": "52.66.181.17:80",
+      "model": "claude-sonnet-5-5",
+      "status": 502,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "The Provider could not be reached."
+    },
+    {
+      "handle": "relay-52-66-181-17",
+      "endpointId": "52.66.181.17:80",
+      "model": "claude-opus-5",
+      "status": 200,
+      "ok": true,
+      "served": "claude-opus-5",
+      "text": "Hello! How can I help you today?",
+      "error": null
+    },
+    {
+      "handle": "relay-9router-iweka-internal-my-id",
+      "endpointId": "9router.iweka-internal.my.id:443",
+      "model": "claude-fable-5-2",
+      "status": 200,
+      "ok": true,
+      "served": "claude-fable-5-2",
+      "text": "Hello! How can I help you today?",
+      "error": null
+    },
+    {
+      "handle": "relay-ai-track360-net-in",
+      "endpointId": "ai.track360.net.in:443",
+      "model": "claude-fable-5-2",
+      "status": 200,
+      "ok": true,
+      "served": "claude-fable-5",
+      "text": "Hello! How can I help you today?\n\nWhether you need assistanc",
+      "error": null
+    },
+    {
+      "handle": "relay-desktop-as3dt75-tail2daffa-ts-net",
+      "endpointId": "desktop-as3dt75.tail2daffa.ts.net:443",
+      "model": "claude-fable-5-2",
+      "status": 200,
+      "ok": true,
+      "served": "claude-fable-5-2",
+      "text": "Hello! What can I help you with today?",
+      "error": null
+    },
+    {
+      "handle": "relay-omni-vietnamtutor-com",
+      "endpointId": "omni.vietnamtutor.com:443",
+      "model": "gemini-3-7-flash",
+      "status": 200,
+      "ok": true,
+      "served": "gemini-3.7-flash-high",
+      "text": "This version of Antigravity is no longer supported. Please d",
+      "error": null
+    },
+    {
+      "handle": "relay-omniroute-nexacore-my-id",
+      "endpointId": "omniroute.nexacore.my.id:443",
+      "model": "claude-fable-5-2",
+      "status": 200,
+      "ok": true,
+      "served": "claude-fable-5-2",
+      "text": "Hi. What are we working on? Paste a file path, error, or tas",
+      "error": null
+    },
+    {
+      "handle": "relay-omniroute-v-nance-com",
+      "endpointId": "omniroute.v-nance.com:443",
+      "model": "gemini-3-1-pro",
+      "status": 200,
+      "ok": true,
+      "served": "gemini-3.1-pro-high",
+      "text": "Gemini 3 Pro is no longer available. Please switch to Gemini",
+      "error": null
+    },
+    {
+      "handle": "relay-or-elija-labs-com",
+      "endpointId": "or.elija-labs.com:443",
+      "model": "gpt-4o",
+      "status": 200,
+      "ok": true,
+      "served": "gpt-4o-2024-11-20",
+      "text": "Hi there! How can I assist you today? 😊",
+      "error": null
+    },
+    {
+      "handle": "relay-sandesh-thapa-omniroute-space-hf-space",
+      "endpointId": "sandesh-thapa-omniroute-space.hf.space:443",
+      "model": "gpt-6-astra",
+      "status": 503,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "No eligible Upstream Key is available for this connection."
+    },
+    {
+      "handle": "relay-sandesh-thapa-omniroute-space-hf-space",
+      "endpointId": "sandesh-thapa-omniroute-space.hf.space:443",
+      "model": "gemini-4-argon",
+      "status": 503,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "No eligible Upstream Key is available for this connection."
+    },
+    {
+      "handle": "relay-sandesh-thapa-omniroute-space-hf-space",
+      "endpointId": "sandesh-thapa-omniroute-space.hf.space:443",
+      "model": "claude-opus-5",
+      "status": 503,
+      "ok": false,
+      "served": null,
+      "text": "",
+      "error": "No eligible Upstream Key is available for this connection."
+    }
+  ]
+}

@@ -169,13 +169,25 @@ export function lookupModelsDevMetadata(
   if (exact !== undefined) return exact.metadata
 
   const requestedModel = modelPortion(cleanId)
+  const candidateModel = (candidate: ModelsDevEntry) => modelPortion(cleanQualifiedId(candidate.id.toLowerCase()))
   const exactModelMatches = distinctMetadata(
     [...catalog.values()]
-      .filter((candidate) => modelPortion(cleanQualifiedId(candidate.id.toLowerCase())) === requestedModel)
+      .filter((candidate) => candidateModel(candidate) === requestedModel)
       .map((candidate) => candidate.metadata),
   )
   if (exactModelMatches.length === 1) return exactModelMatches[0] ?? null
   if (exactModelMatches.length > 1) return null
+
+  // Gateways spell a version `4.7` where the vendor's canonical id says `4-7`.
+  // Only consulted when the literal id found nothing, and only when it is
+  // unambiguous, so a match the literal id already made is never changed.
+  const requestedVersionless = versionSeparatorsAsDashes(requestedModel)
+  const respelledMatches = distinctMetadata(
+    [...catalog.values()]
+      .filter((candidate) => versionSeparatorsAsDashes(candidateModel(candidate)) === requestedVersionless)
+      .map((candidate) => candidate.metadata),
+  )
+  if (respelledMatches.length === 1) return respelledMatches[0] ?? null
 
   let bestScore = 0
   let best: ModelCatalogMetadata[] = []
@@ -238,6 +250,11 @@ function cleanQualifiedId(id: string): string {
 function modelPortion(id: string): string {
   const separator = id.indexOf('/')
   return separator === -1 ? id : id.slice(separator + 1)
+}
+
+/** `claude-opus-4.7` and `claude-opus-4-7` name the same model. */
+function versionSeparatorsAsDashes(model: string): string {
+  return model.replace(/(\d)\.(?=\d)/g, '$1-')
 }
 
 function prefixScore(left: string, right: string): number {

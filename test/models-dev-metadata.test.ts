@@ -89,6 +89,30 @@ describe('models.dev metadata fallback', () => {
     expect(lookupModelsDevMetadata('audio/whisper-1', catalog)?.chat).toBe('unsupported')
   })
 
+  test('matches a dotted version against the canonical dashed id', () => {
+    const catalog = parseModelsDevCatalog(catalogBody)
+
+    expect(lookupModelsDevMetadata('claude/claude-sonnet-4.6', catalog)).toMatchObject({
+      normalizedName: 'Claude Sonnet 4.6',
+      contextLength: 200_000,
+      maxOutputTokens: 64_000,
+    })
+  })
+
+  test('prefers the literal spelling and refuses an ambiguous respelling', () => {
+    const literal = parseModelsDevCatalog({
+      dotted: { models: { m: { id: 'model-4.7', limit: { context: 1_000, output: 100 } } } },
+      dashed: { models: { m: { id: 'model-4-7', limit: { context: 2_000, output: 200 } } } },
+    })
+    expect(lookupModelsDevMetadata('gateway/model-4.7', literal)?.contextLength).toBe(1_000)
+
+    const ambiguous = parseModelsDevCatalog({
+      first: { models: { m: { id: 'model-4-7', limit: { context: 1_000, output: 100 } } } },
+      second: { models: { m: { id: 'model-4-7', limit: { context: 2_000, output: 200 } } } },
+    })
+    expect(lookupModelsDevMetadata('gateway/model-4.7', ambiguous)).toBeNull()
+  })
+
   test('does not choose between conflicting provider-independent matches', () => {
     const catalog = parseModelsDevCatalog({
       first: { models: { shared: { id: 'shared', limit: { context: 1_000, output: 100 } } } },

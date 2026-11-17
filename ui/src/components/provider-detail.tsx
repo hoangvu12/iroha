@@ -1443,6 +1443,9 @@ const CURRENCY_UNITS = new Set([
   'zar',
   'credits',
   'credit',
+  // DeepAI Code meters its frontier models in Theos, which read as an absolute
+  // balance rather than a window percentage.
+  'theos',
 ])
 
 const CURRENCY_SYMBOLS: Record<string, string> = {

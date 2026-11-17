@@ -6,6 +6,13 @@
  */
 export { createGenericUsageAdapter } from './generic-adapter.ts'
 export {
+  createDeepaiUsageAdapter,
+  deepaiCapacityEvidenceOf,
+  deepaiEntitlementUrl,
+  deepaiUsageReadings,
+  type DeepaiUsageAdapterOptions,
+} from './deepai-usage-adapter.ts'
+export {
   createMinimaxUsageAdapter,
   minimaxCapacityEvidenceOf,
   type MinimaxUsageAdapterOptions,

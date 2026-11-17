@@ -22,6 +22,7 @@ import { anthropicPack } from './anthropic.ts'
 import { zaiPack } from './zai.ts'
 import { mistralPack } from './mistral.ts'
 import { nousResearchPack } from './nousresearch.ts'
+import { deepaiPack } from './deepai.ts'
 
 export type { PackAdapterOptions, PackTemplate, ProviderPack } from './pack.ts'
 
@@ -40,6 +41,7 @@ export const BUILT_IN_PROVIDER_PACKS: readonly ProviderPack[] = [
   zaiPack,
   mistralPack,
   nousResearchPack,
+  deepaiPack,
 ]
 
 /**

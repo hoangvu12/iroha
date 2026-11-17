@@ -210,6 +210,64 @@ describe('the DeepAI Usage Adapter', () => {
     })
   })
 
+  describe('a key whose check-in is refused', () => {
+    // The body the upstream answers, verbatim. The refusal is about the check-in,
+    // not the account: model calls on the same key are still served, so the key
+    // must neither be retired nor reported as a broken read.
+    const REFUSED_BODY = {
+      error: {
+        message: 'DeepAI models are temporarily unavailable. Try again later.',
+        type: 'check_in_refused',
+        code: 'check_in_refused',
+      },
+    }
+
+    test('reads as an unknown balance, not a failure and not a zero', async () => {
+      const adapter = createDeepaiUsageAdapter({ fetch: (async () =>
+        new Response(JSON.stringify(REFUSED_BODY), { status: 403 })) as unknown as typeof fetch })
+      const result = await adapter.read({ baseUrl: BASE_URL, allowInsecureHttp: false, upstreamKey: KEY })
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.readings).toHaveLength(1)
+      expect(result.readings[0]).toMatchObject({
+        unit: 'Theos',
+        balance: null,
+        limit: null,
+        remainingPercent: null,
+        resetAt: null,
+        confidence: 'unknown',
+        diagnostics: { upstreamCode: 'check_in_refused' },
+      })
+    })
+
+    test('leaves the key the health it had', async () => {
+      const adapter = createDeepaiUsageAdapter({ fetch: (async () =>
+        new Response(JSON.stringify(REFUSED_BODY), { status: 403 })) as unknown as typeof fetch })
+      const result = await adapter.read({ baseUrl: BASE_URL, allowInsecureHttp: false, upstreamKey: KEY })
+      if (!result.ok) throw new Error('expected a reading')
+      const now = new Date('2026-11-17T12:00:00.000Z')
+      const evidence = result.readings.map((reading) => deepaiCapacityEvidenceOf(reading, 'key-1', now))
+      expect(evidence[0]).toMatchObject({ availability: 'unknown', authority: 'unknown' })
+
+      for (const existing of [
+        { health: 'active', reason: 'authoritative inference success', retryAfterAt: null },
+        { health: 'exhausted', reason: 'credit exhausted', retryAfterAt: new Date('2026-11-17T13:00:00.000Z') },
+      ] as const) {
+        const decision = reconcileCapacity({
+          ownerEnabled: true,
+          keyId: 'key-1',
+          accountId: null,
+          model: null,
+          existing: { ...existing, scope: 'key', scopeId: 'key-1', model: null },
+          credentialEvidence: null,
+          capacityEvidence: evidence,
+          now,
+        })
+        expect(decision.health).toBe(existing.health)
+      }
+    })
+  })
+
   test('an unreachable gateway is reported as unreachable', async () => {
     const adapter = createDeepaiUsageAdapter({ fetch: (async () => {
       throw new Error('connection refused')

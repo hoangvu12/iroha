@@ -23,6 +23,16 @@ const EVIDENCE_FRESHNESS_MS = 60_000
  */
 const SPENT_POOL_CODE = 'network_bound'
 
+/**
+ * The upstream's refusal of a check-in whose flow was restarted too often that day.
+ *
+ * It is a statement about the check-in, not the account: the same key's model
+ * calls are still served. So it is a known state with an unknown balance, never a
+ * failed poll and never an exhausted key — the key keeps whatever health it had.
+ * The refusal carries no reset time.
+ */
+const CHECK_IN_REFUSED_CODE = 'check_in_refused'
+
 export interface DeepaiUsageAdapterOptions {
   readonly fetch?: typeof fetch
   readonly now?: () => Date
@@ -241,6 +251,30 @@ export function createDeepaiUsageAdapter(options: DeepaiUsageAdapterOptions = {}
                 scope: { kind: 'key', keyId: '' },
                 keyId: null,
                 confidence: 'confirmed',
+                diagnostics: {
+                  source: 'deepai-usage-adapter',
+                  kind: 'credit',
+                  upstreamCode: refusal.code,
+                },
+              },
+            ],
+          }
+        }
+        if (refusal !== null && refusal.code === CHECK_IN_REFUSED_CODE) {
+          return {
+            ok: true,
+            readings: [
+              {
+                unit: 'Theos',
+                balance: null,
+                used: null,
+                limit: null,
+                remainingPercent: null,
+                plan: 'DeepAI Code daily Theos',
+                resetAt: null,
+                scope: { kind: 'key', keyId: '' },
+                keyId: null,
+                confidence: 'unknown',
                 diagnostics: {
                   source: 'deepai-usage-adapter',
                   kind: 'credit',

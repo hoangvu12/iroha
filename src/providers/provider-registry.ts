@@ -45,8 +45,9 @@ export type ProviderFailure =
   | { readonly code: 'no_eligible_key' }
   /**
    * Every Upstream Key's Key Model Availability is known and none of them
-   * carries the requested Upstream Model. Waiting cannot change this, so the
-   * Request is refused before any Attempt is sent (ADR-0023).
+   * carries the requested Upstream Model, which the Owner did not add by hand.
+   * Waiting cannot change this, so the Request is refused before any Attempt
+   * is sent (ADR-0023, ADR-0030).
    */
   | { readonly code: 'model_unroutable' }
   /**
@@ -1603,6 +1604,14 @@ export class ProviderRegistry {
       return discovered !== undefined && (discovered.includes(upstream) || discovered.includes(model))
     }
 
+    // A model the Owner added by hand is vouched for: the Owner knows a key
+    // serves it even though no discovered list says so. Discovered lists
+    // still order the keys for it, but never refuse it or remove a key
+    // (ADR-0030). Allow- and deny-lists are the Owner's word too, so they
+    // still filter. Read only when a discovered list could refuse it.
+    const vouched =
+      availability.size > 0 && (await this.#database.modelCatalog.isOwnerAdded(providerId, model))
+
     // A model absent from every *known* availability cannot be served by any
     // key, so no Attempt is worth sending. When at least one key has been
     // discovered and none carry the model, treat it as unroutable regardless
@@ -1611,14 +1620,14 @@ export class ProviderRegistry {
     // A Provider whose every Key carries an explicit allow-list is fully
     // described in the same way: no Key can serve a model its list omits.
     const fullyCurated = keys.length > 0 && keys.every((candidate) => candidate.allowedModels !== null)
-    if ((availability.size > 0 || fullyCurated) && !keys.some((candidate) => carries(candidate))) {
+    if (((availability.size > 0 && !vouched) || fullyCurated) && !keys.some((candidate) => carries(candidate))) {
       return failed({ code: 'model_unroutable' })
     }
 
     const eligible = keys.filter((candidate) => {
       if (candidateKeyIds !== undefined && !candidateKeyIds.includes(candidate.id)) return false
       if (excluded.has(candidate.id) || !keyServesModel(candidate, model)) return false
-      if (availability.get(candidate.id) !== undefined && !carries(candidate)) return false
+      if (!vouched && availability.get(candidate.id) !== undefined && !carries(candidate)) return false
       if (this.#keyModelCoolingDown(candidate.id, model, at)) return false
       if (servesAsActive(candidate, model)) {
         return !scopeUnavailable(candidate, keys, model, at, ignoreUnknownScope)

@@ -6,7 +6,8 @@
  * not name vanished from the snippet while the Models card still showed it,
  * even though the Gateway may route it through another key. The
  * shared `snippetModelIds` rule is asserted here against the real HTTP
- * contracts both cards read (ui-testing.md: coverage lives at the HTTP seam).
+ * contracts both cards read (ui-testing.md: coverage lives at the HTTP seam),
+ * and the Test request proves a model the snippet offers is actually routed.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { snippetModelIds } from '../../ui/src/lib/snippet-models.ts'
@@ -101,6 +102,34 @@ describe('Code Snippet model list', () => {
     expect(callable).toContain(HAND_ADDED)
     expect(callable).not.toContain(BLOCKED)
     expect([...snippetModelIds(catalog, null)].sort()).toEqual([...callable].sort())
+  })
+
+  const testRequest = async (model: string) =>
+    await iroha.fetch(`/api/v1/admin/providers/${providerId}/test`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, protocol: 'openai' }),
+      csrf,
+    })
+
+  test('a hand-added model the snippet offers is routed even though no key discovered it', async () => {
+    const catalog = await json<CatalogDto>(`/api/v1/admin/providers/${providerId}/catalog`)
+    expect(snippetModelIds(catalog, null)).toContain(HAND_ADDED)
+
+    // The curated key's allow-list omits it and the open key's discovered list
+    // does not name it; the Owner vouches for it, so the open key is tried
+    // (ADR-0030).
+    const tested = await testRequest(HAND_ADDED)
+    expect({ status: tested.status, body: await tested.text() }).toMatchObject({ status: 200 })
+    expect(upstream.calls).toHaveLength(1)
+    expect(JSON.parse(upstream.calls[0]!.body ?? '{}')).toMatchObject({ model: HAND_ADDED })
+  })
+
+  test('a model the Owner did not add and no key lists is still refused before any Attempt', async () => {
+    const tested = await testRequest('never-listed-model')
+    expect(tested.status).toBe(404)
+    expect(((await tested.json()) as { error: { code: string } }).error.code).toBe('model_unroutable')
+    expect(upstream.calls).toHaveLength(0)
   })
 
   test('choosing a key narrows the list to what that key serves', async () => {

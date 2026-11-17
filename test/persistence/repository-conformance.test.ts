@@ -893,6 +893,22 @@ for (const engine of availableEngines) {
         expect(await database.modelCatalog.isExcluded('pc_one', 'gpt-4o-mini')).toBe(true)
       })
 
+      test('reports an Owner addition per connection and only while it stays one', async () => {
+        await database.providers.insertProvider(connection('pc_one'))
+        await database.providers.insertProvider(connection('pc_two'))
+
+        await database.modelCatalog.addOwnerModel('pc_one', 'hand-added', at)
+        await database.modelCatalog.syncDiscovered('pc_one', ['gpt-4o-mini'], at)
+
+        expect(await database.modelCatalog.isOwnerAdded('pc_one', 'hand-added')).toBe(true)
+        expect(await database.modelCatalog.isOwnerAdded('pc_two', 'hand-added')).toBe(false)
+        expect(await database.modelCatalog.isOwnerAdded('pc_one', 'gpt-4o-mini')).toBe(false)
+        expect(await database.modelCatalog.isOwnerAdded('pc_one', 'unknown')).toBe(false)
+
+        await database.modelCatalog.removeOwnerModel('pc_one', 'hand-added')
+        expect(await database.modelCatalog.isOwnerAdded('pc_one', 'hand-added')).toBe(false)
+      })
+
       test('tracks overrides per model without leaking across connections', async () => {
         await database.providers.insertProvider(connection('pc_one'))
         await database.providers.insertProvider(connection('pc_two'))

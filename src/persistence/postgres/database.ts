@@ -1142,6 +1142,20 @@ class PostgresModelCatalogRepository implements ModelCatalogRepository {
     return row?.excluded === true
   }
 
+  async isOwnerAdded(providerId: string, modelId: string): Promise<boolean> {
+    const [row] = await this.handle
+      .select({ source: modelCatalogEntries.source })
+      .from(modelCatalogEntries)
+      .where(
+        and(
+          eq(modelCatalogEntries.providerId, providerId),
+          eq(modelCatalogEntries.modelId, modelId),
+        ),
+      )
+      .limit(1)
+    return row?.source === 'owner_added'
+  }
+
   async getSync(providerId: string): Promise<ModelCatalogSyncRecord | null> {
     const [row] = await this.handle
       .select()

@@ -578,6 +578,8 @@ export interface ModelCatalogRepository {
   ): Promise<void>
   /** Whether the Owner has blocked this model on this Provider. */
   isExcluded(providerId: string, modelId: string): Promise<boolean>
+  /** Whether this model's row on this Provider is an Owner addition. */
+  isOwnerAdded(providerId: string, modelId: string): Promise<boolean>
   getSync(providerId: string): Promise<ModelCatalogSyncRecord | null>
   putSync(record: ModelCatalogSyncRecord): Promise<void>
 }

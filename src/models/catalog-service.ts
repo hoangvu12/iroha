@@ -117,8 +117,8 @@ export function templateKnowledgeFromRegistry(
 /**
  * Reads a Provider Template's model-availability declaration from the Adapter
  * Registry. An unknown template — or one that declares nothing — reads as
- * `provider`, so a removed template can never turn an existing connection into
- * a key-scoped one behind the Owner's back.
+ * `key`, matching the Provider Registry, so every key is discovered on its own
+ * unless the template opts out with `provider`.
  */
 export function templateAvailabilityFromRegistry(
   registry: AdapterRegistry,

@@ -139,8 +139,9 @@ export interface ProviderTemplate {
    * Only `key` gives a Provider's keys a meaningful Key Model Availability:
    * Iroha then discovers each key's models separately, unions them into the
    * Model Catalog, and prefers the keys known to carry a requested model when
-   * it selects one. Optional, and read as `provider` when omitted, because that
-   * is what almost every upstream does and what Iroha did before this existed.
+   * it selects one. Optional, and read as `key` when omitted, so a key that
+   * lacks a model's entitlement is never preferred for it; a Pack whose keys
+   * all share one entitlement opts out with `provider`.
    */
   readonly modelAvailability?: 'provider' | 'key'
   /** The registered Inference Adapter the template assumes. */

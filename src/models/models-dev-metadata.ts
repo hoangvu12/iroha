@@ -189,6 +189,16 @@ export function lookupModelsDevMetadata(
   )
   if (respelledMatches.length === 1) return respelledMatches[0] ?? null
 
+  // A bare name such as `muse-wonder` names the vendor's numbered release
+  // (`muse-wonder-1.0`), never a named variant (`muse-wonder-full`) that shares
+  // its prefix. Several distinct releases stay ambiguous and fall through.
+  const releaseMatches = distinctMetadata(
+    [...catalog.values()]
+      .filter((candidate) => isNumberedReleaseOf(requestedModel, candidateModel(candidate)))
+      .map((candidate) => candidate.metadata),
+  )
+  if (releaseMatches.length === 1) return releaseMatches[0] ?? null
+
   let bestScore = 0
   let best: ModelCatalogMetadata[] = []
   for (const candidate of catalog.values()) {
@@ -255,6 +265,19 @@ function modelPortion(id: string): string {
 /** `claude-opus-4.7` and `claude-opus-4-7` name the same model. */
 function versionSeparatorsAsDashes(model: string): string {
   return model.replace(/(\d)\.(?=\d)/g, '$1-')
+}
+
+/**
+ * `muse-wonder-1.0`, `muse-wonder-1-0` and `gpt-4o-2024-05-13` are numbered
+ * releases of `muse-wonder` and `gpt-4o`. A name ending in a number is left
+ * out: `claude-opus-4-1` is Opus 4.1, not a release of `claude-opus-4`. So is
+ * a one-word name such as `image`, as in the prefix match.
+ */
+function isNumberedReleaseOf(requested: string, candidate: string): boolean {
+  if (requested.split('-').length < PREFIX_MATCH_MIN_SHARED_PARTS) return false
+  if (/(?:^|-)\d+$/.test(requested)) return false
+  if (!candidate.startsWith(`${requested}-`)) return false
+  return /^\d+(?:[.-]\d+)*$/.test(candidate.slice(requested.length + 1))
 }
 
 function prefixScore(left: string, right: string): number {

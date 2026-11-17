@@ -113,6 +113,60 @@ describe('models.dev metadata fallback', () => {
     expect(lookupModelsDevMetadata('gateway/model-4.7', ambiguous)).toBeNull()
   })
 
+  test('resolves a bare name to its numbered release rather than a named variant', () => {
+    const catalog = parseModelsDevCatalog({
+      'meta/muse-wonder-1.0': {
+        id: 'meta/muse-wonder-1.0',
+        name: 'Muse Wonder',
+        limit: { context: 1_048_576, output: 131_072 },
+      },
+      'meta/muse-wonder-full': {
+        id: 'meta/muse-wonder-full',
+        name: 'Muse Wonder Full',
+        limit: { context: 1_048_576 },
+      },
+    })
+
+    expect(lookupModelsDevMetadata('muse/muse-wonder', catalog)).toMatchObject({
+      normalizedName: 'Muse Wonder',
+      maxOutputTokens: 131_072,
+    })
+  })
+
+  test('refuses a bare name with several distinct numbered releases', () => {
+    const catalog = parseModelsDevCatalog({
+      meta: {
+        models: {
+          a: { id: 'muse-spark-1.1', name: 'Muse Spark 1.1', limit: { context: 1_000 } },
+          b: { id: 'muse-spark-1.2', name: 'Muse Spark 1.2', limit: { context: 2_000 } },
+        },
+      },
+    })
+
+    expect(lookupModelsDevMetadata('relay/muse-spark', catalog)).toBeNull()
+  })
+
+  test('does not read a trailing number as a release of a name that ends in a number', () => {
+    const catalog = parseModelsDevCatalog({
+      anthropic: {
+        models: {
+          a: { id: 'claude-opus-4-1', name: 'Claude Opus 4.1', limit: { context: 1_000 } },
+          b: { id: 'claude-opus-4-fast', name: 'Claude Opus 4 Fast', limit: { context: 2_000 } },
+        },
+      },
+    })
+
+    expect(lookupModelsDevMetadata('relay/claude-opus-4', catalog)).toBeNull()
+  })
+
+  test('does not read a numbered release into a one-word name', () => {
+    const catalog = parseModelsDevCatalog({
+      minimax: { models: { a: { id: 'image-01', name: 'MiniMax image-01', limit: { context: 1_000 } } } },
+    })
+
+    expect(lookupModelsDevMetadata('relay/image', catalog)).toBeNull()
+  })
+
   test('does not choose between conflicting provider-independent matches', () => {
     const catalog = parseModelsDevCatalog({
       first: { models: { shared: { id: 'shared', limit: { context: 1_000, output: 100 } } } },

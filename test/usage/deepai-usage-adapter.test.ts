@@ -156,6 +156,60 @@ describe('the DeepAI Usage Adapter', () => {
     })
   })
 
+  describe('a key whose daily pool is spent', () => {
+    // The upstream answers with 403 and names the exhaustion, and says when the
+    // pool refills. That is a known state, not a broken read: reporting it as a
+    // failure would leave the row blank and the key looking usable.
+    const SPENT_BODY = {
+      error: {
+        message: 'Free daily Theos are not available right now. Try again at 2026-11-18T12:01:30+00:00.',
+        type: 'network_bound',
+        code: 'network_bound',
+      },
+    }
+
+    test('reads as a confirmed zero with the reset the upstream names', async () => {
+      const adapter = createDeepaiUsageAdapter({ fetch: (async () =>
+        new Response(JSON.stringify(SPENT_BODY), { status: 403 })) as unknown as typeof fetch })
+      const result = await adapter.read({ baseUrl: BASE_URL, allowInsecureHttp: false, upstreamKey: KEY })
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.readings).toHaveLength(1)
+      expect(result.readings[0]).toMatchObject({
+        unit: 'Theos',
+        balance: 0,
+        limit: null,
+        remainingPercent: 0,
+        resetAt: new Date('2026-11-18T12:01:30Z'),
+        confidence: 'confirmed',
+      })
+    })
+
+    test('the key is retired until the pool refills', () => {
+      const reading = deepaiUsageReadings({
+        balance: '0.00000',
+        granted: '0.00000',
+        refresh_at: '2026-11-18T12:01:30+00:00',
+      })[0]!
+      const evidence = deepaiCapacityEvidenceOf(reading, 'key-1', new Date('2026-11-17T12:00:00.000Z'))
+      expect(evidence).toMatchObject({
+        availability: 'exhausted',
+        authority: 'authoritative',
+        reason: 'credit_exhausted',
+        recheckAt: new Date('2026-11-18T12:01:30Z'),
+      })
+    })
+
+    test('a refusal with an unknown code stays a refusal', async () => {
+      const adapter = createDeepaiUsageAdapter({ fetch: (async () =>
+        new Response(JSON.stringify({ error: { code: 'something_else', message: 'no' } }), { status: 403 })) as unknown as typeof fetch })
+      const result = await adapter.read({ baseUrl: BASE_URL, allowInsecureHttp: false, upstreamKey: KEY })
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.failure.code).toBe('upstream_refused')
+    })
+  })
+
   test('an unreachable gateway is reported as unreachable', async () => {
     const adapter = createDeepaiUsageAdapter({ fetch: (async () => {
       throw new Error('connection refused')

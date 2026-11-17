@@ -13,6 +13,16 @@ import type { UsageAdapter, UsageAdapterRequest, UsagePollResult, UsageReading }
 const ENTITLEMENT_PATH = '/theos'
 const EVIDENCE_FRESHNESS_MS = 60_000
 
+/**
+ * The upstream's refusal when the daily pool an account draws from is spent.
+ *
+ * DeepAI answers with 403 and a structured body: the code names the exhaustion and
+ * the message says when the pool refills. That is a confirmed zero with a reset
+ * time, not a failed poll — the Owner needs to see which keys are spent, and the
+ * router needs to retire them until the pool comes back.
+ */
+const SPENT_POOL_CODE = 'network_bound'
+
 export interface DeepaiUsageAdapterOptions {
   readonly fetch?: typeof fetch
   readonly now?: () => Date
@@ -45,6 +55,38 @@ function resetAt(value: unknown): Date | null {
   if (typeof value !== 'string' || value.trim() === '') return null
   const date = new Date(value)
   return Number.isFinite(date.getTime()) ? date : null
+}
+
+/**
+ * The reset time inside a refusal message, e.g. "Try again at 2026-11-18T12:01:30+00:00."
+ *
+ * The upstream states it only in prose, so this reads the timestamp out of the
+ * sentence. A message that does not carry one yields null, which leaves the
+ * reading without a reset rather than inventing one.
+ */
+function resetFromMessage(message: unknown): Date | null {
+  if (typeof message !== 'string') return null
+  const found = /try again at\s+([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2})/i.exec(message)
+  return found === null ? null : resetAt(found[1])
+}
+
+/**
+ * The upstream's structured refusal, when the body carries one.
+ *
+ * Only a code the upstream names is trusted; an unknown code stays a refusal.
+ */
+function refusalOf(body: unknown): { readonly code: string; readonly message: string; readonly resetAt: Date | null } | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null
+  const error = (body as Record<string, unknown>).error
+  if (typeof error !== 'object' || error === null || Array.isArray(error)) return null
+  const code = (error as Record<string, unknown>).code
+  if (typeof code !== 'string' || code.trim() === '') return null
+  const message = (error as Record<string, unknown>).message
+  return {
+    code,
+    message: typeof message === 'string' ? message : '',
+    resetAt: resetFromMessage(message),
+  }
 }
 
 /**
@@ -173,7 +215,41 @@ export function createDeepaiUsageAdapter(options: DeepaiUsageAdapterOptions = {}
         }
       }
       if (!response.ok) {
+        const raw = await response.text().catch(() => '')
         void response.body?.cancel().catch(() => undefined)
+        // A spent daily pool is a known state, not a broken read: report the
+        // exhaustion so the key is retired until the pool refills.
+        let parsed: unknown = null
+        try {
+          parsed = JSON.parse(raw)
+        } catch {
+          parsed = null
+        }
+        const refusal = refusalOf(parsed)
+        if (refusal !== null && refusal.code === SPENT_POOL_CODE) {
+          return {
+            ok: true,
+            readings: [
+              {
+                unit: 'Theos',
+                balance: 0,
+                used: null,
+                limit: null,
+                remainingPercent: 0,
+                plan: 'DeepAI Code daily Theos',
+                resetAt: refusal.resetAt,
+                scope: { kind: 'key', keyId: '' },
+                keyId: null,
+                confidence: 'confirmed',
+                diagnostics: {
+                  source: 'deepai-usage-adapter',
+                  kind: 'credit',
+                  upstreamCode: refusal.code,
+                },
+              },
+            ],
+          }
+        }
         return {
           ok: false,
           failure: { code: 'upstream_refused', status: response.status, message: `DeepAI entitlement endpoint refused (HTTP ${response.status})` },

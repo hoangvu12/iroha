@@ -473,7 +473,16 @@ export class ModelCatalogService {
     return { ok: true, ...discovery }
   }
 
-  /** Names a model the Owner vouches for, even before any discovery reports it. */
+  /**
+   * Names a model the Owner vouches for, even before any discovery reports it.
+   *
+   * The addition is the Owner's word that the Provider serves the model, so in
+   * the same transaction it joins the allow-list of every Upstream Key that
+   * carries one (ADR-0031). Otherwise a Provider whose Keys are all curated
+   * would list the model and refuse every Request for it as `model_unroutable`.
+   * A Key with no allow-list already admits it, and a Key whose deny-list
+   * names it keeps the Owner's narrower word about that Key.
+   */
   async addOwnerModel(providerId: string, modelId: unknown): Promise<ModelCatalogResult<CatalogView>> {
     const name = modelIdProblems(modelId)
     if (name.problems.length > 0) return failed({ code: 'validation_failed', problems: name.problems })
@@ -484,10 +493,17 @@ export class ModelCatalogService {
     const at = this.#clock.now()
     await this.#database.transaction(async (repositories) => {
       await repositories.modelCatalog.addOwnerModel(providerId, name.value, at)
+      let allowListsJoined = 0
+      for (const key of await repositories.providers.listKeys(providerId)) {
+        if (key.allowedModels === null || key.allowedModels.includes(name.value)) continue
+        if (key.deniedModels?.includes(name.value) === true) continue
+        await repositories.providers.updateKey(key.id, { allowedModels: [...key.allowedModels, name.value] }, at)
+        allowListsJoined += 1
+      }
       await repositories.audit.record({
         action: 'model_catalog.owner_added',
         outcome: 'success',
-        detail: { providerId, modelId: name.value },
+        detail: { providerId, modelId: name.value, allowListsJoined },
         at,
       })
     })
@@ -495,7 +511,13 @@ export class ModelCatalogService {
     return await this.#viewOf(providerId)
   }
 
-  /** Removes an Owner addition. Unknown models and non-addition rows change nothing. */
+  /**
+   * Removes an Owner addition. Unknown models and non-addition rows change
+   * nothing. Removing one takes the model off every allow-list on the
+   * Provider, not only those the addition joined: which lists it joined is not
+   * tracked, and with the catalog row gone no Key should keep naming it
+   * (ADR-0031).
+   */
   async removeOwnerModel(providerId: string, modelId: string): Promise<ModelCatalogResult<CatalogView>> {
     const connection = await this.#editableConnection(providerId)
     if (!connection.ok) return connection
@@ -503,10 +525,19 @@ export class ModelCatalogService {
     const at = this.#clock.now()
     await this.#database.transaction(async (repositories) => {
       const removed = await repositories.modelCatalog.removeOwnerModel(providerId, modelId)
+      let allowListsLeft = 0
+      if (removed) {
+        for (const key of await repositories.providers.listKeys(providerId)) {
+          if (key.allowedModels === null || !key.allowedModels.includes(modelId)) continue
+          const allowedModels = key.allowedModels.filter((allowed) => allowed !== modelId)
+          await repositories.providers.updateKey(key.id, { allowedModels }, at)
+          allowListsLeft += 1
+        }
+      }
       await repositories.audit.record({
         action: 'model_catalog.owner_removed',
         outcome: removed ? 'success' : 'failure',
-        detail: { providerId, modelId, removed },
+        detail: { providerId, modelId, removed, allowListsLeft },
         at,
       })
     })

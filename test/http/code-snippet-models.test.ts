@@ -116,9 +116,9 @@ describe('Code Snippet model list', () => {
     const catalog = await json<CatalogDto>(`/api/v1/admin/providers/${providerId}/catalog`)
     expect(snippetModelIds(catalog, null)).toContain(HAND_ADDED)
 
-    // The curated key's allow-list omits it and the open key's discovered list
-    // does not name it; the Owner vouches for it, so the open key is tried
-    // (ADR-0030).
+    // The addition joined the curated key's allow-list (ADR-0031), and the
+    // open key's discovered list does not name it but the Owner vouches for
+    // it (ADR-0030), so either key may be tried.
     const tested = await testRequest(HAND_ADDED)
     expect({ status: tested.status, body: await tested.text() }).toMatchObject({ status: 200 })
     expect(upstream.calls).toHaveLength(1)
@@ -137,7 +137,8 @@ describe('Code Snippet model list', () => {
     const provider = await json<{ keys: KeyDto[] }>(`/api/v1/admin/providers/${providerId}`)
     const [curated, open] = provider.keys
 
-    expect(snippetModelIds(catalog, curated!)).toEqual([DISCOVERED])
+    // The hand-added model joined the curated key's allow-list (ADR-0031).
+    expect([...snippetModelIds(catalog, curated!)].sort()).toEqual([DISCOVERED, HAND_ADDED].sort())
     expect([...snippetModelIds(catalog, open!)].sort()).toEqual([DISCOVERED, HAND_ADDED].sort())
   })
 })

@@ -60,7 +60,10 @@ export const deepaiPack: ProviderPack = {
       'claude-fable-5-2',
       'gpt-6.astra',
     ],
-    modelAvailability: 'key',
+    // Every key here is another DeepAI account behind the same gateway, and they all
+    // serve the same catalog, so the models are a Provider-level fact: per-key
+    // discovery would only ask the gateway the same question three times.
+    modelAvailability: 'provider',
     modelDiscovery: 'supported',
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: 'deepai-usage-adapter',

@@ -16,8 +16,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { fetchCatalog, type CatalogView } from '@/lib/catalog'
-import { type KeyView, type ProviderView } from '@/lib/providers'
+import { type ProviderView } from '@/lib/providers'
+import { hasKeyRestriction, snippetModelIds } from '@/lib/snippet-models'
+import { useCatalog } from '@/lib/use-catalog'
 
 /**
  * The Vite dev server injects this constant via `define` in
@@ -43,69 +44,30 @@ const LANGUAGE_LABELS: Record<SnippetLanguage, string> = {
 }
 
 const GATEWAY_KEY_PLACEHOLDER = '<gateway-key>'
+const ANY_KEY = '__any__'
 
 interface CodeSnippetCardProps {
   readonly provider: ProviderView
   readonly csrfToken: string
 }
 
-/**
- * Mirrors the server-side `keyServesModel` rule
- * (`src/providers/provider-registry.ts`): an Upstream Key rejects a model
- * when it sets an `allowedModels` allow-list the model is not on, or a
- * `deniedModels` deny-list the model is on. A key with both lists null
- * accepts any model. The Owner-excluded catalog rows are already filtered
- * before this check runs.
- */
-function keyServesModel(key: KeyView, model: string): boolean {
-  if (key.allowedModels !== null && !key.allowedModels.includes(model)) return false
-  if (key.deniedModels !== null && key.deniedModels.includes(model)) return false
-  return true
-}
-
-function hasKeyRestriction(key: KeyView): boolean {
-  return key.allowedModels !== null || key.deniedModels !== null
-}
-
 export function CodeSnippetCard({ provider, csrfToken }: CodeSnippetCardProps) {
-  const [catalog, setCatalog] = useState<CatalogView | null>(null)
-  const [loadFailed, setLoadFailed] = useState(false)
+  // The same cached query the Models card reads and every catalog write
+  // replaces, so an added, removed or refreshed model shows up here at once.
+  const catalogQuery = useCatalog(provider.id)
+  const catalog = catalogQuery.data ?? null
+  const loadFailed = catalogQuery.isError
   const [modelId, setModelId] = useState<string | null>(null)
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null)
   const [language, setLanguage] = useState<SnippetLanguage>('curl')
   const [routingMode, setRoutingMode] = useState<RoutingMode>('global')
 
+  // No key chosen is the default, because the snippet and the Test request
+  // route through whichever Upstream Key the Gateway picks. A chosen key
+  // that is removed falls back to that default.
   useEffect(() => {
-    const controller = new AbortController()
-    setCatalog(null)
-    setLoadFailed(false)
-    setModelId(null)
-    fetchCatalog(provider.id, controller.signal)
-      .then((view) => {
-        if (controller.signal.aborted) return
-        setCatalog(view)
-        const first = view.entries.find((entry) => !entry.excluded)
-        setModelId(first?.modelId ?? null)
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return
-        setLoadFailed(true)
-      })
-    return () => controller.abort()
-  }, [provider.id])
-
-  // Keep the key selection in sync with the provider's keys: a removed key
-  // falls back to the first remaining key, an added key does not steal the
-  // Owner's current selection. A provider with no keys clears the
-  // selection so the model list reverts to the unfiltered catalog.
-  useEffect(() => {
-    if (provider.keys.length === 0) {
-      if (selectedKeyId !== null) setSelectedKeyId(null)
-      return
-    }
-    const stillPresent = provider.keys.some((key) => key.id === selectedKeyId)
-    if (!stillPresent) {
-      setSelectedKeyId(provider.keys[0]?.id ?? null)
+    if (selectedKeyId !== null && !provider.keys.some((key) => key.id === selectedKeyId)) {
+      setSelectedKeyId(null)
     }
   }, [provider.keys, selectedKeyId])
 
@@ -116,23 +78,20 @@ export function CodeSnippetCard({ provider, csrfToken }: CodeSnippetCardProps) {
 
   // The list the model picker offers: the catalog minus owner exclusions,
   // then restricted by the selected Upstream Key's allow- / deny-list.
-  const filteredModels = useMemo<readonly string[]>(() => {
-    if (catalog === null) return []
-    const base = catalog.entries
-      .filter((entry) => !entry.excluded)
-      .map((entry) => entry.modelId)
-    if (selectedKey === null) return base
-    return base.filter((id) => keyServesModel(selectedKey, id))
-  }, [catalog, selectedKey])
+  const filteredModels = useMemo<readonly string[]>(
+    () => (catalog === null ? [] : snippetModelIds(catalog, selectedKey)),
+    [catalog, selectedKey],
+  )
 
-  // If the current modelId is no longer in the filtered list (the Owner
-  // switched to a more restrictive key, or the catalog refreshed), snap
-  // to the first filtered model. Empty filtered list → null, which the
-  // dropdown renders as a disabled placeholder.
+  // If there is no model yet, or the current one is no longer in the
+  // filtered list (the Owner switched to a more restrictive key, or removed
+  // or excluded it), snap to the first filtered model. Empty filtered list
+  // → null, which the dropdown renders as a disabled placeholder.
   useEffect(() => {
     if (catalog === null) return
-    if (modelId !== null && !filteredModels.includes(modelId)) {
-      setModelId(filteredModels[0] ?? null)
+    if (modelId === null || !filteredModels.includes(modelId)) {
+      const next = filteredModels[0] ?? null
+      if (next !== modelId) setModelId(next)
     }
   }, [catalog, filteredModels, modelId])
 
@@ -188,15 +147,26 @@ export function CodeSnippetCard({ provider, csrfToken }: CodeSnippetCardProps) {
                 Key
               </label>
               <Select
-                value={selectedKeyId ?? '__none__'}
-                onValueChange={(value) => setSelectedKeyId(value === '__none__' ? null : value)}
+                value={selectedKeyId ?? ANY_KEY}
+                onValueChange={(value) => setSelectedKeyId(value === ANY_KEY ? null : value)}
               >
                 <SelectTrigger id="code-snippet-key" className="h-8 w-44" size="sm">
-                  <SelectValue placeholder="Pick a key">
-                    {selectedKey === null ? 'Pick a key' : selectedKey.id}
+                  <SelectValue placeholder="Any key">
+                    {selectedKey === null ? 'Any key' : selectedKey.id}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent align="end">
+                  <SelectItem value={ANY_KEY}>
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-xs">Any key</span>
+                      <span
+                        aria-hidden="true"
+                        className="text-muted-foreground text-[10px]"
+                      >
+                        Whichever key the Gateway routes to
+                      </span>
+                    </span>
+                  </SelectItem>
                   {provider.keys.map((key) => (
                     <SelectItem key={key.id} value={key.id}>
                       <span className="flex flex-col gap-0.5">

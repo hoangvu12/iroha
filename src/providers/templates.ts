@@ -152,6 +152,13 @@ export interface ProviderTemplate {
    * is honest by default.
    */
   readonly usageAdapterId: string | null
+  /**
+   * How often, in seconds, the usage poll reads this template's entitlement surface
+   * when the Owner has set no per-Provider override. Omitted means the global usage
+   * interval. A template sets it when reading the entitlement is itself a signal to
+   * the upstream, so polling it at the global cadence would cost more than it tells.
+   */
+  readonly usagePollIntervalSeconds?: number
   /** The brand identity rendered in the management UI. Null when the template has no upstream brand. */
   readonly brand: ProviderTemplateBrand | null
 }

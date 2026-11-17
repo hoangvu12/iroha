@@ -1,3 +1,4 @@
+import { findBuiltInTemplate } from '../providers/templates.ts'
 import {
   BackgroundJobError,
   type BackgroundJob,
@@ -14,8 +15,8 @@ export type ConnectionVisitingJob = 'modelSync' | 'usage'
 
 /**
  * Resolves the effective interval for one connection and one connection-visiting
- * job. The override takes precedence over the global interval when the Owner
- * has set one; otherwise the global cadence applies.
+ * job. The Owner's per-connection override wins; then the Provider Template's
+ * own default, when it declares one; otherwise the global cadence applies.
  *
  * Centralising the lookup keeps the per-job logic honest: a job that reads
  * `schedule.overrides.modelSync[id]` and `schedule.modelSync.intervalSeconds`
@@ -26,9 +27,11 @@ export function effectiveIntervalFor(
   schedule: import('./schedule-settings.ts').BackgroundScheduleSettings,
   job: ConnectionVisitingJob,
   providerId: string,
+  templateDefaultSeconds: number | null = null,
 ): number {
   const override = schedule.overrides[job][providerId]
   if (override !== undefined) return override
+  if (templateDefaultSeconds !== null) return templateDefaultSeconds
   return schedule[job].intervalSeconds
 }
 
@@ -152,7 +155,14 @@ export function buildDefaultJobs(): BackgroundJob[] {
         const targets = connections.filter((connection) => connection.archivedAt === null && connection.enabled)
         let succeeded = 0
         for (const connection of targets) {
-          const effective = effectiveIntervalFor(schedule, 'usage', connection.id)
+          const effective = effectiveIntervalFor(
+            schedule,
+            'usage',
+            connection.id,
+            connection.templateId === null
+              ? null
+              : findBuiltInTemplate(connection.templateId)?.usagePollIntervalSeconds ?? null,
+          )
           const prior = await database.usage.get(connection.id)
           if (!connectionIsDue({
             lastSyncedAt: prior?.syncedAt ?? null,

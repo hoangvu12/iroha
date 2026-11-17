@@ -11,6 +11,7 @@ import {
   type BackgroundJobRunResult,
   type BackgroundScheduleSettings,
 } from '../../src/jobs/index.ts'
+import { findBuiltInTemplate } from '../../src/providers/templates.ts'
 import { testClock } from '../support/identity.ts'
 import { fakeTimer } from '../support/timer.ts'
 
@@ -428,6 +429,23 @@ describe('effectiveIntervalFor', () => {
     }
     expect(effectiveIntervalFor(schedule, 'modelSync', 'pc-alpha')).toBe(120)
     expect(effectiveIntervalFor(schedule, 'modelSync', 'pc-beta')).toBe(3600)
+  })
+
+  test("a template's own default replaces the global interval", () => {
+    expect(effectiveIntervalFor(baseSchedule(), 'usage', 'pc-alpha', 600)).toBe(600)
+  })
+
+  test("the Owner's override still beats the template's default", () => {
+    const schedule: BackgroundScheduleSettings = {
+      ...baseSchedule(),
+      overrides: { modelSync: {}, usage: { 'pc-alpha': 15 } },
+    }
+    expect(effectiveIntervalFor(schedule, 'usage', 'pc-alpha', 600)).toBe(15)
+  })
+
+  test('the DeepAI Code template paces its usage poll at the upstream check-in pace', () => {
+    // Every allowance read is also a check-in, and DeepAI paces check-ins at 600 s.
+    expect(findBuiltInTemplate('deepai-code')?.usagePollIntervalSeconds).toBe(600)
   })
 })
 

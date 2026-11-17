@@ -58,7 +58,7 @@ export const deepaiPack: ProviderPack = {
       'muse-wonder',
       'qwen-3.8-max-prime',
       'claude-fable-5-2',
-      'gpt-6.astra',
+      'gpt-6-astra',
     ],
     // Every key here is another DeepAI account behind the same gateway, and they all
     // serve the same catalog, so the models are a Provider-level fact: per-key
@@ -67,6 +67,12 @@ export const deepaiPack: ProviderPack = {
     modelDiscovery: 'supported',
     inferenceAdapterId: GENERIC_INFERENCE_ADAPTER_ID,
     usageAdapterId: 'deepai-usage-adapter',
+    // Every allowance read is also the account's check-in with DeepAI, and the
+    // upstream paces check-ins at 600 seconds (the `check_in.seconds` it answers
+    // with). Reading 161 accounts every minute is six times that pace for no
+    // gain: a key in use already checks in through its own requests, and a
+    // capacity failure still triggers an immediate re-read.
+    usagePollIntervalSeconds: 600,
     brand: { domain: 'deepai.org', accentColor: '#7C3AED' },
   },
   inferenceAdapter: (options) => createGenericInferenceAdapter(options),

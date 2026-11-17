@@ -706,6 +706,8 @@ export interface RequestHistoryFilter {
   readonly outcome?: RequestOutcome
   readonly model?: string
   readonly keyId?: string
+  /** The Gateway Key that made the Request, as its ID was snapshotted. */
+  readonly gatewayKeyId?: string
   /** Only events strictly after this moment (inclusive). */
   readonly after?: Date
   /** Only events strictly before this moment (exclusive). */

@@ -169,11 +169,13 @@ const requestsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/requests',
   component: RequestsRoute,
-  // The Provider list again, this time for the filter bar's Provider select.
+  // The Provider list again, for the filter bar's Provider select and the
+  // Upstream Key cards; the Gateway Keys for the caller filter and cards.
   loader: () =>
     warm(
       queryClient.ensureQueryData(requestPageQueryOptions(NO_FILTER, FIRST_PAGE)),
       queryClient.ensureQueryData(providersQueryOptions()),
+      queryClient.ensureQueryData(gatewayKeysQueryOptions()),
     ),
 })
 

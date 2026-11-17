@@ -47,7 +47,7 @@ export function createRequestHistoryRoutes({ identity, managementKeys, requestHi
           tags: ['Request History'],
           summary: 'List request history',
           description:
-            'Lists recent inference calls with their connection, model, selected key identity, status, latency, and Provider-supplied usage. No prompts, responses, or Upstream Key material.',
+            'Lists recent inference calls with their connection, model, calling Gateway Key, selected key identity, status, latency, and Provider-supplied usage. Filter by `providerId`, `outcome`, `model`, `keyId` (Upstream Key), or `gatewayKeyId`. No prompts, responses, or Upstream Key material.',
         },
         response: {
           200: listResponse,
@@ -283,6 +283,7 @@ function parseListQuery(query: Record<string, unknown>):
     outcome?: 'success' | 'failure'
     model?: string
     keyId?: string
+    gatewayKeyId?: string
   } = {}
   if (typeof query.providerId === 'string' && query.providerId !== '') {
     filter.providerId = query.providerId
@@ -295,6 +296,9 @@ function parseListQuery(query: Record<string, unknown>):
   }
   if (typeof query.keyId === 'string' && query.keyId !== '') {
     filter.keyId = query.keyId
+  }
+  if (typeof query.gatewayKeyId === 'string' && query.gatewayKeyId !== '') {
+    filter.gatewayKeyId = query.gatewayKeyId
   }
 
   const readonlyFilter: RequestHistoryFilter = filter

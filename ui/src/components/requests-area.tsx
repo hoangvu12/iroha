@@ -20,7 +20,9 @@ import {
 } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/empty-state'
 import { Dot } from '@/components/dot'
+import { GatewayKeyRef, UpstreamKeyRef } from '@/components/request-key-cards'
 import { toApiError } from '@/lib/api-client'
+import type { GatewayKeyView } from '@/lib/gateway-keys'
 import type { ProviderView } from '@/lib/providers'
 import type {
   RequestAttemptView,
@@ -28,6 +30,7 @@ import type {
   RequestEventView,
   RequestFilter,
 } from '@/lib/requests'
+import { useGatewayKeys } from '@/lib/use-gateway-keys'
 import { useProviders } from '@/lib/use-providers'
 import { REQUEST_PAGE_SIZE, useRequestDetail, useRequestPage } from '@/lib/use-requests'
 import { formatTime } from '@/lib/time'
@@ -48,10 +51,21 @@ export function RequestsArea() {
   // The filter bar names Providers; this screen is only another reader of the
   // entry the Providers area writes.
   const providersQuery = useProviders()
+  // Names the caller of each Request. A failure here only costs the cards their
+  // detail — the row still shows the name the Request recorded — so it stays
+  // out of the error slot below.
+  const gatewayKeysQuery = useGatewayKeys()
   const detail = useRequestDetail(selectedId)
 
   const list = page.data ?? null
   const providers = providersQuery.data ?? null
+  const gatewayKeys = gatewayKeysQuery.data ?? null
+  const keyContext: KeyContext = {
+    providers,
+    gatewayKeys,
+    onFilterGatewayKey: (gatewayKeyId) => applyFilter({ ...filter, gatewayKeyId }),
+    onFilterUpstreamKey: (keyId) => applyFilter({ ...filter, keyId }),
+  }
   // The page, the Provider list and the open Request used to share one error
   // slot, and so does the Alert that reports them.
   const failure = page.error ?? providersQuery.error ?? detail.error
@@ -93,6 +107,7 @@ export function RequestsArea() {
 
       <RequestsFilterBar
         providers={providers}
+        gatewayKeys={gatewayKeys}
         filter={filter}
         onChange={applyFilter}
       />
@@ -125,29 +140,75 @@ export function RequestsArea() {
           total={list.total}
           offset={offset}
           loadingId={loadingDetailId}
+          keyContext={keyContext}
           onPage={setOffset}
           onOpen={setSelectedId}
         />
       )}
 
       <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
-        {selected && <RequestDetail detail={selected} />}
+        {selected && <RequestDetail detail={selected} keyContext={keyContext} />}
       </Dialog>
     </div>
   )
 }
 
+/** What a key reference needs to describe its key and narrow the list to it. */
+interface KeyContext {
+  readonly providers: readonly ProviderView[] | null
+  readonly gatewayKeys: readonly GatewayKeyView[] | null
+  readonly onFilterGatewayKey: (gatewayKeyId: string) => void
+  readonly onFilterUpstreamKey: (keyId: string) => void
+}
+
 function RequestsFilterBar({
   providers,
+  gatewayKeys,
   filter,
   onChange,
 }: {
   readonly providers: readonly ProviderView[] | null
+  readonly gatewayKeys: readonly GatewayKeyView[] | null
   readonly filter: RequestFilter
   readonly onChange: (next: RequestFilter) => void
 }) {
+  // A key card can narrow to a Gateway Key that has since been deleted; the
+  // select still needs an item for it or it would read as "Any caller".
+  const filteredKeyIsListed =
+    filter.gatewayKeyId === undefined || (gatewayKeys ?? []).some((key) => key.id === filter.gatewayKeyId)
+
   return (
-    <div className="grid gap-3 md:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="requests-caller" className="text-muted-foreground text-xs">
+          Gateway Key
+        </label>
+        <Select
+          value={filter.gatewayKeyId ?? '__any'}
+          onValueChange={(value) =>
+            onChange({
+              ...filter,
+              ...(value === '__any' ? { gatewayKeyId: undefined } : { gatewayKeyId: value }),
+            })
+          }
+        >
+          <SelectTrigger id="requests-caller" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__any">Any caller</SelectItem>
+            {(gatewayKeys ?? []).map((key) => (
+              <SelectItem key={key.id} value={key.id}>
+                {key.revoked ? `${key.name} (revoked)` : key.name}
+              </SelectItem>
+            ))}
+            {!filteredKeyIsListed && filter.gatewayKeyId !== undefined && (
+              <SelectItem value={filter.gatewayKeyId}>{filter.gatewayKeyId} (deleted)</SelectItem>
+            )}
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="flex flex-col gap-1.5">
         <label htmlFor="requests-provider" className="text-muted-foreground text-xs">
           Provider
@@ -222,7 +283,7 @@ function RequestsFilterBar({
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="requests-key" className="text-muted-foreground text-xs">
-          Key
+          Upstream Key
         </label>
         <Input
           id="requests-key"
@@ -245,6 +306,7 @@ function RequestsList({
   total,
   offset,
   loadingId,
+  keyContext,
   onPage,
   onOpen,
 }: {
@@ -252,6 +314,7 @@ function RequestsList({
   readonly total: number
   readonly offset: number
   readonly loadingId: string | null
+  readonly keyContext: KeyContext
   readonly onPage: (next: number) => void
   readonly onOpen: (id: string) => void
 }) {
@@ -266,6 +329,7 @@ function RequestsList({
             key={event.id}
             event={event}
             busy={loadingId === event.id}
+            keyContext={keyContext}
             onOpen={() => onOpen(event.id)}
           />
         ))}
@@ -302,10 +366,12 @@ function RequestsList({
 function RequestRow({
   event,
   busy,
+  keyContext,
   onOpen,
 }: {
   readonly event: RequestEventView
   readonly busy: boolean
+  readonly keyContext: KeyContext
   readonly onOpen: () => void
 }) {
   const tone = event.outcome === 'success' ? 'healthy' : 'danger'
@@ -337,10 +403,31 @@ function RequestRow({
                 · {event.providerHandle ?? event.providerId}
               </span>
             </div>
-            <div className="text-muted-foreground flex items-center gap-2 text-xs">
+            <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs">
               <span className="font-mono tabular-nums">{event.latencyMs} ms</span>
               <span>·</span>
-              <span className="font-mono">Key {event.keyId ?? '—'}</span>
+              <span className="flex min-w-0 shrink items-center gap-1">
+                <span className="shrink-0">by</span>
+                <GatewayKeyRef
+                  gatewayKeyId={event.gatewayKeyId}
+                  recordedName={event.gatewayKeyName}
+                  gatewayKeys={keyContext.gatewayKeys}
+                  providers={keyContext.providers}
+                  onFilter={keyContext.onFilterGatewayKey}
+                  className="text-foreground/80 truncate"
+                />
+              </span>
+              <span>·</span>
+              <span className="flex min-w-0 shrink items-center gap-1">
+                <span className="shrink-0">via</span>
+                <UpstreamKeyRef
+                  keyId={event.keyId}
+                  providerId={event.providerId}
+                  providers={keyContext.providers}
+                  onFilter={keyContext.onFilterUpstreamKey}
+                  className="truncate"
+                />
+              </span>
               <span>·</span>
               <span className="truncate">{formatTime(event.occurredAt)}</span>
               {event.errorCode !== null && (
@@ -363,7 +450,10 @@ function RequestRow({
   )
 }
 
-function RequestDetail({ detail }: { readonly detail: RequestEventDetail }) {
+function RequestDetail({ detail, keyContext }: {
+  readonly detail: RequestEventDetail
+  readonly keyContext: KeyContext
+}) {
   const { event, attempts } = detail
 
   return (
@@ -392,14 +482,36 @@ function RequestDetail({ detail }: { readonly detail: RequestEventDetail }) {
         <Detail label="Prompt tokens">{event.promptTokens ?? '—'}</Detail>
         <Detail label="Completion tokens">{event.completionTokens ?? '—'}</Detail>
         <Detail label="Total tokens">{event.totalTokens ?? '—'}</Detail>
-        <Detail label="Upstream Key">{event.keyId ?? '—'}</Detail>
+        <Detail label="Gateway Key">
+          <GatewayKeyRef
+            gatewayKeyId={event.gatewayKeyId}
+            recordedName={event.gatewayKeyName}
+            gatewayKeys={keyContext.gatewayKeys}
+            providers={keyContext.providers}
+            onFilter={keyContext.onFilterGatewayKey}
+          />
+        </Detail>
+        <Detail label="Upstream Key">
+          <UpstreamKeyRef
+            keyId={event.keyId}
+            providerId={event.providerId}
+            providers={keyContext.providers}
+            onFilter={keyContext.onFilterUpstreamKey}
+          />
+        </Detail>
       </dl>
 
       <div className="flex flex-col gap-2">
         <span className="text-muted-foreground text-xs">Attempts</span>
         <ol className="flex flex-col gap-1 text-xs">
           {attempts.map((attempt) => (
-            <AttemptLine key={attempt.id} attempt={attempt} totalAttempts={attempts.length} />
+            <AttemptLine
+              key={attempt.id}
+              attempt={attempt}
+              providerId={event.providerId}
+              keyContext={keyContext}
+              totalAttempts={attempts.length}
+            />
           ))}
         </ol>
       </div>
@@ -407,8 +519,10 @@ function RequestDetail({ detail }: { readonly detail: RequestEventDetail }) {
   )
 }
 
-function AttemptLine({ attempt, totalAttempts }: {
+function AttemptLine({ attempt, providerId, keyContext, totalAttempts }: {
   readonly attempt: RequestAttemptView
+  readonly providerId: string
+  readonly keyContext: KeyContext
   readonly totalAttempts: number
 }) {
   const tone =
@@ -428,9 +542,13 @@ function AttemptLine({ attempt, totalAttempts }: {
         {attempt.errorCode !== null && (
           <span className="text-muted-foreground break-all">{attempt.errorCode}</span>
         )}
-        <span className="text-muted-foreground ml-auto break-all font-mono text-[10px]">
-          {attempt.keyId ?? '—'}
-        </span>
+        <UpstreamKeyRef
+          keyId={attempt.keyId}
+          providerId={providerId}
+          providers={keyContext.providers}
+          onFilter={keyContext.onFilterUpstreamKey}
+          className="text-muted-foreground ml-auto break-all text-[10px]"
+        />
       </div>
       <AttemptDiagnostics attempt={attempt} totalAttempts={totalAttempts} />
     </li>
@@ -512,6 +630,7 @@ function hasFilter(filter: RequestFilter): boolean {
     (filter.providerId !== undefined && filter.providerId !== '') ||
     filter.outcome !== undefined ||
     (filter.model !== undefined && filter.model !== '') ||
-    (filter.keyId !== undefined && filter.keyId !== '')
+    (filter.keyId !== undefined && filter.keyId !== '') ||
+    (filter.gatewayKeyId !== undefined && filter.gatewayKeyId !== '')
   )
 }

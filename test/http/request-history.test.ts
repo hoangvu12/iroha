@@ -403,6 +403,27 @@ describe('private request history and audit', () => {
       expect(byOutcomeBody.total).toBe(0)
     })
 
+    test('filters by the calling Gateway Key', async () => {
+      const other = await createKey([{ providerId: connection.id }])
+      await chat(keySecret, { model: MODEL, messages: [{ role: 'user', content: 'mine' }] })
+      await chat(other.secret, { model: MODEL, messages: [{ role: 'user', content: 'theirs' }] })
+      await chat(other.secret, { model: MODEL, messages: [{ role: 'user', content: 'theirs again' }] })
+
+      const mine = (await (await iroha.fetch(`/api/v1/admin/requests?gatewayKeyId=${keyId}`)).json()) as {
+        events: RequestEventDto[]
+        total: number
+      }
+      expect(mine.total).toBe(1)
+      expect(mine.events.map((event) => event.gatewayKeyId)).toEqual([keyId])
+
+      const theirs = (await (await iroha.fetch(`/api/v1/admin/requests?gatewayKeyId=${other.id}`)).json()) as {
+        events: RequestEventDto[]
+        total: number
+      }
+      expect(theirs.total).toBe(2)
+      expect(theirs.events.every((event) => event.gatewayKeyId === other.id)).toBe(true)
+    })
+
     test('paginates events with limit and offset', async () => {
       for (let i = 0; i < 5; i++) {
         await chat(keySecret, { model: MODEL, messages: [{ role: 'user', content: String(i) }] })

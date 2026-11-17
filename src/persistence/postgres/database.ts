@@ -1587,6 +1587,9 @@ function eventFilter(filter: RequestHistoryFilter) {
   if (filter.keyId !== undefined) {
     conditions.push(eq(requestEvents.keyId, filter.keyId))
   }
+  if (filter.gatewayKeyId !== undefined) {
+    conditions.push(eq(requestEvents.gatewayKeyId, filter.gatewayKeyId))
+  }
   if (filter.after !== undefined) {
     conditions.push(gte(requestEvents.occurredAt, filter.after))
   }

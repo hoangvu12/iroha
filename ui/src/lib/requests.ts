@@ -86,6 +86,8 @@ export interface RequestFilter {
   readonly outcome?: 'success' | 'failure'
   readonly model?: string
   readonly keyId?: string
+  /** The Gateway Key that made the Request. */
+  readonly gatewayKeyId?: string
 }
 
 export async function fetchRequests(
@@ -104,6 +106,9 @@ export async function fetchRequests(
   }
   if (filter.keyId !== undefined && filter.keyId !== '') {
     query.set('keyId', filter.keyId)
+  }
+  if (filter.gatewayKeyId !== undefined && filter.gatewayKeyId !== '') {
+    query.set('gatewayKeyId', filter.gatewayKeyId)
   }
   if (options.limit !== undefined) {
     query.set('limit', String(options.limit))

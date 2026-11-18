@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { ConfigurationError } from '../../src/config/environment.ts'
 import { createApp } from '../../src/http/app.ts'
 import { ModelCatalogService } from '../../src/models/index.ts'
-import { startIroha, type RunningIroha } from '../../src/runtime/startup.ts'
+import { CALLER_IDLE_TIMEOUT_SECONDS, startIroha, type RunningIroha } from '../../src/runtime/startup.ts'
 
 import { testPasswordHasher } from '../support/identity.ts'
 
@@ -82,6 +82,39 @@ describe('startup ordering', () => {
     running.push(iroha)
 
     expect(received).toBeInstanceOf(ModelCatalogService)
+  })
+
+  test('keeps a silent caller connection open past Elysia’s 30 s default', async () => {
+    // A Request can stay silent longer than 30 s while Iroha tries other keys
+    // or a streaming model pauses; Elysia's default idle limit then reset the
+    // caller's socket (ECONNRESET) with no Request recorded.
+    let listenOptions: unknown
+    const iroha = await startIroha({
+      environment: {
+        DATABASE_URL: 'file::memory:',
+        IROHA_MASTER_KEY: MASTER_KEY,
+        IROHA_SETUP_TOKEN: SETUP_TOKEN,
+        HOST: '127.0.0.1',
+        PORT: String(await freePort()),
+      },
+      frontendDirectory: join(temporaryDirectory(), 'no-frontend'),
+      log: () => undefined,
+      passwordHasher: testPasswordHasher,
+      appFactory: (options) => {
+        const app = createApp(options)
+        const listen = app.listen.bind(app)
+        app.listen = ((serve: unknown, callback?: unknown) => {
+          listenOptions = serve
+          return listen(serve as never, callback as never)
+        }) as typeof app.listen
+        return app
+      },
+    })
+    running.push(iroha)
+
+    expect(listenOptions).toMatchObject({ idleTimeout: CALLER_IDLE_TIMEOUT_SECONDS })
+    expect(CALLER_IDLE_TIMEOUT_SECONDS).toBeGreaterThan(120)
+    expect(CALLER_IDLE_TIMEOUT_SECONDS).toBeLessThanOrEqual(255)
   })
 
   test('migrates before the port accepts traffic', async () => {

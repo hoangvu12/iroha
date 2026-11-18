@@ -35,6 +35,17 @@ import type { Clock } from './clock.ts'
 
 const DEFAULT_FRONTEND_DIRECTORY = join(import.meta.dir, '../../ui/dist')
 
+/**
+ * How long a caller's connection may carry no bytes before Bun closes it.
+ * Elysia's default is 30 s, which is shorter than a Request legitimately stays
+ * silent: before the first byte Iroha may wait out several first-byte timeouts
+ * while it tries other keys, and a streaming model may pause mid-answer. A
+ * close there reaches the caller as ECONNRESET, with no Request recorded.
+ * 255 s is Bun's maximum; Iroha's own per-Provider deadlines end a stuck
+ * Request well before it.
+ */
+export const CALLER_IDLE_TIMEOUT_SECONDS = 255
+
 export interface StartOptions {
   readonly environment?: EnvironmentSource
   readonly frontendDirectory?: string | undefined
@@ -219,7 +230,11 @@ export async function startIroha(options: StartOptions = {}): Promise<RunningIro
     metricsSettings,
   })
 
-  const server = app.listen({ hostname: configuration.host, port: configuration.port })
+  const server = app.listen({
+    hostname: configuration.host,
+    port: configuration.port,
+    idleTimeout: CALLER_IDLE_TIMEOUT_SECONDS,
+  })
   const port = server.server?.port ?? configuration.port
   const url = `http://${configuration.host}:${port}`
   log(`  Listening on ${url}`)

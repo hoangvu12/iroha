@@ -9,12 +9,15 @@ package webui
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"io/fs"
 	"mime"
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
@@ -43,10 +46,11 @@ func Handler() http.Handler {
 	if err != nil {
 		index = []byte(placeholder)
 	}
+	indexTag := etag(index)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if rest, ok := strings.CutPrefix(p, "brand/"); ok {
-			if serveFile(w, r, art, rest, "public, max-age=86400") {
+			if serveFile(w, r, art, "brand", rest, "public, max-age=86400") {
 				return
 			}
 		} else if p != "" && p != "index.html" {
@@ -54,21 +58,45 @@ func Handler() http.Handler {
 			if strings.HasPrefix(p, "assets/") {
 				cache = "public, max-age=31536000, immutable" // file names carry a content hash
 			}
-			if serveFile(w, r, app, p, cache) {
+			if serveFile(w, r, app, "dist", p, cache) {
 				return
 			}
 		}
 		if p == "" || p == "index.html" || wantsPage(r, p) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			// Revalidated on every load, so a deploy shows at once; the ETag
+			// makes an unchanged page a 304.
 			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("ETag", indexTag)
 			w.Header().Set("X-Frame-Options", "DENY")
-			// No modification time: index.html is never cached (no-cache)
-			// and its assets carry content hashes, so Last-Modified buys nothing.
+			// No modification time: the ETag is the validator.
 			http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(index))
 			return
 		}
+		// A missing file (an old tab asking for a chunk a deploy removed) is
+		// never kept: Cloudflare caches a .js 404 for minutes otherwise.
+		w.Header().Set("Cache-Control", "no-store")
 		api.NotFoundHandler(w, r)
 	})
+}
+
+// etag is a strong validator for an embedded file's content.
+func etag(b []byte) string {
+	h := sha256.Sum256(b)
+	return `"` + hex.EncodeToString(h[:10]) + `"`
+}
+
+// tags remembers each embedded file's ETag (the files never change while
+// the binary runs).
+var tags sync.Map
+
+func tagOf(key string, b []byte) string {
+	if t, ok := tags.Load(key); ok {
+		return t.(string)
+	}
+	t := etag(b)
+	tags.Store(key, t)
+	return t
 }
 
 // wantsPage reports whether a miss is a browser loading one of the app's
@@ -77,7 +105,7 @@ func wantsPage(r *http.Request, p string) bool {
 	return path.Ext(p) == "" && strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
-func serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, name, cache string) bool {
+func serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, root, name, cache string) bool {
 	if !fs.ValidPath(name) {
 		return false
 	}
@@ -89,6 +117,7 @@ func serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, name, cache s
 		w.Header().Set("Content-Type", ct)
 	}
 	w.Header().Set("Cache-Control", cache)
+	w.Header().Set("ETag", tagOf(root+"/"+name, b))
 	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(b))
 	return true
 }

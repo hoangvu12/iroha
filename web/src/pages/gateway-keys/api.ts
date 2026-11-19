@@ -59,11 +59,17 @@ export function useGatewayKey(ref: string) {
   });
 }
 
-/** After any change (or its Undo) every list and key page refetches. */
+/**
+ * After any change (or its Undo) every list and key page refetches, and so do the other places
+ * listing Gateway Keys or their scopes: the chat's Send as and model choices, a Pool's Members tab.
+ */
 export function useInvalidateKeys() {
   const qc = useQueryClient();
   // Resolves once the refetches are in, so an inline result shows on fresh data.
-  return () => Promise.all([qc.invalidateQueries({ queryKey: keys.all }), qc.invalidateQueries({ queryKey: ["audit-entries"] })]);
+  return () =>
+    Promise.all(
+      [keys.all, ["audit-entries"], ["providers-page", "gateway-keys"], ["test-models"]].map((k) => qc.invalidateQueries({ queryKey: k })),
+    );
 }
 
 export function useCreateKey() {

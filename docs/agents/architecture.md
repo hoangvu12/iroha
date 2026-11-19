@@ -861,3 +861,35 @@ Reverses "each table scrolls inside itself" (Owner, 2026-11-20). Built into `Dat
 - **Stacked layout**: a rule and its branch side by side need about 940 px; `Rules.tsx` measures the flow's box (`useWidth`, ResizeObserver, outside the `Skeleton` since refs inside it don't hold) and below that (phones, tablets, a narrow window) passes `stacked`, where each step carries "If it matches" and its hits under its conditions, and conditions wrap instead of truncating. Skeleton ids `rules-flow` and `rules-flow:stacked`.
 - **No try-a-failure yet**: the API has no call that classifies a failure the Owner types; `replay` (on a dry run) only re-reads stored Attempts. Matching in the browser would drift from the engine (errors inside a 2xx read as their status, codes read from six JSON fields, the body read by its error fields only, host scopes), so the path highlight waits for a server call such as `POST /api/rules/classify {provider, status, body, headers}` returning the decision from `Set.Classify`.
 - Tests: `pages/providers/Rules.test.tsx` (order and the remembered choice, matches and effects, override, skipped, hits, the End, opening a rule, the stacked step, agent test).
+
+### UI ticket 32: caching
+
+Findings, sources and the Owner's open choices are in `docs/research/ui-caching.md`.
+
+**HTTP caching rules:**
+
+| What | `Cache-Control` | Where it's set |
+|---|---|---|
+| The app page | `no-cache` and an ETag | `internal/webui` |
+| `/assets/*` | `public, max-age=31536000, immutable` and an ETag | `internal/webui` |
+| `/brand/*` | `public, max-age=86400` and an ETag | `internal/webui` |
+| A missing file | `no-store`, so Cloudflare never keeps a `.js` 404 | `internal/webui` |
+| Every `/api/` answer, errors included | `no-store` (secrets; the UI's cache is TanStack Query) | `api.Router.ServeHTTP` |
+| A Provider's or Pool's logo | `private, no-cache` and an ETag (the URL stays the same when the logo domain or maker changes) | `logos` |
+| `/api/logos?...` previews | `private, max-age=3600` | `logos` |
+
+- A Raw route may override the `/api/` default by setting its own header, as logos do.
+- Tests: `server TestAdminAPIAnswersAreNeverStored`, `webui TestUICachingAndPathsThatClimbOutOfTheBundle`, `logos TestARecordsLogoIsRevalidatedSoADomainChangeShowsAtOnce`.
+
+**Refreshing after a change.** Each area's helper (`useRefresh`, `useInvalidateKeys`, `useInvalidateAll`) refreshes everything the change can show in:
+- other pages' lists, including the chat's `["test-models"]` and `["providers-page", "gateway-keys"]` (Send as);
+- open sheets.
+
+A change that can touch any record uses `refreshConfiguration` (`api/refresh.ts`). It invalidates every query except `session`, `readyz`, `requests` and `logo-check`. Today that is only Revert on Audit Entries.
+
+A new query family that isn't configuration goes in that file's `NOT_CONFIGURATION` list. Tests: `pages/settings/revert-refresh.test.tsx`, `pages/gateway-keys/invalidate.test.tsx`, `pages/providers/refresh.test.tsx`.
+
+**Other client behaviour:**
+- **Polls stop in a hidden tab.** `refetchInterval` does this by default. The Requests feed's own `changed_after` loop pauses while `document.hidden` and catches up on `visibilitychange` (`pages/requests/live-hidden.test.tsx`). A new hand-written poll must do the same.
+- **After a deploy.** `app/stale-chunks.ts` (installed in `main.tsx`) reloads the tab once on `vite:preloadError`, which fires when a lazy page or sheet chunk the new build removed fails to load. A second failure within 10 s doesn't reload again (`sessionStorage`).
+- **Checking.** `iroha-v2-notes/v2-ui/shots/32/check32.mjs <url> <password> <out>` records what each load fetched (first, normal reload, hard reload) and simulates a removed chunk. `probe32.mjs` measures the bytes over the wire, because CDP doesn't flag module scripts served from cache.

@@ -73,6 +73,36 @@ func TestUICachingAndPathsThatClimbOutOfTheBundle(t *testing.T) {
 		}
 	}
 
+	// UI ticket 32: every file has an ETag, so revalidating the page (each
+	// load) and brand art (daily) costs a 304, not the whole file.
+	files := []string{"/", "/providers", "/brand/iroha-avatar.png"}
+	if webui.Built() {
+		files = append(files, regexp.MustCompile(`/assets/[^"']+`).FindString(root.Text()))
+	}
+	for _, p := range files {
+		r := page.Get(p).Expect(200)
+		etag := r.Header.Get("ETag")
+		if etag == "" {
+			t.Errorf("%s: no ETag", p)
+			continue
+		}
+		again := page.WithHeader("If-None-Match", etag).Get(p).Expect(304)
+		if len(again.Body) != 0 || again.Header.Get("Cache-Control") != r.Header.Get("Cache-Control") {
+			t.Errorf("%s: 304 with %d bytes, Cache-Control %q", p, len(again.Body), again.Header.Get("Cache-Control"))
+		}
+	}
+	if page.Get("/").Header.Get("ETag") != page.Get("/providers").Header.Get("ETag") {
+		t.Error("the app page has two ETags")
+	}
+	// A missing asset (an old tab asking for a chunk the last deploy removed)
+	// is never kept by a browser or Cloudflare, which would otherwise cache
+	// the 404 of a .js for minutes.
+	for _, p := range []string{"/assets/index-gone.js", "/brand/gone.png"} {
+		if cc := page.Get(p).Expect(404).Header.Get("Cache-Control"); cc != "no-store" {
+			t.Errorf("%s: Cache-Control %q, want no-store", p, cc)
+		}
+	}
+
 	// Files that exist beside the bundle: the database, this package's
 	// source, the module file.
 	outside := []string{"SQLite format", "package webui", "module github.com"}

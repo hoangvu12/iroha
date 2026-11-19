@@ -38,7 +38,7 @@ func Routes(s *Service, l Lookups) []api.Route {
 					return
 				}
 				img, err := s.Domain(r.Context(), d)
-				serve(w, img, err, "Provider "+r.PathValue("provider"))
+				serve(w, r, img, err, "Provider "+r.PathValue("provider"), recordLogo)
 			}),
 		},
 		{
@@ -53,7 +53,7 @@ func Routes(s *Service, l Lookups) []api.Route {
 					return
 				}
 				img, err := s.Pool(r.Context(), m)
-				serve(w, img, err, "Model Pool "+r.PathValue("pool"))
+				serve(w, r, img, err, "Model Pool "+r.PathValue("pool"), recordLogo)
 			}),
 		},
 		{
@@ -75,7 +75,7 @@ func Routes(s *Service, l Lookups) []api.Route {
 						return
 					}
 					img, err := s.Domain(r.Context(), d)
-					serve(w, img, err, d)
+					serve(w, r, img, err, d, previewLogo)
 				case q.Get("maker") != "":
 					m, err := ReadPoolLogo(q.Get("maker"))
 					if err != nil {
@@ -83,7 +83,7 @@ func Routes(s *Service, l Lookups) []api.Route {
 						return
 					}
 					img, err := s.Pool(r.Context(), m)
-					serve(w, img, err, m)
+					serve(w, r, img, err, m, previewLogo)
 				default:
 					api.WriteError(w, api.BadRequest("Pass domain=<site> or maker=<maker ID>.", "Name a domain or a maker."))
 				}
@@ -101,21 +101,51 @@ func PoolLogoError(value string, err error) *api.Error {
 	return api.BadRequest("Use a maker ID such as anthropic, openai or zhipuai (letters, digits, '_', '-'), a website such as chatgpt.com, or \"\" to guess it.", "%q is not a maker ID.", v)
 }
 
-func serve(w http.ResponseWriter, img *Image, err error, what string) {
+// How long a browser may keep a logo (UI ticket 32).
+type cachePolicy struct{ hit, miss string }
+
+var (
+	// A record's logo URL stays the same when its logo domain or maker
+	// changes, so the browser asks again on every use; the ETag makes an
+	// unchanged logo a 304.
+	recordLogo = cachePolicy{hit: "private, no-cache", miss: "private, no-cache"}
+	// A preview's URL names the domain or maker itself.
+	previewLogo = cachePolicy{hit: "private, max-age=3600", miss: "private, max-age=60"}
+)
+
+func serve(w http.ResponseWriter, r *http.Request, img *Image, err error, what string, cache cachePolicy) {
 	if err != nil || img == nil {
-		w.Header().Set("Cache-Control", "private, max-age=60")
+		w.Header().Set("Cache-Control", cache.miss)
 		api.WriteError(w, api.Errorf(http.StatusNotFound, "logo_unavailable",
 			"Draw the first letter of the name instead; set another logo domain (Providers) or maker (Model Pools) to try a different logo.",
 			"No logo was found for %s.", what))
 		return
 	}
 	h := w.Header()
+	etag := `"` + hash(img.Body)[:20] + `"`
+	h.Set("ETag", etag)
+	h.Set("Cache-Control", cache.hit)
+	if matchesETag(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	h.Set("Content-Type", img.Type)
 	h.Set("Content-Length", strconv.Itoa(len(img.Body)))
-	h.Set("Cache-Control", "private, max-age=3600")
 	h.Set("X-Content-Type-Options", "nosniff")
 	// An SVG opened on its own must not run anything.
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(img.Body)
+}
+
+// matchesETag reports whether an If-None-Match header names etag (weak
+// comparison, as RFC 9110 asks for If-None-Match), or is "*".
+func matchesETag(header, etag string) bool {
+	for _, v := range strings.Split(header, ",") {
+		v = strings.TrimPrefix(strings.TrimSpace(v), "W/")
+		if v == etag || v == "*" {
+			return true
+		}
+	}
+	return false
 }

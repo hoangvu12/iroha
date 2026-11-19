@@ -8,6 +8,23 @@ import (
 	"github.com/hoangvu12/iroha/internal/config"
 )
 
+func TestLogoSources(t *testing.T) {
+	parse := func(args ...string) (config.Config, error) {
+		return config.Parse(append([]string{"--data-dir", t.TempDir()}, args...), func(string) string { return "" }, io.Discard)
+	}
+	cfg, err := parse()
+	if err != nil || cfg.LogoFavicons != config.DefaultLogoFavicons || cfg.LogoMakers != config.DefaultLogoMakers {
+		t.Fatalf("defaults = %q, %q (%v)", cfg.LogoFavicons, cfg.LogoMakers, err)
+	}
+	cfg, err = parse("--logo-favicons", "none", "--logo-makers", "http://127.0.0.1:9/m/{maker}.svg")
+	if err != nil || cfg.LogoFavicons != "" || cfg.LogoMakers != "http://127.0.0.1:9/m/{maker}.svg" {
+		t.Fatalf("set = %q, %q (%v)", cfg.LogoFavicons, cfg.LogoMakers, err)
+	}
+	if _, err := parse("--logo-makers", "http://127.0.0.1:9/m.svg"); err == nil {
+		t.Fatal("a template without {maker} was accepted")
+	}
+}
+
 func TestModelsDevBaseURLs(t *testing.T) {
 	env := func(v string) func(string) string {
 		return func(name string) string {

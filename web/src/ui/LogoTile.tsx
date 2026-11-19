@@ -1,5 +1,21 @@
 import { useState } from "react";
+import { poolLogo, providerLogo } from "@/api/logos";
 import { cn } from "./cn";
+
+/**
+ * A Provider's logo (round), served by Iroha; the handle's first letter when
+ * it has none. The one helper every page uses for Provider logos.
+ * `version` is the Provider's logo_domain when the caller knows it, so a
+ * change shows at once.
+ */
+export function ProviderTile({ handle, version, size = 24, className }: { handle: string; version?: string; size?: number; className?: string }) {
+  return <LogoTile name={handle} src={providerLogo(handle, version)} size={size} className={className} />;
+}
+
+/** A Model Pool's logo (rounded square): its model maker's; the name's first letter when it has none. `version` is the Pool's maker. */
+export function PoolTile({ name, version, size = 24, className }: { name: string; version?: string; size?: number; className?: string }) {
+  return <LogoTile name={name} src={poolLogo(name, version)} shape="square" size={size} className={className} />;
+}
 
 /**
  * A logo in a tile: round for Providers, rounded square for Model Pools,
@@ -20,9 +36,10 @@ export function LogoTile({
   size?: number;
   className?: string;
 }) {
-  const [failed, setFailed] = useState(false);
+  // The src that failed, so a new src (another logo domain) is tried again.
+  const [failed, setFailed] = useState<string>();
   const letter = (name.trim()[0] ?? "?").toUpperCase();
-  const showImg = src && !failed;
+  const showImg = src && failed !== src;
   return (
     <span
       aria-hidden="true"
@@ -34,7 +51,14 @@ export function LogoTile({
       )}
     >
       {showImg ? (
-        <img src={src} alt="" className="size-[64%] object-contain" onError={() => setFailed(true)} draggable={false} />
+        <img
+          src={src}
+          alt=""
+          className="size-[64%] object-contain"
+          onError={() => setFailed(src)}
+          onLoad={(e) => e.currentTarget.naturalWidth === 0 && setFailed(src)}
+          draggable={false}
+        />
       ) : (
         letter
       )}

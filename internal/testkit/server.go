@@ -44,6 +44,9 @@ type Options struct {
 	// ModelsDev is the base URL models.dev metadata is read from, usually
 	// a NewModelsDev fake's URL. Default: none, models.dev is never read.
 	ModelsDev string
+	// Logos is where logos are fetched from, usually a NewLogos fake.
+	// Default: none, logos are never fetched.
+	Logos *Logos
 }
 
 // Server is a running in-process Iroha.
@@ -109,11 +112,15 @@ func (s *Server) start() {
 	if s.opts.ModelsDev != "" {
 		modelsDev = []string{s.opts.ModelsDev}
 	}
+	cfg := config.Config{
+		DataDir: s.DataDir, Addr: "127.0.0.1:0", LogLevel: s.opts.LogLevel,
+		LogFormat: "json", DrainTimeout: 5 * time.Second, ModelsDev: modelsDev,
+	}
+	if l := s.opts.Logos; l != nil {
+		cfg.LogoFavicons, cfg.LogoMakers = l.FaviconURL(), l.MakerURL()
+	}
 	app, err := server.New(context.Background(), server.Options{
-		Config: config.Config{
-			DataDir: s.DataDir, Addr: "127.0.0.1:0", LogLevel: s.opts.LogLevel,
-			LogFormat: "json", DrainTimeout: 5 * time.Second, ModelsDev: modelsDev,
-		},
+		Config:     cfg,
 		Version:    s.opts.Version,
 		Clock:      s.Clock,
 		Console:    s.console,

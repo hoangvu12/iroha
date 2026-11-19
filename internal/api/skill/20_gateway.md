@@ -11,10 +11,11 @@ POST /api/gateway-keys                      {"name": "discord-bot", "scope": {"a
 
 - **Handles** are lowercase letters, digits and single hyphens (at most 63). They never change and are never reused, so choose them with care. Retire a Provider with `PATCH /api/providers/<handle>` `{"archived": true}`.
 - **Endpoint URLs** carry the version path (`.../v1`, `.../api/paas/v4`); Iroha appends the operation path such as `/chat/completions`. Today only Endpoints speaking the Caller's Shape serve it.
-- **Upstream Keys** added without a name are matched by secret: pasting the same key twice never makes a duplicate, and new keys get the next free name `key-N`. A named key without a secret is a keyless slot that sends no auth header. Secrets are always readable with `GET /api/providers/<handle>/keys`.
+- **Several Endpoints** (regions, plan-specific URLs, an Anthropic-compatible URL) live on one Provider, each created by name: `POST /api/providers/acme/endpoints {"name": "eu", "url": "...", "shape": "openai-chat"}`. Each has its own `auth_style`: `bearer` (default, `Authorization: Bearer <key>`), `x-api-key`, `header` (the header named in `auth_param`, e.g. `api-key`), `query` (the query parameter named in `auth_param`, e.g. `key`) or `none`; `static_headers` sent on every Attempt (for a fixed credential use `auth_style` `none` and put it here); and `renames` such as `{"glm-4.6": "glm-4.6-fp8"}` (the model a Caller names -> the model sent to this URL, applied per Attempt, so failing over to another Endpoint sends that Endpoint's name). Maps replace the whole set; `{}` clears one.
+- **Upstream Keys** added without a name are matched by secret: pasting the same key twice never makes a duplicate, and new keys get the next free name `key-N`. A named key without a secret is a keyless slot that sends no credential in any auth style; a 401 to a keyless Attempt moves on without making the key invalid. `"endpoints": ["eu"]` on a key (create, bulk or `PATCH`) restricts it: it is only ever sent to those Endpoints; `[]` lifts it. Deleting an Endpoint takes it out of keys' restrictions in the same Audit Entry, and is refused with `409 endpoint_in_use` while a key may use that Endpoint alone. Secrets are always readable with `GET /api/providers/<handle>/keys`.
 - **Gateway Key scopes** are `{"all": true}` or `{"providers": [{"provider": "acme"}, {"provider": "other", "models": ["glm-4.6"]}]}`. The answer contains the key's secret; it stays readable with `GET /api/gateway-keys/<name>`.
 
-Iroha uses a Provider's Upstream Keys in turn (round-robin), skipping keys that are disabled, invalid or cooling; when an Attempt fails it moves on to the next key within the Request budget (see "Key States and Failure Rules").
+Iroha uses a Provider's Upstream Keys in turn (round-robin), skipping keys that are disabled, invalid or cooling, and keys with a Model Gap for the model; when an Attempt fails it moves on to the next key within the Request budget (see "Key States and Failure Rules").
 
 ## Calling the Gateway
 
@@ -25,9 +26,20 @@ Callers send the Gateway Key as `Authorization: Bearer <key>`, `x-api-key: <key>
 - `403 model_not_allowed`: the key's scope narrows this Provider to other models.
 - `400 invalid_request` / `model_required`: the body is not a JSON object or names no model.
 - `502 upstream_redirect`, `endpoint_misconfigured`: the Endpoint needs fixing; no other key is tried.
-- `503 no_candidate`: nothing can serve this until the Owner acts. `details.reason` is `no_endpoint`, `no_upstream_key` or `no_usable_key` (every key disabled or invalid).
+- `503 no_candidate`: nothing can serve this until the Owner acts. `details.reason` is `no_endpoint`, `no_upstream_key` or `no_usable_key` (every key disabled, invalid or restricted to Endpoints that cannot serve the Request).
 - `503 keys_cooling`: every usable key is cooling; `Retry-After` and `details.until` say when the first is back. No Attempt was made.
+- `404 model_unavailable`: the Provider refused this model to every usable key (`details.reason` `model_gap`; `details.until` is when the first gap expires). Use another model.
 - When every Attempt failed, the error lists them in `details.attempts` (key, status, rule, outcome, reason, action) and `details.summary` (one line): `400`-class `upstream_rejected` (the Provider refused the request itself, with its status and message; no other key is tried), `504 upstream_timeout` (no first byte within the time budget), `503 upstream_unavailable` with `Retry-After` (the keys tried are cooling), otherwise `502 upstream_failed`.
+- `503 shutting_down`: Iroha restarted while the Request was in flight and it outlived the drain limit; retry.
+
+### Streams
+
+A streaming Caller (`"stream": true`) never waits in silence, so proxies in between (Cloudflare's 100 s limit, idle timeouts) do not close it:
+
+- If no upstream answer has arrived 10 s after the Request, Iroha commits the response: `200`, `text/event-stream` and a keep-alive comment (`: keep-alive`). Iroha keeps trying keys within the budget meanwhile.
+- Whenever the stream is silent for 15 s (waiting for the first byte, or a model pausing mid-answer) another keep-alive goes out. Streams have no overall time limit.
+- Before commitment, failures get the HTTP statuses above. After it, the failure is the stream's last event, in the Caller's Shape, with the same `code`, `hint`, `request_id` and `details` (for OpenAI Chat: `data: {"error": {...}}`, with no `[DONE]` after it). Besides the codes above: `upstream_stream_broken` (the Provider's stream broke off mid-answer) and `upstream_not_streamed` (the Provider answered with a single body after the stream had begun).
+- The Request records `status` 200 (what the Caller received) with `error.code` saying why it failed.
 
 ## Reading Requests
 

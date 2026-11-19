@@ -59,14 +59,42 @@ func forwardable(name string) bool {
 
 // outbound builds the upstream request of one Attempt: the Endpoint's URL
 // plus op, the Caller's forwardable headers, the Endpoint's static headers,
-// then the Upstream Key per the Endpoint's auth style.
+// then the Upstream Key per the Endpoint's auth style. A key with an empty
+// secret, or an Endpoint with auth style none, sends no credential at all;
+// a Caller header in the auth slot is dropped either way.
 func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []byte, op string, stream bool) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.Endpoint.URL, "/")+op, bytes.NewReader(body))
+	ep := c.Endpoint
+	u, err := url.Parse(strings.TrimRight(ep.URL, "/") + op)
+	if err != nil {
+		return nil, fmt.Errorf("the Endpoint URL does not make a request: %w", err)
+	}
+	var slot, prefix string // the header the key goes in, and what precedes it
+	switch ep.AuthStyle {
+	case "", planner.AuthBearer:
+		slot, prefix = "Authorization", "Bearer "
+	case planner.AuthXAPIKey:
+		slot = "X-Api-Key"
+	case planner.AuthHeader:
+		slot = ep.AuthParam
+	case planner.AuthQuery, planner.AuthNone:
+	default:
+		return nil, fmt.Errorf("Endpoint %s uses auth style %q, which this version of Iroha cannot apply", ep.Name, ep.AuthStyle)
+	}
+	if (ep.AuthStyle == planner.AuthHeader || ep.AuthStyle == planner.AuthQuery) && ep.AuthParam == "" {
+		return nil, fmt.Errorf("Endpoint %s uses auth style %s without auth_param", ep.Name, ep.AuthStyle)
+	}
+	send := !c.Key.Keyless(ep)
+	if send && ep.AuthStyle == planner.AuthQuery {
+		q := u.Query()
+		q.Set(ep.AuthParam, c.Key.Secret)
+		u.RawQuery = q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("the Endpoint URL does not make a request: %w", err)
 	}
 	for k, vs := range in {
-		if forwardable(k) {
+		if forwardable(k) && !strings.EqualFold(k, slot) {
 			req.Header[k] = append([]string(nil), vs...)
 		}
 	}
@@ -80,16 +108,11 @@ func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []b
 			req.Header.Set("Accept", "application/json")
 		}
 	}
-	for k, v := range c.Endpoint.StaticHeaders {
+	for k, v := range ep.StaticHeaders {
 		req.Header.Set(k, v)
 	}
-	switch c.Endpoint.AuthStyle {
-	case "", "bearer":
-		if c.Key.Secret != "" {
-			req.Header.Set("Authorization", "Bearer "+c.Key.Secret)
-		}
-	default: // the other styles arrive with ticket 09
-		return nil, fmt.Errorf("Endpoint %s uses auth style %q, which this version of Iroha cannot apply", c.Endpoint.Name, c.Endpoint.AuthStyle)
+	if send && slot != "" {
+		req.Header.Set(slot, prefix+c.Key.Secret)
 	}
 	return req, nil
 }
@@ -177,7 +200,7 @@ func (x *exchange) attemptChat(seq int, c planner.Candidate, body []byte, cr cha
 		a.Error = transportError(err)
 		switch {
 		case x.ctx.Err() != nil:
-			x.callerGone()
+			x.stopped()
 			return a, nil
 		case context.Cause(ctx) == errFirstByte:
 			a.Error = fmt.Sprintf("no response within the time budget (%s)", deadline.Sub(x.start).Round(time.Second))
@@ -272,9 +295,22 @@ func (x *exchange) recordAttempt(a requests.Attempt) {
 	x.g.log.Info("attempt finished", attrs...)
 }
 
+// stopped handles the end of x.ctx: the Caller went away, or Iroha is
+// shutting down and the Request outlived the drain limit, which the Caller
+// is told in its Shape (an error event when the stream is under way).
+func (x *exchange) stopped() {
+	if context.Cause(x.ctx) == ErrShuttingDown {
+		x.fail(api.Errorf(http.StatusServiceUnavailable, "shutting_down",
+			"Retry; Iroha is restarting and is usually back within seconds.",
+			"Iroha shut down while this Request was in flight; it outlived the drain limit."))
+		return
+	}
+	x.callerGone()
+}
+
 // callerGone records that the Caller went away before the answer ended.
 func (x *exchange) callerGone() {
-	if x.rec.Status == 0 {
+	if x.rec.Status == 0 && !x.isCommitted() {
 		x.rec.Status = 499 // no status reached the Caller
 	}
 	x.rec.Error = &requests.Failure{Code: "caller_gone", Message: "The Caller closed the connection before the answer ended."}
@@ -303,16 +339,30 @@ type relayResult struct {
 
 // writeHead sends the status line: the upstream status and content type
 // (fallback def), plus Iroha's own headers. No other upstream header reaches
-// the Caller.
-func (x *exchange) writeHead(resp *http.Response, def string) {
+// the Caller. When Iroha already committed the response (stream.go) the
+// Caller has its 200 and stream headers: a stream carries on in them, and
+// a non-stream answer cannot be sent, so writeHead reports false.
+func (x *exchange) writeHead(resp *http.Response, def string, stream bool) bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.committed {
+		return stream
+	}
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = def
 	}
 	x.w.Header().Set("Content-Type", ct)
-	x.wrote = true
+	if stream {
+		x.w.Header().Set("Cache-Control", "no-cache")
+	}
+	x.wrote, x.streaming = true, stream
 	x.rec.Status = resp.StatusCode
 	x.w.WriteHeader(resp.StatusCode)
+	if f, ok := x.w.(http.Flusher); stream && ok {
+		f.Flush()
+	}
+	return true
 }
 
 // relayBuffered reads the whole answer, lets transform adjust it and writes it.
@@ -322,7 +372,7 @@ func (x *exchange) relayBuffered(resp *http.Response, transform func(status int,
 	if err != nil {
 		res.err = "reading the answer: " + transportError(err)
 		if x.ctx.Err() != nil {
-			x.callerGone()
+			x.stopped()
 			return res
 		}
 		x.fail(api.Errorf(http.StatusBadGateway, "upstream_broken", "Retry; the Provider's connection broke mid-answer.",
@@ -330,7 +380,13 @@ func (x *exchange) relayBuffered(resp *http.Response, transform func(status int,
 		return res
 	}
 	data = transform(resp.StatusCode, data)
-	x.writeHead(resp, "application/json")
+	if !x.writeHead(resp, "application/json", false) {
+		res.err = "the Provider answered a stream request without a stream"
+		x.fail(api.Errorf(http.StatusBadGateway, "upstream_not_streamed", "Retry without stream: true, or ask the Owner to check the Endpoint; the Provider answered this stream request with a single "+
+			resp.Header.Get("Content-Type")+" body, which cannot follow the stream Iroha had already begun.",
+			"Provider %s did not stream its answer.", x.rec.Provider))
+		return res
+	}
 	if _, err := x.w.Write(data); err != nil {
 		x.callerGone()
 	}
@@ -339,15 +395,11 @@ func (x *exchange) relayBuffered(resp *http.Response, transform func(status int,
 
 // relayStream forwards a server-sent event stream event by event, flushing
 // each as it arrives. transform sees each data payload and may change or
-// drop its event.
+// drop its event. A stream that breaks off ends with an error event.
 func (x *exchange) relayStream(resp *http.Response, transform func(payload []byte) ([]byte, bool)) relayResult {
 	var res relayResult
-	x.w.Header().Set("Cache-Control", "no-cache")
-	x.writeHead(resp, "text/event-stream")
-	flusher, _ := x.w.(http.Flusher)
-	if flusher != nil {
-		flusher.Flush()
-	}
+	defer x.end()
+	x.writeHead(resp, "text/event-stream", true)
 	br := bufio.NewReaderSize(resp.Body, 32<<10)
 	for {
 		ev, err := readEvent(br)
@@ -356,13 +408,10 @@ func (x *exchange) relayStream(resp *http.Response, transform func(payload []byt
 				res.firstByte = x.g.clock.Now()
 			}
 			if out := mapData(ev, transform); out != nil {
-				if _, werr := x.w.Write(out); werr != nil {
+				if werr := x.send(out); werr != nil {
 					res.err = "the Caller went away mid-stream"
 					x.callerGone()
 					return res
-				}
-				if flusher != nil {
-					flusher.Flush()
 				}
 			}
 		}
@@ -372,14 +421,25 @@ func (x *exchange) relayStream(resp *http.Response, transform func(payload []byt
 		if !errors.Is(err, io.EOF) {
 			if x.ctx.Err() != nil {
 				res.err = "the Caller went away mid-stream"
-				x.callerGone()
+				if context.Cause(x.ctx) == ErrShuttingDown {
+					res.err = "Iroha shut down mid-stream"
+				}
+				x.stopped()
 				return res
 			}
 			res.err = "the stream broke off: " + transportError(err)
-			x.rec.Error = &requests.Failure{Code: "upstream_stream_broken", Message: fmt.Sprintf("Provider %s's stream broke off: %s", x.rec.Provider, transportError(err))}
+			x.fail(api.Errorf(http.StatusBadGateway, "upstream_stream_broken", "Retry; the Provider's stream broke off mid-answer. GET /api/requests/"+x.rec.ID+" (Admin Token) shows the Attempt.",
+				"Provider %s's stream broke off: %s", x.rec.Provider, transportError(err)))
 		}
 		return res
 	}
+}
+
+// end marks the answer complete, so the keeper writes nothing more.
+func (x *exchange) end() {
+	x.mu.Lock()
+	x.ended = true
+	x.mu.Unlock()
 }
 
 // readEvent reads one server-sent event: lines up to and including a blank

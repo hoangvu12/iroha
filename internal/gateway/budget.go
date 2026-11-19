@@ -106,7 +106,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest)
 		x.recordAttempt(t.attempt)
 		failed = append(failed, t)
 		if x.ctx.Err() != nil {
-			x.callerGone()
+			x.stopped()
 			x.summarize(failed, nil, "")
 			return
 		}
@@ -136,19 +136,17 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest)
 // to the key's Key State and fills in the Attempt's rule, outcome and action.
 func (x *exchange) classify(set *rules.Set, c planner.Candidate, a requests.Attempt, f *rules.Failure) tried {
 	g := x.g
-	d := set.Classify(*f, g.clock.Now())
+	d := noCredential(set.Classify(*f, g.clock.Now()), c)
 	t := tried{attempt: a, decision: d, failure: f}
 	k := keystate.Key{ID: c.Key.ID, Name: c.Key.Name, Provider: c.Provider.Handle}
 	switch d.Outcome {
-	case rules.Invalid, rules.CoolingKey, rules.CoolingKeyModel:
+	case rules.Invalid, rules.CoolingKey, rules.CoolingKeyModel, rules.ModelGap:
 		eff, err := g.states.Fail(x.ctx, keystate.Failure{Key: k, Model: c.WireModel, RequestID: x.rec.ID, Decision: d})
 		if err != nil {
 			g.log.Error("recording a Key State failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
 		}
 		t.effect = eff
 		t.attempt.Action = eff.Action
-	case rules.ModelGap:
-		t.attempt.Action = fmt.Sprintf("Upstream Key %s skipped for %s for the rest of this Request.", c.Key.Name, c.WireModel)
 	case rules.RetryElsewhere:
 		t.attempt.Action = "Key State unchanged; moved on to the next candidate."
 	case rules.FailRequest:
@@ -160,6 +158,17 @@ func (x *exchange) classify(set *rules.Set, c planner.Candidate, a requests.Atte
 		"upstream_key", c.Key.Name, "model", c.WireModel, "status", f.Status, "reason", d.Reason}
 	g.log.Info("Failure Rule matched", attrs...)
 	return t
+}
+
+// noCredential keeps a keyless Attempt (empty secret, or auth style none)
+// from making its key invalid: an auth refusal of a request that carried no
+// credential says the Endpoint wants one, not that the key is bad.
+func noCredential(d rules.Decision, c planner.Candidate) rules.Decision {
+	if d.Outcome == rules.Invalid && c.Key.Keyless(c.Endpoint) {
+		d.Outcome = rules.RetryElsewhere
+		d.Reason += " (no credential was sent, so the key is not invalid)"
+	}
+	return d
 }
 
 // noteProvider records the serving Provider as soon as the first Attempt
@@ -254,6 +263,10 @@ func (x *exchange) failAll(failed []tried, stop string, maxAttempts int) {
 
 	var e *api.Error
 	switch {
+	case allGaps(failed):
+		e = api.Errorf(http.StatusNotFound, "model_unavailable", "Use another model; every key that tried it now has a Model Gap for it (GET /api/providers/"+handle+"/model-gaps, Admin Token). "+reqHint,
+			"Provider %s refused %s on every key tried: %s", handle, last.attempt.WireModel, last.decision.Reason)
+		details["reason"] = planner.ModelGap
 	case last.decision.Outcome == rules.FailRequest:
 		status := last.decision.Status // an error sent inside a 200 answer: the status it stands for
 		if status < 400 || status > 599 {
@@ -267,7 +280,7 @@ func (x *exchange) failAll(failed []tried, stop string, maxAttempts int) {
 	default:
 		retry := earliestCooling(failed, x.g.clock.Now())
 		if retry > 0 {
-			x.w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
+			x.setHeader("Retry-After", strconv.Itoa(int(retry.Seconds())))
 			e = api.Errorf(http.StatusServiceUnavailable, "upstream_unavailable", fmt.Sprintf("Retry after %d seconds (Retry-After), when the first key cools down. %s", int(retry.Seconds()), reqHint),
 				"Every Attempt on %s failed (%d %s): %s", handle, n, plural, x.rec.Summary)
 		} else {
@@ -276,6 +289,16 @@ func (x *exchange) failAll(failed []tried, stop string, maxAttempts int) {
 		}
 	}
 	x.fail(e.WithDetails(details))
+}
+
+// allGaps reports whether every failed Attempt recorded a Model Gap.
+func allGaps(failed []tried) bool {
+	for _, t := range failed {
+		if t.decision.Outcome != rules.ModelGap {
+			return false
+		}
+	}
+	return len(failed) > 0
 }
 
 // earliestCooling is how long until the first key that cooled in this

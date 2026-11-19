@@ -20,6 +20,7 @@ type snapshot struct {
 	Name      string     `json:"name"`
 	Secret    string     `json:"secret"`
 	Scope     stored     `json:"scope"`
+	Capture   bool       `json:"capture"`
 	CreatedAt time.Time  `json:"created_at"`
 	RevokedAt *time.Time `json:"revoked_at"`
 }
@@ -37,7 +38,7 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 		if err != nil {
 			return nil, err
 		}
-		return &snapshot{ID: k.ID, Name: k.Name, Secret: k.Secret, Scope: k.scope, CreatedAt: k.CreatedAt, RevokedAt: k.RevokedAt}, nil
+		return &snapshot{ID: k.ID, Name: k.Name, Secret: k.Secret, Scope: k.scope, Capture: k.Capture, CreatedAt: k.CreatedAt, RevokedAt: k.RevokedAt}, nil
 	},
 	Restore: func(ctx context.Context, tx *sql.Tx, id string, s *snapshot) error {
 		if s == nil {
@@ -51,9 +52,9 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 		if s.RevokedAt != nil {
 			revoked = store.Millis(*s.RevokedAt)
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO gateway_keys (id, name, secret, scope, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (id) DO UPDATE SET name = excluded.name, secret = excluded.secret, scope = excluded.scope, revoked_at = excluded.revoked_at`,
-			id, s.Name, s.Secret, s.Scope.json(), store.Millis(s.CreatedAt), revoked)
+		_, err := tx.ExecContext(ctx, `INSERT INTO gateway_keys (id, name, secret, scope, capture, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET name = excluded.name, secret = excluded.secret, scope = excluded.scope, capture = excluded.capture, revoked_at = excluded.revoked_at`,
+			id, s.Name, s.Secret, s.Scope.json(), s.Capture, store.Millis(s.CreatedAt), revoked)
 		return err
 	},
 })
@@ -73,14 +74,16 @@ func nameFree(ctx context.Context, q audit.Querier, name, id string) error {
 
 // CreateGatewayKey is the body of POST /api/gateway-keys and each item of its bulk.
 type CreateGatewayKey struct {
-	Name  string `json:"name" doc:"Unique name, usually the Caller it is issued to. Repeating a create with an existing name updates that key."`
-	Scope *Scope `json:"scope,omitempty" doc:"What the key may use. Required for a new key; omit to keep the scope of an existing one."`
+	Name    string `json:"name" doc:"Unique name, usually the Caller it is issued to. Repeating a create with an existing name updates that key."`
+	Scope   *Scope `json:"scope,omitempty" doc:"What the key may use. Required for a new key; omit to keep the scope of an existing one."`
+	Capture *bool  `json:"capture,omitempty" doc:"Store the full prompt and response of this key's Requests. Default false for a new key; omit to keep the current setting."`
 }
 
 // UpdateGatewayKey is the body of PATCH /api/gateway-keys/{key}.
 type UpdateGatewayKey struct {
-	Name  *string `json:"name,omitempty"`
-	Scope *Scope  `json:"scope,omitempty" doc:"Replaces the whole scope."`
+	Name    *string `json:"name,omitempty"`
+	Scope   *Scope  `json:"scope,omitempty" doc:"Replaces the whole scope."`
+	Capture *bool   `json:"capture,omitempty" doc:"true: store the full prompt and response of this key's later Requests; false: stop storing them (captures already stored stay until they expire)."`
 }
 
 // GatewayKeyResult is the response of a single Gateway Key change.
@@ -158,7 +161,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodPatch, Path: "/api/gateway-keys/{key}", Tag: tag,
-			Summary: "Rename a Gateway Key or replace its scope",
+			Summary: "Rename a Gateway Key, replace its scope, or turn prompt capture on or off",
 			Query:   []api.Param{audit.DryRun},
 			Request: UpdateGatewayKey{}, Response: GatewayKeyResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -270,7 +273,7 @@ func (h handlers) upsert(m *audit.Mutation, in CreateGatewayKey) (GatewayKey, er
 			return k, api.Conflict("gateway_key_revoked", "Pick another name for the new key; revoked keys and their names stay as a record.",
 				"The Gateway Key %q was revoked; it cannot be issued again.", in.Name)
 		}
-		return h.update(m, id, UpdateGatewayKey{Scope: in.Scope})
+		return h.update(m, id, UpdateGatewayKey{Scope: in.Scope, Capture: in.Capture})
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return GatewayKey{}, err
@@ -286,8 +289,9 @@ func (h handlers) upsert(m *audit.Mutation, in CreateGatewayKey) (GatewayKey, er
 	if err := m.Track(Resource, id); err != nil {
 		return GatewayKey{}, err
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO gateway_keys (id, name, secret, scope, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, in.Name, ids.Secret(SecretPrefix), scope.json(), store.Millis(m.Now)); err != nil {
+	capture := in.Capture != nil && *in.Capture
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO gateway_keys (id, name, secret, scope, capture, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, in.Name, ids.Secret(SecretPrefix), scope.json(), capture, store.Millis(m.Now)); err != nil {
 		return GatewayKey{}, err
 	}
 	return byID(m.Ctx, m.Tx, id)
@@ -301,7 +305,7 @@ func (h handlers) update(m *audit.Mutation, id string, in UpdateGatewayKey) (Gat
 	if err != nil {
 		return cur, err
 	}
-	if cur.Revoked && (in.Name != nil || in.Scope != nil) {
+	if cur.Revoked && (in.Name != nil || in.Scope != nil || in.Capture != nil) {
 		return cur, api.Conflict("gateway_key_revoked", revokedForever, "The Gateway Key %q is revoked and cannot be edited.", cur.Name)
 	}
 	if in.Name != nil {
@@ -321,6 +325,11 @@ func (h handlers) update(m *audit.Mutation, id string, in UpdateGatewayKey) (Gat
 			return cur, err
 		}
 		if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE gateway_keys SET scope = ? WHERE id = ?`, scope.json(), id); err != nil {
+			return cur, err
+		}
+	}
+	if in.Capture != nil {
+		if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE gateway_keys SET capture = ? WHERE id = ?`, *in.Capture, id); err != nil {
 			return cur, err
 		}
 	}

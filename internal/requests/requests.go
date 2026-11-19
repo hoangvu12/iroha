@@ -16,6 +16,9 @@ import (
 const (
 	StateInProgress = "in_progress"
 	StateCompleted  = "completed"
+	// StateInterrupted is a Request Iroha stopped serving without finishing
+	// it (a crash or a forced stop); it is set at the next startup.
+	StateInterrupted = "interrupted"
 )
 
 // Caller kinds.
@@ -28,7 +31,7 @@ type Request struct {
 	ID         string     `json:"id" doc:"Also returned to the Caller in the x-request-id header."`
 	StartedAt  time.Time  `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	State      string     `json:"state" enum:"in_progress,completed"`
+	State      string     `json:"state" enum:"in_progress,completed,interrupted" doc:"interrupted: Iroha stopped (crash or forced restart) before the Request finished; status, timings and usage may be missing."`
 	Status     int        `json:"status" doc:"HTTP status the Caller received; 0 while in progress."`
 	Error      *Failure   `json:"error,omitempty" doc:"Why the Request failed, when Iroha refused or failed it."`
 
@@ -52,6 +55,7 @@ type Request struct {
 	DurationMs   *int64       `json:"duration_ms,omitempty" doc:"Time from arrival to the end of the answer."`
 	Usage        *usage.Usage `json:"usage,omitempty" doc:"Token usage, streamed answers included; absent when the Provider reported none."`
 	AttemptCount int          `json:"attempt_count"`
+	Captured     bool         `json:"captured" doc:"true when the prompt and response are stored: GET /api/requests/{request}/capture."`
 	Attempts     []Attempt    `json:"attempts,omitempty" doc:"Every Attempt in order (on GET /api/requests/{request} only)."`
 }
 

@@ -18,8 +18,29 @@ One Go binary (`cmd/iroha`), one SQLite file (`<data-dir>/iroha.db`), pure-Go dr
 | `internal/ids` | Record IDs (`at_xxxx`) and secrets. |
 | `internal/shape` | The four Shape names. |
 | `internal/testkit` | In-process server, clients, fake upstreams. |
+| `internal/providers` | Providers, Endpoints, Upstream Keys: tables, audited admin routes (`/api/providers`, `.../{provider}/endpoints`, `.../{provider}/keys`), and `Store.Routing(handle)`, the routing view the Gateway plans over. |
+| `internal/gatewaykeys` | Gateway Keys and their scope: `/api/gateway-keys`, `Store.Authenticate(r)` (Bearer, `x-api-key`, `api-key`) returning a `Caller` with `AllowsProvider` / `AllowsModel`. |
+| `internal/planner` | Candidate planning, pure: `Plan(Request, []Provider, Rotation)` gives the ordered (Provider, Endpoint, key, wire model) list or why there is none. `Counter` is live round-robin, `Fixed` is for previews. Table-tested. |
+| `internal/gateway` | Inference routes. Orchestrates one Request across the seams below; owns Attempt execution (outbound request, header filtering, passthrough relay buffered or streamed, model echo) and the Caller-facing error envelope. |
+| `internal/requests` | Request and Attempt history: `Recorder` (Begin, Attempt, Finish) and `/api/requests`. |
+| `internal/usage` | Token usage parsing per Shape (OpenAI Chat today), for bodies and stream events. |
 
-Suggested homes for later work (create when needed, one package per concern so parallel tickets do not collide): `providers` (Providers, Endpoints, Upstream Keys; 04, 09), `gatewaykeys` (04, 12), `requests` (Request and Attempt history; 04), `gateway` (inference routes, passthrough, streaming; 04, 13–17), `planner` (candidate planning, pure; 05, 09, 18), `rules` (Failure Rules, pure matching; 05–07), `keystate` (Key States, Cooling, Model Gaps; 05, 08), `models` (lists, discovery, metadata; 10, 11), `pools` (18), `translate` and `normalise` (13–16), `jobs` (19, 20), `session` (Owner login; 21). The UI goes in `web/` (21), deploy files in `deploy/` (03).
+Suggested homes for later work (create when needed, one package per concern so parallel tickets do not collide): `rules` (Failure Rules, pure matching; 05–07), `keystate` (Key States, Cooling, Model Gaps; 05, 08), `models` (lists, discovery, metadata; 10, 11), `pools` (18), `translate` and `normalise` (13–16), `jobs` (19, 20), `session` (Owner login; 21). The UI goes in `web/` (21), deploy files in `deploy/` (03).
+
+## The inference path
+
+One Request runs through four seams, in this order. Change the seam that owns a behaviour; keep `internal/gateway` an orchestrator.
+
+| Step | Owner | Today (04) | Who extends it |
+|---|---|---|---|
+| 1. Caller auth and scope | `gatewaykeys.Store.Authenticate`, `Caller.AllowsProvider/AllowsModel` | Gateway Key from Bearer, `x-api-key`, `api-key`; scope `all` or Providers each optionally narrowed to models. Unknown, disabled, archived and out-of-scope Providers get one 403 `provider_not_allowed`. | 12 (global routes, `/v1/models`), 15 (`x-goog-api-key`, `key=`), 18 (Pools in scope), 23 (Test caller) |
+| 2. Candidate planning | `planner.Plan` over `providers.Store.Routing` | Endpoints of the Caller's Shape only; keys round-robin (`Counter` per Provider ID), each key on every such Endpoint; renames applied per Endpoint. Empty plan says why (`no_endpoint`, `no_upstream_key`). | 05 (exclude invalid/cooling keys, "cooling until T"), 08 (Model Gaps), 09 (key-to-Endpoint restrictions), 10 (carriers first), 13 (other-Shape Endpoints after same-Shape), 18 (Pool members) |
+| 3. Attempt execution | `gateway/attempt.go` | One Attempt: `outbound` builds URL + op path, forwards Caller headers except credentials/hop-by-hop/`x-forwarded-*`/`cf-*`/`iroha-*`, applies static headers then bearer auth (empty secret = no header). Redirects are never followed. `relayStream` forwards SSE event by event with flush; `relayBuffered` otherwise. `chatRelay` echoes the requested model, reads usage, drops the usage chunk Iroha injected. | 05 (budget loop + Failure Rules decide retry), 09 (auth styles in `outbound`), 13–16 (translate/normalise between relay and Caller), 17 (keep-alives, error events after commit) |
+| 4. Recording | `requests.Recorder`, log kinds `request` and `attempt` | Request inserted `in_progress` once the Caller is known (401s are not recorded), one row per Attempt, completed with status, error code, serving Provider/Endpoint/key/wire model, Shapes, first byte, duration, usage. Writes ignore the Caller's cancellation. | 05 (matched rule, action, failure body and headers on Attempts), 19 (capture, retention), 25 (stats) |
+
+Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `echoModel`) replaces one top-level value in place, so passthrough never re-serialises a body. Streams of OpenAI Chat get `stream_options.include_usage` added when the Caller did not ask, so usage is recorded for every stream.
+
+Nested admin resources (Endpoints and Upstream Keys under a Provider) resolve their parent with the Provider resource and themselves by name or ID *within* that Provider (`resolveChild` in `internal/providers`); their audit names are `<handle>/<name>`, so `GET /api/audit-entries?record=acme/key-1` works.
 
 ## Rules everyone follows
 
@@ -114,7 +135,7 @@ func TestSomething(t *testing.T) {
     up.Enqueue(up.Error(429, "slow down").Header("Retry-After", "30"), up.Text("hi"))
 
     srv.Admin.Post("/api/providers", body).Expect(201)        // Admin = bootstrap Admin Token
-    caller := srv.Client("sk-iroha-...")                       // Bearer; .WithHeader("x-api-key", k) for others
+    caller := srv.Client(gatewayKeySecret)                     // Bearer; srv.Anon.WithHeader("x-api-key", k) for others
     resp := caller.Post("/providers/acme/v1/chat/completions", req).OK()
     resp.JSON(&out); resp.Events()                             // SSE parsed; srv.Anon has no credentials
 

@@ -1,0 +1,289 @@
+package providers
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"net/http"
+	"slices"
+	"time"
+
+	"github.com/hoangvu12/iroha/internal/api"
+	"github.com/hoangvu12/iroha/internal/audit"
+	"github.com/hoangvu12/iroha/internal/ids"
+	"github.com/hoangvu12/iroha/internal/store"
+)
+
+// providerSnapshot is what an Audit Entry records of a Provider.
+type providerSnapshot struct {
+	ID        string    `json:"id"`
+	Handle    string    `json:"handle"`
+	Name      string    `json:"name"`
+	Enabled   bool      `json:"enabled"`
+	Archived  bool      `json:"archived"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Resource is the Provider resource of the audit machinery.
+var Resource = audit.Register(&audit.Resource[providerSnapshot]{
+	Name: "provider", Label: "Provider", Plural: "Providers", Path: "/api/providers",
+	Table: "providers", NameColumn: "handle",
+	NameOf: func(s providerSnapshot) string { return s.Handle },
+	Load: func(ctx context.Context, q audit.Querier, id string) (*providerSnapshot, error) {
+		var s providerSnapshot
+		var created int64
+		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at FROM providers WHERE id = ?`, id).
+			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		s.CreatedAt = store.FromMillis(created)
+		return &s, err
+	},
+	Restore: func(ctx context.Context, tx *sql.Tx, id string, s *providerSnapshot) error {
+		if s == nil {
+			var children int
+			if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM endpoints WHERE provider_id = ?) + (SELECT count(*) FROM upstream_keys WHERE provider_id = ?)`,
+				id, id).Scan(&children); err != nil {
+				return err
+			}
+			if children > 0 {
+				return api.Conflict("provider_has_children", "Delete the Provider's Endpoints and Upstream Keys first (or revert the entries that added them), then retry.",
+					"The Provider still has %d Endpoints and Upstream Keys.", children)
+			}
+			_, err := tx.ExecContext(ctx, `DELETE FROM providers WHERE id = ?`, id)
+			return err
+		}
+		var other string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM providers WHERE handle = ? AND id != ?`, s.Handle, id).Scan(&other)
+		if err == nil {
+			return api.Conflict("handle_taken", "Handles are never reused; nothing can be restored over another Provider.",
+				"Another Provider (%s) has the handle %q.", other, s.Handle)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET name = excluded.name, enabled = excluded.enabled, archived = excluded.archived`,
+			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt))
+		return err
+	},
+})
+
+// CreateProvider is the body of POST /api/providers and each item of its bulk.
+type CreateProvider struct {
+	Handle  string  `json:"handle" doc:"Unique handle: lowercase letters, digits and single hyphens, at most 63. Never changes. Repeating a create with an existing handle updates that Provider."`
+	Name    *string `json:"name,omitempty" doc:"Display name; defaults to the handle for a new Provider."`
+	Enabled *bool   `json:"enabled,omitempty" doc:"Default true for a new Provider."`
+}
+
+// UpdateProvider is the body of PATCH /api/providers/{provider}.
+type UpdateProvider struct {
+	Handle   *string `json:"handle,omitempty" doc:"Handles never change; a different value is refused with handle_immutable."`
+	Name     *string `json:"name,omitempty"`
+	Enabled  *bool   `json:"enabled,omitempty"`
+	Archived *bool   `json:"archived,omitempty" doc:"Archive to retire the Provider: Callers are refused and the handle stays reserved."`
+}
+
+// ProviderResult is the response of a single Provider change.
+type ProviderResult struct {
+	audit.Result
+	Provider Provider `json:"provider" doc:"The Provider after the change (on a dry run, as it would be)."`
+}
+
+// ProviderList is the response of GET /api/providers.
+type ProviderList struct {
+	Providers []Provider `json:"providers"`
+}
+
+// Routes returns the Provider, Endpoint and Upstream Key routes.
+func Routes(tr *audit.Trail, db *store.DB) []api.Route {
+	h := handlers{tr: tr, db: db}
+	return slices.Concat(h.providerRoutes(), h.endpointRoutes(), h.keyRoutes())
+}
+
+type handlers struct {
+	tr *audit.Trail
+	db *store.DB
+}
+
+func (h handlers) providerRoutes() []api.Route {
+	const tag = "Providers"
+	return []api.Route{
+		{
+			Method: http.MethodGet, Path: "/api/providers", Tag: tag,
+			Summary: "List Providers with their Endpoints",
+			Query: []api.Param{
+				{Name: "archived", Type: "boolean", Description: "true: only archived Providers; false: only the others. Default: all."},
+			},
+			Response: ProviderList{},
+			Handle:   h.listProviders,
+		},
+		{
+			Method: http.MethodGet, Path: "/api/providers/{provider}", Tag: tag,
+			Summary:  "Read a Provider by handle or ID",
+			Response: Provider{},
+			Handle: func(c *api.Call) (any, error) {
+				id, err := Resource.Resolve(c.R.Context(), h.db, c.Path("provider"))
+				if err != nil {
+					return nil, err
+				}
+				return readProvider(c.R.Context(), h.db, id)
+			},
+		},
+		{
+			Method: http.MethodPost, Path: "/api/providers", Tag: tag,
+			Summary: "Create a Provider, or update the one with that handle",
+			Description: "A new Provider has no Endpoints or Upstream Keys; add them with POST /api/providers/{provider}/endpoints and POST /api/providers/{provider}/keys. " +
+				"Callers then reach it at /providers/<handle>/v1/...",
+			Query:   []api.Param{audit.DryRun},
+			Request: CreateProvider{}, Response: ProviderResult{},
+			Handle: func(c *api.Call) (any, error) {
+				var in CreateProvider
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				var out Provider
+				res, err := h.tr.Mutate(c, "provider.create", "Created", func(m *audit.Mutation) error {
+					var err error
+					out, err = h.upsertProvider(m, in)
+					return err
+				})
+				return ProviderResult{Result: res, Provider: out}, err
+			},
+		},
+		{
+			Method: http.MethodPost, Path: "/api/providers/bulk", Tag: tag,
+			Summary:     "Create or update many Providers, each by handle",
+			Description: "Each item is applied or refused on its own; read failed and each item's error.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     audit.BulkRequest[CreateProvider]{}, Response: audit.BulkResult[Provider]{},
+			Handle: func(c *api.Call) (any, error) {
+				var in audit.BulkRequest[CreateProvider]
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				return audit.Bulk(h.tr, c, "provider.create", "Created", in.Items, h.upsertProvider)
+			},
+		},
+		{
+			Method: http.MethodPatch, Path: "/api/providers/{provider}", Tag: tag,
+			Summary: "Rename, enable, disable, archive or unarchive a Provider",
+			Query:   []api.Param{audit.DryRun},
+			Request: UpdateProvider{}, Response: ProviderResult{},
+			Handle: func(c *api.Call) (any, error) {
+				var in UpdateProvider
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				var out Provider
+				res, err := h.tr.Mutate(c, "provider.update", "Edited", func(m *audit.Mutation) error {
+					id, err := Resource.Resolve(m.Ctx, m.Tx, c.Path("provider"))
+					if err != nil {
+						return err
+					}
+					out, err = h.updateProvider(m, id, in)
+					return err
+				})
+				return ProviderResult{Result: res, Provider: out}, err
+			},
+		},
+	}
+}
+
+func (h handlers) listProviders(c *api.Call) (any, error) {
+	q := `SELECT id FROM providers`
+	switch c.Query("archived") {
+	case "":
+	case "true":
+		q += ` WHERE archived = 1`
+	case "false":
+		q += ` WHERE archived = 0`
+	default:
+		return nil, api.BadRequest("Use archived=true, archived=false, or leave it out for all Providers.", "archived must be true or false.")
+	}
+	rows, err := h.db.QueryContext(c.R.Context(), q+` ORDER BY handle`)
+	if err != nil {
+		return nil, err
+	}
+	var idList []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		idList = append(idList, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := ProviderList{Providers: []Provider{}}
+	for _, id := range idList {
+		p, err := readProvider(c.R.Context(), h.db, id)
+		if err != nil {
+			return nil, err
+		}
+		out.Providers = append(out.Providers, p)
+	}
+	return out, nil
+}
+
+func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider, error) {
+	if err := CheckHandle(in.Handle); err != nil {
+		return Provider{}, err
+	}
+	var id string
+	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM providers WHERE handle = ?`, in.Handle).Scan(&id)
+	if err == nil {
+		return h.updateProvider(m, id, UpdateProvider{Name: in.Name, Enabled: in.Enabled})
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Provider{}, err
+	}
+	name, enabled := in.Handle, true
+	if in.Name != nil {
+		if err := checkDisplayName(*in.Name); err != nil {
+			return Provider{}, err
+		}
+		name = *in.Name
+	}
+	if in.Enabled != nil {
+		enabled = *in.Enabled
+	}
+	id = ids.New("pr")
+	if err := m.Track(Resource, id); err != nil {
+		return Provider{}, err
+	}
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO providers (id, handle, name, enabled, created_at) VALUES (?, ?, ?, ?, ?)`,
+		id, in.Handle, name, enabled, store.Millis(m.Now)); err != nil {
+		return Provider{}, err
+	}
+	return readProvider(m.Ctx, m.Tx, id)
+}
+
+func (h handlers) updateProvider(m *audit.Mutation, id string, in UpdateProvider) (Provider, error) {
+	if err := m.Track(Resource, id); err != nil {
+		return Provider{}, err
+	}
+	cur, err := readProvider(m.Ctx, m.Tx, id)
+	if err != nil {
+		return cur, err
+	}
+	if in.Handle != nil && *in.Handle != cur.Handle {
+		return cur, api.Errorf(http.StatusBadRequest, "handle_immutable",
+			"Keep the handle \""+cur.Handle+"\" (leave handle out of the body); to use another handle, create a new Provider with it.",
+			"A Provider's handle never changes.")
+	}
+	if in.Name != nil {
+		if err := checkDisplayName(*in.Name); err != nil {
+			return cur, err
+		}
+	}
+	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE providers SET name = coalesce(?, name), enabled = coalesce(?, enabled), archived = coalesce(?, archived) WHERE id = ?`,
+		in.Name, in.Enabled, in.Archived, id); err != nil {
+		return cur, err
+	}
+	return readProvider(m.Ctx, m.Tx, id)
+}

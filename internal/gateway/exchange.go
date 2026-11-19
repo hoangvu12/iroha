@@ -1,0 +1,131 @@
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/hoangvu12/iroha/internal/api"
+	"github.com/hoangvu12/iroha/internal/gatewaykeys"
+	"github.com/hoangvu12/iroha/internal/ids"
+	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/requests"
+	"github.com/hoangvu12/iroha/internal/shape"
+)
+
+// exchange is one Request in flight: what the Caller sent, what it has been
+// answered, and the record being built.
+type exchange struct {
+	g     *Gateway
+	w     http.ResponseWriter
+	r     *http.Request
+	ctx   context.Context
+	start time.Time
+	rec   requests.Request
+	begun bool // the Request is recorded (the Caller is known)
+	wrote bool // the status line went to the Caller
+}
+
+func (g *Gateway) newExchange(w http.ResponseWriter, r *http.Request, sh shape.Shape) *exchange {
+	now := g.clock.Now()
+	x := &exchange{g: g, w: w, r: r, ctx: r.Context(), start: now,
+		rec: requests.Request{ID: ids.New("req"), StartedAt: now.UTC(), Route: r.URL.Path, ShapeIn: sh}}
+	w.Header().Set("X-Request-Id", x.rec.ID)
+	return x
+}
+
+// begin records the Request once the Caller is known.
+func (x *exchange) begin(c gatewaykeys.Caller) {
+	x.rec.Caller = requests.Caller{Kind: requests.CallerGatewayKey, GatewayKeyID: c.KeyID, Name: c.Name}
+	if err := x.g.rec.Begin(x.ctx, &x.rec); err != nil {
+		x.g.log.Error("recording a Request failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
+		return
+	}
+	x.begun = true
+}
+
+// finish completes the record and logs the Request.
+func (x *exchange) finish() {
+	now := x.g.clock.Now()
+	at := now.UTC()
+	x.rec.FinishedAt = &at
+	x.rec.DurationMs = ms(now.Sub(x.start))
+	if x.rec.Status == 0 {
+		x.rec.Status = http.StatusOK
+	}
+	if x.begun {
+		if err := x.g.rec.Finish(x.ctx, &x.rec); err != nil {
+			x.g.log.Error("recording a Request failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
+		}
+	}
+	attrs := []any{logs.Kind(KindRequest), logs.Request(x.rec.ID), "caller", x.rec.Caller.Name, "route", x.rec.Route,
+		"model", x.rec.Model, "status", x.rec.Status, "attempts", x.rec.AttemptCount, "duration_ms", *x.rec.DurationMs}
+	if x.rec.Provider != "" {
+		attrs = append(attrs, logs.Provider(x.rec.Provider))
+	}
+	if x.rec.Error != nil {
+		attrs = append(attrs, "error_code", x.rec.Error.Code)
+	}
+	x.g.log.Info("request finished", attrs...)
+}
+
+// fail answers the Caller with e in its Shape and records why.
+func (x *exchange) fail(e *api.Error) {
+	x.rec.Status = e.Status
+	x.rec.Error = &requests.Failure{Code: e.Code, Message: e.Message}
+	x.writeError(e)
+}
+
+// refuseUnrecorded answers a Caller that could not be identified; there is
+// no Caller to attribute a Request to, so nothing is recorded.
+func (x *exchange) refuseUnrecorded(e *api.Error) {
+	x.writeError(e)
+}
+
+// writeError writes e in the Caller's Shape: for OpenAI Shapes the OpenAI
+// error envelope, extended with Iroha's hint and the Request ID.
+func (x *exchange) writeError(e *api.Error) {
+	if x.wrote {
+		return
+	}
+	x.wrote = true
+	body := map[string]any{"error": map[string]any{
+		"message":    e.Message,
+		"type":       errorType(e.Status),
+		"param":      nil,
+		"code":       e.Code,
+		"hint":       e.Hint,
+		"request_id": x.rec.ID,
+	}}
+	if e.Details != nil {
+		body["error"].(map[string]any)["details"] = e.Details
+	}
+	x.w.Header().Set("Content-Type", "application/json")
+	x.w.WriteHeader(e.Status)
+	enc := json.NewEncoder(x.w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(body)
+}
+
+func errorType(status int) string {
+	switch {
+	case status == http.StatusUnauthorized:
+		return "authentication_error"
+	case status == http.StatusForbidden:
+		return "permission_error"
+	case status == http.StatusNotFound:
+		return "not_found_error"
+	case status >= 500:
+		return "server_error"
+	}
+	return "invalid_request_error"
+}
+
+func ms(d time.Duration) *int64 {
+	v := d.Milliseconds()
+	if v < 0 {
+		v = 0
+	}
+	return &v
+}

@@ -6,26 +6,35 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/ids"
+	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/shape"
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
 // endpointSnapshot is what an Audit Entry records of an Endpoint. Provider
-// (the handle) is shown in the entry and ignored by Restore.
+// (the handle) is shown in the entry and ignored by Restore. Entries written
+// before ticket 09 lack the auth and rename fields; their zero values mean
+// bearer auth, no static headers and no renames.
 type endpointSnapshot struct {
-	ID         string    `json:"id"`
-	ProviderID string    `json:"provider_id"`
-	Provider   string    `json:"provider"`
-	Name       string    `json:"name"`
-	URL        string    `json:"url"`
-	Shape      string    `json:"shape"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID            string            `json:"id"`
+	ProviderID    string            `json:"provider_id"`
+	Provider      string            `json:"provider"`
+	Name          string            `json:"name"`
+	URL           string            `json:"url"`
+	Shape         string            `json:"shape"`
+	AuthStyle     string            `json:"auth_style,omitempty"`
+	AuthParam     string            `json:"auth_param,omitempty"`
+	StaticHeaders map[string]string `json:"static_headers,omitempty"`
+	Renames       map[string]string `json:"renames,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
 }
 
 // EndpointResource is the Endpoint resource of the audit machinery.
@@ -36,26 +45,51 @@ var EndpointResource = audit.Register(&audit.Resource[endpointSnapshot]{
 	Load: func(ctx context.Context, q audit.Querier, id string) (*endpointSnapshot, error) {
 		var s endpointSnapshot
 		var created int64
-		err := q.QueryRowContext(ctx, `SELECT e.id, e.provider_id, p.handle, e.name, e.url, e.shape, e.created_at
+		var headers, renames string
+		err := q.QueryRowContext(ctx, `SELECT e.id, e.provider_id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.created_at
 			FROM endpoints e JOIN providers p ON p.id = e.provider_id WHERE e.id = ?`, id).
-			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Name, &s.URL, &s.Shape, &created)
+			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Name, &s.URL, &s.Shape, &s.AuthStyle, &s.AuthParam, &headers, &renames, &created)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
+		if err != nil {
+			return nil, err
+		}
 		s.CreatedAt = store.FromMillis(created)
-		return &s, err
+		if s.StaticHeaders, err = decodeMap(headers); err != nil {
+			return nil, err
+		}
+		if s.Renames, err = decodeMap(renames); err != nil {
+			return nil, err
+		}
+		return &s, nil
 	},
 	Restore: func(ctx context.Context, tx *sql.Tx, id string, s *endpointSnapshot) error {
 		if s == nil {
+			var keys string
+			if err := tx.QueryRowContext(ctx, `SELECT coalesce(group_concat(k.name, ', '), '') FROM upstream_key_endpoints ke
+				JOIN upstream_keys k ON k.id = ke.key_id WHERE ke.endpoint_id = ?`, id).Scan(&keys); err != nil {
+				return err
+			}
+			if keys != "" {
+				return api.Conflict("endpoint_in_use", "Lift those keys' restriction to this Endpoint first (PATCH .../keys/<key> {\"endpoints\": [...]}), then retry.",
+					"Upstream Keys %s are restricted to this Endpoint.", keys)
+			}
 			_, err := tx.ExecContext(ctx, `DELETE FROM endpoints WHERE id = ?`, id)
 			return err
 		}
 		if err := childNameFree(ctx, tx, "endpoints", "Endpoint", s.ProviderID, s.Name, id); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, created_at) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (id) DO UPDATE SET name = excluded.name, url = excluded.url, shape = excluded.shape`,
-			id, s.ProviderID, s.Name, s.URL, s.Shape, store.Millis(s.CreatedAt))
+		style := s.AuthStyle
+		if style == "" {
+			style = planner.AuthBearer
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET name = excluded.name, url = excluded.url, shape = excluded.shape, auth_style = excluded.auth_style,
+			auth_param = excluded.auth_param, static_headers = excluded.static_headers, renames = excluded.renames`,
+			id, s.ProviderID, s.Name, s.URL, s.Shape, style, s.AuthParam, encodeMap(s.StaticHeaders), encodeMap(s.Renames), store.Millis(s.CreatedAt))
 		return err
 	},
 })
@@ -76,16 +110,24 @@ func childNameFree(ctx context.Context, q audit.Querier, table, label, providerI
 
 // CreateEndpoint is the body of POST /api/providers/{provider}/endpoints.
 type CreateEndpoint struct {
-	Name  string  `json:"name,omitempty" doc:"Unique within the Provider; default \"default\". Repeating a create with an existing name updates that Endpoint."`
-	URL   *string `json:"url,omitempty" doc:"Base URL including the version path, e.g. https://api.openai.com/v1 (Iroha appends /chat/completions). Required for a new Endpoint."`
-	Shape *string `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks. Required for a new Endpoint."`
+	Name          string             `json:"name,omitempty" doc:"Unique within the Provider; default \"default\". Repeating a create with an existing name updates that Endpoint."`
+	URL           *string            `json:"url,omitempty" doc:"Base URL including the version path, e.g. https://api.openai.com/v1 (Iroha appends /chat/completions). Required for a new Endpoint."`
+	Shape         *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks. Required for a new Endpoint."`
+	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent; default bearer."`
+	AuthParam     *string            `json:"auth_param,omitempty" doc:"The header name for auth_style header (e.g. api-key) or the query parameter name for auth_style query (e.g. key)."`
+	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Headers sent on every Attempt, e.g. {\"HTTP-Referer\": \"https://example.com\"}. Replaces the whole set; {} clears it."`
+	Renames       *map[string]string `json:"renames,omitempty" doc:"Model renames for this URL, Caller's name -> wire name, e.g. {\"glm-4.6\": \"glm-4.6-fp8\"}. Replaces the whole set; {} clears it."`
 }
 
 // UpdateEndpoint is the body of PATCH /api/providers/{provider}/endpoints/{endpoint}.
 type UpdateEndpoint struct {
-	Name  *string `json:"name,omitempty"`
-	URL   *string `json:"url,omitempty"`
-	Shape *string `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini"`
+	Name          *string            `json:"name,omitempty"`
+	URL           *string            `json:"url,omitempty"`
+	Shape         *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini"`
+	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"Changing to a style without a parameter clears auth_param."`
+	AuthParam     *string            `json:"auth_param,omitempty"`
+	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Replaces the whole set; {} clears it."`
+	Renames       *map[string]string `json:"renames,omitempty" doc:"Replaces the whole set; {} clears it."`
 }
 
 // EndpointResult is the response of a single Endpoint change.
@@ -121,7 +163,7 @@ func checkURL(s string) (string, error) {
 	case u.User != nil:
 		return "", api.BadRequest(urlHint, "url must not contain user:password; add the secret as an Upstream Key.")
 	case u.RawQuery != "" || u.Fragment != "":
-		return "", api.BadRequest(urlHint, "url must not contain a query or fragment.")
+		return "", api.BadRequest(urlHint, "url must not contain a query or fragment; use auth_style query for a key in the URL, static_headers for anything else.")
 	}
 	return strings.TrimRight(s, "/"), nil
 }
@@ -129,6 +171,97 @@ func checkURL(s string) (string, error) {
 func checkShape(s string) error {
 	if !shape.Shape(s).Valid() {
 		return api.BadRequest("Use one of openai-chat, openai-responses, anthropic-messages or gemini.", "shape %q is not a known Shape.", s)
+	}
+	return nil
+}
+
+var (
+	headerNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+	queryParamPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
+)
+
+// reservedHeaders are headers Iroha's HTTP client owns; an Endpoint may not set them.
+var reservedHeaders = map[string]bool{
+	"host": true, "content-length": true, "transfer-encoding": true, "connection": true, "keep-alive": true,
+	"te": true, "trailer": true, "upgrade": true, "proxy-connection": true, "expect": true,
+}
+
+const (
+	maxStaticHeaders = 32
+	maxRenames       = 1000
+)
+
+// authHeader is the header an auth style writes the secret into ("" for
+// query and none).
+func authHeader(style, param string) string {
+	switch style {
+	case planner.AuthBearer:
+		return "Authorization"
+	case planner.AuthXAPIKey:
+		return "x-api-key"
+	case planner.AuthHeader:
+		return param
+	}
+	return ""
+}
+
+// checkEndpoint validates the auth, static header and rename configuration
+// of an Endpoint as a whole.
+func checkEndpoint(e *Endpoint) error {
+	styleHint := "Use auth_style bearer, x-api-key, header (with auth_param naming the header), query (with auth_param naming the query parameter) or none."
+	switch e.AuthStyle {
+	case planner.AuthBearer, planner.AuthXAPIKey, planner.AuthNone:
+		if e.AuthParam != "" {
+			return api.BadRequest(styleHint, "auth_param is only used with auth_style header or query.")
+		}
+	case planner.AuthHeader:
+		if !headerNamePattern.MatchString(e.AuthParam) {
+			return api.BadRequest("Send auth_param: the header the key goes in, 1 to 128 letters, digits, '-' or '_', e.g. api-key.", "auth_param %q is not a header name.", e.AuthParam)
+		}
+		if reservedHeaders[strings.ToLower(e.AuthParam)] {
+			return api.BadRequest("Pick the header the Provider reads the key from.", "auth_param %q is a header Iroha's HTTP client sets.", e.AuthParam)
+		}
+	case planner.AuthQuery:
+		if !queryParamPattern.MatchString(e.AuthParam) {
+			return api.BadRequest("Send auth_param: the query parameter the key goes in, 1 to 128 letters, digits, '.', '-' or '_', e.g. key.", "auth_param %q is not a query parameter name.", e.AuthParam)
+		}
+	default:
+		return api.BadRequest(styleHint, "auth_style %q is not known.", e.AuthStyle)
+	}
+
+	if len(e.StaticHeaders) > maxStaticHeaders {
+		return api.BadRequest("Send at most 32 static headers.", "static_headers has %d headers.", len(e.StaticHeaders))
+	}
+	slot := authHeader(e.AuthStyle, e.AuthParam)
+	seen := map[string]string{}
+	for k, v := range e.StaticHeaders {
+		lk := strings.ToLower(k)
+		switch {
+		case !headerNamePattern.MatchString(k):
+			return api.BadRequest("Header names are 1 to 128 letters, digits, '-' or '_'.", "static header %q is not a header name.", k)
+		case reservedHeaders[lk]:
+			return api.BadRequest("Leave transport headers to Iroha.", "static header %q is a header Iroha's HTTP client sets.", k)
+		case slot != "" && strings.EqualFold(k, slot):
+			return api.BadRequest("Put the secret in an Upstream Key; for a fixed credential use auth_style none with the header in static_headers.",
+				"static header %q is where auth_style %s puts the Upstream Key.", k, e.AuthStyle)
+		case seen[lk] != "":
+			return api.BadRequest("Send each header once.", "static headers %q and %q are the same header.", seen[lk], k)
+		case len(v) > 4096 || strings.ContainsFunc(v, unicode.IsControl):
+			return api.BadRequest("Header values are at most 4096 characters without line breaks or control characters.", "static header %q has a value that cannot be sent.", k)
+		}
+		seen[lk] = k
+	}
+
+	if len(e.Renames) > maxRenames {
+		return api.BadRequest("Send at most 1000 renames.", "renames has %d entries.", len(e.Renames))
+	}
+	renameHint := "Model names in renames are 1 to 256 characters without surrounding spaces or control characters, e.g. {\"glm-4.6\": \"glm-4.6-fp8\"}."
+	for from, to := range e.Renames {
+		for _, s := range []string{from, to} {
+			if s == "" || len(s) > 256 || strings.TrimSpace(s) != s || strings.ContainsFunc(s, unicode.IsControl) {
+				return api.BadRequest(renameHint, "renames has an entry %q -> %q that is not a model name.", from, to)
+			}
+		}
 	}
 	return nil
 }
@@ -168,10 +301,11 @@ func (h handlers) endpointRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: base, Tag: tag,
-			Summary:     "Add an Endpoint to a Provider, or update the one with that name",
-			Description: "An Endpoint is one URL speaking one Shape. Callers' requests go to Endpoints speaking their Shape.",
-			Query:       []api.Param{audit.DryRun},
-			Request:     CreateEndpoint{}, Response: EndpointResult{},
+			Summary: "Add an Endpoint to a Provider, or update the one with that name",
+			Description: "An Endpoint is one URL speaking one Shape, with its own auth style, static headers and model renames. " +
+				"Callers' requests go to Endpoints speaking their Shape; Upstream Keys go to every Endpoint unless restricted to some.",
+			Query:   []api.Param{audit.DryRun},
+			Request: CreateEndpoint{}, Response: EndpointResult{},
 			Handle: func(c *api.Call) (any, error) {
 				var in CreateEndpoint
 				if err := c.Decode(&in); err != nil {
@@ -211,7 +345,7 @@ func (h handlers) endpointRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodPatch, Path: base + "/{endpoint}", Tag: tag,
-			Summary: "Rename an Endpoint or change its URL or Shape",
+			Summary: "Change an Endpoint: name, URL, Shape, auth, static headers or renames",
 			Query:   []api.Param{audit.DryRun},
 			Request: UpdateEndpoint{}, Response: EndpointResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -237,10 +371,11 @@ func (h handlers) endpointRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodDelete, Path: base + "/{endpoint}", Tag: tag,
-			Summary:     "Delete an Endpoint",
-			Description: "Revertible through its Audit Entry.",
-			Query:       []api.Param{audit.DryRun},
-			Response:    EndpointResult{},
+			Summary: "Delete an Endpoint",
+			Description: "Upstream Keys restricted to it and to other Endpoints lose it from their restriction (in the same Audit Entry). " +
+				"Refused with 409 endpoint_in_use while a key may use only this Endpoint. Revertible through its Audit Entry.",
+			Query:    []api.Param{audit.DryRun},
+			Response: EndpointResult{},
 			Handle: func(c *api.Call) (any, error) {
 				var out Endpoint
 				res, err := h.tr.Mutate(c, "endpoint.delete", "Deleted", func(m *audit.Mutation) error {
@@ -256,6 +391,9 @@ func (h handlers) endpointRoutes() []api.Route {
 						return err
 					}
 					if err := m.Track(EndpointResource, id); err != nil {
+						return err
+					}
+					if err := releaseEndpoint(m, p, id); err != nil {
 						return err
 					}
 					_, err = m.Tx.ExecContext(m.Ctx, `DELETE FROM endpoints WHERE id = ?`, id)
@@ -274,10 +412,11 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 	if err := api.CheckName("name", in.Name); err != nil {
 		return Endpoint{}, err
 	}
+	upd := UpdateEndpoint{URL: in.URL, Shape: in.Shape, AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames}
 	var id string
 	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM endpoints WHERE provider_id = ? AND name = ?`, p.id, in.Name).Scan(&id)
 	if err == nil {
-		return h.updateEndpoint(m, p, id, UpdateEndpoint{URL: in.URL, Shape: in.Shape})
+		return h.updateEndpoint(m, p, id, upd)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Endpoint{}, err
@@ -285,53 +424,83 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 	if in.URL == nil {
 		return Endpoint{}, api.BadRequest(urlHint, "url is required for a new Endpoint.")
 	}
-	u, err := checkURL(*in.URL)
-	if err != nil {
-		return Endpoint{}, err
-	}
 	if in.Shape == nil {
 		return Endpoint{}, api.BadRequest("Send shape: openai-chat, openai-responses, anthropic-messages or gemini.", "shape is required for a new Endpoint.")
 	}
-	if err := checkShape(*in.Shape); err != nil {
+	e := Endpoint{Name: in.Name, AuthStyle: planner.AuthBearer, StaticHeaders: map[string]string{}, Renames: map[string]string{}}
+	if err := applyEndpoint(&e, upd); err != nil {
 		return Endpoint{}, err
 	}
 	id = ids.New("ep")
 	if err := m.Track(EndpointResource, id); err != nil {
 		return Endpoint{}, err
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, p.id, in.Name, u, *in.Shape, store.Millis(m.Now)); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, p.id, e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), store.Millis(m.Now)); err != nil {
 		return Endpoint{}, err
 	}
 	return readEndpoint(m.Ctx, m.Tx, id)
+}
+
+// applyEndpoint applies the fields sent in in to e and validates the result.
+func applyEndpoint(e *Endpoint, in UpdateEndpoint) error {
+	if in.Name != nil {
+		if err := api.CheckName("name", *in.Name); err != nil {
+			return err
+		}
+		e.Name = *in.Name
+	}
+	if in.URL != nil {
+		u, err := checkURL(*in.URL)
+		if err != nil {
+			return err
+		}
+		e.URL = u
+	}
+	if in.Shape != nil {
+		if err := checkShape(*in.Shape); err != nil {
+			return err
+		}
+		e.Shape = *in.Shape
+	}
+	if in.AuthStyle != nil {
+		s := strings.ToLower(strings.TrimSpace(*in.AuthStyle))
+		if s != e.AuthStyle && in.AuthParam == nil && s != planner.AuthHeader && s != planner.AuthQuery {
+			e.AuthParam = "" // the new style takes no parameter
+		}
+		e.AuthStyle = s
+	}
+	if in.AuthParam != nil {
+		e.AuthParam = strings.TrimSpace(*in.AuthParam)
+	}
+	if in.StaticHeaders != nil {
+		e.StaticHeaders = *in.StaticHeaders
+	}
+	if in.Renames != nil {
+		e.Renames = *in.Renames
+	}
+	return checkEndpoint(e)
 }
 
 func (h handlers) updateEndpoint(m *audit.Mutation, p ref, id string, in UpdateEndpoint) (Endpoint, error) {
 	if err := m.Track(EndpointResource, id); err != nil {
 		return Endpoint{}, err
 	}
+	e, err := readEndpoint(m.Ctx, m.Tx, id)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	if err := applyEndpoint(&e, in); err != nil {
+		return Endpoint{}, err
+	}
 	if in.Name != nil {
-		if err := api.CheckName("name", *in.Name); err != nil {
-			return Endpoint{}, err
-		}
-		if err := childNameFree(m.Ctx, m.Tx, "endpoints", "Endpoint", p.id, *in.Name, id); err != nil {
+		if err := childNameFree(m.Ctx, m.Tx, "endpoints", "Endpoint", p.id, e.Name, id); err != nil {
 			return Endpoint{}, err
 		}
 	}
-	if in.URL != nil {
-		u, err := checkURL(*in.URL)
-		if err != nil {
-			return Endpoint{}, err
-		}
-		in.URL = &u
-	}
-	if in.Shape != nil {
-		if err := checkShape(*in.Shape); err != nil {
-			return Endpoint{}, err
-		}
-	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE endpoints SET name = coalesce(?, name), url = coalesce(?, url), shape = coalesce(?, shape) WHERE id = ?`,
-		in.Name, in.URL, in.Shape, id); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE endpoints SET name = ?, url = ?, shape = ?, auth_style = ?, auth_param = ?, static_headers = ?, renames = ? WHERE id = ?`,
+		e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), id); err != nil {
 		return Endpoint{}, err
 	}
 	return readEndpoint(m.Ctx, m.Tx, id)

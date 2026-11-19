@@ -22,13 +22,15 @@ import (
 // configuration (disabled included), not last_used_at nor its runtime Key
 // State (invalid, cooling).
 type keySnapshot struct {
-	ID         string    `json:"id"`
-	ProviderID string    `json:"provider_id"`
-	Provider   string    `json:"provider"`
-	Name       string    `json:"name"`
-	Secret     string    `json:"secret"`
-	Disabled   bool      `json:"disabled"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string `json:"id"`
+	ProviderID string `json:"provider_id"`
+	Provider   string `json:"provider"`
+	Name       string `json:"name"`
+	Secret     string `json:"secret"`
+	Disabled   bool   `json:"disabled"`
+	// EndpointIDs is the restriction (sorted); empty: every Endpoint.
+	EndpointIDs []string  `json:"endpoint_ids,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // KeyResource is the Upstream Key resource of the audit machinery.
@@ -45,7 +47,11 @@ var KeyResource = audit.Register(&audit.Resource[keySnapshot]{
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
+		if err != nil {
+			return nil, err
+		}
 		s.CreatedAt = store.FromMillis(created)
+		s.EndpointIDs, err = keyEndpointIDsOf(ctx, q, id)
 		return &s, err
 	},
 	Restore: func(ctx context.Context, tx *sql.Tx, id string, s *keySnapshot) error {
@@ -56,25 +62,29 @@ var KeyResource = audit.Register(&audit.Resource[keySnapshot]{
 		if err := childNameFree(ctx, tx, "upstream_keys", "Upstream Key", s.ProviderID, s.Name, id); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO upstream_keys (id, provider_id, name, secret, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO upstream_keys (id, provider_id, name, secret, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET name = excluded.name, secret = excluded.secret, disabled = excluded.disabled`,
-			id, s.ProviderID, s.Name, s.Secret, s.Disabled, store.Millis(s.CreatedAt))
-		return err
+			id, s.ProviderID, s.Name, s.Secret, s.Disabled, store.Millis(s.CreatedAt)); err != nil {
+			return err
+		}
+		return writeKeyEndpoints(ctx, tx, s.ProviderID, id, s.EndpointIDs)
 	},
 })
 
 // CreateUpstreamKey is the body of POST /api/providers/{provider}/keys and
 // each item of its bulk.
 type CreateUpstreamKey struct {
-	Name   string  `json:"name,omitempty" doc:"Unique within the Provider. Omit it to match by secret: a secret the Provider already holds answers that key unchanged, a new one gets the next free name key-N. Repeating a create with an existing name updates that key."`
-	Secret *string `json:"secret,omitempty" doc:"The key issued by the Provider. Omit (with a name) for a keyless slot that sends no auth header. Surrounding whitespace is trimmed."`
+	Name      string    `json:"name,omitempty" doc:"Unique within the Provider. Omit it to match by secret: a secret the Provider already holds answers that key unchanged, a new one gets the next free name key-N. Repeating a create with an existing name updates that key."`
+	Secret    *string   `json:"secret,omitempty" doc:"The key issued by the Provider. Omit (with a name) for a keyless slot that sends no auth header. Surrounding whitespace is trimmed."`
+	Endpoints *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs); it is never sent to the others. [] or omitted on a new key: every Endpoint."`
 }
 
 // UpdateUpstreamKey is the body of PATCH /api/providers/{provider}/keys/{key}.
 type UpdateUpstreamKey struct {
-	Name    *string `json:"name,omitempty"`
-	Secret  *string `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling. A new name or secret clears the key's Model Gaps."`
-	Enabled *bool   `json:"enabled,omitempty" doc:"false disables the key (no traffic until enabled); true enables it."`
+	Name      *string   `json:"name,omitempty"`
+	Secret    *string   `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling. A new name or secret clears the key's Model Gaps."`
+	Enabled   *bool     `json:"enabled,omitempty" doc:"false disables the key (no traffic until enabled); true enables it."`
+	Endpoints *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs); [] lifts the restriction."`
 }
 
 // UpstreamKeyResult is the response of a single Upstream Key change.
@@ -192,7 +202,7 @@ func (h handlers) keyRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodPatch, Path: base + "/{key}", Tag: tag,
-			Summary: "Rename, enable or disable an Upstream Key, or replace its secret",
+			Summary: "Rename, enable or disable an Upstream Key, replace its secret, or restrict it to some Endpoints",
 			Query:   []api.Param{audit.DryRun},
 			Request: UpdateUpstreamKey{}, Response: UpstreamKeyResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -361,10 +371,7 @@ func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey, logs
 		var id string
 		err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM upstream_keys WHERE provider_id = ? AND secret = ?`, p.id, secret).Scan(&id)
 		if err == nil {
-			if err := m.Track(KeyResource, id); err != nil {
-				return UpstreamKey{}, err
-			}
-			return readKey(m.Ctx, m.Tx, id, m.Now)
+			return h.updateKey(m, p, id, UpdateUpstreamKey{Endpoints: in.Endpoints}, logs)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return UpstreamKey{}, err
@@ -379,7 +386,7 @@ func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey, logs
 		var id string
 		err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM upstream_keys WHERE provider_id = ? AND name = ?`, p.id, name).Scan(&id)
 		if err == nil {
-			return h.updateKey(m, p, id, UpdateUpstreamKey{Secret: in.Secret}, logs)
+			return h.updateKey(m, p, id, UpdateUpstreamKey{Secret: in.Secret, Endpoints: in.Endpoints}, logs)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return UpstreamKey{}, err
@@ -388,12 +395,22 @@ func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey, logs
 	if err := secretFree(m.Ctx, m.Tx, p, secret, ""); err != nil {
 		return UpstreamKey{}, err
 	}
+	var eps []string
+	if in.Endpoints != nil {
+		var err error
+		if eps, err = resolveEndpoints(m.Ctx, m.Tx, p, *in.Endpoints); err != nil {
+			return UpstreamKey{}, err
+		}
+	}
 	id := ids.New("uk")
 	if err := m.Track(KeyResource, id); err != nil {
 		return UpstreamKey{}, err
 	}
 	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO upstream_keys (id, provider_id, name, secret, created_at) VALUES (?, ?, ?, ?, ?)`,
 		id, p.id, name, secret, store.Millis(m.Now)); err != nil {
+		return UpstreamKey{}, err
+	}
+	if err := writeKeyEndpoints(m.Ctx, m.Tx, p.id, id, eps); err != nil {
 		return UpstreamKey{}, err
 	}
 	return readKey(m.Ctx, m.Tx, id, m.Now)
@@ -443,6 +460,15 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 			return UpstreamKey{}, err
 		}
 		in.Secret = &s
+	}
+	if in.Endpoints != nil {
+		eps, err := resolveEndpoints(m.Ctx, m.Tx, p, *in.Endpoints)
+		if err != nil {
+			return UpstreamKey{}, err
+		}
+		if err := writeKeyEndpoints(m.Ctx, m.Tx, p.id, id, eps); err != nil {
+			return UpstreamKey{}, err
+		}
 	}
 	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE upstream_keys SET name = coalesce(?, name), secret = coalesce(?, secret) WHERE id = ?`,
 		in.Name, in.Secret, id); err != nil {

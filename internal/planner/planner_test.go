@@ -73,6 +73,51 @@ func TestPlan(t *testing.T) {
 	}
 }
 
+func TestEndpointRestrictions(t *testing.T) {
+	eu := planner.Endpoint{ID: "ep_eu", Name: "eu", Shape: shape.OpenAIChat}
+	us := planner.Endpoint{ID: "ep_us", Name: "us", Shape: shape.OpenAIChat, Renames: map[string]string{"glm": "glm-us"}}
+	msgs := planner.Endpoint{ID: "ep_m", Name: "m", Shape: shape.AnthropicMessages}
+	key := func(name string, eps ...string) planner.Key {
+		return planner.Key{ID: "uk_" + name, Name: name, Secret: "sk-test-" + name, Endpoints: eps}
+	}
+	cases := []struct {
+		name  string
+		eps   []planner.Endpoint
+		keys  []planner.Key
+		want  string
+		skips string
+		empty string
+	}{
+		{"a restricted key only goes to its Endpoints", []planner.Endpoint{eu, us}, []planner.Key{key("plan", "ep_us"), key("any")},
+			"plan@us:glm-us any@eu:glm any@us:glm-us", "", ""},
+		{"a key restricted to another Shape's Endpoint is skipped", []planner.Endpoint{eu, msgs}, []planner.Key{key("claude", "ep_m"), key("any")},
+			"any@eu:glm", "claude:restricted", ""},
+		{"nothing left but restricted keys", []planner.Endpoint{eu, msgs}, []planner.Key{key("claude", "ep_m")},
+			"", "claude:restricted", planner.NoUsableKey},
+		{"a keyless key is planned like any other", []planner.Endpoint{eu}, []planner.Key{{ID: "uk_free", Name: "free"}},
+			"free@eu:glm", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := []planner.Provider{{ID: "p", Handle: "p", Endpoints: tc.eps, Keys: tc.keys}}
+			r := planner.Plan(planner.Request{Shape: shape.OpenAIChat, Model: "glm", Now: now}, p, planner.Fixed(0))
+			if got := order(r); got != tc.want {
+				t.Fatalf("order = %q, want %q", got, tc.want)
+			}
+			var skips []string
+			for _, s := range r.Skipped {
+				skips = append(skips, s.Key.Name+":"+s.Reason)
+			}
+			if got := strings.Join(skips, " "); got != tc.skips {
+				t.Fatalf("skips = %q, want %q", got, tc.skips)
+			}
+			if (tc.empty == "") != (r.Empty == nil) || (r.Empty != nil && (r.Empty.Code != tc.empty || !strings.Contains(r.Empty.Message, "restricted"))) {
+				t.Fatalf("empty = %+v, want %q", r.Empty, tc.empty)
+			}
+		})
+	}
+}
+
 func TestCounterRotatesPerGroup(t *testing.T) {
 	c := planner.NewCounter()
 	p := []planner.Provider{{ID: "p", Handle: "p", Endpoints: []planner.Endpoint{{Name: "a", Shape: shape.OpenAIChat}}, Keys: keys("k1", "k2", "k3")}}

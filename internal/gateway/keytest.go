@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -64,10 +65,15 @@ type KeyTestBulk struct {
 	Items  []KeyTestItem `json:"items"`
 }
 
-var testModelParam = api.Param{Name: "model", Description: "The model to ask for. Default: the model of the Provider's latest successful Request."}
+var (
+	testModelParam    = api.Param{Name: "model", Description: "The model to ask for. Default: the model of the Provider's latest successful Request."}
+	testEndpointParam = api.Param{Name: "endpoint", Description: "The Endpoint (name or ID) to test on. Default: the first Endpoint the key may use."}
+)
 
-const keyTestDescription = "Sends a tiny real chat call (\"" + keyTestPrompt + "\", max_tokens 16) with the key on the Provider's first OpenAI Chat Endpoint. " +
-	"A pass makes an invalid or cooling key active again and clears its Model Gaps. A failure is read by the Failure Rules like any Attempt, so a 401 makes the key invalid and a 429 cools it. " +
+const keyTestDescription = "Sends a tiny real chat call (\"" + keyTestPrompt + "\", at most 16 tokens) with the key, in the Endpoint's Shape and auth style, " +
+	"on the first Endpoint the key may use (or ?endpoint=). " +
+	"A pass makes an invalid or cooling key active again and clears its Model Gaps. A failure is read by the Failure Rules like any Attempt, so a 401 makes the key invalid and a 429 cools it; " +
+	"a keyless test (empty secret or auth style none) sends no credential, so a 401 then leaves the key as it is. " +
 	"Disabled keys are tested too and stay disabled. The test is not recorded as a Request."
 
 // AdminRoutes are the admin routes the Gateway serves: key tests.
@@ -77,7 +83,7 @@ func (g *Gateway) AdminRoutes() []api.Route {
 		{
 			Method: http.MethodPost, Path: "/api/providers/{provider}/keys/{key}/test", Tag: tag,
 			Summary: "Test an Upstream Key with a tiny real chat call", Description: keyTestDescription,
-			Query: []api.Param{audit.DryRun, testModelParam}, Response: KeyTestResult{},
+			Query: []api.Param{audit.DryRun, testModelParam, testEndpointParam}, Response: KeyTestResult{},
 			Handle: func(c *api.Call) (any, error) {
 				dry, err := audit.IsDryRun(c)
 				if err != nil {
@@ -96,14 +102,14 @@ func (g *Gateway) AdminRoutes() []api.Route {
 				if err != nil {
 					return nil, err
 				}
-				return g.testKey(ctx, &rt, k, model, dry)
+				return g.testKey(ctx, &rt, k, model, c.Query("endpoint"), dry)
 			},
 		},
 		{
 			Method: http.MethodPost, Path: "/api/providers/{provider}/keys/bulk/test", Tag: tag,
 			Summary:     "Test many Upstream Keys of a Provider, each by name or ID",
 			Description: keyTestDescription + ` Body {"items": ["key-1", "uk_..."]}; up to 5 tests run at once. Each item reports its own result or error.`,
-			Query:       []api.Param{audit.DryRun, testModelParam},
+			Query:       []api.Param{audit.DryRun, testModelParam, testEndpointParam},
 			Request:     audit.BulkRequest[string]{}, Response: KeyTestBulk{},
 			Handle: func(c *api.Call) (any, error) {
 				dry, err := audit.IsDryRun(c)
@@ -141,7 +147,7 @@ func (g *Gateway) AdminRoutes() []api.Route {
 						defer wg.Done()
 						sem <- struct{}{}
 						defer func() { <-sem }()
-						res, err := g.testKey(ctx, &rt, k, model, dry)
+						res, err := g.testKey(ctx, &rt, k, model, c.Query("endpoint"), dry)
 						if err != nil {
 							out.Items[i].Error = api.AsError(err)
 							return
@@ -180,23 +186,13 @@ func (g *Gateway) testModel(ctx context.Context, rt *providers.Routing, given st
 }
 
 // testKey runs one key test and applies its verdict to the Key State.
-func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner.Key, model string, dry bool) (KeyTestResult, error) {
+func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner.Key, model, endpoint string, dry bool) (KeyTestResult, error) {
 	res := KeyTestResult{DryRun: dry, Provider: rt.Handle, UpstreamKey: k.Name}
-	var ep *planner.Endpoint
-	for i := range rt.Endpoints {
-		if rt.Endpoints[i].Shape == shape.OpenAIChat {
-			ep = &rt.Endpoints[i]
-			break
-		}
+	ep, err := testEndpoint(rt, k, endpoint)
+	if err != nil {
+		return res, err
 	}
-	if ep == nil {
-		return res, api.Conflict("no_testable_endpoint", "Add an OpenAI Chat Endpoint to "+rt.Handle+" (POST /api/providers/"+rt.Handle+"/endpoints); key tests use one.",
-			"Provider %s has no OpenAI Chat Endpoint to test keys on.", rt.Handle)
-	}
-	wire := model
-	if w, ok := ep.Renames[model]; ok && w != "" {
-		wire = w
-	}
+	wire := ep.WireModel(model)
 	res.Endpoint, res.Model = ep.Name, wire
 	if dry {
 		res.Action = "Nothing sent (dry run)."
@@ -205,14 +201,13 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 		return res, err
 	}
 	ctx = context.WithoutCancel(ctx) // a test the Owner asked for finishes and records its verdict
-	body, _ := json.Marshal(map[string]any{"model": wire, "max_tokens": 16,
-		"messages": []any{map[string]any{"role": "user", "content": keyTestPrompt}}})
+	op, body, header := testCall(ep.Shape, wire)
 	c := planner.Candidate{Provider: &rt.Provider, Endpoint: ep, Key: k, WireModel: wire}
 	started := g.clock.Now()
 	actx, _, release := deadlineContext(ctx, g.clock, started.Add(keyTestTimeout))
 	defer release()
 	f := &rules.Failure{Provider: rt.Handle, Host: hostOf(ep.URL)}
-	req, err := outbound(actx, c, http.Header{}, body, opChat, false)
+	req, err := outbound(actx, c, header, body, op, false)
 	if err != nil {
 		return res, api.Conflict("endpoint_misconfigured", "Fix the Endpoint (GET /api/providers/"+rt.Handle+"/endpoints).", "%s", err.Error())
 	}
@@ -237,7 +232,7 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 			return res, err
 		}
 	} else {
-		d := g.rules().Classify(*f, g.clock.Now())
+		d := noCredential(g.rules().Classify(*f, g.clock.Now()), c)
 		res.Rule, res.Outcome, res.Reason = d.Rule, string(d.Outcome), d.Reason
 		res.Action = "Key State unchanged."
 		switch d.Outcome {
@@ -261,4 +256,57 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 	}
 	g.log.Info("Upstream Key tested", attrs...)
 	return res, nil
+}
+
+// testEndpoint is the Endpoint a key test uses: the one named by ref, or
+// the first one the key may use.
+func testEndpoint(rt *providers.Routing, k *planner.Key, ref string) (*planner.Endpoint, error) {
+	list := "GET /api/providers/" + rt.Handle + "/endpoints"
+	if ref != "" {
+		var ep *planner.Endpoint
+		for i := range rt.Endpoints {
+			if e := &rt.Endpoints[i]; e.ID == ref || (ep == nil && e.Name == ref) {
+				ep = e
+			}
+		}
+		switch {
+		case ep == nil:
+			return nil, api.NotFound("List them with "+list+"; address one by its name or ID.",
+				"Provider %s has no Endpoint named %q or with that ID.", rt.Handle, ref)
+		case !k.Allows(ep.ID):
+			return nil, api.Conflict("endpoint_not_allowed", "Test on an Endpoint the key may use (GET /api/providers/"+rt.Handle+"/keys/"+k.Name+" lists them), or lift its restriction.",
+				"Upstream Key %s is restricted to other Endpoints than %s.", k.Name, ep.Name)
+		}
+		return ep, nil
+	}
+	for i := range rt.Endpoints {
+		if k.Allows(rt.Endpoints[i].ID) {
+			return &rt.Endpoints[i], nil
+		}
+	}
+	return nil, api.Conflict("no_testable_endpoint", "Add an Endpoint to "+rt.Handle+" (POST /api/providers/"+rt.Handle+"/endpoints); key tests use one.",
+		"Provider %s has no Endpoint this key may use.", rt.Handle)
+}
+
+// testCall is the tiny chat call of a key test in Shape sh: the operation
+// path, the body and any header that Shape needs.
+func testCall(sh shape.Shape, model string) (op string, body []byte, header http.Header) {
+	header = http.Header{}
+	msgs := []any{map[string]any{"role": "user", "content": keyTestPrompt}}
+	var v map[string]any
+	switch sh {
+	case shape.OpenAIResponses:
+		op, v = "/responses", map[string]any{"model": model, "input": keyTestPrompt, "max_output_tokens": 16}
+	case shape.AnthropicMessages:
+		op, v = "/messages", map[string]any{"model": model, "max_tokens": 16, "messages": msgs}
+		header.Set("Anthropic-Version", "2023-06-01")
+	case shape.Gemini:
+		op = "/models/" + url.PathEscape(model) + ":generateContent"
+		v = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": keyTestPrompt}}}},
+			"generationConfig": map[string]any{"maxOutputTokens": 16}}
+	default:
+		op, v = opChat, map[string]any{"model": model, "max_tokens": 16, "messages": msgs}
+	}
+	body, _ = json.Marshal(v)
+	return op, body, header
 }

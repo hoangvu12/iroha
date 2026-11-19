@@ -59,14 +59,42 @@ func forwardable(name string) bool {
 
 // outbound builds the upstream request of one Attempt: the Endpoint's URL
 // plus op, the Caller's forwardable headers, the Endpoint's static headers,
-// then the Upstream Key per the Endpoint's auth style.
+// then the Upstream Key per the Endpoint's auth style. A key with an empty
+// secret, or an Endpoint with auth style none, sends no credential at all;
+// a Caller header in the auth slot is dropped either way.
 func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []byte, op string, stream bool) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.Endpoint.URL, "/")+op, bytes.NewReader(body))
+	ep := c.Endpoint
+	u, err := url.Parse(strings.TrimRight(ep.URL, "/") + op)
+	if err != nil {
+		return nil, fmt.Errorf("the Endpoint URL does not make a request: %w", err)
+	}
+	var slot, prefix string // the header the key goes in, and what precedes it
+	switch ep.AuthStyle {
+	case "", planner.AuthBearer:
+		slot, prefix = "Authorization", "Bearer "
+	case planner.AuthXAPIKey:
+		slot = "X-Api-Key"
+	case planner.AuthHeader:
+		slot = ep.AuthParam
+	case planner.AuthQuery, planner.AuthNone:
+	default:
+		return nil, fmt.Errorf("Endpoint %s uses auth style %q, which this version of Iroha cannot apply", ep.Name, ep.AuthStyle)
+	}
+	if (ep.AuthStyle == planner.AuthHeader || ep.AuthStyle == planner.AuthQuery) && ep.AuthParam == "" {
+		return nil, fmt.Errorf("Endpoint %s uses auth style %s without auth_param", ep.Name, ep.AuthStyle)
+	}
+	send := !c.Key.Keyless(ep)
+	if send && ep.AuthStyle == planner.AuthQuery {
+		q := u.Query()
+		q.Set(ep.AuthParam, c.Key.Secret)
+		u.RawQuery = q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("the Endpoint URL does not make a request: %w", err)
 	}
 	for k, vs := range in {
-		if forwardable(k) {
+		if forwardable(k) && !strings.EqualFold(k, slot) {
 			req.Header[k] = append([]string(nil), vs...)
 		}
 	}
@@ -80,16 +108,11 @@ func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []b
 			req.Header.Set("Accept", "application/json")
 		}
 	}
-	for k, v := range c.Endpoint.StaticHeaders {
+	for k, v := range ep.StaticHeaders {
 		req.Header.Set(k, v)
 	}
-	switch c.Endpoint.AuthStyle {
-	case "", "bearer":
-		if c.Key.Secret != "" {
-			req.Header.Set("Authorization", "Bearer "+c.Key.Secret)
-		}
-	default: // the other styles arrive with ticket 09
-		return nil, fmt.Errorf("Endpoint %s uses auth style %q, which this version of Iroha cannot apply", c.Endpoint.Name, c.Endpoint.AuthStyle)
+	if send && slot != "" {
+		req.Header.Set(slot, prefix+c.Key.Secret)
 	}
 	return req, nil
 }

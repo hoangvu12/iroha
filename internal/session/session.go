@@ -161,9 +161,12 @@ func sessionError(code, msg string) *api.Error {
 		Hint: "Sign in again with the Owner password (POST /api/session, or the login page), or send an Admin Token."}
 }
 
-// cookie builds the session cookie; maxAge < 0 deletes it.
+// cookie builds the session cookie; maxAge < 0 deletes it. It is Secure when
+// the browser reached Iroha over HTTPS: TLS here, or the first (client-side)
+// value of X-Forwarded-Proto when a chain of proxies lists several.
 func cookie(r *http.Request, value string, maxAge int) *http.Cookie {
-	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	secure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(proto), "https")
 	return &http.Cookie{Name: CookieName, Value: value, Path: "/", MaxAge: maxAge,
 		HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode}
 }

@@ -5,10 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/requests"
+	"github.com/hoangvu12/iroha/internal/session"
 	"github.com/hoangvu12/iroha/internal/settings"
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
@@ -67,7 +69,7 @@ func TestRetentionRunsEveryHourAndLogsEachRun(t *testing.T) {
 	j = job(t, srv)
 	r := j.LastRun
 	if r == nil || r.Trigger != jobs.TriggerSchedule || r.Outcome != "ok" || r.DryRun || !r.StartedAt.Equal(testkit.Epoch.Add(time.Hour)) ||
-		r.Summary != "Deleted 0 captures, 0 Requests and 0 log events." || r.Details["requests_days"] != float64(30) {
+		r.Summary != "Deleted 0 captures, 0 Requests, 0 log events and 0 Owner sessions." || r.Details["requests_days"] != float64(30) {
 		t.Fatalf("last run = %+v", r)
 	}
 	if !j.NextRunAt.Equal(testkit.Epoch.Add(2 * time.Hour)) {
@@ -167,6 +169,61 @@ func TestRetentionDeletesWhatIsOlderThanEachSetting(t *testing.T) {
 	}
 	if dryEv := runs(srv, "kind=job.run&since=1m&limit=50"); !hasDry(dryEv) {
 		t.Fatalf("the dry run was not logged: %+v", dryEv)
+	}
+}
+
+// AUTH-11, USE-67: Owner sessions that were revoked or expired stay listed
+// for retention.logs_days after they stopped working, then the hourly job
+// deletes them; sessions still in use are never touched.
+func TestEndedOwnerSessionsAreDeletedAfterTheLogsRetention(t *testing.T) {
+	srv := testkit.Start(t)
+	ids := func(active string) []string {
+		var list session.OwnerSessionList
+		srv.Admin.Get("/api/owner-sessions?active=" + active).Expect(200).JSON(&list)
+		var out []string
+		for _, s := range list.OwnerSessions {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+	whoami := func(c *testkit.Client) string {
+		var a api.Actor
+		c.Get("/api/whoami").Expect(200).JSON(&a)
+		return a.ID
+	}
+	signedOut := srv.OwnerSession() // revoked at once
+	revokedID := whoami(signedOut)
+	signedOut.Delete("/api/session").Expect(204)
+	expiring := srv.OwnerSession() // expires after 30 days
+	expiringID := whoami(expiring)
+	srv.Clock.Advance(20 * 24 * time.Hour)
+	later := srv.OwnerSession() // expires on day 50
+	laterID := whoami(later)
+
+	// Day 30 + 1 h: the signed-out session ended 30 days and 1 h ago and goes;
+	// the one that expired an hour ago stays listed as inactive.
+	srv.Clock.Advance(10*24*time.Hour + time.Hour)
+	srv.SettleJobs()
+	if got := ids("false"); len(got) != 1 || got[0] != expiringID {
+		t.Fatalf("inactive sessions on day 30 = %v, want only %s (signed out %s)", got, expiringID, revokedID)
+	}
+	if got := ids("true"); len(got) != 1 || got[0] != laterID {
+		t.Fatalf("active sessions = %v", got)
+	}
+	later.Get("/api/whoami").Expect(200)
+	if dry := srv.RunJob("retention", "dry_run=true"); dry.Details["owner_sessions"] != float64(0) || !strings.Contains(dry.Summary, "0 Owner sessions") {
+		t.Fatalf("dry run = %+v", dry)
+	}
+
+	// Day 60 + 1 h: the session that expired on day 30 goes; the one that
+	// expired on day 50 is still within the 30 days.
+	srv.Clock.Advance(30 * 24 * time.Hour)
+	srv.SettleJobs()
+	if got := ids(""); len(got) != 1 || got[0] != laterID {
+		t.Fatalf("sessions on day 60 = %v, want only %s", got, laterID)
+	}
+	if r := job(t, srv).LastRun; r == nil || r.Details["owner_sessions"] != float64(1) || r.Details["owner_sessions_days"] != float64(30) {
+		t.Fatalf("last run = %+v", r)
 	}
 }
 

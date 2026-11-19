@@ -64,8 +64,10 @@ func Parse(args []string, getenv func(string) string, stderr io.Writer) (Config,
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
+	// Every bad value is reported at once, so one restart fixes them all.
+	var errs []error
 	if fs.NArg() > 0 {
-		return c, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+		errs = append(errs, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " ")))
 	}
 	switch strings.ToLower(level) {
 	case "debug":
@@ -77,34 +79,35 @@ func Parse(args []string, getenv func(string) string, stderr io.Writer) (Config,
 	case "error":
 		c.LogLevel = slog.LevelError
 	default:
-		return c, fmt.Errorf("log-level: unknown level %q", level)
+		errs = append(errs, fmt.Errorf("log-level: unknown level %q", level))
 	}
 	if c.LogFormat != "json" && c.LogFormat != "text" {
-		return c, fmt.Errorf("log-format: want json or text, got %q", c.LogFormat)
+		errs = append(errs, fmt.Errorf("log-format: want json or text, got %q", c.LogFormat))
 	}
-	d, err := time.ParseDuration(drain)
-	if err != nil || d < 0 {
-		return c, fmt.Errorf("drain-timeout: %q is not a duration", drain)
+	if d, err := time.ParseDuration(drain); err != nil || d < 0 {
+		errs = append(errs, fmt.Errorf("drain-timeout: %q is not a duration", drain))
+	} else {
+		c.DrainTimeout = d
 	}
-	c.DrainTimeout = d
 	if strings.TrimSpace(modelsDev) != "none" {
 		for _, u := range strings.Split(modelsDev, ",") {
 			if u = strings.TrimSpace(u); u != "" {
 				if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
-					return c, fmt.Errorf("models-dev: %q is not an http(s) URL", u)
+					errs = append(errs, fmt.Errorf("models-dev: %q is not an http(s) URL", u))
+					continue
 				}
 				c.ModelsDev = append(c.ModelsDev, u)
 			}
 		}
 	}
 	if c.DataDir == "" && !c.ShowVersion {
-		exe, err := os.Executable()
-		if err != nil {
-			return c, errors.New("data-dir: not set and the binary's directory is unknown")
+		if exe, err := os.Executable(); err != nil {
+			errs = append(errs, errors.New("data-dir: not set and the binary's directory is unknown"))
+		} else {
+			c.DataDir = filepath.Dir(exe)
 		}
-		c.DataDir = filepath.Dir(exe)
 	}
-	return c, nil
+	return c, errors.Join(errs...)
 }
 
 func envName(flagName string) string {

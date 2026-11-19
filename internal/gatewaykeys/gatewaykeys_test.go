@@ -3,6 +3,7 @@ package gatewaykeys_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/testkit"
@@ -103,5 +104,91 @@ func TestGatewayKeysAreIssuedReadableScopedAndRevoked(t *testing.T) {
 	srv.Admin.Post("/api/gateway-keys/bulk/revoke", map[string]any{"items": []string{"a", "zeron-fleet"}}).Expect(200).JSON(&bulk)
 	if bulk.Succeeded != 2 {
 		t.Fatalf("bulk revoke = %+v", bulk)
+	}
+}
+
+// KEY-13: revoking twice is harmless (unchanged, no second Audit Entry), and
+// a revoked key cannot be edited back to life.
+func TestARevokedGatewayKeyStaysRevokedAndCannotBeEdited(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "friend", "scope": map[string]any{"all": true}}).Expect(201)
+	var first, second gatewaykeys.GatewayKeyResult
+	srv.Admin.Post("/api/gateway-keys/friend/revoke", nil).Expect(200).JSON(&first)
+	if first.Outcome != "updated" || first.AuditEntry == "" || !first.GatewayKey.Revoked {
+		t.Fatalf("revoke = %+v", first)
+	}
+	srv.Admin.Post("/api/gateway-keys/friend/revoke", nil).Expect(200).JSON(&second)
+	if second.Outcome != "unchanged" || second.AuditEntry != "" || !second.GatewayKey.Revoked {
+		t.Fatalf("second revoke = %+v", second)
+	}
+	for _, body := range []map[string]any{
+		{"name": "friend-2"},
+		{"scope": map[string]any{"all": true}},
+		{"capture": true},
+	} {
+		e := srv.Admin.Patch("/api/gateway-keys/friend", body).Expect(409).Err()
+		if e.Code != "gateway_key_revoked" || e.Hint == "" {
+			t.Errorf("PATCH %v: %+v", body, e)
+		}
+	}
+	var entries struct{ Entries []struct{ ID string } }
+	srv.Admin.Get("/api/audit-entries?record=friend").Expect(200).JSON(&entries)
+	if len(entries.Entries) != 2 { // the create and the one revoke
+		t.Fatalf("audit entries = %+v", entries.Entries)
+	}
+	var k gatewaykeys.GatewayKey
+	srv.Admin.Get("/api/gateway-keys/friend").Expect(200).JSON(&k)
+	if !k.Revoked || k.Name != "friend" || k.Capture {
+		t.Fatalf("after refused edits = %+v", k)
+	}
+	if e := srv.Client(k.Secret).Get("/v1/models").Expect(401).Err(); e.Code != "gateway_key_invalid" {
+		t.Fatalf("revoked key on /v1/models: %+v", e)
+	}
+}
+
+// KEY-15: last_used_at says when a key last authenticated, to the minute: it
+// is absent before use, set by a successful authentication, not by refused
+// ones, and written at most once a minute.
+func TestLastUsedIsRecordedOnSuccessfulUseToTheMinute(t *testing.T) {
+	srv := testkit.Start(t)
+	var issued gatewaykeys.GatewayKeyResult
+	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "friend", "scope": map[string]any{"all": true}}).Expect(201).JSON(&issued)
+	lastUsed := func() *time.Time {
+		t.Helper()
+		var k gatewaykeys.GatewayKey
+		srv.Admin.Get("/api/gateway-keys/friend").Expect(200).JSON(&k)
+		return k.LastUsedAt
+	}
+	if at := lastUsed(); at != nil {
+		t.Fatalf("last used before any use = %v", at)
+	}
+	friend := srv.Client(issued.GatewayKey.Secret)
+
+	// A wrong key is refused and touches nothing.
+	srv.Client(issued.GatewayKey.Secret + "x").Get("/v1/models").Expect(401)
+	if at := lastUsed(); at != nil {
+		t.Fatalf("last used after a refused key = %v", at)
+	}
+	friend.Get("/v1/models").Expect(200)
+	if at := lastUsed(); at == nil || !at.Equal(testkit.Epoch) {
+		t.Fatalf("last used after a call = %v, want %v", at, testkit.Epoch)
+	}
+	// Within the minute it is not rewritten.
+	srv.Clock.Advance(59 * time.Second)
+	friend.Get("/v1/models").Expect(200)
+	if at := lastUsed(); !at.Equal(testkit.Epoch) {
+		t.Fatalf("rewritten within the minute: %v", at)
+	}
+	srv.Clock.Advance(time.Second)
+	srv.Anon.WithHeader("x-api-key", issued.GatewayKey.Secret).Get("/v1/models").Expect(200)
+	if at := lastUsed(); !at.Equal(testkit.Epoch.Add(time.Minute)) {
+		t.Fatalf("last used a minute later = %v", at)
+	}
+	// After revoking, its uses are refused and no longer recorded.
+	srv.Admin.Post("/api/gateway-keys/friend/revoke", nil).Expect(200)
+	srv.Clock.Advance(time.Hour)
+	friend.Get("/v1/models").Expect(401)
+	if at := lastUsed(); !at.Equal(testkit.Epoch.Add(time.Minute)) {
+		t.Fatalf("last used after a revoked use = %v", at)
 	}
 }

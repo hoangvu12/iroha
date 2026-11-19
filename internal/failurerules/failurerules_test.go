@@ -277,6 +277,8 @@ func TestDryRunReplaysRecentFailedAttemptsAndHitsAreCounted(t *testing.T) {
 		up.Enqueue(arrearage())
 		c.Post(chatPath, chat()).Expect(400)
 	}
+	// The 5xx is replayed once on the same key, after a short pause.
+	srv.SkipShortWaits(time.Second)
 	up.Enqueue(up.Error(500, "boom"), up.Error(500, "boom")) // replayed once on the same key
 	c.Post(chatPath, chat()).Expect(502)
 	srv.Clock.Advance(time.Minute)

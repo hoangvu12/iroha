@@ -50,6 +50,10 @@ func opFor(sh shape.Shape, model string, stream bool) string {
 // anthropicVersion is sent to Anthropic Endpoints when the Caller sends none.
 const anthropicVersion = "2023-06-01"
 
+// idempotencyHeader carries one value per Request on every Attempt: the
+// Caller's own, else one Iroha mints (newExchange).
+const idempotencyHeader = "Idempotency-Key"
+
 // maxUpstreamBody caps a buffered upstream answer.
 const maxUpstreamBody = 256 << 20
 
@@ -276,6 +280,9 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 		x.fail(api.Errorf(http.StatusBadGateway, "endpoint_misconfigured",
 			"Ask the Owner to fix the Endpoint (GET /api/providers/"+handle+"/endpoints).", "%s", a.Error))
 		return a, nil
+	}
+	if x.idempotencyKey != "" && req.Header.Get(idempotencyHeader) == "" {
+		req.Header.Set(idempotencyHeader, x.idempotencyKey)
 	}
 	resp, err := g.http.Do(req)
 	if err != nil {

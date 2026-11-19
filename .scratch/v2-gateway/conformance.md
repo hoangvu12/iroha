@@ -13,7 +13,7 @@ Every case of kind **a** (essential) or **b** (provider quirk) in `docs/research
   - `ui (#NN)`: a UI behaviour, owned by UI ticket NN (no DOM tests; the API behind it is mapped where it exists).
 - **Note**: what is asserted, and `deviation:` where v2 deliberately behaves differently from v1. The deviations worth an Owner decision are collected below.
 
-**Totals:** 521 cases (418 of kind a, 103 of kind b): 395 covered, 95 n/a, 17 ui, 8 partial, 6 open.
+**Totals:** 521 cases (418 of kind a, 103 of kind b): 399 covered, 95 n/a, 17 ui, 5 partial, 5 open.
 
 ## Fixed by ticket 26
 
@@ -39,7 +39,7 @@ Tests written for this checklist found these behaviours wrong; each is fixed and
 | 23 | KEY-24, REQ-07, MOD-88, UI-07 | Test chat records "Test" / "Test (as <key>)" Requests (already in ticket 23) |
 | 29 | PRV-03, PRV-08 | Spread Requests across a Provider's same-Shape Endpoints, or record that they are a preference order (needs decision) |
 | 30 | REQ-45, REQ-59, REQ-57 | Done: structured output across every Shape; `search_result` blocks become text |
-| 31 | REQ-18, FAIL-94, FAIL-83, TIME-09 | Mint an `Idempotency-Key` per Request; pause before a same-key 5xx replay (needs decision) |
+| 31 | REQ-18, FAIL-94, FAIL-83, TIME-09 | Done: an `Idempotency-Key` minted per Request; a pause before a same-key 5xx replay |
 | 33 | MOD-67 | Model display names on the model lists (needs decision) |
 | 35 | PRV-86 | Mask static header values in Endpoint Audit Entries (needs decision) |
 | 36 | REQ-105, RUN-08 | Response compression, or record that Cloudflare compresses (needs decision) |
@@ -180,7 +180,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | REQ-15 | a | covered | `gateway TestEachAuthStyleSendsTheKeyItsWayAndKeylessSendsNothing` | every auth style; keyless sends nothing and drops the Caller's header in the slot |
 | REQ-16 | a | covered | `gateway TestEachAuthStyleSendsTheKeyItsWayAndKeylessSendsNothing`; `providers TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited` | static header beats Caller's; static `Authorization` refused when it is the auth slot |
 | REQ-17 | a | covered | `gateway TestContentTypeAndAcceptAreDefaultedUpstreamAndTheCallersAreKept` | A bare body gets Content-Type and Accept `application/json`. A stream gets Accept `text/event-stream` (deviation from v1, which sent application/json). Content-Type and Accept sent by the Caller are kept. |
-| REQ-18 | a | partial (#31) | `gateway TestResponsesPassThroughToAResponsesEndpoint` | Caller's Idempotency-Key forwarded (asserted); v2 never mints one per Request (no code) |
+| REQ-18 | a | covered | `gateway TestEveryAttemptOfARequestCarriesTheSameIdempotencyKey`; `gateway TestResponsesPassThroughToAResponsesEndpoint` | The Caller's value is forwarded unchanged to every Attempt; without one, a UUID minted per Request goes on every Attempt (across keys and the replay), a new one per Request |
 | REQ-19 | a | covered | `gateway TestNonStreamedChatPassesThroughWithTheRequestedModelAndIsRecorded`; `gateway TestMessagesPassThroughToAnAnthropicEndpoint`; `gateway TestResponsesPassThroughToAResponsesEndpoint` | upstream path asserted per op; trailing-slash trim untested |
 | REQ-20 | a | covered | `gateway TestUpstreamRedirectsAreNeverFollowedAndRefusalsKeepTheirStatus` | 302 and 307 with a Location pointing at a second fake: the Caller gets 502 `upstream_redirect`, the second fake gets nothing, no second key is tried (one Attempt, status 3xx), and both keys stay active. A key test that gets a 302 does not pass, reports status 302 and leaves the key active. |
 | REQ-21 | a | covered | `gateway TestNonStreamedChatPassesThroughWithTheRequestedModelAndIsRecorded`; `gateway TestCallersAuthenticateWithAnyKeyHeaderAndTheirCredentialsNeverReachTheUpstream`; `gateway TestACallersRequestIdIsReplacedAndNeverForwarded` | The redirect target receives nothing. The code is `upstream_redirect`, not `upstream_rejected` as part-6 guessed. |
@@ -412,7 +412,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | FAIL-80 | a | covered | `gateway TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself`; `gateway TestMaxAttemptsOverrideLimitsTheAttempts` | deviation (spec): capped at `max_attempts` (default 3), not every key |
 | FAIL-81 | a | covered | `gateway TestAModelEveryKeyIsRefusedIsAnsweredWithoutAnAttempt`; `gateway TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself` |  |
 | FAIL-82 | a | covered | `gateway TestWhenEveryAttemptFailsTheCallerGetsEachAttempt` | One replay of a 5xx key+Endpoint, after every other candidate ("a,b,a") |
-| FAIL-83 | a | open (#31) |  | No backoff at all: a 5xx replay is sent immediately (budget.go:115-120) |
+| FAIL-83 | a | covered | `gateway TestAReplayOnTheSameKeyWaitsFirst` | The pause is before the same-key replay only (v2 has no rounds): 250 ms x 2^(n-1) up to 8 s, jitter x0.5-1.5, a longer Retry-After wins up to 60 s, counted from the failure; deviation: a replay that could not start before the first-byte deadline is not made (502 at once) |
 | FAIL-84 | a | n/a | `gateway TestUpstreamErrorsPassThroughAndFailuresAreExplained` | deviation (spec): one budget (3 Attempts, 60 s to first byte), no rounds; a transient end gives 503 + Retry-After |
 | FAIL-85 | a | covered | `gateway TestTheTimeBudgetEndsASilentAttemptWithoutReplayingIt`; `gateway TestAPoolSharesOneBudgetAcrossItsMembers` | deviation: the deadline is per Request, so a timed-out Attempt ends the Request (504) instead of moving to an untried key |
 | FAIL-86 | a | covered | `gateway TestAThreeMinuteStreamWithLongPausesCompletes`; `gateway TestAStreamWaitingForItsFirstByteIsCommittedAndKeptAlive` | The budget stops at the first byte; only the first-byte deadline cuts an Attempt |
@@ -421,7 +421,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | FAIL-91 | a | covered | `gateway TestAStreamBrokenMidwayEndsWithAnErrorEvent`; `gateway TestAStreamBrokenMidwayLeavesTheKeyStateAlone` | After a mid-stream break: one Attempt with no rule, key active with no since/cooling_models, no `key.state` event |
 | FAIL-92 | b | covered | `gateway TestAnUnstreamedAnswerAfterCommitmentIsAnErrorEvent`; `gateway TestAJSONAnswerToAStreamRequestBeforeCommitmentIsPassedOn` | Deviation: a non-SSE answer goes through the whole-answer path (normalised, model echoed); it is not piped raw. |
 | FAIL-93 | a | covered | `gateway TestACallerThatGoesAwayEndsTheUpstreamCallAndIsRecordedCallerGone` | Status is 499 when no status reached the Caller. The "mid-stream" case keeps 200, the status the Caller already got. |
-| FAIL-94 | a | partial (#31) | `gateway TestResponsesPassThroughToAResponsesEndpoint` | Forwarding the Caller's `Idempotency-Key` is asserted; v2 mints none when it is absent, so a same-key 5xx replay carries no idempotency value |
+| FAIL-94 | a | covered | `gateway TestEveryAttemptOfARequestCarriesTheSameIdempotencyKey`; `gateway TestAReplayOnTheSameKeyWaitsFirst` | The same-key 5xx replay carries the first Attempt's `Idempotency-Key`; minted for every Endpoint Shape |
 | FAIL-95 | a | covered | `gateway TestStatefulResponsesCannotBeTranslated`; `gateway TestMessagesErrorsUseTheAnthropicEnvelope` | 400 `untranslatable_request`, upstream never called |
 | FAIL-98 | a | covered | `gateway TestUpstreamErrorsPassThroughAndFailuresAreExplained`; `gateway TestStreamFailuresBeforeCommitmentKeepTheirHTTPStatus`; `gateway TestCoolingDoublesFromAMinuteAndHonoursResetTimes` | 503 `upstream_unavailable` / `keys_cooling` with Retry-After from the earliest cooling |
 | FAIL-99 | a | n/a |  | `provider_capacity_exhausted` needs usage authority (polling out of scope) |
@@ -606,7 +606,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | TIME-06 | a | covered | `gateway TestAStreamBrokenMidwayEndsWithAnErrorEvent`; `gateway TestAStreamWhoseUpstreamStaysSilentEndsWithAnErrorEvent`; `gateway TestAStreamThatBreaksAfterRelayingIsNeverRetriedOnAnotherKey` | With two keys, the stream breaks after "Hel". Only key a was used and the Request has one Attempt. Deviation: the stream ends with an error event. |
 | TIME-07 | a | covered | `gateway TestTheTimeBudgetEndsASilentAttemptWithoutReplayingIt`; `gateway TestMaxAttemptsOverrideLimitsTheAttempts`; `gateway TestAPoolSharesOneBudgetAcrossItsMembers` | precedence: Pool, then Provider, then default |
 | TIME-08 | a | covered | `gateway TestACallerThatGoesAwayEndsTheUpstreamCallAndIsRecordedCallerGone/"mid-stream"` | Buffered and streaming are both covered (see the other subtests). |
-| TIME-09 | a | partial (#31) | `gateway TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself` | deviation: no backoff sleeps; the next Attempt goes at once to another key, and Retry-After becomes the cooling time |
+| TIME-09 | a | covered | `gateway TestAReplayOnTheSameKeyWaitsFirst`; `gateway TestACallerLeavingDuringTheReplayPauseEndsTheRequest`; `gateway TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself` | The pause runs on the injected clock and ends when the Caller leaves (499 `caller_gone`, no replay). deviation: moving to another key never waits; a 429's Retry-After becomes the cooling time |
 | TIME-10 | a | covered | `gateway TestStreamsFlowChunkByChunkAndUsageIsRecorded`; `gateway TestASlowCallerSlowsTheUpstreamRead` | relay is synchronous event by event with flush, so it is pull-bound: a slow Caller slows the upstream read and memory stays bounded (ticket 39) |
 | TIME-11 | a | covered | `rules TestBuiltinRulesClassifyTheGenericFailures/"302 matches nothing"`; `gateway TestUpstreamRedirectsAreNeverFollowedAndRefusalsKeepTheirStatus` | The redirect target receives nothing. The code is `upstream_redirect`, not `upstream_rejected` as part-6 guessed. |
 | TIME-12 | b | n/a |  | Bun-specific; v2 is a Go binary |

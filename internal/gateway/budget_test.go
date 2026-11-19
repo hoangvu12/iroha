@@ -164,6 +164,7 @@ func TestWhenEveryAttemptFailsTheCallerGetsEachAttempt(t *testing.T) {
 
 	// Two keys failing with 5xx: each is tried, then one replay, then the
 	// budget of 3 Attempts is spent.
+	srv.SkipShortWaits(time.Second) // the pause before the replay
 	up.Default(up.Error(503, "overloaded"))
 	var e callerError
 	resp := caller.Post(chatPath, chat("gpt-x")).Expect(502).JSON(&e)
@@ -523,6 +524,153 @@ func TestKeysAreEnabledDisabledAndSummarisedThroughTheAPI(t *testing.T) {
 	srv.Admin.Get("/api/providers/acme/summary").Expect(200).JSON(&sum)
 	if sum.Keys.Cooling != 1 || sum.Keys.Active != 0 || sum.NextUsableAt == nil || !sum.NextUsableAt.Equal(srv.Clock.Now().Add(time.Minute)) {
 		t.Fatalf("summary = %+v", sum)
+	}
+}
+
+// idempotencyKeys lists the Idempotency-Key of each Attempt the fake
+// received from the from-th request on.
+func idempotencyKeys(up *testkit.Upstream, from int) []string {
+	var out []string
+	for _, r := range up.Requests()[from:] {
+		if r.Method != http.MethodGet {
+			out = append(out, r.Header.Get("Idempotency-Key"))
+		}
+	}
+	return out
+}
+
+// REQ-18, FAIL-94: every Attempt of a Request carries one Idempotency-Key,
+// the Caller's when it sent one, else one Iroha minted for the Request.
+func TestEveryAttemptOfARequestCarriesTheSameIdempotencyKey(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
+	caller := srv.Client(issue(t, srv, "pi", all))
+
+	up.Enqueue(up.Error(500, "boom"), up.Text("hello"))
+	caller.Post(chatPath, chat("gpt-x")).Expect(200)
+	first := idempotencyKeys(up, 0)
+	if len(first) != 2 || first[0] == "" || first[0] != first[1] {
+		t.Fatalf("Idempotency-Keys = %q", first)
+	}
+
+	// Another Request gets its own.
+	n := up.Count()
+	caller.Post(chatPath, chat("gpt-x")).Expect(200)
+	if got := idempotencyKeys(up, n); len(got) != 1 || got[0] == "" || got[0] == first[0] {
+		t.Fatalf("second Request's Idempotency-Key = %q (first %q)", got, first[0])
+	}
+
+	// A Caller's own value goes to every Attempt unchanged.
+	n = up.Count()
+	up.Enqueue(up.Error(500, "boom"), up.Text("hello"))
+	caller.WithHeader("Idempotency-Key", "caller-key-1").Post(chatPath, chat("gpt-x")).Expect(200)
+	if got := idempotencyKeys(up, n); len(got) != 2 || got[0] != "caller-key-1" || got[1] != "caller-key-1" {
+		t.Fatalf("Caller's Idempotency-Key = %q", got)
+	}
+}
+
+// waitForReplay runs the Request on the caller in the background and waits
+// until its replay pause is armed: a timer due within max. It returns the
+// Request's answer channel and the time the pause was armed.
+func waitForReplay(t *testing.T, srv *testkit.Server, up *testkit.Upstream, send func() *testkit.Response, max time.Duration) (<-chan *testkit.Response, time.Time) {
+	t.Helper()
+	done := make(chan *testkit.Response, 1)
+	go func() { done <- send() }()
+	up.Await(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	now := srv.Clock.Now()
+	if err := srv.Clock.BlockUntilDue(ctx, now.Add(max)); err != nil {
+		t.Fatalf("no replay pause armed: %v", err)
+	}
+	return done, now
+}
+
+// notYet fails the test when the Request answered or the fake got another
+// Attempt.
+func notYet(t *testing.T, done <-chan *testkit.Response, up *testkit.Upstream, attempts int) {
+	t.Helper()
+	select {
+	case r := <-done:
+		t.Fatalf("answered during the pause: %d %s", r.Status, r.Body)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if up.Count() != attempts {
+		t.Fatalf("upstream got %d Attempts during the pause, want %d", up.Count(), attempts)
+	}
+}
+
+// FAIL-83, TIME-09: a 5xx key is replayed after a pause on the clock: 250 ms
+// with jitter (125-375 ms), or the answer's Retry-After when it asks longer.
+func TestAReplayOnTheSameKeyWaitsFirst(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addProvider(t, srv, "acme", up.URL(), "sk-test-a")
+	caller := srv.Client(issue(t, srv, "pi", all))
+	send := func() *testkit.Response { return caller.Post(chatPath, chat("gpt-x")) }
+
+	up.Enqueue(up.Error(503, "overloaded"), up.Text("hello"))
+	done, _ := waitForReplay(t, srv, up, send, 375*time.Millisecond)
+	notYet(t, done, up, 1)
+	srv.Clock.Advance(375 * time.Millisecond)
+	resp := (<-done).Expect(200)
+	r := readRequest(t, srv, resp.Header.Get("X-Request-Id"))
+	if len(r.Attempts) != 2 || r.Attempts[1].UpstreamKey != "key-1" || up.Count() != 2 {
+		t.Fatalf("request = %+v", r)
+	}
+	if keys := idempotencyKeys(up, 0); keys[0] == "" || keys[0] != keys[1] {
+		t.Fatalf("the replay sent another Idempotency-Key: %q", keys)
+	}
+
+	// A Retry-After asking longer wins.
+	up.Enqueue(up.Error(503, "overloaded").Header("Retry-After", "3"), up.Text("hello"))
+	n := up.Count()
+	done, _ = waitForReplay(t, srv, up, send, 3*time.Second)
+	srv.Clock.Advance(2900 * time.Millisecond)
+	notYet(t, done, up, n+1)
+	srv.Clock.Advance(100 * time.Millisecond)
+	(<-done).Expect(200)
+
+	// A Retry-After past the first-byte deadline leaves no time for the
+	// replay: the Caller is answered at once.
+	up.Enqueue(up.Error(503, "overloaded").Header("Retry-After", "120"))
+	n = up.Count()
+	var e callerError
+	send().Expect(502).JSON(&e)
+	if e.Error.Code != "upstream_failed" || len(e.Error.Details.Attempts) != 1 || up.Count() != n+1 {
+		t.Fatalf("error = %+v (upstream got %d)", e.Error, up.Count()-n)
+	}
+}
+
+// TIME-09: a Caller that leaves during the pause ends it; nothing is replayed.
+func TestACallerLeavingDuringTheReplayPauseEndsTheRequest(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addProvider(t, srv, "acme", up.URL(), "sk-test-a")
+	key := issue(t, srv, "pi", all)
+
+	up.Enqueue(up.Error(503, "overloaded").Header("Retry-After", "30"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+chatPath,
+		strings.NewReader(`{"model":"gpt-x","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Authorization", "Bearer "+key)
+	go func() {
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	up.Await(1)
+	wait, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	if err := srv.Clock.BlockUntilDue(wait, srv.Clock.Now().Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	r := confOnlyRequest(t, srv)
+	if r.Status != 499 || r.Error == nil || r.Error.Code != "caller_gone" || len(r.Attempts) != 1 || up.Count() != 1 {
+		t.Fatalf("request = %+v (upstream got %d)", r, up.Count())
 	}
 }
 

@@ -238,6 +238,7 @@ func TestFailuresAfterCommitmentMoveOnThenArriveAsAnErrorEvent(t *testing.T) {
 
 	// Every Attempt fails after the commit: the error event carries what
 	// the HTTP error would have, the Attempts and the summary.
+	srv.SkipShortWaits(time.Second) // the pause before the replay
 	hold = make(chan struct{})
 	up.Enqueue(up.Error(503, "overloaded").HoldUntil(hold))
 	up.Default(up.Error(503, "overloaded"))
@@ -265,6 +266,7 @@ func TestStreamFailuresBeforeCommitmentKeepTheirHTTPStatus(t *testing.T) {
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
+	srv.SkipShortWaits(time.Second) // the pause before the replay
 	up.Default(up.Error(503, "overloaded"))
 	body := chat("gpt-x")
 	body["stream"] = true

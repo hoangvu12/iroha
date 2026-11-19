@@ -12,7 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/shape"
@@ -45,8 +47,9 @@ type Send struct {
 	// Reasoning is written in the Shape's own field, so translation to the
 	// Endpoint's Shape is exercised like any Caller's.
 	Reasoning string `json:"reasoning,omitempty" enum:"off,low,medium,high" doc:"Reasoning effort, written in the Shape's own field: reasoning_effort (OpenAI Chat), reasoning.effort (Responses), thinking.budget_tokens 1024/4096/12000 (Anthropic), thinkingConfig.thinkingBudget (Gemini). off or absent: not set."`
-	ToolCheck bool   `json:"tool_check,omitempty" doc:"Offer the test tool get_weather(city) and report whether the model called it properly."`
-	MaxTokens int    `json:"max_tokens,omitempty" doc:"Most output tokens. Default 4096 (plus the reasoning budget on Anthropic)."`
+	Tools     []string `json:"tools,omitempty" doc:"Test tools to offer, by name (GET /api/test/tools lists them: get_weather, get_time, calculate, web_search, fetch_url, lookup_order). The answer carries a check of the model's tool calls."`
+	ToolCheck bool     `json:"tool_check,omitempty" doc:"The older form of tools: [\"get_weather\"]. Ignored when tools names any."`
+	MaxTokens int      `json:"max_tokens,omitempty" doc:"Most output tokens. Default 4096 (plus the reasoning budget on Anthropic)."`
 	// Routing.
 	UpstreamKey string `json:"upstream_key,omitempty" doc:"Pin every Attempt to this Upstream Key (name or ID) of the model's Provider. It is tried whatever its Key State (as key tests do); failures still change it. Needs <provider>/<model>."`
 	Endpoint    string `json:"endpoint,omitempty" doc:"Pin every Attempt to this Endpoint (name or ID) of the model's Provider. Needs <provider>/<model>."`
@@ -57,9 +60,9 @@ type Send struct {
 type Message struct {
 	Role    string `json:"role" enum:"user,assistant"`
 	Content string `json:"content"`
-	// ToolCalls are calls an assistant turn made to the test tool; each is
-	// answered with a made-up weather report before the next turn.
-	ToolCalls []ToolCall `json:"tool_calls,omitempty" doc:"Assistant turns only: the test tool calls the model made. Each is answered with a made-up weather report in the request."`
+	// ToolCalls are calls an assistant turn made to test tools; Iroha
+	// answers each (toolAnswer) before the next turn.
+	ToolCalls []ToolCall `json:"tool_calls,omitempty" doc:"Assistant turns only: the test tool calls the model made. Iroha answers each in the request with that tool's result (made up, or computed for get_time and calculate)."`
 }
 
 // ToolCall is one call of the test tool.
@@ -82,15 +85,8 @@ type Built struct {
 	Stream bool
 }
 
-// Test tool.
-const (
-	ToolName        = "get_weather"
-	toolDescription = "Get the current weather in a city."
-)
-
-var toolParameters = obj{{"type", "object"}, {"properties", obj{{"city", obj{{"type", "string"}, {"description", "City name, e.g. Hanoi"}}}}}, {"required", []any{"city"}}}
-
-// Check validates a send and fills in its defaults.
+// Check validates a send and fills in its defaults; afterwards Tools holds
+// the tools offered (tool_check alone becomes get_weather), each once.
 func (s *Send) Check() error {
 	s.Model = strings.TrimSpace(s.Model)
 	if s.Model == "" {
@@ -121,8 +117,26 @@ func (s *Send) Check() error {
 	if s.MaxTokens < 0 {
 		return api.BadRequest("Send max_tokens of at least 1, or leave it out.", "max_tokens is %d.", s.MaxTokens)
 	}
+	if len(s.Tools) == 0 && s.ToolCheck {
+		s.Tools = []string{ToolName}
+	}
+	var chosen []string
+	for _, name := range s.Tools {
+		name = strings.TrimSpace(name)
+		if toolNamed(name) == nil {
+			return api.Errorf(http.StatusBadRequest, "unknown_tool", "Use the names GET /api/test/tools lists: "+strings.Join(ToolNames(), ", ")+".", "There is no test tool %q.", name)
+		}
+		if !slices.Contains(chosen, name) {
+			chosen = append(chosen, name)
+		}
+	}
+	s.Tools = chosen
 	return nil
 }
+
+// Checked reports whether the answer gets a tool check: some tool was
+// chosen. Call Check first.
+func (s Send) Checked() bool { return len(s.Tools) > 0 }
 
 // budget is the thinking budget of a level (Anthropic, Gemini).
 func budget(level string) int {
@@ -151,39 +165,51 @@ func (s Send) maxTokens() int {
 	return 4096
 }
 
-// tools reports whether the request offers the test tool: when the check
-// is on, and whenever earlier turns called it (Providers refuse tool calls
-// in the history of a request offering no tools).
-func (s Send) tools() bool {
-	if s.ToolCheck {
-		return true
-	}
-	for _, m := range s.Messages {
-		if len(m.ToolCalls) > 0 {
-			return true
+// offered is the tools the request offers: the chosen ones, then any test
+// tool earlier turns called that is no longer chosen (Providers refuse tool
+// calls in the history of a request offering no such tool). History with
+// calls to no known tool still offers get_weather, as before ticket 29.
+func (s Send) offered() []*tool {
+	var out []*tool
+	add := func(name string) {
+		if t := toolNamed(name); t != nil && !slices.Contains(out, t) {
+			out = append(out, t)
 		}
 	}
-	return false
+	for _, name := range s.Tools {
+		add(name)
+	}
+	calls := false
+	for _, m := range s.Messages {
+		for _, c := range m.ToolCalls {
+			calls = true
+			add(c.Name)
+		}
+	}
+	if calls && len(out) == 0 {
+		add(ToolName)
+	}
+	return out
 }
 
-// Build writes the send as the request a Caller of its Shape would make.
-// Call Check first.
-func Build(s Send) (Built, error) {
+// Build writes the send as the request a Caller of its Shape would make;
+// now is when get_time results are for. Call Check first.
+func Build(s Send, now time.Time) (Built, error) {
 	b := Built{Shape: s.Shape, Model: s.Model, Stream: s.StreamOn()}
 	var body obj
 	switch s.Shape {
 	case shape.OpenAIChat:
-		b.Path, body = "/v1/chat/completions", buildChat(s)
+		b.Path, body = "/v1/chat/completions", buildChat(s, now)
 	case shape.OpenAIResponses:
-		b.Path, body = "/v1/responses", buildResponses(s)
+		b.Path, body = "/v1/responses", buildResponses(s, now)
 	case shape.AnthropicMessages:
-		b.Path, body = "/v1/messages", buildAnthropic(s)
+		b.Path, body = "/v1/messages", buildAnthropic(s, now)
 	case shape.Gemini:
 		method := "generateContent"
 		if b.Stream {
 			method = "streamGenerateContent"
 		}
-		b.Path, body = "/v1beta/models/"+s.Model+":"+method, buildGemini(s)
+		b.Path, body = "/v1beta/models/"+s.Model+":"+method, buildGemini(s, now)
 	default:
 		return b, fmt.Errorf("testchat: unknown shape %q", s.Shape)
 	}
@@ -225,25 +251,21 @@ func args(c ToolCall) json.RawMessage {
 // argsString is a tool call's arguments as the JSON string OpenAI Shapes use.
 func argsString(c ToolCall) string { return string(args(c)) }
 
-// toolResult is the made-up answer of the test tool.
-func toolResult(c ToolCall) obj {
-	var a struct {
-		City string `json:"city"`
-	}
-	_ = json.Unmarshal(args(c), &a)
-	city := a.City
-	if city == "" {
-		city = "Hanoi"
-	}
-	return obj{{"city", city}, {"temperature_c", 24}, {"conditions", "partly cloudy"}, {"wind", "light east wind"}}
-}
-
-func toolResultString(c ToolCall) string {
-	b, _ := toolResult(c).MarshalJSON()
+func toolResultString(c ToolCall, now time.Time) string {
+	b, _ := toolAnswer(c, now).MarshalJSON()
 	return string(b)
 }
 
-func buildChat(s Send) obj {
+// toolDefs writes the offered tools in a Shape's own form.
+func (s Send) toolDefs(def func(t *tool) any) []any {
+	var out []any
+	for _, t := range s.offered() {
+		out = append(out, def(t))
+	}
+	return out
+}
+
+func buildChat(s Send, now time.Time) obj {
 	var msgs []any
 	if s.System != "" {
 		msgs = append(msgs, obj{{"role", "system"}, {"content", s.System}})
@@ -259,12 +281,14 @@ func buildChat(s Send) obj {
 		}
 		msgs = append(msgs, obj{{"role", "assistant"}, {"content", m.Content}, {"tool_calls", calls}})
 		for i, c := range m.ToolCalls {
-			msgs = append(msgs, obj{{"role", "tool"}, {"tool_call_id", callID(c, t, i)}, {"content", toolResultString(c)}})
+			msgs = append(msgs, obj{{"role", "tool"}, {"tool_call_id", callID(c, t, i)}, {"content", toolResultString(c, now)}})
 		}
 	}
 	body := obj{{"model", s.Model}, {"messages", msgs}, {"max_tokens", s.maxTokens()}}
-	if s.tools() {
-		body = append(body, kv{"tools", []any{obj{{"type", "function"}, {"function", obj{{"name", ToolName}, {"description", toolDescription}, {"parameters", toolParameters}}}}}})
+	if defs := s.toolDefs(func(t *tool) any {
+		return obj{{"type", "function"}, {"function", obj{{"name", t.name}, {"description", t.description}, {"parameters", t.params}}}}
+	}); defs != nil {
+		body = append(body, kv{"tools", defs})
 	}
 	if r := s.reasoning(); r != "" {
 		body = append(body, kv{"reasoning_effort", r})
@@ -275,7 +299,7 @@ func buildChat(s Send) obj {
 	return body
 }
 
-func buildResponses(s Send) obj {
+func buildResponses(s Send, now time.Time) obj {
 	var input []any
 	for t, m := range s.Messages {
 		if m.Content != "" || len(m.ToolCalls) == 0 {
@@ -283,7 +307,7 @@ func buildResponses(s Send) obj {
 		}
 		for i, c := range m.ToolCalls {
 			input = append(input, obj{{"type", "function_call"}, {"call_id", callID(c, t, i)}, {"name", c.Name}, {"arguments", argsString(c)}})
-			input = append(input, obj{{"type", "function_call_output"}, {"call_id", callID(c, t, i)}, {"output", toolResultString(c)}})
+			input = append(input, obj{{"type", "function_call_output"}, {"call_id", callID(c, t, i)}, {"output", toolResultString(c, now)}})
 		}
 	}
 	body := obj{{"model", s.Model}}
@@ -291,8 +315,10 @@ func buildResponses(s Send) obj {
 		body = append(body, kv{"instructions", s.System})
 	}
 	body = append(body, kv{"input", input}, kv{"max_output_tokens", s.maxTokens()})
-	if s.tools() {
-		body = append(body, kv{"tools", []any{obj{{"type", "function"}, {"name", ToolName}, {"description", toolDescription}, {"parameters", toolParameters}}}})
+	if defs := s.toolDefs(func(t *tool) any {
+		return obj{{"type", "function"}, {"name", t.name}, {"description", t.description}, {"parameters", t.params}}
+	}); defs != nil {
+		body = append(body, kv{"tools", defs})
 	}
 	if r := s.reasoning(); r != "" {
 		body = append(body, kv{"reasoning", obj{{"effort", r}}})
@@ -303,7 +329,7 @@ func buildResponses(s Send) obj {
 	return body
 }
 
-func buildAnthropic(s Send) obj {
+func buildAnthropic(s Send, now time.Time) obj {
 	var msgs []any
 	for t, m := range s.Messages {
 		if len(m.ToolCalls) == 0 {
@@ -316,7 +342,7 @@ func buildAnthropic(s Send) obj {
 		}
 		for i, c := range m.ToolCalls {
 			blocks = append(blocks, obj{{"type", "tool_use"}, {"id", callID(c, t, i)}, {"name", c.Name}, {"input", args(c)}})
-			results = append(results, obj{{"type", "tool_result"}, {"tool_use_id", callID(c, t, i)}, {"content", toolResultString(c)}})
+			results = append(results, obj{{"type", "tool_result"}, {"tool_use_id", callID(c, t, i)}, {"content", toolResultString(c, now)}})
 		}
 		msgs = append(msgs, obj{{"role", "assistant"}, {"content", blocks}}, obj{{"role", "user"}, {"content", results}})
 	}
@@ -331,8 +357,10 @@ func buildAnthropic(s Send) obj {
 		body = append(body, kv{"system", s.System})
 	}
 	body = append(body, kv{"messages", msgs})
-	if s.tools() {
-		body = append(body, kv{"tools", []any{obj{{"name", ToolName}, {"description", toolDescription}, {"input_schema", toolParameters}}}})
+	if defs := s.toolDefs(func(t *tool) any {
+		return obj{{"name", t.name}, {"description", t.description}, {"input_schema", t.params}}
+	}); defs != nil {
+		body = append(body, kv{"tools", defs})
 	}
 	if think > 0 {
 		body = append(body, kv{"thinking", obj{{"type", "enabled"}, {"budget_tokens", think}}})
@@ -366,7 +394,7 @@ func blocksOf(content any) []any {
 	return content.([]any)
 }
 
-func buildGemini(s Send) obj {
+func buildGemini(s Send, now time.Time) obj {
 	var contents []any
 	for _, m := range s.Messages {
 		role := "user"
@@ -384,7 +412,7 @@ func buildGemini(s Send) obj {
 		if len(m.ToolCalls) > 0 {
 			var results []any
 			for _, c := range m.ToolCalls {
-				results = append(results, obj{{"functionResponse", obj{{"name", c.Name}, {"response", toolResult(c)}}}})
+				results = append(results, obj{{"functionResponse", obj{{"name", c.Name}, {"response", toolAnswer(c, now)}}}})
 			}
 			contents = append(contents, obj{{"role", "user"}, {"parts", results}})
 		}
@@ -394,8 +422,10 @@ func buildGemini(s Send) obj {
 		body = append(body, kv{"systemInstruction", obj{{"parts", []any{obj{{"text", s.System}}}}}})
 	}
 	body = append(body, kv{"contents", contents})
-	if s.tools() {
-		body = append(body, kv{"tools", []any{obj{{"functionDeclarations", []any{obj{{"name", ToolName}, {"description", toolDescription}, {"parameters", toolParameters}}}}}}})
+	if defs := s.toolDefs(func(t *tool) any {
+		return obj{{"name", t.name}, {"description", t.description}, {"parameters", t.params}}
+	}); defs != nil {
+		body = append(body, kv{"tools", []any{obj{{"functionDeclarations", defs}}}})
 	}
 	cfg := obj{{"maxOutputTokens", s.maxTokens()}}
 	if think := budget(s.reasoning()); think > 0 {

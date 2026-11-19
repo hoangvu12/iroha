@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { Message, Settings, Shape, StreamEvent, ToolCall, ToolCheck } from "./api";
-import { DEFAULT_SETTINGS, sendBody, streamTurn } from "./api";
+import { DEFAULT_SETTINGS, normalizeSettings, sendBody, streamTurn } from "./api";
 
 // The chats (ticket 23). Kept in this browser's localStorage, so they
 // survive a reload; nothing about them is configuration, and every turn is
@@ -51,8 +51,10 @@ function load(): State {
     if (raw) {
       const s = JSON.parse(raw) as { chats: Chat[]; currentId?: string };
       // A reply cut by a reload is not streaming any more.
-      for (const c of s.chats)
+      for (const c of s.chats) {
+        c.settings = normalizeSettings(c.settings);
         for (const t of c.turns) if (t.role === "assistant") for (const r of t.rounds) if (r.status === "streaming") r.status = "stopped";
+      }
       return { chats: s.chats, currentId: s.currentId, running: 0 };
     }
   } catch {
@@ -225,10 +227,14 @@ function patchRound(chatId: string, turnId: string, index: number, fn: (r: Round
   patchReply(chatId, turnId, (t) => ({ ...t, rounds: t.rounds.map((r, i) => (i === index ? fn(r) : r)) }));
 }
 
+/** Most Requests one reply makes: the answer, then a follow-up for each round of tool calls. */
+export const MAX_ROUNDS = 5;
+
 /**
- * Send text as the next user turn and stream the reply. With the tool
- * check on, a reply that calls the tool is followed by one more Request
- * carrying the made-up result, whose answer joins the same reply.
+ * Send text as the next user turn and stream the reply. With test tools
+ * on, a reply that calls tools is followed by another Request carrying
+ * Iroha's results, whose answer joins the same reply; it goes on while the
+ * model keeps calling, up to MAX_ROUNDS Requests.
  */
 export async function send(chatId: string, text: string) {
   const chat = state.chats.find((c) => c.id === chatId);
@@ -247,7 +253,7 @@ export async function send(chatId: string, text: string) {
   running.set(chatId, ctrl);
   set((s) => ({ ...s, running: running.size }));
   try {
-    for (let round = 0; round < 2; round++) {
+    for (let round = 0; round < MAX_ROUNDS; round++) {
       const current = state.chats.find((c) => c.id === chatId);
       if (!current) return;
       const before = current.turns.filter((t) => t.id !== reply.id);
@@ -262,7 +268,7 @@ export async function send(chatId: string, text: string) {
       );
       patchRound(chatId, reply.id, round, (r) => ({ ...r, requestId: res.requestId, status: res.error ? "failed" : "done", error: res.error }));
       const done = findReply(chatId, reply.id)?.rounds[round];
-      if (!done || res.error || !settings.toolCheck || roundCalls(done).length === 0) break;
+      if (!done || res.error || settings.tools.length === 0 || roundCalls(done).length === 0) break;
     }
   } catch {
     // Stopped: keep what arrived.

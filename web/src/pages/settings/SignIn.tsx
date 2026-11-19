@@ -75,7 +75,7 @@ const columns = col.columns([
     id: "browser",
     header: "Browser",
     sortFn: (a, b) => browserName(a.original.user_agent).localeCompare(browserName(b.original.user_agent)) || b.original.created_at.localeCompare(a.original.created_at),
-    meta: { width: "w-[30%]", className: "text-[15px]" },
+    meta: { width: "w-[34%]", className: "whitespace-nowrap text-[15px]" },
     cell: ({ row }) => (
       <span title={row.original.user_agent}>
         <span className="font-medium">{browserName(row.original.user_agent)}</span>

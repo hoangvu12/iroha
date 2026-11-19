@@ -8,7 +8,12 @@ import { readStack, recordKey, type SheetRecord, writeStack } from "./records";
 // first. React state leads and the URL follows in the same event (UI SDK's
 // controlled-value rule); Back, Forward and links lead the other way.
 
-export type SheetEntry = { id: number; record: SheetRecord };
+/**
+ * One open sheet. `id` names the sheet itself, which keeps it while its record
+ * changes in place (↑/↓, a tab, a record of the same kind opened over it);
+ * `opened` changes each time `open` puts a record in it, so the sheet takes focus.
+ */
+export type SheetEntry = { id: number; record: SheetRecord; opened?: number };
 
 /** History state on an entry pushed by opening a sheet: the search it was opened from, and the params the link dropped. */
 type Pushed = { sheetBack?: string; dropped?: string[] };
@@ -37,10 +42,15 @@ const LevelContext = createContext(-1);
 
 let nextId = 1;
 
+/** Entries for `records`: a record already shown keeps its sheet; a sheet whose record went keeps its place for one of the same kind (Back after a swap). */
 function toEntries(records: SheetRecord[], prev: SheetEntry[]): SheetEntry[] {
-  return records.map((record) => {
+  const keys = new Set(records.map(recordKey));
+  return records.map((record, i) => {
     const same = prev.find((e) => recordKey(e.record) === recordKey(record));
-    return { id: same?.id ?? nextId++, record };
+    if (same) return { ...same, record };
+    const there = prev[i];
+    if (there && there.record.kind === record.kind && !keys.has(recordKey(there.record))) return { ...there, record };
+    return { id: nextId++, record };
   });
 }
 
@@ -56,11 +66,21 @@ function without(search: string, drop?: string[]): string {
 const sameStack = (a: SheetEntry[], b: SheetEntry[]) =>
   a.length === b.length && a.every((e, i) => e.id === b[i].id && JSON.stringify(e.record) === JSON.stringify(b[i].record));
 
-/** The stack after opening `record` from `from`. */
+let nextOpened = 1;
+
+/**
+ * The stack after opening `record` from `from`. A record of the same kind as
+ * the sheet it would close takes that sheet's place (a feed row clicked while
+ * a Request is open, another key from a Provider's list): the content swaps
+ * and nothing slides out and in again.
+ */
 function opened(stack: SheetEntry[], record: SheetRecord, from: number): SheetEntry[] {
   const at = stack.findIndex((e) => recordKey(e.record) === recordKey(record));
   if (at >= 0) return stack.slice(0, at + 1);
-  return [...stack.slice(0, Math.max(0, from + 1)), { id: nextId++, record }];
+  const kept = stack.slice(0, Math.max(0, from + 1));
+  const over = stack[kept.length];
+  const id = over && over.record.kind === record.kind ? over.id : nextId++;
+  return [...kept, { id, record, opened: nextOpened++ }];
 }
 
 export function SheetStackProvider({ children }: { children: ReactNode }) {
@@ -116,7 +136,8 @@ export function SheetStackProvider({ children }: { children: ReactNode }) {
         const dropping = !!drop?.some((k) => new URLSearchParams(latest.current.location.search).has(k));
         if (sameStack(next, cur) && !dropping) return;
         const added = next[next.length - 1];
-        const isNew = !cur.some((e) => e.id === added.id);
+        // New to the stack, in a sheet of its own or in the place of one of its kind.
+        const isNew = !cur.some((e) => recordKey(e.record) === recordKey(added.record));
         if (isNew) openers.current.set(added.id, document.activeElement);
         // Leaving a dialog for a sheet is a step forward too: Back returns to the dialog.
         write(next, isNew || dropping ? "push" : "close", drop);

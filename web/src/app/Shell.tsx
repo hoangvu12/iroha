@@ -13,7 +13,7 @@ import { SheetStack } from "@/sheets/SheetStack";
 import { SheetStackProvider } from "@/sheets/stack";
 import { Avatar, BANNER_SRC } from "./brand";
 import { useChatPanel } from "./chat-panel";
-import { CHAT_WIDTH, ChatSheet } from "./ChatSheet";
+import { ChatSheet } from "./ChatSheet";
 import type { HealthState } from "./health";
 import { healthLabel, useHealth } from "./health";
 import { NAV, type NavItem } from "./nav";
@@ -63,19 +63,12 @@ function ShellFrame() {
         <ChatPanel mode="sheet" />
       </ChatSheet>
       {phone && <TabBar />}
-      <SheetsBesideChat chatPage={chatPage} />
+      {/* Record sheets beside the page, left of the chat panel (UI tickets 10, 15). The
+          stack reads the chat's state itself, so the chat coming and going re-renders
+          the sheets and not the whole frame and page. */}
+      <SheetStack chat={!chatPage} />
     </div>
   );
-}
-
-/**
- * Record sheets open beside the page, left of the chat panel (UI ticket 10).
- * Its own component, so the chat opening and closing re-renders the sheets
- * and not the whole frame and page.
- */
-function SheetsBesideChat({ chatPage }: { chatPage: boolean }) {
-  const chat = useChatPanel();
-  return <SheetStack right={chat.isOpen && !chatPage ? CHAT_WIDTH : 0} />;
 }
 
 // No transition: P, G, R and C move the highlight, and a key never animates

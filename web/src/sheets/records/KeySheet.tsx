@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CircleSlash, MessageCircle, Pause, Play } from "lucide-react";
 import { api, seg } from "@/api/client";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { formatDate, formatDuration, timeAgo } from "@/lib/format";
 import { calls, errorText, maskSecret, useRefresh, type UpstreamKey } from "@/pages/providers/api";
 import { KeyStateLabel } from "@/pages/providers/controls";
@@ -21,7 +21,7 @@ export default function KeySheet({ record }: SheetBodyProps<"key">) {
     queryFn: ({ signal }) => api.get<UpstreamKey>(`/api/providers/${seg(provider)}/keys/${seg(key)}`, { signal }),
     refetchInterval: 10_000,
   });
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const refresh = useRefresh();
   const [result, setResult] = useState<string>();
   // The sheet stays open, so Disable/Enable says how it went beside its button (UI ticket 04).

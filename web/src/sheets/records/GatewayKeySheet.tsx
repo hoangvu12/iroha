@@ -1,7 +1,7 @@
 import { KeyRound, MessageCircle } from "lucide-react";
 import { Link } from "react-router";
 import { seg } from "@/api/client";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { formatDate, formatNumber, timeAgo } from "@/lib/format";
 import { useGatewayKey } from "@/pages/gateway-keys/api";
 import { maskSecret } from "@/pages/providers/api";
@@ -26,7 +26,7 @@ import type { SheetBodyProps } from "../SheetStack";
 
 export default function GatewayKeySheet({ record }: SheetBodyProps<"gateway-key">) {
   const q = useGatewayKey(record.key);
-  const chat = useChatPanel();
+  const chat = useChatActions();
 
   if (!q.data)
     return (

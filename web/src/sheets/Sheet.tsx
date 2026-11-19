@@ -83,7 +83,8 @@ export function SheetTitle({
 
 export function SheetBody({ children }: { children: ReactNode }) {
   return (
-    <ScrollArea className="flex-1" contentClassName="px-6 pb-10">
+    // Scrolling past its end doesn't scroll the page behind; the end clears a phone's home bar.
+    <ScrollArea className="flex-1" contentClassName="px-6 pb-[calc(2.5rem+env(safe-area-inset-bottom))]" viewportClassName="overscroll-contain">
       {children}
     </ScrollArea>
   );

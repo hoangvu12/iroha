@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { DialogTitle } from "@ui-sdk/react/dialog";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { seg } from "@/api/client";
 import type { RequestTab } from "@/sheets/records";
 import { CopyIconButton, SheetBar, SheetBody, SheetProblem, SheetTitle } from "@/sheets/Sheet";
@@ -35,7 +35,7 @@ export function RequestSheet({ record, index, top }: SheetBodyProps<"request">) 
   const { id } = record;
   const tab: RequestTab = record.tab ?? "details";
   const sheets = useSheets();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const navigate = useNavigate();
   const rows = sheets.requestRows;
   const req = useRequest(id, rows.find((x) => x.id === id));

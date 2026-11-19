@@ -33,7 +33,8 @@ test("a feed row opens the Request sheet first; ↓ steps to the next row in pla
 
   await user.keyboard("{ArrowDown}");
   await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_2"));
-  expect(await screen.findByRole("dialog", { name: "Request slow" })).toBeTruthy();
+  // ↑/↓ swaps the content in the same sheet: nothing slides (a key, many a day).
+  expect(await screen.findByRole("dialog", { name: "Request slow" })).toBe(sheet);
   expect((await feedRow("req_2")).getAttribute("aria-current")).toBe("true");
 
   await user.click(await within(screen.getByRole("dialog", { name: "Request slow" })).findByRole("link", { name: "acme" }));
@@ -41,7 +42,8 @@ test("a feed row opens the Request sheet first; ↓ steps to the next row in pla
   await user.click(await feedRow("req_1"));
   await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1"));
   await waitFor(() => expect(sheets()).toHaveLength(1));
-  expect(sheet).toBeTruthy();
+  // A row clicked while a Request is open shows it in that sheet: no slide out and in again.
+  expect(screen.getByRole("dialog", { name: "Request fast" })).toBe(sheet);
 });
 
 test("a feed row's Caller, Pool, Provider and key are links to their sheets, not to the Request", async () => {

@@ -1,6 +1,6 @@
 import { MessageCircle } from "lucide-react";
 import { seg } from "@/api/client";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { formatDate } from "@/lib/format";
 import { usePool } from "@/pages/providers/api";
 import { Status } from "@/ui/bits";
@@ -25,7 +25,7 @@ import type { SheetBodyProps } from "../SheetStack";
 
 export default function PoolSheet({ record }: SheetBodyProps<"pool">) {
   const q = usePool(record.name);
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const page = `/providers/pools/${seg(record.name)}/route`;
 
   if (!q.data)

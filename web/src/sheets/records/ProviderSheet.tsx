@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { MessageCircle, Pause, Play } from "lucide-react";
 import { api, seg } from "@/api/client";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { calls, errorText, type KeyCounts, natural, qk, useKeys, useProvider, useRefresh } from "@/pages/providers/api";
 import { KeyStateLabel } from "@/pages/providers/controls";
@@ -42,7 +42,7 @@ export default function ProviderSheet({ record }: SheetBodyProps<"provider">) {
     refetchInterval: 15_000,
   });
   const keys = useKeys(handle);
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const refresh = useRefresh();
   // The sheet stays open, so Disable/Enable says how it went beside its button (UI ticket 04).
   const toggling = useSave({ refresh, describe: errorText });

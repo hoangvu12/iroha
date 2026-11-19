@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { MessageCircle } from "lucide-react";
 import { api, seg } from "@/api/client";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { formatDate } from "@/lib/format";
 import { type Endpoint, natural, shapeLabel, useKeys } from "@/pages/providers/api";
 import { KeyStateLabel } from "@/pages/providers/controls";
@@ -43,7 +43,7 @@ export default function EndpointSheet({ record }: SheetBodyProps<"endpoint">) {
     queryFn: ({ signal }) => api.get<Endpoint>(`/api/providers/${seg(provider)}/endpoints/${seg(endpoint)}`, { signal }),
   });
   const keys = useKeys(provider);
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const page = `/providers/${seg(provider)}/endpoints`;
 
   if (!q.data)

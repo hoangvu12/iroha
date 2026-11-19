@@ -33,20 +33,6 @@ const (
 	opMessages = "/messages"
 )
 
-// opFor is the operation path of an inference call in Shape sh for model
-// (a Gemini URL names the model and whether it streams).
-func opFor(sh shape.Shape, model string, stream bool) string {
-	switch sh {
-	case shape.AnthropicMessages:
-		return opMessages
-	case shape.OpenAIResponses:
-		return opResponses
-	case shape.Gemini:
-		return geminiOp(model, stream)
-	}
-	return opChat
-}
-
 // idempotencyHeader carries one value per Request on every Attempt: the
 // Caller's own, else one Iroha mints (newExchange).
 const idempotencyHeader = "Idempotency-Key"
@@ -708,10 +694,7 @@ func (c *passRelay) body(status int, b []byte) ([]byte, *api.Error) {
 	}
 	c.usage.Body(b)
 	c.reported.read(b)
-	if c.shape == shape.Gemini {
-		return echoModelVersion(b, c.model), nil
-	}
-	return echoModel(b, c.model), nil
+	return specOf(c.shape).echoBody(b, c.model), nil
 }
 
 func (c *passRelay) data(p []byte) ([]byte, bool) {
@@ -720,27 +703,12 @@ func (c *passRelay) data(p []byte) ([]byte, bool) {
 	}
 	c.usage.Event(p)
 	c.reported.read(p)
-	switch c.shape {
-	case shape.OpenAIChat:
-		if c.dropUsageChunk && bytes.Contains(p, []byte(`"usage"`)) && noChoices(p) {
-			if _, ok := usage.FromOpenAIChat(p); ok {
-				return nil, true
-			}
+	if c.shape == shape.OpenAIChat && c.dropUsageChunk && bytes.Contains(p, []byte(`"usage"`)) && noChoices(p) {
+		if _, ok := usage.FromOpenAIChat(p); ok {
+			return nil, true
 		}
-	case shape.AnthropicMessages:
-		// Only message_start names the model, inside its message.
-		if msg, ok := field(p, "message"); ok && bytes.Contains(p, []byte(`"message_start"`)) {
-			if out, ok := setField(p, "message", echoModel(msg, c.model)); ok {
-				return out, false
-			}
-		}
-		return p, false
-	case shape.Gemini:
-		return echoModelVersion(p, c.model), false
-	case shape.OpenAIResponses:
-		return echoResponsesEvent(p, c.model), false
 	}
-	return echoModel(p, c.model), false
+	return specOf(c.shape).echoEvent(p, c.model), false
 }
 
 // translatedBody converts a whole translated answer for the Caller.

@@ -22,24 +22,7 @@ func (r *reportedModel) read(p []byte) {
 	if r == nil || r.model != "" || len(p) == 0 || p[0] != '{' {
 		return
 	}
-	switch r.shape {
-	case shape.Gemini:
-		r.model = stringField(p, "modelVersion")
-	case shape.AnthropicMessages: // a body, or the message of message_start
-		if r.model = stringField(p, "model"); r.model == "" && bytes.Contains(p, []byte(`"message_start"`)) {
-			if msg, ok := field(p, "message"); ok {
-				r.model = stringField(msg, "model")
-			}
-		}
-	case shape.OpenAIResponses: // a body, or the response of response.* events
-		if r.model = stringField(p, "model"); r.model == "" {
-			if resp, ok := field(p, "response"); ok {
-				r.model = stringField(resp, "model")
-			}
-		}
-	default:
-		r.model = stringField(p, "model")
-	}
+	r.model = specOf(r.shape).reported(p) // shapes.go
 }
 
 // Model is the model read so far ("" when the answer named none), at most

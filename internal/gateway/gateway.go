@@ -353,14 +353,6 @@ type callerRequest struct {
 	includeUsage bool // OpenAI Chat: the Caller asked for stream_options.include_usage
 }
 
-// bodyHints say what a body of each Shape must hold.
-var bodyHints = map[shape.Shape]string{
-	shape.OpenAIChat:        "Send an OpenAI Chat Completions JSON object with model and messages.",
-	shape.AnthropicMessages: "Send an Anthropic Messages JSON object with model, max_tokens and messages.",
-	shape.OpenAIResponses:   "Send an OpenAI Responses JSON object with model and input.",
-	shape.Gemini:            "Send a Gemini generateContent JSON object with contents to .../v1beta/models/{model}:generateContent.",
-}
-
 // readBody reads a Caller's body written in sh. Every Shape whose body
 // names the model shares these rules: a JSON object, a non-blank string
 // model, stream only when it is exactly true. Gemini names both in the URL
@@ -374,7 +366,7 @@ func readBody(r *http.Request, sh shape.Shape) ([]byte, callerRequest, *api.Erro
 	if len(body) > maxCallerBody {
 		return nil, cr, api.Errorf(http.StatusRequestEntityTooLarge, "request_too_large", "Send a body of at most 64 MiB.", "The request body is larger than 64 MiB.")
 	}
-	hint := bodyHints[sh]
+	hint := specOf(sh).bodyHint
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
 		return nil, cr, api.BadRequest(hint, "The request body is empty.")

@@ -79,7 +79,7 @@ func readGeminiTarget(r *http.Request, cr *callerRequest) *api.Error {
 	cr.bodyModel = rest
 	cr.model = strings.TrimSpace(rest)
 	if cr.model == "" {
-		return api.Errorf(http.StatusBadRequest, "model_required", bodyHints[shape.Gemini], "The URL names no model.")
+		return api.Errorf(http.StatusBadRequest, "model_required", specOf(shape.Gemini).bodyHint, "The URL names no model.")
 	}
 	return nil
 }

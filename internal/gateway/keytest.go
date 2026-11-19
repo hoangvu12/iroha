@@ -291,24 +291,18 @@ func testEndpoint(rt *providers.Routing, k *planner.Key, ref string) (*planner.E
 }
 
 // testCall is the tiny chat call of a key test in Shape sh: the operation
-// path, the body and any header that Shape needs.
+// path, the body and any header that Shape needs (shapeSpec.testBody).
 func testCall(sh shape.Shape, model string) (op string, body []byte, header http.Header) {
-	header = http.Header{}
-	msgs := []any{map[string]any{"role": "user", "content": keyTestPrompt}}
-	var v map[string]any
-	switch sh {
-	case shape.OpenAIResponses:
-		v = map[string]any{"model": model, "input": keyTestPrompt, "max_output_tokens": 16}
-	case shape.AnthropicMessages:
-		v = map[string]any{"model": model, "max_tokens": 16, "messages": msgs}
-		header.Set("Anthropic-Version", shape.AnthropicVersion)
-	case shape.Gemini:
-		v = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": keyTestPrompt}}}},
-			"generationConfig": map[string]any{"maxOutputTokens": 16}}
-	default:
-		v = map[string]any{"model": model, "max_tokens": 16, "messages": msgs}
+	v, header := specOf(sh).testBody(model)
+	if header == nil {
+		header = http.Header{}
 	}
 	body, _ = json.Marshal(v)
-	op = opFor(sh, model, false)
-	return op, body, header
+	return opFor(sh, model, false), body, header
+}
+
+// testMessages is the conversation of a key test in the Shapes that take
+// messages.
+func testMessages() []any {
+	return []any{map[string]any{"role": "user", "content": keyTestPrompt}}
 }

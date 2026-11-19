@@ -8,7 +8,6 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/clock"
-	"github.com/hoangvu12/iroha/internal/shape"
 )
 
 // A streaming Caller never waits in silence. Proxies between Iroha and the
@@ -34,21 +33,14 @@ const (
 )
 
 // streamShape frames Iroha's own events on a stream in one Caller Shape.
-// Each Shape the Gateway serves streams in adds an implementation to
-// streamShapes.
+// Each Shape the Gateway serves streams in sets one as shapeSpec.stream
+// (shapes.go).
 type streamShape interface {
 	// keepAlive is an event the Shape's clients ignore.
 	keepAlive() []byte
 	// errorEvent is the last event of a stream that failed after the
 	// response was committed.
 	errorEvent(e *api.Error, requestID string) []byte
-}
-
-var streamShapes = map[shape.Shape]streamShape{
-	shape.OpenAIChat:        openAIChatStream{},
-	shape.AnthropicMessages: anthropicStream{},
-	shape.OpenAIResponses:   responsesStream{},   // responses.go
-	shape.Gemini:            geminiStreamShape{}, // gemini.go
 }
 
 // anthropicStream: Anthropic's own ping event keeps the stream alive (the
@@ -147,10 +139,7 @@ func compactJSON(v any) []byte {
 // silence. Every write to the Caller goes through x.mu, so keep-alives
 // never land inside a relayed event.
 func (x *exchange) keepAlive() (stop func()) {
-	frame := streamShapes[x.rec.ShapeIn]
-	if frame == nil {
-		return func() {}
-	}
+	frame := specOf(x.rec.ShapeIn).stream
 	t := x.g.clock.NewTimer(StreamCommitAfter - clock.Since(x.g.clock, x.start))
 	quit, done := make(chan struct{}), make(chan struct{})
 	go func() {

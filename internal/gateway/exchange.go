@@ -151,9 +151,7 @@ func (x *exchange) writeError(e *api.Error) int {
 	}
 	x.ended = true
 	if x.streaming {
-		if frame := streamShapes[x.rec.ShapeIn]; frame != nil {
-			_ = x.sendLocked(frame.errorEvent(e, x.rec.ID))
-		}
+		_ = x.sendLocked(specOf(x.rec.ShapeIn).stream.errorEvent(e, x.rec.ID))
 		return 0
 	}
 	if x.padded { // committed 200 + JSON: the error is the body
@@ -168,18 +166,6 @@ func (x *exchange) writeError(e *api.Error) int {
 	x.w.WriteHeader(e.Status)
 	_, _ = x.w.Write(append(compactJSON(errorEnvelope(x.rec.ShapeIn, e, x.rec.ID)), '\n'))
 	return e.Status
-}
-
-// errorEnvelope is e in the error envelope of Shape sh: Anthropic's for
-// Anthropic Messages, Google's for Gemini, OpenAI's otherwise.
-func errorEnvelope(sh shape.Shape, e *api.Error, requestID string) map[string]any {
-	switch sh {
-	case shape.AnthropicMessages:
-		return anthropicError(e, requestID)
-	case shape.Gemini:
-		return geminiError(e, requestID)
-	}
-	return openAIError(e, requestID)
 }
 
 func errorType(status int) string {

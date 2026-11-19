@@ -221,7 +221,7 @@ func TestStreamUsageReachesCallersWhoAskForItAndModelsAreEchoed(t *testing.T) {
 	caller := srv.Client(issue(t, srv, "opencode", all))
 
 	up.Enqueue(testkit.SSE(
-		"data: {\"id\":\"c1\",\"model\":\"gpt-x-0613\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}],\"usage\":null}\n\n",
+		"data: {\"id\":\"c1\",\"model\":\"gpt-x-0613\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],\"usage\":null}\n\n",
 		": keep-alive comment\n\n",
 		"data: {\"id\":\"c1\",\"model\":\"gpt-x-0613\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}\n\n",
 		"data: [DONE]\n\n",
@@ -231,7 +231,7 @@ func TestStreamUsageReachesCallersWhoAskForItAndModelsAreEchoed(t *testing.T) {
 	if string(up.Last().Body) != body {
 		t.Fatalf("a body that already asks for usage was changed: %s", up.Last().Body)
 	}
-	want := "data: {\"id\":\"c1\",\"model\":\"gpt-x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}],\"usage\":null}\n\n" +
+	want := "data: {\"id\":\"c1\",\"model\":\"gpt-x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],\"usage\":null}\n\n" +
 		": keep-alive comment\n\n" +
 		"data: {\"id\":\"c1\",\"model\":\"gpt-x\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}\n\n" +
 		"data: [DONE]\n\n"

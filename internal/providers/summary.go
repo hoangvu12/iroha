@@ -7,6 +7,8 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/keystate"
+	"github.com/hoangvu12/iroha/internal/normalise"
+	"github.com/hoangvu12/iroha/internal/shape"
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
@@ -21,6 +23,30 @@ type ProviderSummary struct {
 	NextUsableAt   *time.Time     `json:"next_usable_at,omitempty" doc:"When no key is active: the earliest time one is usable again (absent when none will be without the Owner)."`
 	ModelGaps      []GapEntry     `json:"model_gaps" doc:"Every live Model Gap: a key the Provider refused one model, soonest expiry first."`
 	RecentAttempts AttemptStats   `json:"recent_attempts" doc:"Attempts on this Provider in the last hour."`
+	Normalisers    []Normaliser   `json:"normalisers" doc:"The built-in normalisers that rewrite this Provider's requests or answers, chosen by each Endpoint's Shape and host."`
+}
+
+// Normaliser is a built-in normaliser and the Endpoints it applies to.
+type Normaliser struct {
+	normalise.Normaliser
+	Endpoints []string `json:"endpoints" doc:"Names of the Endpoints it applies to."`
+}
+
+// normalisers lists the normalisers applying to any of eps, in built-in order.
+func normalisers(eps []Endpoint) []Normaliser {
+	on := map[string][]string{}
+	for _, e := range eps {
+		for _, n := range normalise.Applying(e.URL, shape.Shape(e.Shape)) {
+			on[n.Name] = append(on[n.Name], e.Name)
+		}
+	}
+	out := []Normaliser{}
+	for _, n := range normalise.Builtin {
+		if eps := on[n.Name]; len(eps) > 0 {
+			out = append(out, Normaliser{Normaliser: n, Endpoints: eps})
+		}
+	}
+	return out
 }
 
 // KeyCounts counts Upstream Keys by Key State.
@@ -107,6 +133,11 @@ func (h handlers) summaryRoute() api.Route {
 			if out.RecentAttempts.Attempts > 0 {
 				out.RecentAttempts.FailureRate = float64(out.RecentAttempts.Failed) / float64(out.RecentAttempts.Attempts)
 			}
+			eps, err := listEndpoints(ctx, h.db, id)
+			if err != nil {
+				return nil, err
+			}
+			out.Normalisers = normalisers(eps)
 			return out, nil
 		},
 	}

@@ -33,6 +33,7 @@ One Go binary (`cmd/iroha`), one SQLite file (`<data-dir>/iroha.db`), pure-Go dr
 | `internal/retention` | The retention settings (`retention.history_days`, `.logs_days`, `.captures_days`) and the hourly `retention` job deleting older Requests (with Attempts), captures and log events. |
 | `internal/usage` | Token usage parsing per Shape (OpenAI Chat, Anthropic Messages), for bodies and stream events: `NewReader(shape)`, read from the Endpoint's answer before translation. |
 | `internal/translate` | Shape translation (ADR-0004): the only importer of RelayKit. `New(from, to, Options)` per Attempt gives `Request`, `Response`, `Stream` (`Event`, `End`); `Targets(from)` feeds the planner. One `codec` per Shape (`codec.go`, `chat.go`, `anthropic.go`); golden tests in `testdata/golden/`. See "Ticket 13: translation". |
+| `internal/normalise` | Normalisers (16), pure and table-tested: content rewrites for Provider quirks, in the Endpoint's Shape. `For(endpointURL, shape)` gives a `Set` (`RequestBody`, `Body`, `Stream` with `Event`/`End`); `Builtin` lists them (name, side, Shape, `Host`, catalog cases); `Applying` feeds the Provider summary. See "Ticket 16: normalisers". |
 | `internal/models` | Model lists (10): entries in `provider_models` with independent flags (discovered = a row in `provider_model_sources`; `added`/`hidden` = the Owner's, audited resource `model`), discovery (`Store.Refresh`, `Store.Reset`), `Store.Prepare` (refusals and carriers before planning), `/api/providers/{provider}/models[...]` and the Caller route `GET /providers/{handle}/v1/models`. See "Ticket 10: model lists". |
 | `deploy` | `deploy.sh` (run locally: build, copy, back up, swap, restart, readiness, rollback over SSH keys), `remote.sh` (its server half), `iroha.service` (systemd unit template), Go tests tying the unit's stop timeout to the drain limit and the runbook (`internal/api/skill/50_deploy.md`) to the script. `deploy/test/e2e.sh` runs the scripts against a local Docker container with systemd and sshd; run it after changing anything in `deploy/` (needs Docker; never point it at a real server). |
 
@@ -58,6 +59,12 @@ One Request runs through four seams, in this order. Change the seam that owns a 
 - Normalisers (16) hook on the upstream answer in the Endpoint's Shape, before `passRelay` or `translate` sees it, so both paths get them.
 
 Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `echoModel`) replaces one top-level value in place, so passthrough never re-serialises a body. Streams of OpenAI Chat get `stream_options.include_usage` added when the Caller did not ask, so usage is recorded for every stream.
+
+### Ticket 16: normalisers
+
+- `exchange.prepare` takes `normalise.For(endpoint URL, endpoint Shape)` per Attempt and runs `RequestBody` on the body sent (passthrough or translated). The answer is normalised before anything reads it: a whole 2xx answer by `normaliseBody` (after `embeddedError`; a `normalise.Failure` makes it a failed Attempt with status 200), a stream event by event in `relayStream` (`normaliseEvent`, then `passRelay.data`) and `relayTranslatedStream` (before `translate.Stream.Event`). `Stream.End` runs only when the body ended without a transport error, and may add events (held text, a closing chunk, `[DONE]`).
+- Selection: a normaliser for a model's quirk has no `Host` (relays pass it on); one for a service's own vocabulary has the service's hosts, like built-in Failure Rules. Each acts only when its construct is present and otherwise returns the same bytes, so passthrough stays byte-preserving. A rewritten JSON body is re-encoded (keys sorted, numbers kept, no HTML escaping).
+- Adding one: an entry in `normalise.Builtin` and its code in the Shape's file (`chat.go`); a normaliser for another Shape needs `Set.Body`/`Stream` to dispatch on it, and `normaliseEvent` frames added events as data-only (enough for OpenAI Chat; a Shape with event names needs framing per Shape).
 
 ### Ticket 10: model lists
 

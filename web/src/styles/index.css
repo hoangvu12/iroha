@@ -293,6 +293,17 @@
 /* Skeletons are Skullet's (ui/Skeleton.tsx, app/skeletons.tsx), coloured from
    --bg-muted with this highlight. .skeleton-fill passes a flex parent's height
    through Skullet's wrappers, for content that fills it (the route canvases). */
+/* Skullet's React Skeleton paints a skeleton from the first frame when it
+   mounts loading; this holds it unseen (still taking its space) for 150 ms,
+   so a fast load shows the content straight away and never a skeleton. */
+.skeleton-hold[aria-busy="true"] {
+  animation: skeleton-hold 150ms step-end both;
+}
+@keyframes skeleton-hold {
+  from {
+    visibility: hidden;
+  }
+}
 .skeleton-fill,
 .skeleton-fill :is([skullet-pane], [skullet-loading], [skullet-ghost]) {
   display: flex;

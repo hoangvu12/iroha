@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { createContext, useContext } from "react";
 import { Skeleton as Measured } from "skullet/react";
+import { cn } from "./cn";
 
 // Every loading state in the app is this: Skullet draws the skeleton from the
 // real content, rendered from `sample` (or the shape last shown under `id`),
@@ -37,7 +38,8 @@ export function Skeleton<T>({
   children: (data: T) => ReactNode;
 }) {
   return (
-    <Measured data={data} sample={sample} label={label} id={id} error={error || undefined} className={className} style={style}>
+    // `skeleton-hold` (styles/index.css) keeps a skeleton unseen for its first 150 ms.
+    <Measured data={data} sample={sample} label={label} id={id} error={error || undefined} className={cn("skeleton-hold", className)} style={style}>
       {(d: T) =>
         d === sample ? (
           <SampleContext.Provider value>

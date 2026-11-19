@@ -26,10 +26,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
           setNotice(e.code === "owner_session_expired" ? "Your session ended after 30 days. Sign in again." : "You were signed out. Sign in again.");
         }
         qc.setQueryData<SessionStatus>(sessionKey, { password_set: was?.password_set ?? true, signed_in: false });
-        forgetShapes();
       }),
     [qc],
   );
+
+  // Signed out: forget the skeleton shapes remembered from this session's pages. After the
+  // commit that unmounts them, because Skullet saves a skeleton's shape as it unmounts.
+  const signedOut = session.data?.signed_in === false;
+  useEffect(() => {
+    if (signedOut) forgetShapes();
+  }, [signedOut]);
 
   if (session.isPending) return <div className="min-h-dvh bg-bg" aria-busy="true" />;
   if (session.isError) {

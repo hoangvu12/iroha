@@ -51,8 +51,7 @@ type queued struct {
 // Caller, whatever its Shape.
 func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerRequest) {
 	g := x.g
-	first := cands[0].Provider
-	maxAttempts, _ := providers.EffectiveBudget(first.MaxAttempts, first.FirstByte)
+	maxAttempts, _ := x.budget(cands[0].Provider)
 	ceiling := x.start.Add(providers.FirstByteCeiling)
 	set := g.rules()
 
@@ -77,7 +76,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 			stop = stopAttempts
 			break
 		}
-		_, fb := providers.EffectiveBudget(c.Provider.MaxAttempts, c.Provider.FirstByte)
+		_, fb := x.budget(c.Provider)
 		deadline := x.start.Add(fb)
 		if deadline.After(ceiling) {
 			deadline = ceiling
@@ -132,6 +131,23 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 	x.failAll(failed, stop, maxAttempts)
 }
 
+// budget is the Request budget while p serves: the Attempts allowed and the
+// wait for a first byte, counted from the Request's arrival. A Pool's own
+// override wins over p's; either is capped at the 95 s ceiling. The Attempt
+// count is fixed by the first candidate, so it is shared by every member.
+func (x *exchange) budget(p *planner.Provider) (int, time.Duration) {
+	n, fb := providers.EffectiveBudget(p.MaxAttempts, p.FirstByte)
+	if x.pool != nil {
+		if x.pool.MaxAttempts > 0 {
+			n = x.pool.MaxAttempts
+		}
+		if x.pool.FirstByte > 0 {
+			_, fb = providers.EffectiveBudget(0, x.pool.FirstByte)
+		}
+	}
+	return n, fb
+}
+
 // classify runs the Failure Rules on a failed Attempt, applies the outcome
 // to the key's Key State and fills in the Attempt's rule, outcome and action.
 func (x *exchange) classify(set *rules.Set, c planner.Candidate, a requests.Attempt, f *rules.Failure) tried {
@@ -177,7 +193,7 @@ func (x *exchange) noteProvider(p *planner.Provider) {
 	if !x.begun {
 		return
 	}
-	if err := x.g.rec.NoteProvider(x.ctx, x.rec.ID, p.ID, p.Handle); err != nil {
+	if err := x.g.rec.NoteProvider(x.ctx, x.rec.ID, p.ID, p.Handle, x.rec.Pool); err != nil {
 		x.g.log.Error("recording a Request failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
 	}
 }
@@ -236,7 +252,11 @@ type attemptView struct {
 
 // failAll answers the Caller when no Attempt succeeded, listing them all.
 func (x *exchange) failAll(failed []tried, stop string, maxAttempts int) {
-	handle := x.rec.Provider
+	handle := x.rec.Provider                  // the last Attempt's Provider
+	subject, on := "Provider "+handle, handle // what "every Attempt" was made on
+	if x.pool != nil {
+		subject, on = "Model Pool "+x.pool.Name, "Model Pool "+x.pool.Name
+	}
 	var stopText string
 	switch stop {
 	case stopAttempts:
@@ -276,16 +296,16 @@ func (x *exchange) failAll(failed []tried, stop string, maxAttempts int) {
 			"Provider %s refused the request: %s", handle, last.decision.Reason)
 	case last.failure.Timeout || stop == stopTime:
 		e = api.Errorf(http.StatusGatewayTimeout, "upstream_timeout", "Retry later, or ask the Owner to raise the Provider's first_byte_seconds (at most 95). "+reqHint,
-			"Provider %s did not answer within the time budget (%d %s): %s", handle, n, plural, x.rec.Summary)
+			"%s did not answer within the time budget (%d %s): %s", subject, n, plural, x.rec.Summary)
 	default:
 		retry := earliestCooling(failed, x.g.clock.Now())
 		if retry > 0 {
 			x.setHeader("Retry-After", strconv.Itoa(int(retry.Seconds())))
 			e = api.Errorf(http.StatusServiceUnavailable, "upstream_unavailable", fmt.Sprintf("Retry after %d seconds (Retry-After), when the first key cools down. %s", int(retry.Seconds()), reqHint),
-				"Every Attempt on %s failed (%d %s): %s", handle, n, plural, x.rec.Summary)
+				"Every Attempt on %s failed (%d %s): %s", on, n, plural, x.rec.Summary)
 		} else {
 			e = api.Errorf(http.StatusBadGateway, "upstream_failed", "Retry in a moment; if it keeps failing, read the Attempts. "+reqHint,
-				"Every Attempt on %s failed (%d %s): %s", handle, n, plural, x.rec.Summary)
+				"Every Attempt on %s failed (%d %s): %s", on, n, plural, x.rec.Summary)
 		}
 	}
 	x.fail(e.WithDetails(details))

@@ -18,6 +18,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/modelmeta"
 	"github.com/hoangvu12/iroha/internal/modelrefresh"
 	"github.com/hoangvu12/iroha/internal/models"
+	"github.com/hoangvu12/iroha/internal/pools"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/session"
@@ -38,6 +39,7 @@ func (s *Server) routes() []api.Route {
 		session.Routes(s.owner, s.audit),
 		providers.Routes(s.audit, s.db, s.log),
 		gatewaykeys.Routes(s.audit, s.db),
+		pools.Routes(s.audit, s.db),
 		requests.Routes(s.db),
 		settings.Routes(s.audit, s.db),
 		jobs.Routes(s.jobs),
@@ -46,6 +48,7 @@ func (s *Server) routes() []api.Route {
 		modelrefresh.Routes(s.refresh),
 		s.gateway().Routes(),
 		s.gateway().AdminRoutes(),
+		s.gateway().PreviewRoutes(),
 	)
 }
 
@@ -99,7 +102,7 @@ func (s *Server) coreRoutes() []api.Route {
 func (s *Server) gateway() *gateway.Gateway {
 	if s.gw == nil {
 		s.gw = gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db),
-			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log), Models: s.models(), Rules: s.rules.Set})
+			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log), Models: s.models(), Pools: pools.New(s.db), Rules: s.rules.Set})
 	}
 	return s.gw
 }
@@ -108,7 +111,7 @@ func (s *Server) gateway() *gateway.Gateway {
 // refresh job).
 func (s *Server) models() *models.Store {
 	if s.modelStore == nil {
-		s.modelStore = models.New(models.Options{DB: s.db, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db),
+		s.modelStore = models.New(models.Options{DB: s.db, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db), Pools: pools.New(s.db),
 			ModelsDev: modelmeta.NewSource(modelmeta.SourceOptions{Bases: s.opts.Config.ModelsDev, HTTPClient: s.httpc, Clock: s.clock, Log: s.log})})
 	}
 	return s.modelStore

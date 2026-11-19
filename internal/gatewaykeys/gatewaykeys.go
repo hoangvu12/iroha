@@ -15,6 +15,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/clock"
+	"github.com/hoangvu12/iroha/internal/pools"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/store"
 )
@@ -37,8 +38,9 @@ type GatewayKey struct {
 
 // Scope is what a Gateway Key may use.
 type Scope struct {
-	All       bool            `json:"all" doc:"true: every Provider, including ones added later, and every model."`
+	All       bool            `json:"all" doc:"true: every Provider and Model Pool, including ones added later, and every model."`
 	Providers []ScopeProvider `json:"providers,omitempty" doc:"When all is false: the Providers the key may use. An empty list allows nothing."`
+	Pools     []string        `json:"pools,omitempty" doc:"When all is false: the Model Pools (name or ID; answers carry names) the key may use as the model on the global routes. A Pool is served by all its members, whatever Providers the key has."`
 }
 
 // ScopeProvider is one Provider of a Scope.
@@ -52,6 +54,7 @@ type ScopeProvider struct {
 type stored struct {
 	All       bool             `json:"all"`
 	Providers []storedProvider `json:"providers,omitempty"`
+	Pools     []string         `json:"pools,omitempty"` // Pool IDs
 }
 
 type storedProvider struct {
@@ -75,17 +78,26 @@ type queryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-const scopeHint = `Send {"all": true} for everything, or {"all": false, "providers": [{"provider": "<handle>"}, {"provider": "<handle>", "models": ["<model>"]}]}.`
+const scopeHint = `Send {"all": true} for everything, or {"all": false, "providers": [{"provider": "<handle>"}, {"provider": "<handle>", "models": ["<model>"]}], "pools": ["<pool>"]}.`
 
 // normalize validates a Scope from a request and returns its stored form.
 func normalize(ctx context.Context, q queryer, in Scope) (stored, error) {
 	if in.All {
-		if len(in.Providers) > 0 {
-			return stored{}, api.BadRequest(scopeHint, "scope has all: true and a list of providers; send one or the other.")
+		if len(in.Providers) > 0 || len(in.Pools) > 0 {
+			return stored{}, api.BadRequest(scopeHint, "scope has all: true and a list of providers or pools; send one or the other.")
 		}
 		return stored{All: true}, nil
 	}
 	out := stored{Providers: []storedProvider{}}
+	for _, ref := range in.Pools {
+		id, err := pools.ResolveID(ctx, q, ref)
+		if err != nil {
+			return stored{}, err
+		}
+		if !slices.Contains(out.Pools, id) {
+			out.Pools = append(out.Pools, id)
+		}
+	}
 	at := map[string]int{}
 	for _, p := range in.Providers {
 		id, err := providers.ResolveID(ctx, q, p.Provider)
@@ -163,6 +175,15 @@ func view(ctx context.Context, q queryer, s stored) (Scope, error) {
 		}
 		out.Providers = append(out.Providers, ScopeProvider{Provider: h, Models: p.Models})
 	}
+	names, err := pools.Names(ctx, q, s.Pools)
+	if err != nil {
+		return out, err
+	}
+	for _, id := range s.Pools {
+		if n, ok := names[id]; ok { // a deleted Pool drops out
+			out.Pools = append(out.Pools, n)
+		}
+	}
 	return out, nil
 }
 
@@ -235,6 +256,35 @@ func (c Caller) AllowsModel(providerID, model string) bool {
 		}
 	}
 	return false
+}
+
+// AllowsPool reports whether the Caller may name the Pool on the global
+// routes.
+func (c Caller) AllowsPool(poolID string) bool {
+	return c.scope.All || slices.Contains(c.scope.Pools, poolID)
+}
+
+// Unrestricted is a Caller whose scope is everything: the Owner, for
+// previews that take no Gateway Key's scope.
+func Unrestricted(name string) Caller { return Caller{Name: name, scope: stored{All: true}} }
+
+// CallerOf returns the Caller a Gateway Key, addressed by name or ID, would
+// be (scope included), with the uniform 404 when there is none and 409
+// gateway_key_revoked for a revoked key.
+func (s *Store) CallerOf(ctx context.Context, ref string) (Caller, error) {
+	id, err := Resource.Resolve(ctx, s.db, ref)
+	if err != nil {
+		return Caller{}, err
+	}
+	k, err := scan(s.db.QueryRowContext(ctx, `SELECT `+keyColumns+` FROM gateway_keys WHERE id = ?`, id))
+	if err != nil {
+		return Caller{}, err
+	}
+	if k.Revoked {
+		return Caller{}, api.Conflict("gateway_key_revoked", "Pick an unrevoked Gateway Key (GET /api/gateway-keys?revoked=false).",
+			"The Gateway Key %q is revoked; its Requests are refused before routing.", k.Name)
+	}
+	return Caller{KeyID: k.ID, Name: k.Name, Capture: k.Capture, scope: k.scope}, nil
 }
 
 // ScopeModels returns the models the Caller's scope narrows the Provider

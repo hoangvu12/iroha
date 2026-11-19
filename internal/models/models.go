@@ -33,6 +33,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/modelmeta"
 	"github.com/hoangvu12/iroha/internal/planner"
+	"github.com/hoangvu12/iroha/internal/pools"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/store"
 )
@@ -45,6 +46,7 @@ type Options struct {
 	Providers  *providers.Store
 	Keys       *gatewaykeys.Store // authenticates Callers of /providers/{handle}/v1/models
 	ModelsDev  *modelmeta.Source  // model metadata (ticket 11); nil: never read
+	Pools      *pools.Store       // the Pools GET /v1/models lists; nil: none
 }
 
 // Store keeps model lists.
@@ -56,13 +58,14 @@ type Store struct {
 	providers *providers.Store
 	keys      *gatewaykeys.Store
 	meta      *modelmeta.Source
+	pools     *pools.Store
 }
 
 // New returns a Store.
 func New(o Options) *Store {
 	hc := *o.HTTPClient
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Store{db: o.DB, log: o.Log, clock: o.DB.Clock(), http: &hc, providers: o.Providers, keys: o.Keys, meta: o.ModelsDev}
+	return &Store{db: o.DB, log: o.Log, clock: o.DB.Clock(), http: &hc, providers: o.Providers, keys: o.Keys, meta: o.ModelsDev, pools: o.Pools}
 }
 
 // entryID is the record ID of a Provider's entry for model: derived from

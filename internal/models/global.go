@@ -7,6 +7,7 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
+	"github.com/hoangvu12/iroha/internal/pools"
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
@@ -18,7 +19,8 @@ func (s *Store) globalRoute() api.Route {
 	return api.Route{
 		Method: http.MethodGet, Path: "/v1/models", Tag: "Gateway", Auth: api.AuthCaller,
 		Summary: "List every model a Gateway Key may use, as <provider>/<model> (OpenAI list shape)",
-		Description: "The IDs to send to the global routes (/v1/chat/completions, /v1/messages, ...): for each enabled Provider in the key's scope, " +
+		Description: "The IDs to send to the global routes (/v1/chat/completions, /v1/messages, ...). First the Model Pools the key may use, by name, " +
+			"with the metadata of the Pool's first switched-on member and owned_by the model's maker; then, for each enabled Provider in the key's scope, " +
 			"its visible models (discovered or added by the Owner, not hidden) qualified with its handle, e.g. acme/gpt-4o; " +
 			"for a Provider the key is narrowed to some models, exactly those models minus hidden ones. Sorted by Provider handle, then model. " +
 			"Entries carry the same fields as GET /providers/{handle}/v1/models (context_length, max_input_tokens, max_output_tokens, " +
@@ -47,6 +49,7 @@ type globalProvider struct {
 	brand   string
 	entries map[string]entryRow // by model
 	visible []string            // in model order
+	allowed bool                // the Caller's scope names it
 }
 
 type entryRow struct {
@@ -79,12 +82,11 @@ func (s *Store) CallerModels(ctx context.Context, caller gatewaykeys.Caller) ([]
 		if err := rows.Scan(&id, &handle, &created, &brand, &model, &added, &hidden, &reported, &overrides, &external, &externalBrand, &discovered); err != nil {
 			return nil, err
 		}
-		if !caller.AllowsProvider(id) {
-			continue
-		}
 		p := byID[id]
 		if p == nil {
-			p = &globalProvider{handle: handle, created: created, brand: brand, entries: map[string]entryRow{}}
+			// Every enabled Provider is read: a Pool's metadata comes from its
+			// first member, whatever Providers the key may use directly.
+			p = &globalProvider{handle: handle, created: created, brand: brand, entries: map[string]entryRow{}, allowed: caller.AllowsProvider(id)}
 			byID[id] = p
 			order = append(order, id)
 		}
@@ -99,9 +101,15 @@ func (s *Store) CallerModels(ctx context.Context, caller gatewaykeys.Caller) ([]
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	out := []CallerModel{}
+	out, err := s.callerPools(ctx, caller, byID)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range order {
 		p := byID[id]
+		if !p.allowed {
+			continue
+		}
 		names := caller.ScopeModels(id)
 		if names == nil {
 			names = p.visible
@@ -125,4 +133,51 @@ func (s *Store) CallerModels(ctx context.Context, caller gatewaykeys.Caller) ([]
 		}
 	}
 	return out, nil
+}
+
+// callerPools lists the Pools caller may use, by name, each with the
+// metadata of its first switched-on member on an enabled Provider (else
+// its first member; unknown facts when that Provider is not enabled).
+func (s *Store) callerPools(ctx context.Context, caller gatewaykeys.Caller, byID map[string]*globalProvider) ([]CallerModel, error) {
+	out := []CallerModel{}
+	if s.pools == nil {
+		return out, nil
+	}
+	all, err := s.pools.All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, pl := range all {
+		if !caller.AllowsPool(pl.ID) {
+			continue
+		}
+		facts := Metadata{}.Of(pl.Name)
+		if m, ok := firstMember(pl, byID); ok {
+			facts = Metadata{}.Of(m.Model)
+			if p := byID[m.ProviderID]; p != nil {
+				if e, ok := p.entries[m.Model]; ok {
+					facts = entryLayers(p.brand, e.reported, e.overrides, e.external, e.externalBrand).served()
+				}
+			}
+		}
+		owner := pl.Maker
+		if owner == "" {
+			owner = "iroha"
+		}
+		out = append(out, CallerModel{ID: pl.Name, Object: "model", Created: pl.CreatedAt.Unix(), OwnedBy: owner, Facts: facts})
+	}
+	return out, nil
+}
+
+// firstMember is the member a Pool's metadata comes from.
+func firstMember(pl pools.Routing, byID map[string]*globalProvider) (pools.RoutingMember, bool) {
+	for _, m := range pl.Members {
+		if m.Enabled && byID[m.ProviderID] != nil {
+			return m, true
+		}
+	}
+	if len(pl.Members) > 0 {
+		return pl.Members[0], true
+	}
+	return pools.RoutingMember{}, false
 }

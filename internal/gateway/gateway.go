@@ -30,6 +30,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/models"
 	"github.com/hoangvu12/iroha/internal/planner"
+	"github.com/hoangvu12/iroha/internal/pools"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/rules"
@@ -55,6 +56,8 @@ type Options struct {
 	// Models applies the Provider's model list before planning: hidden and
 	// (on strict Providers) unlisted models are refused, carriers marked.
 	Models *models.Store
+	// Pools looks up the Model Pool a global route's model names.
+	Pools *pools.Store
 	// Rules gives the Failure Rules in force for the next Attempt; nil
 	// means the built-in rules. The server passes failurerules.Store.Set:
 	// the built-ins merged with the Owner's rules, reloaded on every change.
@@ -71,6 +74,7 @@ type Gateway struct {
 	rec       *requests.Recorder
 	states    *keystate.Store
 	models    *models.Store
+	pools     *pools.Store
 	rules     func() *rules.Set
 	rotation  *planner.Counter
 	live      inflight // Requests being served (shutdown.go)
@@ -86,7 +90,7 @@ func New(o Options) *Gateway {
 		rs = func() *rules.Set { return rules.Default }
 	}
 	return &Gateway{clock: o.Clock, log: o.Log, http: &hc, providers: o.Providers, keys: o.Keys, rec: o.Recorder,
-		states: o.KeyStates, models: o.Models, rules: rs, rotation: planner.NewCounter()}
+		states: o.KeyStates, models: o.Models, pools: o.Pools, rules: rs, rotation: planner.NewCounter()}
 }
 
 // ChatCompletionRequest documents the body of the Chat Completions routes.
@@ -168,23 +172,40 @@ func (g *Gateway) serveScoped(w http.ResponseWriter, r *http.Request, sh shape.S
 	g.serve(w, r, sh, (*exchange).scoped)
 }
 
-// resolver finds where a Request goes from the model the Caller named: the
-// Provider, ready for planning (models.Store.Prepare applied), and the model
-// as that Provider's list names it. scoped (provider-scoped routes) and
-// global (global.go) are the two.
-type resolver func(x *exchange, caller gatewaykeys.Caller, model string) (planner.Provider, string, *api.Error)
+// route is where a Request goes: the Providers to plan over, in order, each
+// ready for planning (models.Store.Prepare applied) and asked for its own
+// model (planner.Provider.ModelFor). A Pool (pool.go) gives one Provider per
+// member it can plan, and notes every member for the route preview.
+type route struct {
+	providers []planner.Provider
+	model     string // planner.Request.Model: the model on a single Provider; "" for a Pool
+	pool      *pools.Routing
+	members   []memberNote
+}
+
+// resolver finds where a Request goes from the model the Caller named.
+// scoped (provider-scoped routes) and global (global.go) are the two. On an
+// error the route may still say what was found (the route preview shows a
+// Pool's members even when none can serve).
+type resolver func(x *exchange, caller gatewaykeys.Caller, model string) (route, *api.Error)
 
 // scoped resolves the model of a provider-scoped route: the Provider is the
 // one the path names, the model is the name as sent.
-func (x *exchange) scoped(caller gatewaykeys.Caller, model string) (planner.Provider, string, *api.Error) {
-	p, err := x.provider(caller, x.r.PathValue("handle"), model, "Check the handle in the URL")
+func (x *exchange) scoped(caller gatewaykeys.Caller, model string) (route, *api.Error) {
+	return x.single(caller, x.r.PathValue("handle"), model, "Check the handle in the URL")
+}
+
+// single is the route to model on the Provider named handle, scope-checked
+// and prepared. check says where the Caller wrote the handle, for the hint.
+func (x *exchange) single(caller gatewaykeys.Caller, handle, model, check string) (route, *api.Error) {
+	p, err := x.provider(caller, handle, model, check)
 	if err != nil {
-		return p, "", err
+		return route{}, err
 	}
 	if err := x.g.models.Prepare(x.ctx, &p, model); err != nil {
-		return p, "", api.AsError(err)
+		return route{}, api.AsError(err)
 	}
-	return p, model, nil
+	return route{providers: []planner.Provider{p}, model: model}, nil
 }
 
 // serve serves one inference Request whose Caller speaks sh, resolving its
@@ -209,16 +230,18 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, sh shape.Shape, 
 
 	// cr.model stays the name the Caller sent: answers echo it and the
 	// Request records it. model is that name on the Provider.
-	p, model, err := resolve(x, caller, cr.model)
+	rt, err := resolve(x, caller, cr.model)
 	if err != nil {
 		x.fail(err)
 		return
 	}
 	now := g.clock.Now()
-	g.expireGaps(x, &p, now)
-	plan := planner.Plan(planner.Request{Shape: sh, Model: model, Now: now, Translate: translate.Targets(sh)}, []planner.Provider{p}, g.rotation)
+	for i := range rt.providers {
+		g.expireGaps(x, &rt.providers[i], now)
+	}
+	plan := planner.Plan(planRequest(sh, rt, now), rt.providers, g.rotation)
 	if len(plan.Candidates) == 0 {
-		e := noCandidate(p.Handle, plan.Empty)
+		e := rt.noCandidate(plan.Empty)
 		if plan.Empty.Code == planner.Cooling {
 			x.w.Header().Set("Retry-After", strconv.Itoa(retryAfter(plan.Empty.Until, now)))
 		}
@@ -229,6 +252,25 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, sh shape.Shape, 
 		defer x.keepAlive()() // stream.go: commit early, keep-alives, error events
 	}
 	x.serve(plan.Candidates, body, cr)
+}
+
+// planRequest is what planning knows of a Request in Shape sh along rt.
+func planRequest(sh shape.Shape, rt route, now time.Time) planner.Request {
+	return planner.Request{Shape: sh, Model: rt.model, Now: now, Translate: translate.Targets(sh)}
+}
+
+// noCandidate is the error of an empty plan along rt.
+func (rt route) noCandidate(e *planner.Empty) *api.Error {
+	handle := e.Provider
+	if handle == "" && len(rt.providers) > 0 {
+		handle = rt.providers[0].Handle
+	}
+	if rt.pool != nil {
+		c := *e
+		c.Message = "No member of Model Pool " + rt.pool.Name + " can serve it now: " + e.Message
+		e = &c
+	}
+	return noCandidate(handle, e)
 }
 
 // retryAfter is whole seconds from now until t, at least 1.

@@ -52,6 +52,11 @@ func TestPlan(t *testing.T) {
 			{ID: "p", Handle: "p", Endpoints: []planner.Endpoint{chat}, Keys: keys("k1")},
 			{ID: "q", Handle: "q", Endpoints: []planner.Endpoint{chatB}, Keys: keys("q1")},
 		}, planner.Fixed(0), "glm", "k1@a:glm q1@b:glm-4.6-b", ""},
+		{"Pool members ask each Provider for its own model", []planner.Provider{
+			{ID: "p", Handle: "p", Model: "glm-4.6", Endpoints: []planner.Endpoint{chat}, Keys: keys("k1")},
+			{ID: "q", Handle: "q", Model: "zai-org/GLM-4.6", Endpoints: []planner.Endpoint{chat}, Keys: keys("q1")},
+			{ID: "r", Handle: "r", Model: "glm", Endpoints: []planner.Endpoint{chatB}, Keys: keys("r1")},
+		}, planner.Fixed(0), "", "k1@a:glm-4.6 q1@a:zai-org/GLM-4.6 r1@b:glm-4.6-b", ""},
 		{"no Endpoint speaks the Shape", []planner.Provider{{ID: "p", Handle: "p", Endpoints: []planner.Endpoint{msgs}, Keys: keys("k1")}},
 			planner.Fixed(0), "glm", "", planner.NoEndpoint},
 		{"no Upstream Keys", []planner.Provider{{ID: "p", Handle: "p", Endpoints: []planner.Endpoint{chat}}},

@@ -161,12 +161,13 @@ func (rc *Recorder) Attempt(ctx context.Context, id string, a Attempt) error {
 	})
 }
 
-// NoteProvider records the Provider a Request is being served by, as its
-// first Attempt starts, so an interrupted Request still names it.
-func (rc *Recorder) NoteProvider(ctx context.Context, id, providerID, handle string) error {
+// NoteProvider records the Provider a Request is being served by (and the
+// Model Pool it named, if any), as its first Attempt starts, so an
+// interrupted Request still names them.
+func (rc *Recorder) NoteProvider(ctx context.Context, id, providerID, handle, pool string) error {
 	ctx = context.WithoutCancel(ctx)
 	return rc.db.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE requests SET provider_id = ?, provider_handle = ? WHERE id = ?`, providerID, handle, id)
+		_, err := tx.ExecContext(ctx, `UPDATE requests SET provider_id = ?, provider_handle = ?, pool = ? WHERE id = ?`, providerID, handle, pool, id)
 		return err
 	})
 }
@@ -200,9 +201,9 @@ func (rc *Recorder) Finish(ctx context.Context, r *Request) error {
 		_, err := tx.ExecContext(ctx, `UPDATE requests SET finished_at = ?, state = ?, status = ?, error_code = ?, error_message = ?,
 			model = ?, stream = ?, shape_out = ?, provider_id = ?, provider_handle = ?, endpoint_id = ?, endpoint_name = ?,
 			upstream_key_id = ?, upstream_key_name = ?, wire_model = ?, first_byte_ms = ?, duration_ms = ?,
-			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, reasoning_tokens = ?, summary = ? WHERE id = ?`,
+			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, reasoning_tokens = ?, summary = ?, pool = ? WHERE id = ?`,
 			finished, r.State, r.Status, code, msg, r.Model, r.Stream, string(r.ShapeOut), r.ProviderID, r.Provider, r.EndpointID, r.Endpoint,
-			r.UpstreamKeyID, r.UpstreamKey, r.WireModel, r.FirstByteMs, r.DurationMs, in, out, cache, reasoning, r.Summary, r.ID)
+			r.UpstreamKeyID, r.UpstreamKey, r.WireModel, r.FirstByteMs, r.DurationMs, in, out, cache, reasoning, r.Summary, r.Pool, r.ID)
 		return err
 	})
 }

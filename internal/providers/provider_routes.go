@@ -130,6 +130,9 @@ type BudgetOverrides struct {
 	FirstByteSeconds *int `json:"first_byte_seconds,omitempty" doc:"Seconds a Request waits for the first upstream byte across its Attempts, 1 to 95; 0 restores the default (60). Never above the 95 s ceiling, so every Request answers before the 100 s edge cutoff."`
 }
 
+// Check validates the overrides (Model Pools take the same ones).
+func (b BudgetOverrides) Check() error { return b.check() }
+
 func (b BudgetOverrides) check() error {
 	if b.MaxAttempts != nil && (*b.MaxAttempts < 0 || *b.MaxAttempts > MaxAttemptsLimit) {
 		return api.BadRequest("Use 1 to 10, or 0 for the default of 3.", "max_attempts must be between 0 and %d.", MaxAttemptsLimit)

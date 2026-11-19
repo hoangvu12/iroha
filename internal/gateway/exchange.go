@@ -10,6 +10,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/ids"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/pools"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/shape"
 )
@@ -27,6 +28,9 @@ type exchange struct {
 	// capture collects the prompt and response when the Gateway Key has
 	// capture on; it wraps r.Body and w, so nothing else needs to know.
 	capture *requests.Capture
+	// pool is the Model Pool the Caller named, if any: its budget override
+	// applies across its members (budget.go).
+	pool *pools.Routing
 
 	// mu guards what follows and every write to w, since a stream's keeper
 	// (stream.go) writes alongside the relay.

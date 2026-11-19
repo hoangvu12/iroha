@@ -4,7 +4,8 @@
 // (Provider, Endpoint, Upstream Key, wire model) to try. It does no I/O and
 // reads no clock; the only state it consults is the Rotation it is handed.
 //
-// Order: Providers in the order given (Pool members later). Within a
+// Order: Providers in the order given (a Model Pool's members, each with its
+// own Provider.Model, in member order). Within a
 // Provider, Endpoints come in tiers (endpointTiers) and the first tier that
 // yields any candidate is the one used, so a later tier is reached only when
 // nothing in an earlier one can serve: first the Endpoints speaking the
@@ -46,9 +47,20 @@ type Provider struct {
 	Handle    string
 	Endpoints []Endpoint
 	Keys      []Key
+	// Model is the model on this Provider when it is not Request.Model: a
+	// Pool member's own model. Empty means Request.Model.
+	Model string
 	// Budget overrides; zero means the Gateway's default.
 	MaxAttempts int
 	FirstByte   time.Duration
+}
+
+// ModelFor is the model asked of this Provider for req, before renames.
+func (p *Provider) ModelFor(req Request) string {
+	if p.Model != "" {
+		return p.Model
+	}
+	return req.Model
 }
 
 // Endpoint is one URL of a Provider.
@@ -160,9 +172,10 @@ const (
 
 // Empty explains why nothing can serve the Request.
 type Empty struct {
-	Code    string
-	Message string
-	Until   time.Time // Cooling: when the first key is usable again
+	Code     string
+	Message  string
+	Until    time.Time // Cooling: when the first key is usable again
+	Provider string    // handle of the Provider the explanation is about
 }
 
 // Skip is a key left out of the plan, and why.
@@ -197,14 +210,14 @@ func Plan(req Request, providers []Provider, rot Rotation) Result {
 		tiers := endpointTiers(p, req)
 		if len(tiers) == 0 {
 			if empty == nil {
-				empty = &Empty{Code: NoEndpoint, Message: noEndpoint(p, req)}
+				empty = &Empty{Code: NoEndpoint, Message: noEndpoint(p, req), Provider: p.Handle}
 			}
 			continue
 		}
 		n := len(p.Keys)
 		if n == 0 {
 			if empty == nil {
-				empty = &Empty{Code: NoUpstreamKey, Message: fmt.Sprintf("Provider %s has no Upstream Keys.", p.Handle)}
+				empty = &Empty{Code: NoUpstreamKey, Message: fmt.Sprintf("Provider %s has no Upstream Keys.", p.Handle), Provider: p.Handle}
 			}
 			continue
 		}
@@ -285,7 +298,7 @@ func planTier(req Request, p *Provider, eps []*Endpoint, start int) ([]Candidate
 				continue
 			}
 			allowed = true
-			wm := ep.WireModel(req.Model)
+			wm := ep.WireModel(p.ModelFor(req))
 			if s := skip(k, wm, req.Now); s != nil {
 				s.Provider = p
 				skipped = addSkip(skipped, *s)
@@ -354,11 +367,11 @@ func emptyFromSkips(skipped []Skip) *Empty {
 		}
 	}
 	if !until.IsZero() {
-		return &Empty{Code: Cooling, Until: until,
+		return &Empty{Code: Cooling, Until: until, Provider: handle,
 			Message: fmt.Sprintf("Every usable Upstream Key of %s is cooling; the first is usable again at %s.", handle, until.UTC().Format(time.RFC3339))}
 	}
 	if !gapUntil.IsZero() {
-		return &Empty{Code: ModelGap, Until: gapUntil,
+		return &Empty{Code: ModelGap, Until: gapUntil, Provider: gapHandle,
 			Message: fmt.Sprintf("Every usable Upstream Key of %s has a Model Gap for %s (the Provider refused them that model); the first expires at %s.",
 				gapHandle, gapModel, gapUntil.UTC().Format(time.RFC3339))}
 	}
@@ -369,7 +382,7 @@ func emptyFromSkips(skipped []Skip) *Empty {
 			break
 		}
 	}
-	return &Empty{Code: NoUsableKey, Message: fmt.Sprintf("Every Upstream Key of %s is %s.", skipped[0].Provider.Handle, what)}
+	return &Empty{Code: NoUsableKey, Message: fmt.Sprintf("Every Upstream Key of %s is %s.", skipped[0].Provider.Handle, what), Provider: skipped[0].Provider.Handle}
 }
 
 // Counter is the in-memory Rotation of live traffic. It resets on restart.
@@ -390,8 +403,21 @@ func (c *Counter) Next(group string) uint64 {
 	return v
 }
 
-// Fixed is a Rotation that always answers the same value; previews use it
-// so planning without sending never moves live traffic's rotation.
+// Peek is a Rotation answering what c would answer next without advancing
+// it: a route preview shows the order the next Request would get, and
+// planning without sending never moves live traffic's rotation.
+func (c *Counter) Peek() Rotation { return peek{c} }
+
+type peek struct{ c *Counter }
+
+func (p peek) Next(group string) uint64 {
+	p.c.mu.Lock()
+	defer p.c.mu.Unlock()
+	return p.c.n[group]
+}
+
+// Fixed is a Rotation that always answers the same value, for tests and
+// previews that want the configured order.
 type Fixed uint64
 
 // Next returns f.

@@ -4,7 +4,7 @@
 #
 #   remote.sh check  --dir D --service S --ready-url U [--unit FILE]
 #   remote.sh deploy --dir D --service S --ready-url U --version V
-#                    [--timeout SECONDS] [--keep N] [--unit FILE]
+#                    [--timeout SECONDS] [--keep N] [--unit FILE] [--allow-no-ui]
 #
 # deploy: stop the service (Iroha drains in-flight requests), back up the
 # binary and iroha.db into <dir>/backups/<UTC time>/, swap in
@@ -53,14 +53,21 @@ fetch() {
 	fi
 }
 
-# wait_ready VERSION: poll GET /readyz until it reports VERSION ("" accepts
-# any) or TIMEOUT seconds pass.
+# wait_ready VERSION [NEED_UI]: poll GET /readyz until it reports VERSION (""
+# accepts any) or TIMEOUT seconds pass. With NEED_UI=1 a ready answer must
+# also report "ui": true, or the release is refused at once.
 wait_ready() {
-	local want=$1 body got="" deadline=$((SECONDS + TIMEOUT))
+	local want=$1 need_ui=${2:-0} body got="" deadline=$((SECONDS + TIMEOUT))
 	while [ "$SECONDS" -lt "$deadline" ]; do
 		if body=$(fetch); then
 			got=$(printf '%s' "$body" | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p')
 			if printf '%s' "$body" | grep -q '"status" *: *"ready"' &&{ [ -z "$want" ] || [ "$got" = "$want" ]; }; then
+				# A release that is ready but serves no UI is refused (only the
+				# new release is checked; --allow-no-ui lifts it).
+				if [ "$need_ui" = 1 ] && ! printf '%s' "$body" | grep -q '"ui" *: *true'; then
+					say "refused: $READY_URL reports version $got without the UI (\"ui\": false); build it with npm --prefix web run build, or deploy with --no-ui on purpose"
+					return 1
+				fi
 				say "ready: $READY_URL reports version $got"
 				return 0
 			fi
@@ -187,7 +194,7 @@ deploy() {
 	say "starting $SERVICE"
 	ctl start "$SERVICE" || say "systemctl start failed"
 
-	if wait_ready "$VERSION"; then
+	if wait_ready "$VERSION" "$REQUIRE_UI"; then
 		prune
 		result "deployed version=$VERSION previous=${prev:-none} backup=$bk"
 		return 0
@@ -215,6 +222,7 @@ deploy() {
 
 main() {
 	local cmd=${1:-}
+	REQUIRE_UI=1
 	shift || true
 	while [ $# -gt 0 ]; do
 		case $1 in
@@ -225,6 +233,7 @@ main() {
 		--timeout) TIMEOUT=$2 ;;
 		--keep) KEEP=$2 ;;
 		--unit) UNIT=$2 ;;
+		--allow-no-ui) REQUIRE_UI=0; shift; continue ;;
 		*) fail 1 "unknown argument $1" ;;
 		esac
 		shift 2

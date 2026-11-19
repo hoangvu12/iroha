@@ -9,7 +9,7 @@ deploy/deploy.sh --host <server>             # deploy the checked-out commit
 
 Defaults: SSH user `iroha`, install directory `/opt/iroha`, service `iroha`, listening on `127.0.0.1:8080`. `deploy/deploy.sh --help` lists the options (`--user`, `--port`, `--identity`, `--dir`, `--service`, `--addr`, `--timeout`, `--keep`, `--dry-run`, ...); each also reads an `IROHA_DEPLOY_*` variable.
 
-What a deploy does: build the UI (`npm --prefix web ci && npm --prefix web run build`; needs Node 22+, skip with `--no-ui`) and the binary for the server's architecture with a version of `<git describe>-<UTC time>`; copy the binary to `<dir>/.deploy/`; check it runs and reports that version; stop the service (Iroha drains in-flight requests, see below); copy the binary and `iroha.db` to `<dir>/backups/<UTC time>/`; swap in the new binary; start; wait until `GET /readyz` reports the new version. On success it deletes all but the newest `--keep` backups (default 5).
+What a deploy does: build the UI (`npm --prefix web ci && npm --prefix web run build`; needs Node 22+, skip with `--no-ui`) and the binary for the server's architecture with a version of `<git describe>-<UTC time>`; copy the binary to `<dir>/.deploy/`; check it runs and reports that version; stop the service (Iroha drains in-flight requests, see below); copy the binary and `iroha.db` to `<dir>/backups/<UTC time>/`; swap in the new binary; start; wait until `GET /readyz` reports the new version and `"ui": true` (a release without the UI is refused and rolled back unless `--no-ui` is given). On success it deletes all but the newest `--keep` backups (default 5).
 
 The last line of output is `IROHA_DEPLOY <outcome> key=value...`:
 

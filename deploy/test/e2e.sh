@@ -166,7 +166,22 @@ check "keep 2: two backups left" [ "$(backups)" = 2 ]
 check "keep 2: the newest backup is kept" on_server 'grep -qx e2e-2 "/opt/iroha/backups/$(ls -1 /opt/iroha/backups | sort | tail -1)/version"'
 check "keep 2: serving e2e-3" [ "$(ready_version)" = e2e-3 ]
 
-# 10. When the restored release fails too, the script says so (exit 11).
+# 10. A real Iroha built without the UI ("ui": false on /readyz) is refused
+# and rolled back, unless --no-ui says that is intended. It is built from a
+# clean export of HEAD, whose internal/webui/dist holds only the placeholder.
+mkdir -p "$WORK/noui-src"
+(cd "$ROOT" && git archive HEAD) | tar -x -C "$WORK/noui-src" || bad "export HEAD for the no-UI build"
+(cd "$WORK/noui-src" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-X main.version=e2e-noui" \
+	-o "$(native "$WORK/noui")" ./cmd/iroha) || bad "build the no-UI binary"
+deploy "release without the UI" --user iroha --identity "$KEY" --binary "$WORK/noui" --version e2e-noui --timeout 30
+check "no UI: exit 10" [ "$CODE" = 10 ]
+check "no UI: says why" has '"ui": false'
+check "no UI: previous release serving again" [ "$(ready_version)" = e2e-3 ]
+deploy "release without the UI, on purpose" --user iroha --identity "$KEY" --binary "$WORK/noui" --version e2e-noui --no-ui
+check "no UI with --no-ui: exit 0" [ "$CODE" = 0 ]
+check "no UI with --no-ui: serving e2e-noui" [ "$(ready_version)" = e2e-noui ]
+
+# 11. When the restored release fails too, the script says so (exit 11).
 # "fragile" is a real Iroha that refuses to start once a marker file exists.
 (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-X main.version=e2e-fragile" \
 	-o "$(native "$WORK/fragile-real")" ./cmd/iroha) || bad "build the fragile binary"

@@ -204,6 +204,17 @@ func ResolveID(ctx context.Context, q audit.Querier, ref string) (string, error)
 	return Resource.Resolve(ctx, q, ref)
 }
 
+// MakerOf is the maker of the Pool addressed by name or ID (the Owner's,
+// else the guess), with the uniform 404 when there is no Pool.
+func MakerOf(ctx context.Context, db *store.DB, ref string) (string, error) {
+	id, err := Resource.Resolve(ctx, db, ref)
+	if err != nil {
+		return "", err
+	}
+	p, err := readPool(ctx, db, id)
+	return p.Maker, err
+}
+
 // Names maps Pool IDs to names (IDs without a Pool are left out).
 func Names(ctx context.Context, q audit.Querier, ids []string) (map[string]string, error) {
 	out := map[string]string{}

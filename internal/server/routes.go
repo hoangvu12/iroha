@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/keystate"
+	"github.com/hoangvu12/iroha/internal/logos"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/modelmeta"
 	"github.com/hoangvu12/iroha/internal/modelrefresh"
@@ -49,7 +51,19 @@ func (s *Server) routes() []api.Route {
 		s.gateway().Routes(),
 		s.gateway().AdminRoutes(),
 		s.gateway().PreviewRoutes(),
+		providers.OverviewRoutes(s.db),
+		logos.Routes(s.logos(), logos.Lookups{
+			ProviderDomain: func(ctx context.Context, ref string) (string, error) { return providers.LogoDomain(ctx, s.db, ref) },
+			PoolMaker:      func(ctx context.Context, ref string) (string, error) { return pools.MakerOf(ctx, s.db, ref) },
+		}),
 	)
+}
+
+// logos builds the logo service (ticket 22): fetched through Iroha, cached
+// in memory and under <data-dir>/logos.
+func (s *Server) logos() *logos.Service {
+	return logos.New(logos.Options{FaviconURL: s.opts.Config.LogoFavicons, MakerURL: s.opts.Config.LogoMakers,
+		HTTPClient: s.httpc, Clock: s.clock, Log: s.log, Dir: filepath.Join(s.opts.Config.DataDir, "logos")})
 }
 
 // Health is the body of /healthz and /readyz.

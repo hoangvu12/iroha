@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -82,6 +83,9 @@ var EndpointResource = audit.Register(&audit.Resource[endpointSnapshot]{
 		if err := childNameFree(ctx, tx, "endpoints", "Endpoint", s.ProviderID, s.Name, id); err != nil {
 			return err
 		}
+		if err := endpointURLFree(ctx, tx, s.ProviderID, s.Provider, s.URL, s.Shape, id); err != nil {
+			return err
+		}
 		style := s.AuthStyle
 		if style == "" {
 			style = planner.AuthBearer
@@ -109,9 +113,51 @@ func childNameFree(ctx context.Context, q audit.Querier, table, label, providerI
 		"Another %s of this Provider (%s) is already named %q.", label, other, name)
 }
 
+// findEndpointURL gives the ID and name of the Endpoint of the Provider that
+// has url and shape, other than id ("" when none). URLs compare as checkURL
+// leaves them, scheme and host case-insensitively.
+func findEndpointURL(ctx context.Context, q *sql.Tx, providerID, u, sh, id string) (string, string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, name, url FROM endpoints WHERE provider_id = ? AND shape = ? AND id != ?`, providerID, sh, id)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+	want := sameURLKey(u)
+	for rows.Next() {
+		var otherID, name, other string
+		if err := rows.Scan(&otherID, &name, &other); err != nil {
+			return "", "", err
+		}
+		if sameURLKey(other) == want {
+			return otherID, name, nil
+		}
+	}
+	return "", "", rows.Err()
+}
+
+// sameURLKey is an Endpoint URL in the form duplicates are compared in.
+func sameURLKey(u string) string {
+	if c, err := checkURL(u); err == nil {
+		return c
+	}
+	return u
+}
+
+// endpointURLFree refuses a URL and Shape another Endpoint of the Provider
+// already has (SCR-11): keys would rotate over the same URL twice.
+func endpointURLFree(ctx context.Context, q *sql.Tx, providerID, handle, u, sh, id string) error {
+	_, name, err := findEndpointURL(ctx, q, providerID, u, sh, id)
+	if err != nil || name == "" {
+		return err
+	}
+	return api.Conflict("endpoint_duplicate",
+		fmt.Sprintf("Address that Endpoint as %s (PATCH /api/providers/%s/endpoints/%s) instead of adding the URL again, or rename it there.", name, handle, name),
+		"Endpoint %q of Provider %s already sends %s to %s.", name, handle, sh, u)
+}
+
 // CreateEndpoint is the body of POST /api/providers/{provider}/endpoints.
 type CreateEndpoint struct {
-	Name          string             `json:"name,omitempty" doc:"Unique within the Provider; default \"default\". Repeating a create with an existing name updates that Endpoint."`
+	Name          string             `json:"name,omitempty" doc:"Unique within the Provider. Repeating a create with an existing name updates that Endpoint. Without a name, the Endpoint with the same url and shape is updated, else the name is \"default\"."`
 	URL           *string            `json:"url,omitempty" doc:"Base URL including the version path, e.g. https://api.openai.com/v1 (Iroha appends /chat/completions). Required for a new Endpoint."`
 	Shape         *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks. Required for a new Endpoint."`
 	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent; default bearer."`
@@ -167,6 +213,12 @@ func checkURL(s string) (string, error) {
 		return "", api.BadRequest(urlHint, "url must not contain user:password; add the secret as an Upstream Key.")
 	case u.RawQuery != "" || u.Fragment != "":
 		return "", api.BadRequest(urlHint, "url must not contain a query or fragment; use auth_style query for a key in the URL, static_headers for anything else.")
+	}
+	// Scheme and host are case-insensitive: keep them lowercase so one URL
+	// has one spelling (no user:password, so the host follows "://").
+	n := len(u.Scheme) + len("://") + len(u.Host)
+	if len(s) >= n && strings.EqualFold(s[:n], u.Scheme+"://"+u.Host) {
+		s = strings.ToLower(s[:n]) + s[n:]
 	}
 	return strings.TrimRight(s, "/"), nil
 }
@@ -409,6 +461,21 @@ func (h handlers) endpointRoutes() []api.Route {
 }
 
 func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (Endpoint, error) {
+	if in.Name == "" && in.URL != nil && in.Shape != nil {
+		// Like keys by secret: without a name, the same URL and Shape is the
+		// same Endpoint, so re-running a script or import never duplicates it.
+		u, err := checkURL(*in.URL)
+		if err != nil {
+			return Endpoint{}, err
+		}
+		id, _, err := findEndpointURL(m.Ctx, m.Tx, p.id, u, *in.Shape, "")
+		if err != nil {
+			return Endpoint{}, err
+		}
+		if id != "" {
+			return h.updateEndpoint(m, p, id, UpdateEndpoint{AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames, DiscoveryURL: in.DiscoveryURL})
+		}
+	}
 	if in.Name == "" {
 		in.Name = "default"
 	}
@@ -432,6 +499,9 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 	}
 	e := Endpoint{Name: in.Name, AuthStyle: planner.AuthBearer, StaticHeaders: map[string]string{}, Renames: map[string]string{}}
 	if err := applyEndpoint(&e, upd); err != nil {
+		return Endpoint{}, err
+	}
+	if err := endpointURLFree(m.Ctx, m.Tx, p.id, p.handle, e.URL, e.Shape, ""); err != nil {
 		return Endpoint{}, err
 	}
 	id = ids.New("ep")
@@ -530,6 +600,11 @@ func (h handlers) updateEndpoint(m *audit.Mutation, p ref, id string, in UpdateE
 	}
 	if in.Name != nil {
 		if err := childNameFree(m.Ctx, m.Tx, "endpoints", "Endpoint", p.id, e.Name, id); err != nil {
+			return Endpoint{}, err
+		}
+	}
+	if in.URL != nil || in.Shape != nil {
+		if err := endpointURLFree(m.Ctx, m.Tx, p.id, p.handle, e.URL, e.Shape, id); err != nil {
 			return Endpoint{}, err
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
@@ -67,6 +68,67 @@ func TestTheSameSecretIsAcceptedOnAnotherProviderButRefusedTwiceWithinOne(t *tes
 	srv.Admin.Get("/api/providers/acme/keys").Expect(200).JSON(&list)
 	if len(list.UpstreamKeys) != 2 || list.UpstreamKeys[1].Secret != "sk-test-mine-6666" {
 		t.Fatalf("acme's keys = %+v", list.UpstreamKeys)
+	}
+}
+
+// SCR-11: one URL and Shape is one Endpoint per Provider. Without a name a
+// create matches the Endpoint by URL and Shape (as keys match by secret), so
+// re-running a script updates it; under another name, in bulk, by PATCH or by
+// reverting a delete the duplicate is refused with 409 endpoint_duplicate
+// naming the Endpoint that has it. The same URL in another Shape is fine.
+func TestAnEndpointURLAndShapeIsHeldOnceWithinAProvider(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
+	base := "/api/providers/acme/endpoints"
+	const a, b = "https://api.example.com/v1", "https://eu.example.com/v1"
+	srv.Admin.Post(base, map[string]any{"url": a, "shape": "openai-chat"}).Expect(201)
+	srv.Admin.Post(base, map[string]any{"name": "eu", "url": b, "shape": "openai-chat"}).Expect(201)
+
+	// No name: matched by URL and Shape, not moved onto "default".
+	var again providers.EndpointResult
+	srv.Admin.Post(base, map[string]any{"url": b + "/", "shape": "openai-chat"}).Expect(200).JSON(&again)
+	if again.Outcome != "unchanged" || again.Endpoint.Name != "eu" {
+		t.Fatalf("repeat without a name = %+v", again)
+	}
+	var renamed providers.EndpointResult
+	srv.Admin.Post(base, map[string]any{"url": "HTTPS://EU.example.com/v1", "shape": "openai-chat", "renames": map[string]string{"glm": "glm-fp8"}}).Expect(200).JSON(&renamed)
+	if renamed.Outcome != "updated" || renamed.Endpoint.Name != "eu" || renamed.Endpoint.Renames["glm"] != "glm-fp8" {
+		t.Fatalf("update by URL and Shape = %+v", renamed)
+	}
+
+	duplicate := func(r *testkit.Response, holder string) {
+		t.Helper()
+		if e := r.Expect(409).Err(); e.Code != "endpoint_duplicate" || !strings.Contains(e.Hint, holder) {
+			t.Fatalf("duplicate = %+v", e)
+		}
+	}
+	duplicate(srv.Admin.Post(base, map[string]any{"name": "again", "url": "https://API.example.com/v1/", "shape": "openai-chat"}), "default")
+	duplicate(srv.Admin.Patch(base+"/eu", map[string]any{"url": a}), "default")
+	srv.Admin.Post(base, map[string]any{"name": "messages", "url": a, "shape": "anthropic-messages"}).Expect(201)
+	duplicate(srv.Admin.Patch(base+"/messages", map[string]any{"shape": "openai-chat"}), "default")
+
+	var bulk audit.BulkResult[providers.Endpoint]
+	srv.Admin.Post(base+"/bulk", map[string]any{"items": []any{
+		map[string]any{"name": "copy", "url": b, "shape": "openai-chat"},
+		map[string]any{"name": "us", "url": "https://us.example.com/v1", "shape": "openai-chat"},
+		map[string]any{"name": "us-2", "url": "https://us.example.com/v1", "shape": "openai-chat"},
+		map[string]any{"url": a, "shape": "openai-chat"},
+	}}).Expect(200).JSON(&bulk)
+	if bulk.Failed != 2 || bulk.Items[0].Error.Code != "endpoint_duplicate" || bulk.Items[2].Error.Code != "endpoint_duplicate" ||
+		bulk.Items[1].Outcome != "created" || bulk.Items[3].Outcome != "unchanged" {
+		t.Fatalf("bulk = %+v", bulk)
+	}
+
+	// A delete cannot be reverted onto a URL another Endpoint took since.
+	var deleted providers.EndpointResult
+	srv.Admin.Delete(base + "/us").Expect(200).JSON(&deleted)
+	srv.Admin.Post(base, map[string]any{"name": "us-new", "url": "https://us.example.com/v1", "shape": "openai-chat"}).Expect(201)
+	duplicate(srv.Admin.Post("/api/audit-entries/"+deleted.AuditEntry+"/revert", nil), "us-new")
+
+	var list providers.EndpointList
+	srv.Admin.Get(base).Expect(200).JSON(&list)
+	if len(list.Endpoints) != 4 { // default, eu, messages, us-new
+		t.Fatalf("endpoints = %+v", list.Endpoints)
 	}
 }
 

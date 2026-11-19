@@ -4,7 +4,11 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Test in `internal/providers` (create, bulk, PATCH to a duplicate URL)
-- [ ] Skill text for Endpoints updated
+- [x] Test in `internal/providers` (create, bulk, PATCH to a duplicate URL)
+- [x] Skill text for Endpoints updated
+
+## Comments
+
+Both options, as keys do it: a create without a name (with `url` and `shape`) updates the Endpoint that already has that URL and Shape, else falls back to `default` as before; any write that would give two Endpoints of a Provider the same URL and Shape (create under another name, bulk item, `PATCH` of url or shape, revert of a delete) is 409 `endpoint_duplicate`, hint naming the holder. `checkURL` now lowercases scheme and host, and URLs compare after `checkURL` (so a trailing slash or `HTTPS://API...` is the same URL). The same URL in another Shape is allowed. No migration: rows stored before keep working, and the check is in Go over the Provider's Endpoints of that Shape. Test: `providers TestAnEndpointURLAndShapeIsHeldOnceWithinAProvider`; skill text in `20_gateway.md`.

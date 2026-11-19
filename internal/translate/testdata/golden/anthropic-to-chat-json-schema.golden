@@ -1,0 +1,85 @@
+== request sent upstream ==
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": "Extract the contact.",
+      "role": "system"
+    },
+    {
+      "content": "Ada Lovelace, ada@example.com",
+      "role": "user"
+    }
+  ],
+  "model": "gpt-5",
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "response",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "name",
+          "email"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  }
+}
+== answer to the Caller ==
+{
+  "content": [
+    {
+      "text": "{\"name\":\"Ada Lovelace\",\"email\":\"ada@example.com\"}",
+      "type": "text"
+    }
+  ],
+  "id": "chatcmpl-Contact",
+  "model": "gpt",
+  "role": "assistant",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 30,
+    "output_tokens": 15
+  }
+}
+== stream to the Caller ==
+event: message_start
+data: {"message":{"content":[],"id":"chatcmpl-Contact","model":"gpt","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":0,"output_tokens":0}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"{\"name\":\"Ada Lovelace\",","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"\"email\":\"ada@example.com\"}","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":30,"output_tokens":15}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

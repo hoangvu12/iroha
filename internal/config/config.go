@@ -29,10 +29,22 @@ type Config struct {
 	// order (each serves api.json and models.json). Empty: never read; the
 	// flag's default is models.dev and its repository mirror.
 	ModelsDev []string
+	// LogoFavicons and LogoMakers are the URL templates logos are fetched
+	// from: a site's favicon ({domain}) for Providers, a model maker's mark
+	// ({maker}) for Model Pools. Empty: never fetched (lettered tiles); the
+	// flags' defaults are Google's favicon service and models.dev.
+	LogoFavicons string
+	LogoMakers   string
 }
 
 // DefaultModelsDev is the default of --models-dev.
 const DefaultModelsDev = "https://models.dev,https://raw.githubusercontent.com/anomalyco/models.dev/dev"
+
+// Defaults of --logo-favicons and --logo-makers.
+const (
+	DefaultLogoFavicons = "https://www.google.com/s2/favicons?domain={domain}&sz=64"
+	DefaultLogoMakers   = "https://models.dev/logos/{maker}.svg"
+)
 
 // DBPath is the SQLite file.
 func (c Config) DBPath() string { return filepath.Join(c.DataDir, store.FileName) }
@@ -60,6 +72,8 @@ func Parse(args []string, getenv func(string) string, stderr io.Writer) (Config,
 	str(&drain, "drain-timeout", drain, "how long shutdown waits for in-flight requests")
 	var modelsDev string
 	str(&modelsDev, "models-dev", DefaultModelsDev, "comma-separated base URLs serving models.dev's api.json and models.json, tried in order, for model metadata; none to never read it")
+	str(&c.LogoFavicons, "logo-favicons", DefaultLogoFavicons, "URL template Provider logos are fetched from, {domain} replaced by the logo domain; none to never fetch them")
+	str(&c.LogoMakers, "logo-makers", DefaultLogoMakers, "URL template Model Pool logos are fetched from, {maker} replaced by the model maker; none to never fetch them")
 	fs.BoolVar(&c.ShowVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return c, err
@@ -99,6 +113,20 @@ func Parse(args []string, getenv func(string) string, stderr io.Writer) (Config,
 				c.ModelsDev = append(c.ModelsDev, u)
 			}
 		}
+	}
+	for _, t := range []struct {
+		p           *string
+		flag, token string
+	}{{&c.LogoFavicons, "logo-favicons", "{domain}"}, {&c.LogoMakers, "logo-makers", "{maker}"}} {
+		v := strings.TrimSpace(*t.p)
+		if v == "none" {
+			*t.p = ""
+			continue
+		}
+		if !strings.HasPrefix(v, "https://") && !strings.HasPrefix(v, "http://") || !strings.Contains(v, t.token) {
+			return c, fmt.Errorf("%s: %q is not an http(s) URL containing %s", t.flag, v, t.token)
+		}
+		*t.p = v
 	}
 	if c.DataDir == "" && !c.ShowVersion {
 		if exe, err := os.Executable(); err != nil {

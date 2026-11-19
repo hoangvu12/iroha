@@ -18,12 +18,14 @@ import (
 // :streamGenerateContent), which the Gateway builds; Options.Stream tells
 // the translation that a Gemini Caller asked for a stream.
 var geminiCodec = &codec{
-	shape:    shape.Gemini,
-	format:   types.RelayFormatGemini,
-	request:  func() any { return &dto.GeminiChatRequest{} },
-	answer:   func() any { return &dto.GeminiChatResponse{} },
-	event:    func() any { return &dto.GeminiChatResponse{} },
-	setModel: func(any, string) {}, // the model is in the URL path
+	shape:       shape.Gemini,
+	format:      types.RelayFormatGemini,
+	request:     func() any { return &dto.GeminiChatRequest{} },
+	answer:      func() any { return &dto.GeminiChatResponse{} },
+	event:       func() any { return &dto.GeminiChatResponse{} },
+	setModel:    func(any, string) {}, // the model is in the URL path
+	readFormat:  readGeminiFormat,
+	writeFormat: writeGeminiFormat,
 	noteRequest: func(req any, t *Translation) {
 		if tc := req.(*dto.GeminiChatRequest).GenerationConfig.ThinkingConfig; tc != nil && tc.IncludeThoughts != nil {
 			t.thoughts = *tc.IncludeThoughts

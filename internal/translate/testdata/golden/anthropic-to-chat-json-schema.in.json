@@ -1,0 +1,45 @@
+{
+  "from": "anthropic-messages",
+  "to": "openai-chat",
+  "model": "gpt",
+  "wire_model": "gpt-5",
+  "request": {
+    "model": "gpt",
+    "max_tokens": 1024,
+    "stream": true,
+    "system": "Extract the contact.",
+    "messages": [
+      {"role": "user", "content": "Ada Lovelace, ada@example.com"}
+    ],
+    "output_config": {
+      "format": {
+        "type": "json_schema",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "email": {"type": "string", "format": "email"}
+          },
+          "required": ["name", "email"],
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  "answer": {
+    "id": "chatcmpl-Contact",
+    "object": "chat.completion",
+    "created": 1767225600,
+    "model": "gpt-5",
+    "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "{\"name\":\"Ada Lovelace\",\"email\":\"ada@example.com\"}"}}],
+    "usage": {"prompt_tokens": 30, "completion_tokens": 15, "total_tokens": 45}
+  },
+  "stream": [
+    {"id": "chatcmpl-Contact", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-5", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]},
+    {"id": "chatcmpl-Contact", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-5", "choices": [{"index": 0, "delta": {"content": "{\"name\":\"Ada Lovelace\","}, "finish_reason": null}]},
+    {"id": "chatcmpl-Contact", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-5", "choices": [{"index": 0, "delta": {"content": "\"email\":\"ada@example.com\"}"}, "finish_reason": null}]},
+    {"id": "chatcmpl-Contact", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-5", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+    {"id": "chatcmpl-Contact", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-5", "choices": [], "usage": {"prompt_tokens": 30, "completion_tokens": 15, "total_tokens": 45}},
+    "[DONE]"
+  ]
+}

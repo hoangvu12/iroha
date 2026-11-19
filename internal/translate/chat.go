@@ -12,12 +12,14 @@ import (
 
 // chatCodec is OpenAI Chat Completions.
 var chatCodec = &codec{
-	shape:    shape.OpenAIChat,
-	format:   types.RelayFormatOpenAI,
-	request:  func() any { return &dto.GeneralOpenAIRequest{} },
-	answer:   func() any { return &dto.OpenAITextResponse{} },
-	event:    func() any { return &dto.ChatCompletionsStreamResponse{} },
-	setModel: func(req any, model string) { req.(*dto.GeneralOpenAIRequest).Model = model },
+	shape:       shape.OpenAIChat,
+	format:      types.RelayFormatOpenAI,
+	request:     func() any { return &dto.GeneralOpenAIRequest{} },
+	answer:      func() any { return &dto.OpenAITextResponse{} },
+	event:       func() any { return &dto.ChatCompletionsStreamResponse{} },
+	setModel:    func(req any, model string) { req.(*dto.GeneralOpenAIRequest).Model = model },
+	readFormat:  readChatFormat,
+	writeFormat: writeChatFormat,
 
 	prepareRequest: func(req map[string]any, t *Translation) {
 		tools := list(req["tools"])

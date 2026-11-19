@@ -10,6 +10,10 @@
 //   - tool names that one Shape rejects are sanitised on the way in and
 //     restored in the answer (names.go);
 //   - image URLs reach Anthropic as URL sources, never downloaded (media.go);
+//   - structured output (a JSON schema or JSON mode) is carried between
+//     every pair of Shapes, schema properties in the Caller's order
+//     (format.go);
+//   - Anthropic search_result blocks become text (anthropic.go);
 //   - usage objects lose RelayKit's billing fields, and a Chat stream gets
 //     usage once, in a final chunk, only when the Caller asked for it;
 //   - every stream chunk names the answer's id, the Caller's model and the
@@ -140,6 +144,9 @@ func New(from, to shape.Shape, o Options) (*Translation, error) {
 // Request converts the Caller's body into the body for the Endpoint,
 // naming wireModel. An *Error means the body itself cannot be translated.
 func (t *Translation) Request(ctx context.Context, body []byte, wireModel string) ([]byte, error) {
+	if t.caller.rewrite != nil {
+		body = t.caller.rewrite(body)
+	}
 	in := t.caller.request()
 	if err := json.Unmarshal(body, in); err != nil {
 		return nil, &Error{Message: fmt.Sprintf("The body is not a valid %s request: %v", t.caller.shape, err)}
@@ -148,6 +155,7 @@ func (t *Translation) Request(ctx context.Context, body []byte, wireModel string
 	if t.caller.noteRequest != nil {
 		t.caller.noteRequest(in, t)
 	}
+	format := t.caller.readFormat(in) // format.go
 	t.meta = &convmeta.Values{OriginModelName: t.o.Model, UpstreamModelName: wireModel, ChannelMetaAttached: true, IsStream: t.o.Stream,
 		Options: &convmeta.Options{Claude: convmeta.ClaudeOptions{DefaultMaxTokens: defaultMaxTokens},
 			// Gemini 3 refuses replayed model turns whose function calls lack
@@ -164,6 +172,9 @@ func (t *Translation) Request(ctx context.Context, body []byte, wireModel string
 	m, err := toMap(res.Value)
 	if err != nil {
 		return nil, err
+	}
+	if format != nil {
+		t.endpoint.writeFormat(m, format, t)
 	}
 	t.endpoint.prepareRequest(m, t)
 	return marshal(m)

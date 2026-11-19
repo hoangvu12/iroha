@@ -14,7 +14,7 @@ import (
 
 func TestProviderHandlesAreValidatedUniqueAndImmutable(t *testing.T) {
 	srv := testkit.Start(t)
-	for _, bad := range []string{"", "Acme", "my_provider", "-acme", "acme-", "ac--me", "a.b", strings.Repeat("a", 64), "bulk"} {
+	for _, bad := range []string{"", "Acme", "my_provider", "-acme", "acme-", "ac--me", "a.b", strings.Repeat("a", 64), "bulk", "pools"} {
 		e := srv.Admin.Post("/api/providers", map[string]any{"handle": bad}).Expect(400).Err()
 		if e.Hint == "" {
 			t.Errorf("%q: no hint", bad)

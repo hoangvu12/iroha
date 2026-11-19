@@ -18,6 +18,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/keystate"
+	"github.com/hoangvu12/iroha/internal/logos"
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/shape"
 	"github.com/hoangvu12/iroha/internal/store"
@@ -36,6 +37,8 @@ type Provider struct {
 	Strict           bool       `json:"strict" doc:"true: a model missing from the Provider's model list (GET /api/providers/{provider}/models) is refused before any Attempt. false: it is forwarded anyway."`
 	Discovery        string     `json:"discovery" enum:"none,provider,key" doc:"How the model list is discovered: provider (once per Endpoint, with one key), key (per key and Endpoint; keys whose list names a model are tried first for it) or none."`
 	ModelsDevBrand   string     `json:"models_dev_brand" doc:"The models.dev provider ID model metadata is looked up under; \"\": none (by model name in models.dev's maker catalog only)."`
+	LogoDomain       string     `json:"logo_domain" doc:"The site whose logo the UI shows for this Provider (GET /api/providers/{provider}/logo): the Owner's, else guessed from the first Endpoint's host; \"\" when there is none (the UI draws the first letter)."`
+	LogoGuessed      bool       `json:"logo_domain_guessed" doc:"true when logo_domain is a guess (the Owner set none)."`
 	Endpoints        []Endpoint `json:"endpoints"`
 	UpstreamKeyCount int        `json:"upstream_key_count"`
 }
@@ -126,6 +129,8 @@ func CheckHandle(h string) error {
 		return api.BadRequest(handleHint, "handle %q is not valid.", h)
 	case h == "bulk":
 		return api.BadRequest("Pick another handle; \"bulk\" is a word of the admin API's paths.", "handle %q is reserved.", h)
+	case h == "pools":
+		return api.BadRequest("Pick another handle; \"pools\" is a word of the UI's paths (/providers/pools/<pool>).", "handle %q is reserved.", h)
 	}
 	return nil
 }
@@ -158,10 +163,11 @@ func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	var p Provider
 	var created int64
 	var maxAttempts, firstByte int
-	err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand,
+	var logo string
+	err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain,
 		(SELECT count(*) FROM upstream_keys k WHERE k.provider_id = providers.id)
 		FROM providers WHERE id = ?`, id).
-		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &maxAttempts, &firstByte, &p.Strict, &p.Discovery, &p.ModelsDevBrand, &p.UpstreamKeyCount)
+		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &maxAttempts, &firstByte, &p.Strict, &p.Discovery, &p.ModelsDevBrand, &logo, &p.UpstreamKeyCount)
 	if err != nil {
 		return p, err
 	}
@@ -170,7 +176,39 @@ func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	p.CreatedAt = store.FromMillis(created)
 	p.CallerPath = "/providers/" + p.Handle + "/v1"
 	p.Endpoints, err = listEndpoints(ctx, q, id)
+	p.LogoDomain, p.LogoGuessed = effectiveLogo(logo, p.Endpoints)
 	return p, err
+}
+
+// NoLogo is the logo_domain of a Provider shown with its first letter only.
+const NoLogo = "none"
+
+// effectiveLogo is the logo domain shown for a Provider: the Owner's, else
+// the site of its first Endpoint.
+func effectiveLogo(owner string, eps []Endpoint) (string, bool) {
+	switch owner {
+	case NoLogo:
+		return "", false
+	case "":
+		for _, e := range eps {
+			if d := logos.SiteOf(e.URL); d != "" {
+				return d, true
+			}
+		}
+		return "", false
+	}
+	return owner, false
+}
+
+// LogoDomain is the logo domain of the Provider addressed by handle or ID
+// (with the uniform 404 when there is none); "" when it has none.
+func LogoDomain(ctx context.Context, db *store.DB, ref string) (string, error) {
+	id, err := Resource.Resolve(ctx, db, ref)
+	if err != nil {
+		return "", err
+	}
+	p, err := readProvider(ctx, db, id)
+	return p.LogoDomain, err
 }
 
 const endpointColumns = `e.id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.discovery_url, e.created_at`

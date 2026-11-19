@@ -9,7 +9,7 @@ import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
-import { LogoTile } from "@/ui/LogoTile";
+import { LogoTile, PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { Menu, MenuContent, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { Chip, EmptyState, ErrorState, NoResults } from "@/ui/States";
 import { TableSkeleton } from "@/ui/Table";
@@ -231,7 +231,9 @@ function TargetIcon({ resource, name }: { resource: string; name: string }) {
         <Monitor size={14} />
       </span>
     );
-  return <LogoTile name={name} shape={resource === "model_pool" ? "square" : "round"} size={28} />;
+  if (resource === "provider") return <ProviderTile handle={name} size={28} />;
+  if (resource === "pool") return <PoolTile name={name} size={28} />;
+  return <LogoTile name={name} size={28} />;
 }
 
 /** "Created Admin Token huy" shows as "Created Admin Token", with huy in its own column. */

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { LogoTile } from "@/ui/LogoTile";
+import { ProviderTile } from "@/ui/LogoTile";
 import { StatusDot, type Tone } from "@/ui/bits";
 import { cn } from "@/ui/cn";
 import type { RequestRecord, Shape } from "./api";
@@ -168,17 +168,10 @@ const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFra
 /** 2140000 -> "2.14M". */
 export const compactNumber = (n: number) => compact.format(n);
 
-/**
- * The URL of a Provider's logo served by Iroha. Ticket 22 serves logos; until
- * then every tile shows the first letter. This is the one place to change.
- */
-export function providerLogo(_handle: string): string | undefined {
-  return undefined;
-}
-
+/** A Provider's logo (the shared ProviderTile); nothing when no Provider was tried. */
 export function ProviderLogo({ handle, size = 20 }: { handle?: string; size?: number }) {
   if (!handle) return null;
-  return <LogoTile name={handle} src={providerLogo(handle)} size={size} />;
+  return <ProviderTile handle={handle} size={size} />;
 }
 
 /** The small grey "Pool" tag after a model served through a Model Pool. */

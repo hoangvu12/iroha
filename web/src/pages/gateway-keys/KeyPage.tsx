@@ -18,7 +18,7 @@ import { type GatewayKey, useCaptureDays, useGatewayKey, useInvalidateKeys, useU
 import { baseUrls, Switch } from "./bits";
 import { DeleteDialog, RevokeDialog } from "./confirm";
 import { requestsHref } from "./List";
-import { PoolTile, ProviderTile } from "./logos";
+import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { type Draft, modelsLabel, sameScope, scopeSummary, toDraft, toScope } from "./scope";
 import { ScopeEditor } from "./ScopeEditor";
 

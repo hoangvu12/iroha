@@ -478,7 +478,7 @@ function AttemptPanel({ a, next, onClose }: { a: Attempt; next?: Attempt; onClos
       {e.headers && <Headers headers={e.headers} />}
       <div className="flex-1" />
       <Link
-        to={`/providers/${seg(a.provider)}/keys?q=${encodeURIComponent(a.upstream_key)}`}
+        to={`/providers/${seg(a.provider)}/keys?key=${encodeURIComponent(a.upstream_key)}`}
         className={buttonClass("secondary", "lg", "mt-8 w-full")}
       >
         Open {a.upstream_key} <ArrowUpRight size={16} />

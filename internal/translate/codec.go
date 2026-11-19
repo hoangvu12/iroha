@@ -29,6 +29,9 @@ type codec struct {
 	// fixUp, if set, corrects a decoded answer or stream event from an
 	// Endpoint (a DTO from answer or event) before it is converted.
 	fixUp func(v any)
+	// writeFormat writes the structured output the Caller asked for in
+	// this Shape's terms (format.go), before prepareRequest.
+	writeFormat func(req map[string]any, f *outputFormat, t *Translation)
 
 	// As the Caller's Shape:
 
@@ -43,6 +46,13 @@ type codec struct {
 	// noteRequest, when set, reads what the Caller's decoded request asks
 	// of the answer (Gemini: whether thoughts are wanted).
 	noteRequest func(req any, t *Translation)
+	// readFormat reads the structured output a decoded request asks for
+	// (format.go); nil when it asks for none.
+	readFormat func(req any) *outputFormat
+	// rewrite, if set, fixes the Caller's raw body before it is decoded
+	// into the request DTO, for what the DTO cannot hold (Anthropic's
+	// search_result blocks).
+	rewrite func(body []byte) []byte
 	// chatHop: answers are converted to this Shape through OpenAI Chat,
 	// whose form tidyAnswer (Translation.chat) and the writer (chatReader)
 	// see (hop.go).

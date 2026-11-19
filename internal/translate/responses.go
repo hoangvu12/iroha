@@ -21,13 +21,15 @@ import (
 // with store: false unless the Caller said otherwise: such a Caller cannot
 // refer to a stored response later, so nothing is kept at the Provider.
 var responsesCodec = &codec{
-	shape:    shape.OpenAIResponses,
-	format:   types.RelayFormatOpenAIResponses,
-	request:  func() any { return &dto.OpenAIResponsesRequest{} },
-	answer:   func() any { return &dto.OpenAIResponsesResponse{} },
-	event:    func() any { return &dto.ResponsesStreamResponse{} },
-	setModel: func(req any, model string) { req.(*dto.OpenAIResponsesRequest).Model = model },
-	streamID: func(t *Translation) string { return "resp_" + t.o.ID },
+	shape:       shape.OpenAIResponses,
+	format:      types.RelayFormatOpenAIResponses,
+	request:     func() any { return &dto.OpenAIResponsesRequest{} },
+	answer:      func() any { return &dto.OpenAIResponsesResponse{} },
+	event:       func() any { return &dto.ResponsesStreamResponse{} },
+	setModel:    func(req any, model string) { req.(*dto.OpenAIResponsesRequest).Model = model },
+	streamID:    func(t *Translation) string { return "resp_" + t.o.ID },
+	readFormat:  readResponsesFormat,
+	writeFormat: writeResponsesFormat,
 
 	prepareRequest: func(req map[string]any, t *Translation) {
 		tools := list(req["tools"])

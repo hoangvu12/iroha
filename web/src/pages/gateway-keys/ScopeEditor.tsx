@@ -5,7 +5,7 @@ import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
 import { usePoolOptions, useProviderOptions } from "./api";
 import { Checkbox, RadioOption } from "./bits";
-import { PoolTile, ProviderTile } from "./logos";
+import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { ModelPicker } from "./ModelPicker";
 import { type Draft, modelsLabel } from "./scope";
 

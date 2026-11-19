@@ -1,20 +1,23 @@
-import { Server } from "lucide-react";
-import { PageHeader } from "@/app/PageHeader";
-import { EmptyState } from "@/ui/States";
+import { Navigate, Route, Routes } from "react-router";
+import { ProvidersList } from "./List";
+import { PoolPage } from "./PoolPage";
+import { ProviderPage } from "./ProviderPage";
 
-// Placeholder for ticket 22, which owns this folder. App.tsx mounts this
-// component at /providers/*, so sub-pages (/providers/:handle/keys...) go in
-// a <Routes> here, without touching App.tsx.
+// Providers (ticket 22). App.tsx mounts this at /providers/*:
+//   /providers                         Providers and Model Pools (C05, C30)
+//   /providers/<handle>/<tab>          a Provider: keys, endpoints, models, rules, settings
+//   /providers/pools/<name>/<tab>      a Model Pool: route, members, settings
+// "pools" is reserved as a Provider handle so the two never collide.
 
 export default function ProvidersPage() {
   return (
-    <>
-      <PageHeader title="Providers" description="The AI services Iroha sends requests to" />
-      <EmptyState
-        icon={Server}
-        title="No Providers yet"
-        description="Add a Provider and paste its Upstream Keys, and Iroha starts routing to them."
-      />
-    </>
+    <Routes>
+      <Route index element={<ProvidersList />} />
+      <Route path="pools/:name" element={<Navigate to="route" replace />} />
+      <Route path="pools/:name/:tab" element={<PoolPage />} />
+      <Route path=":handle" element={<Navigate to="keys" replace />} />
+      <Route path=":handle/:tab" element={<ProviderPage />} />
+      <Route path="*" element={<Navigate to="/providers" replace />} />
+    </Routes>
   );
 }

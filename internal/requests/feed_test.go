@@ -119,6 +119,15 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 			t.Errorf("%s: median %v, want %d", tc.q, s.MedianDurationMs, tc.medianMs)
 		}
 	}
+	// A 500 is retried on the next try; the Request counts as retried and succeeded.
+	up.Enqueue(up.Error(500, "boom"), up.Text("ok"))
+	alice.Post(chatPath, `{"model":"gpt-z","messages":[]}`).Expect(200)
+	if s := statsOf(t, srv, "retried=true"); s.Requests != 1 || s.Retried != 1 || s.Succeeded != 1 {
+		t.Fatalf("retried stats = %+v", s)
+	}
+	if s := statsOf(t, srv, ""); s.Retried != 1 || s.Requests != 6 {
+		t.Fatalf("stats after a retry = %+v", s)
+	}
 	for _, q := range []string{"status=6xx", "retried=maybe", "caller_kind=robot", "since=yesterday"} {
 		if e := srv.Admin.Get("/api/requests/stats?" + q).Expect(400).Err(); e.Hint == "" {
 			t.Errorf("%s: no hint", q)

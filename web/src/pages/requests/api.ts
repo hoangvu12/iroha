@@ -27,8 +27,13 @@ export type Attempt = {
   first_byte_ms?: number;
   duration_ms?: number;
   usage?: Usage;
-  // Ticket 05 (read through attempt-info.ts, never directly).
-  [extra: string]: unknown;
+  // Set on failed Attempts (ticket 05); read through attempt-info.ts.
+  rule?: string;
+  outcome?: string;
+  reason?: string;
+  action?: string;
+  failure_headers?: Record<string, string>;
+  failure_body?: string;
 };
 
 export type RequestRecord = {
@@ -38,6 +43,8 @@ export type RequestRecord = {
   state: "in_progress" | "completed" | "interrupted";
   status: number;
   error?: { code: string; message: string };
+  /** One line saying what happened at each Attempt, for Requests with a failed or more than one Attempt. */
+  summary?: string;
   caller: { kind: "gateway_key" | "test"; gateway_key_id?: string; name: string };
   route: string;
   shape_in: Shape;

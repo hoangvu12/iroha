@@ -1,24 +1,12 @@
 import type { Tone } from "@/ui/bits";
-import type { Attempt, RequestRecord } from "./api";
+import type { Attempt } from "./api";
 import { clock } from "./bits";
 
-// What Iroha made of each Attempt: the matched Failure Rule, what it meant
-// (outcome), what Iroha did about it (Key State effect), and the upstream
-// error. Ticket 05 adds these fields to Attempts in GET /api/requests/{id};
-// this file is the ONLY place that reads them, so a rename is a one-line fix
-// in FIELDS below. Everything degrades to the plain status when they are absent.
-
-const FIELDS = {
-  rule: "rule", // the Failure Rule the failure matched
-  outcome: "outcome", // invalid | cooling_key | cooling_key_model | model_gap | retry_elsewhere | fail_request
-  reason: "reason", // what the Provider answered, in one line
-  action: "action", // what Iroha did: Key State change, next candidate
-  failureBody: "failure_body", // upstream response body of a failed Attempt
-  failureHeaders: "failure_headers", // upstream response headers of a failed Attempt
-} as const;
-
-/** On the Request (ticket 05): one line saying what happened at each Attempt. */
-export const requestSummary = (r: RequestRecord): string | undefined => str((r as unknown as Record<string, unknown>).summary);
+// What Iroha made of each failed Attempt, from the fields GET
+// /api/requests/{id} gives it (internal/requests.Attempt): the matched
+// Failure Rule, what the failure meant (outcome), what Iroha did about it
+// (action: the Key State effect), and the upstream error body and headers.
+// The drawer, the Attempts tab and the Route view all read them through here.
 
 export type Outcome = "invalid" | "cooling_key" | "cooling_key_model" | "model_gap" | "retry_elsewhere" | "fail_request";
 
@@ -26,7 +14,9 @@ export type Explanation = {
   failed: boolean;
   rule?: string;
   outcome?: Outcome;
+  /** What the Provider answered, in one line. */
   reason?: string;
+  /** What Iroha did about it, as recorded ("Upstream Key team-3 cooling until ..."). */
   action?: string;
   /** The Key State the Attempt left the Upstream Key in ("Cooling until 14:33:01"). */
   keyState?: { text: string; tone: Tone };
@@ -34,13 +24,9 @@ export type Explanation = {
   headers?: Record<string, string>;
 };
 
-function str(v: unknown): string | undefined {
-  return typeof v === "string" && v !== "" ? v : undefined;
-}
-
 const ISO = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})/;
 
-/** "cooling until 2026-11-19T14:33:01Z" in an action -> "14:33:01" (local time). */
+/** "... cooling until 2026-11-19T14:33:01Z." -> "14:33:01" (local time). */
 function untilIn(text?: string): string | undefined {
   const m = text?.match(ISO);
   return m ? clock(m[0]) : undefined;
@@ -51,28 +37,30 @@ export function attemptFailed(a: Attempt): boolean {
 }
 
 export function explain(a: Attempt): Explanation {
-  const outcome = str(a[FIELDS.outcome]) as Outcome | undefined;
-  const action = str(a[FIELDS.action]);
-  const headers = a[FIELDS.failureHeaders];
+  const outcome = (a.outcome || undefined) as Outcome | undefined;
   const e: Explanation = {
     failed: attemptFailed(a),
-    rule: str(a[FIELDS.rule]),
+    rule: a.rule || undefined,
     outcome,
-    reason: str(a[FIELDS.reason]),
-    action,
-    body: str(a[FIELDS.failureBody]) ?? a.error,
-    headers: headers && typeof headers === "object" ? (headers as Record<string, string>) : undefined,
+    reason: a.reason || undefined,
+    action: a.action || undefined,
+    body: a.failure_body || a.error || undefined,
+    headers: a.failure_headers && Object.keys(a.failure_headers).length > 0 ? a.failure_headers : undefined,
   };
-  const until = untilIn(action);
+  const until = untilIn(a.action);
+  const stays = /stays invalid/i.test(a.action ?? "");
   switch (outcome) {
     case "cooling_key":
       e.keyState = { text: until ? `Cooling until ${until}` : "Cooling", tone: "amber" };
       break;
     case "cooling_key_model":
-      e.keyState = { text: until ? `Cooling for ${a.wire_model} until ${until}` : `Cooling for ${a.wire_model}`, tone: "amber" };
+      // Three models refused within minutes escalate to the whole key (the action says so).
+      e.keyState = /whole key/i.test(a.action ?? "")
+        ? { text: `Cooling until ${untilIn(a.action?.slice(a.action.search(/whole key/i))) ?? until ?? "later"}`, tone: "amber" }
+        : { text: until ? `Cooling for ${a.wire_model} until ${until}` : `Cooling for ${a.wire_model}`, tone: "amber" };
       break;
     case "invalid":
-      e.keyState = { text: "Invalid", tone: "red" };
+      e.keyState = { text: stays ? "Still invalid" : "Invalid", tone: "red" };
       break;
     case "model_gap":
       e.keyState = { text: `Model Gap for ${a.wire_model}`, tone: "blue" };
@@ -82,6 +70,7 @@ export function explain(a: Attempt): Explanation {
       e.keyState = { text: "Unchanged", tone: "gray" };
       break;
   }
+  if (stays && e.keyState) e.keyState = { text: "Still invalid", tone: "red" };
   return e;
 }
 
@@ -102,8 +91,7 @@ export function jumpLabel(a: Attempt, next: Attempt | undefined): { text: string
   if (!next || !attemptFailed(a)) return undefined;
   const tried = thenText(a, next);
   const lower = tried.charAt(0).toLowerCase() + tried.slice(1);
-  const e = explain(a);
-  switch (e.outcome) {
+  switch (explain(a).outcome) {
     case "cooling_key":
     case "cooling_key_model":
       return { text: `Cooling, ${lower}`, tone: "amber" };

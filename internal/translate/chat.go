@@ -92,10 +92,28 @@ var chatCodec = &codec{
 		}
 		for _, c := range list(m["choices"]) {
 			restoreChatCalls(obj(obj(c)["message"]), t)
+			if c := obj(c); c["finish_reason"] != nil {
+				c["finish_reason"] = chatFinish(c["finish_reason"], len(list(obj(c["message"])["tool_calls"])) > 0)
+			}
 		}
 	},
 
 	newWriter: func(t *Translation, o StreamOptions) streamWriter { return &chatWriter{t: t, o: o} },
+}
+
+// chatFinishReasons are the finish reasons the OpenAI SDKs know.
+var chatFinishReasons = map[string]bool{"stop": true, "length": true, "tool_calls": true, "content_filter": true, "function_call": true}
+
+// chatFinish is the finish reason a Chat Caller gets: one it knows, and
+// tool_calls when the answer called tools but its Provider said it ended
+// its turn (Anthropic's end_turn after tool_use blocks), since clients run
+// tools only on tool_calls.
+func chatFinish(v any, called bool) any {
+	v = knownReason(v, chatFinishReasons, "stop")
+	if called && v == "stop" {
+		return "tool_calls"
+	}
+	return v
 }
 
 // chatError reads an OpenAI error envelope's inner object.
@@ -141,10 +159,11 @@ func restoreChatCalls(msg map[string]any, t *Translation) {
 // in a last chunk with no choices, when the Caller asked for it; chunks
 // that say nothing are dropped; [DONE] ends a complete stream.
 type chatWriter struct {
-	t    *Translation
-	o    StreamOptions
-	id   string
-	sent bool
+	t      *Translation
+	o      StreamOptions
+	id     string
+	sent   bool
+	called bool // a delta called a tool
 }
 
 func (w *chatWriter) write(m map[string]any) []byte {
@@ -167,7 +186,14 @@ func (w *chatWriter) write(m map[string]any) []byte {
 		}
 		delta := obj(c["delta"])
 		restoreChatCalls(delta, w.t)
-		if c["finish_reason"] != nil || saysSomething(delta) {
+		if len(list(delta["tool_calls"])) > 0 {
+			w.called = true
+		}
+		if c["finish_reason"] != nil {
+			c["finish_reason"] = chatFinish(c["finish_reason"], w.called)
+			keep = true
+		}
+		if saysSomething(delta) {
 			keep = true
 		}
 	}

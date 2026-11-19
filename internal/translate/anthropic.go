@@ -2,6 +2,7 @@ package translate
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -85,9 +86,13 @@ var anthropicCodec = &codec{
 		if _, ok := m["stop_sequence"]; !ok {
 			m["stop_sequence"] = nil
 		}
-		for _, block := range list(m["content"]) {
+		m["stop_reason"] = knownReason(m["stop_reason"], anthropicStopReasons, "end_turn")
+		for i, block := range list(m["content"]) {
 			if block := obj(block); str(block["type"]) == "tool_use" {
 				rename(block, "name", t.names.original)
+				if str(block["id"]) == "" { // the Caller answers a tool call by its id
+					block["id"] = fmt.Sprintf("toolu_%s_%d", t.o.ID, i)
+				}
 			}
 		}
 	},
@@ -112,6 +117,20 @@ func urlSources(block map[string]any) {
 	if u, ok := urlFromMarker(str(src["data"])); ok {
 		block["source"] = map[string]any{"type": "url", "url": u}
 	}
+}
+
+// anthropicStopReasons are the stop reasons Anthropic's SDKs know.
+var anthropicStopReasons = map[string]bool{"end_turn": true, "max_tokens": true, "stop_sequence": true, "tool_use": true,
+	"pause_turn": true, "refusal": true, "model_context_window_exceeded": true}
+
+// knownReason is a stop or finish reason the Caller's Shape knows: another
+// Shape's reason the converter passed on unmapped becomes def. Absent (nil)
+// stays absent.
+func knownReason(v any, known map[string]bool, def string) any {
+	if s, ok := v.(string); ok && !known[s] {
+		return def
+	}
+	return v
 }
 
 // anthropicUsage is a usage object as Anthropic reports it, without
@@ -157,6 +176,7 @@ func (w *anthropicWriter) write(m map[string]any) []byte {
 			if _, ok := d["stop_sequence"]; !ok {
 				d["stop_sequence"] = nil
 			}
+			d["stop_reason"] = knownReason(d["stop_reason"], anthropicStopReasons, "end_turn")
 		}
 	case "content_block_start":
 		if cb := obj(m["content_block"]); str(cb["type"]) == "tool_use" {

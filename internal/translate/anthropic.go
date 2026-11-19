@@ -1,8 +1,10 @@
 package translate
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -12,12 +14,15 @@ import (
 
 // anthropicCodec is Anthropic Messages.
 var anthropicCodec = &codec{
-	shape:    shape.AnthropicMessages,
-	format:   types.RelayFormatClaude,
-	request:  func() any { return &dto.ClaudeRequest{} },
-	answer:   func() any { return &dto.ClaudeResponse{} },
-	event:    func() any { return &dto.ClaudeResponse{} },
-	setModel: func(req any, model string) { req.(*dto.ClaudeRequest).Model = model },
+	shape:       shape.AnthropicMessages,
+	format:      types.RelayFormatClaude,
+	request:     func() any { return &dto.ClaudeRequest{} },
+	answer:      func() any { return &dto.ClaudeResponse{} },
+	event:       func() any { return &dto.ClaudeResponse{} },
+	setModel:    func(req any, model string) { req.(*dto.ClaudeRequest).Model = model },
+	readFormat:  readAnthropicFormat,
+	writeFormat: writeAnthropicFormat,
+	rewrite:     searchResultsAsText,
 
 	prepareRequest: func(req map[string]any, t *Translation) {
 		tools := list(req["tools"])
@@ -117,6 +122,86 @@ func urlSources(block map[string]any) {
 	if u, ok := urlFromMarker(str(src["data"])); ok {
 		block["source"] = map[string]any{"type": "url", "url": u}
 	}
+}
+
+// searchResultsAsText turns every search_result block of an Anthropic
+// request (in a message or in a tool_result's content) into a text block
+// naming its title and source, ahead of its text: RelayKit's request DTO
+// cannot hold the block (its source is a string), and no other Shape has
+// one, but the model should still read the RAG context. Citations of it
+// exist only in Anthropic answers, so nothing is lost there. Only the
+// messages are re-encoded; the rest of the body keeps its bytes.
+func searchResultsAsText(body []byte) []byte {
+	if !bytes.Contains(body, []byte(`"search_result"`)) {
+		return body
+	}
+	var top map[string]json.RawMessage
+	if json.Unmarshal(body, &top) != nil {
+		return body // decoding reports it
+	}
+	dec := json.NewDecoder(bytes.NewReader(top["messages"]))
+	dec.UseNumber()
+	var msgs []any
+	if dec.Decode(&msgs) != nil {
+		return body
+	}
+	changed := false
+	textOf := func(blocks []any) {
+		for i, b := range blocks {
+			if b := obj(b); str(b["type"]) == "search_result" {
+				blocks[i] = searchResultText(b)
+				changed = true
+			}
+		}
+	}
+	for _, msg := range msgs {
+		blocks := list(obj(msg)["content"])
+		textOf(blocks)
+		for _, b := range blocks {
+			if b := obj(b); str(b["type"]) == "tool_result" {
+				textOf(list(b["content"]))
+			}
+		}
+	}
+	if !changed {
+		return body
+	}
+	raw, err := marshal(msgs)
+	if err != nil {
+		return body
+	}
+	top["messages"] = raw
+	out, err := marshal(top)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func searchResultText(b map[string]any) map[string]any {
+	var head, texts []string
+	if t := str(b["title"]); t != "" {
+		head = append(head, "Search result: "+t)
+	} else {
+		head = append(head, "Search result")
+	}
+	if s := str(b["source"]); s != "" {
+		head = append(head, "Source: "+s)
+	}
+	for _, c := range list(b["content"]) {
+		if t := str(obj(c)["text"]); t != "" {
+			texts = append(texts, t)
+		}
+	}
+	text := strings.Join(head, "\n")
+	if len(texts) > 0 {
+		text += "\n\n" + strings.Join(texts, "\n\n")
+	}
+	out := map[string]any{"type": "text", "text": text}
+	if cc, ok := b["cache_control"]; ok {
+		out["cache_control"] = cc
+	}
+	return out
 }
 
 // anthropicStopReasons are the stop reasons Anthropic's SDKs know.

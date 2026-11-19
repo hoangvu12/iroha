@@ -13,7 +13,7 @@ Every case of kind **a** (essential) or **b** (provider quirk) in `docs/research
   - `ui (#NN)`: a UI behaviour, owned by UI ticket NN (no DOM tests; the API behind it is mapped where it exists).
 - **Note**: what is asserted, and `deviation:` where v2 deliberately behaves differently from v1. The deviations worth an Owner decision are collected below.
 
-**Totals:** 521 cases (418 of kind a, 103 of kind b): 388 covered, 95 n/a, 17 ui, 13 partial, 8 open.
+**Totals:** 521 cases (418 of kind a, 103 of kind b): 391 covered, 95 n/a, 17 ui, 11 partial, 7 open.
 
 ## Fixed by ticket 26
 
@@ -38,7 +38,7 @@ Tests written for this checklist found these behaviours wrong; each is fixed and
 |---|---|---|
 | 23 | KEY-24, REQ-07, MOD-88, UI-07 | Test chat records "Test" / "Test (as <key>)" Requests (already in ticket 23) |
 | 29 | PRV-03, PRV-08 | Spread Requests across a Provider's same-Shape Endpoints, or record that they are a preference order (needs decision) |
-| 30 | REQ-45, REQ-59, REQ-57 | Structured output across Chat ↔ Anthropic; `search_result` blocks refuse the Request instead of being dropped |
+| 30 | REQ-45, REQ-59, REQ-57 | Done: structured output across every Shape; `search_result` blocks become text |
 | 31 | REQ-18, FAIL-94, FAIL-83, TIME-09 | Mint an `Idempotency-Key` per Request; pause before a same-key 5xx replay (needs decision) |
 | 32 | MOD-06 | Record the model the upstream says it served on each Attempt |
 | 33 | MOD-67 | Model display names on the model lists (needs decision) |
@@ -75,6 +75,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 - REQ-04, MOD-06…08: every answer names the model the Caller asked for (qualified on global routes), never the upstream's (ticket 32 records the upstream's).
 - REQ-85, REQ-88: `<think>` text is lifted only when it opens the answer; text after echoed reasoning is kept (ticket 16).
 - REQ-17: `Accept: text/event-stream` is sent upstream on stream requests (v1 sent `application/json`).
+- REQ-57, REQ-45: an Anthropic `search_result` block reaches other Shapes as text (v1 dropped it); JSON-schema keywords an Anthropic Endpoint cannot take move into the description instead of the Request being refused (ticket 30).
 
 **Configuration and models**
 - PRV-75: `POST /api/providers` with a taken handle updates that Provider (create-or-update) instead of 409; the ticket 22 create dialog must check the handle first.
@@ -208,7 +209,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | REQ-42 | a | covered | `translate TestGolden/"chat-to-anthropic-tools-images-reasoning"` |  |
 | REQ-43 | a | covered | `translate TestGolden/"chat-to-anthropic-tools-images-reasoning"`; `translate TestGolden/"chat-to-anthropic-text"` | v1 BUG fixed: `{name, description, input_schema}` |
 | REQ-44 | a | covered | `translate TestGolden/"chat-to-anthropic-tools-images-reasoning"` | v1 GAP fixed: tool_calls → tool_use, images → image blocks; deviation: RelayKit adds `"..."` text to tool-call-only assistant turns |
-| REQ-45 | a | partial (#30) | `translate TestGolden/"chat-to-anthropic-text"`; `translate TestGolden/"chat-to-anthropic-tools-images-reasoning"` | stop→stop_sequences, reasoning_effort→thinking, unknown fields dropped: asserted. `response_format` is silently dropped, not mapped to `output_config.format` (WRONG) |
+| REQ-45 | a | covered | `translate TestGolden/"chat-to-anthropic-text"`; `translate TestGolden/"chat-to-anthropic-tools-images-reasoning"`; `translate TestGolden/"chat-to-anthropic-json-schema"`; `translate TestAJSONSchemaReachesEveryShape`; `translate TestSchemaKeywordsAnthropicCannotTakeMoveIntoTheDescription`; `translate TestJSONModeWithoutASchema` | stop→stop_sequences, reasoning_effort→thinking, unknown fields dropped: asserted. `response_format` json_schema → `output_config.format` in the Caller's property order (fixed, ticket 30); keywords Anthropic cannot take move into the description, like Anthropic's SDKs (deviation: not refused); `json_object` is dropped with a diagnostic (Anthropic has no JSON mode) |
 | REQ-46 | a | covered | `translate TestGolden/"chat-to-anthropic-text"`; `translate TestGolden/"chat-to-anthropic-tools-images-reasoning"`; `translate TestAnswersWithBadToolArgumentsOrNoIDsStillTranslate` | synthesized id (`chatcmpl-<request id>`) asserted (ticket 26) |
 | REQ-47 | a | covered | `translate TestGolden/"chat-to-anthropic-text"`; `translate TestGolden/"chat-to-anthropic-tools-images-reasoning"`; `translate TestStopReasonsMapBetweenAnthropicAndChatBothWays` | Anthropic→Chat, whole and streamed: end_turn/stop_sequence→stop, max_tokens/pause_turn→length, tool_use→tool_calls, refusal→content_filter, unknown→stop (fixed). end_turn with tool_use blocks→tool_calls (fixed, whole and streamed) |
 | REQ-48 | b | covered | `rules TestEmbeddedErrorsAreToldFromAnswers`; `rules TestBuiltinQuirkRulesClassifyTheRecordedBodies/"rate_limit_error inside a 200 answer"`; `gateway TestAnHTMLPageSentWith200PassesThroughUntouched`; `gateway TestAnHTMLPageSentWith200IsAFailedAttemptWhenTranslating` | (b) On passthrough (Anthropic to Anthropic) the HTML body, status and content type are relayed unchanged with one Attempt. `type:error` inside a 2xx was already covered by the rules tests |
@@ -219,9 +220,9 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | REQ-54 | a | covered | `translate TestGolden/"anthropic-to-chat-tools-images-thinking"` | ids unchanged both ways |
 | REQ-55 | a | covered | `translate TestGolden/"anthropic-to-chat-tools-images-thinking"` | v1 BUG fixed: no trailing empty user turn after tool messages |
 | REQ-56 | a | covered | `translate TestToolResultImagesReachAChatModel` | v1 GAP, correct today. In tool_result `[text, image]` the text goes to the tool message and the image to a following user message. An image-only result says `[image]` in the tool message |
-| REQ-57 | a | partial (#30) | `translate TestGolden/"anthropic-to-chat-tools-images-thinking"`; `translate TestAnthropicBlocksChatCannotCarryAreDropped` | thinking, redacted_thinking, URL document, server_tool_use and web_search_tool_result are dropped, with RelayKit diagnostics for the document and hosted-tool items. `search_result` is not dropped: see "needs ticket" |
+| REQ-57 | a | covered | `translate TestGolden/"anthropic-to-chat-tools-images-thinking"`; `translate TestAnthropicBlocksChatCannotCarryAreDropped`; `translate TestSearchResultBlocksBecomeText` | thinking, redacted_thinking, URL document, server_tool_use and web_search_tool_result are dropped, with RelayKit diagnostics for the document and hosted-tool items. deviation: a `search_result` block (top level or in a `tool_result`) becomes text ("Search result: title / Source: … / content") toward every Shape, so the RAG context reaches the model; v1 dropped it (ticket 30; it used to refuse the Request) |
 | REQ-58 | a | covered | `translate TestGolden/"anthropic-to-chat-text-effort"`; `translate TestGolden/"anthropic-to-chat-tools-images-thinking"` | max_tokens, temperature, stop, metadata/cache_control dropped; deviation: thinking→reasoning_effort, stream_options added; top_p/top_k untested |
-| REQ-59 | a | open (#30) |  | `output_config.format`/`output_format` dropped toward Chat (no mapping in RelayKit or codecs) (WRONG) |
+| REQ-59 | a | covered | `translate TestGolden/"anthropic-to-chat-json-schema"`; `translate TestAJSONSchemaReachesEveryShape`; `translate TestAnthropicLegacyOutputFormatAndEffortSideBySide`; `translate TestSchemaNamesCarryOverOrAreMade` | `output_config.format` or legacy `output_format` → `response_format` json_schema named `response` (v1 GAP fixed: OpenAI requires a name), no `strict`; also to Responses `text.format` and Gemini `responseJsonSchema` (ticket 30) |
 | REQ-60 | a | covered | `translate TestGolden/"anthropic-to-chat-tools-images-thinking"`; `translate TestGolden/"anthropic-to-chat-text-effort"`; `translate TestStopReasonsMapBetweenAnthropicAndChatBothWays`; `translate TestAnswersWithBadToolArgumentsOrNoIDsStillTranslate` | Chat→Anthropic: stop→end_turn, length→max_tokens, tool_calls→tool_use, content_filter→refusal, unknown→end_turn (fixed). `stop_sequence: null`. `"{bad"` args become `input: {}`. An answer without an id gets `msg_<req>`. A tool call without an id gets `toolu_<req>_<n>` (fixed, buffered; streamed already got a random `toolu_`). An Anthropic answer without an id gets `chatcmpl-<req>` |
 | REQ-61 | a | covered | `translate TestGolden/"anthropic-to-chat-tools-images-thinking"`; `gateway TestGLMContentBlocksAreFlattened`; `gateway TestThinkTextMovesIntoReasoningOnEveryPath` | v1 GAP fixed |
 | REQ-62 | a | covered | `gateway TestAnHTMLPageSentWith200IsAFailedAttemptWhenTranslating` | v1 BUG, fixed. An HTML 200 from a Chat Endpoint to a Messages Caller is a failed Attempt (`server-error`, `retry_elsewhere`, status 200, "sent inside a 2xx answer") and the next key serves, whole and streamed. When every key fails the Caller gets a 502 `upstream_failed` (`api_error`) Anthropic envelope with 3 Attempts |

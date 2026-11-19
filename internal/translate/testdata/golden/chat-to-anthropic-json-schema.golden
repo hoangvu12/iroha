@@ -1,0 +1,95 @@
+== request sent upstream ==
+{
+  "max_tokens": 64000,
+  "messages": [
+    {
+      "content": "Ada Lovelace, ada@example.com, born 1815-12-10",
+      "role": "user"
+    }
+  ],
+  "model": "claude-sonnet-4-5",
+  "output_config": {
+    "format": {
+      "type": "json_schema",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "{minLength: 1}"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "born": {
+            "type": "string",
+            "format": "date"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "{maxItems: 3}"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "born",
+          "tags"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "stream": true,
+  "system": [
+    {
+      "text": "Extract the contact.",
+      "type": "text"
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "{\"name\":\"Ada Lovelace\",\"email\":\"ada@example.com\",\"born\":\"1815-12-10\",\"tags\":[]}",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1767225600,
+  "id": "msg_01Contact",
+  "model": "sonnet",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 22,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 40,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 62
+  }
+}
+== stream to the Caller ==
+data: {"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Contact","model":"sonnet","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"{\"name\":\"Ada Lovelace\","},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Contact","model":"sonnet","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"\"email\":\"ada@example.com\",\"born\":\"1815-12-10\",\"tags\":[]}"},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Contact","model":"sonnet","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1767225600,"id":"msg_01Contact","model":"sonnet","object":"chat.completion.chunk"}
+
+data: {"choices":[],"created":1767225600,"id":"msg_01Contact","model":"sonnet","object":"chat.completion.chunk","usage":{"completion_tokens":22,"completion_tokens_details":{"reasoning_tokens":0},"prompt_tokens":40,"prompt_tokens_details":{"cached_tokens":0},"total_tokens":62}}
+
+data: [DONE]
+

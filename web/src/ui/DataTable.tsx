@@ -368,13 +368,15 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const filteredRows = table.getFilteredRowModel().rows;
   const shown = paging.mode === "server" ? paging.rowCount : filteredRows.length;
   const pageRows = table.getRowModel().rows;
-  const filtered = search.trim() !== "" || (props.columnFilters?.length ?? 0) > 0 || (props.filterChips?.length ?? 0) > 0;
+  // Rows the server filtered can be none because of the filters; loaded rows filtered here can't.
+  const serverFiltered = !!props.manualFiltering || paging.mode === "server";
+  const filtered = serverFiltered && (search.trim() !== "" || (props.columnFilters?.length ?? 0) > 0 || (props.filterChips?.length ?? 0) > 0);
 
   // ---- States in place of the table ----
   let state: ReactNode;
   if (props.error && !data) state = <ErrorState title={props.errorTitle ?? `Couldn't load ${label}`} error={props.error} onRetry={props.onRetry} />;
   else if (data && data.length === 0 && !filtered) state = props.empty ?? null;
-  else if (data && (paging.mode === "server" ? data.length === 0 : filteredRows.length === 0))
+  else if (data && (serverFiltered ? data.length === 0 : filteredRows.length === 0))
     state = props.noResults ?? (props.onClearFilters ? <NoResults title={`No ${label.toLowerCase()} match`} filters={props.filterChips} onClear={props.onClearFilters} /> : null);
   const showToolbar = loading || (data && data.length > 0) || filtered;
 

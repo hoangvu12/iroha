@@ -1,9 +1,7 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
-  ArrowDown,
-  ArrowUp,
   CircleCheck,
   CircleSlash,
   Copy,
@@ -27,33 +25,73 @@ import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
 import { Mono, StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
+import { useConfirm } from "@/ui/Confirm";
 import { CopyButton, useCopy } from "@/ui/CopyButton";
+import { type ColumnFiltersState, type SortingState, DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
 import { type Done, type Save, SaveError, SaveStatus, toastDone, useSave } from "@/ui/SaveStatus";
 import { ScrollArea } from "@/ui/ScrollArea";
-import { ConfirmDialog, Dialog } from "@/ui/Dialog";
+import { Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
-import { EmptyState, ErrorState, NoResults } from "@/ui/States";
-import { Skeleton } from "@/ui/Skeleton";
-import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { EmptyState } from "@/ui/States";
 import { notify, notifyChange } from "@/ui/toast";
 import type { KeyTestBulk, KeyTestResult, Provider, UpstreamKey } from "./api";
 import { calls, errorText, maskSecret, natural, useKeys, useRefresh } from "./api";
 import { Checkbox, KeyStateLabel, Pill, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
 import { SAMPLE_KEYS } from "./samples";
 
-// The Keys tab (C01, C11, C20; phones C31): one line per Upstream Key,
-// sorted, filtered and searched; selecting keys turns the toolbar into
-// "N selected" with Test, Disable and a ⋯ menu. Every bulk action calls the
-// bulk API and shows per-key results when any key failed. Its result (with
-// Undo, an Audit revert) shows where it was asked for: in the selection bar,
-// or in the key's dialog; from a row's menu, which has closed, it toasts.
-// ?q= searches; ?key=<name> opens a key.
+// The Keys tab (C01, C11, C20; phones C31): one line per Upstream Key in the
+// shared DataTable, sorted, filtered, searched and paged; selecting keys turns
+// the toolbar into "N selected" with Test, Disable and a ⋯ menu. Every bulk
+// action calls the bulk API and shows per-key results when any key failed. Its
+// result (with Undo, an Audit revert) shows where it was asked for: in the
+// selection bar, or in the key's dialog; from a row's menu, which has closed, it
+// toasts. Deletes ask first (UI ticket 21).
+// ?q= searches, ?state= filters, ?sort=&dir= sorts; ?key=<name> opens a key.
 
 type StateFilter = "all" | "active" | "cooling" | "invalid" | "disabled" | "gaps";
 type Sort = "name" | "state" | "used";
 
 const stateOrder = { invalid: 0, cooling: 1, disabled: 2, active: 3 };
+
+const col = columnsFor<UpstreamKey>();
+const columns = col.columns([
+  col.accessor("name", {
+    header: "Name",
+    sortFn: (a, b) => natural(a.original.name, b.original.name),
+    meta: { width: "w-[24%]", className: "text-[15px] font-medium", opens: true },
+    cell: ({ row }) => <span className="truncate">{row.original.name}</span>,
+  }),
+  col.display({
+    id: "key",
+    header: "Key",
+    meta: { width: "w-[20%]" },
+    cell: ({ row }) => <SecretCell k={row.original} />,
+  }),
+  col.accessor((k) => k.state.state, {
+    id: "state",
+    header: "State",
+    sortFn: (a, b) => stateOrder[a.original.state.state] - stateOrder[b.original.state.state] || natural(a.original.name, b.original.name),
+    filterFn: (row, _id, value) => (value === "gaps" ? hasGaps(row.original) : row.original.state.state === value),
+    meta: { width: "w-[24%]" },
+    cell: ({ row }) => (
+      <span className="flex items-center gap-2">
+        <KeyStateLabel state={row.original.state} plain={row.original.state.state !== "cooling"} />
+        <GapsPill k={row.original} />
+      </span>
+    ),
+  }),
+  col.accessor((k) => k.last_used_at ?? "", {
+    id: "used",
+    header: "Last used",
+    // Most recent first, then by name.
+    sortFn: (a, b) => (b.original.last_used_at ?? "").localeCompare(a.original.last_used_at ?? "") || natural(a.original.name, b.original.name),
+    meta: { className: "whitespace-nowrap tabular" },
+    cell: ({ row }) => (row.original.last_used_at ? timeAgo(row.original.last_used_at) : <span className="text-fg-muted">Never</span>),
+  }),
+]);
+
+const searchKeys = (k: UpstreamKey, needle: string) => !needle || k.name.toLowerCase().includes(needle) || k.secret.toLowerCase().includes(needle);
 
 export function KeysTab({
   handle,
@@ -70,6 +108,7 @@ export function KeysTab({
   const refresh = useRefresh();
   const phone = useIsPhone();
   const chat = useChatActions();
+  const confirm = useConfirm();
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
   const filter = (params.get("state") as StateFilter) || "all";
@@ -88,13 +127,9 @@ export function KeysTab({
       { replace: true },
     );
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [selecting, setSelecting] = useState(false); // phones: checkboxes shown
   const [results, setResults] = useState<Results>();
-  const [deleting, setDeleting] = useState<string[]>();
   const [restricting, setRestricting] = useState<string[]>();
   const [busy, setBusy] = useState<string>();
-  const lastClicked = useRef<number>(-1);
   // Results of what the selection bar did show in the bar.
   const barSave = useSave({ describe: errorText });
   const emptySave = useSave({ describe: errorText });
@@ -103,51 +138,8 @@ export function KeysTab({
   const all = useMemo(() => keys.data ?? [], [keys.data]);
   const byName = useMemo(() => new Map(all.map((k) => [k.name, k])), [all]);
 
-  // Forget selected keys that are gone (deleted, renamed).
-  useEffect(() => {
-    setSelected((s) => {
-      const next = new Set([...s].filter((n) => byName.has(n)));
-      return next.size === s.size ? s : next;
-    });
-  }, [byName]);
-
-  const shown = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const list = all.filter((k) => {
-      if (needle && !k.name.toLowerCase().includes(needle) && !k.secret.toLowerCase().includes(needle)) return false;
-      if (filter === "gaps") return hasGaps(k);
-      if (filter !== "all") return k.state.state === filter;
-      return true;
-    });
-    const cmp =
-      sort === "state"
-        ? (a: UpstreamKey, b: UpstreamKey) => stateOrder[a.state.state] - stateOrder[b.state.state] || natural(a.name, b.name)
-        : sort === "used"
-          ? (a: UpstreamKey, b: UpstreamKey) => (b.last_used_at ?? "").localeCompare(a.last_used_at ?? "") || natural(a.name, b.name)
-          : (a: UpstreamKey, b: UpstreamKey) => natural(a.name, b.name);
-    list.sort(cmp);
-    if (desc) list.reverse();
-    return list;
-  }, [all, q, filter, sort, desc]);
-
-  const toggle = (name: string, on: boolean, index: number, shift: boolean) => {
-    setSelected((s) => {
-      const next = new Set(s);
-      if (shift && lastClicked.current >= 0) {
-        const [a, b] = [Math.min(lastClicked.current, index), Math.max(lastClicked.current, index)];
-        for (const k of shown.slice(a, b + 1)) on ? next.add(k.name) : next.delete(k.name);
-      } else on ? next.add(name) : next.delete(name);
-      return next;
-    });
-    lastClicked.current = index;
-  };
-  const allShownSelected = shown.length > 0 && shown.every((k) => selected.has(k.name));
-  const someSelected = shown.some((k) => selected.has(k.name));
-  const names = [...selected].sort(natural);
-  const clearSelection = () => {
-    setSelected(new Set());
-    setSelecting(false);
-  };
+  const sorting = useMemo<SortingState>(() => [{ id: sort, desc }], [sort, desc]);
+  const columnFilters = useMemo<ColumnFiltersState>(() => (filter === "all" ? [] : [{ id: "state", value: filter }]), [filter]);
 
   // Runs a change and shows its result at `at` (the bar, the key's dialog);
   // without one it came from a row's menu, which has closed, so it toasts.
@@ -171,7 +163,7 @@ export function KeysTab({
   };
 
   const bulk = (
-    action: "enable" | "disable" | "delete" | "clear-model-gaps" | "clear-endpoint-gaps" | "restrict-to-working-endpoints",
+    action: "enable" | "disable" | "clear-model-gaps" | "clear-endpoint-gaps" | "restrict-to-working-endpoints",
     items: string[],
     past: string,
     at?: Save,
@@ -181,7 +173,6 @@ export function KeysTab({
       async () => {
         const res = await calls.bulkKeys(handle, action, items);
         await refresh();
-        if (action === "delete" && res.failed === 0) clearSelection();
         return bulkDone(res, items, past, setResults);
       },
       action,
@@ -205,6 +196,25 @@ export function KeysTab({
       "test",
       at,
     );
+
+  // Asks first, naming the keys; the rows are gone afterwards, so the result (with Undo) toasts.
+  const askDelete = (names: string[]) => {
+    const one = names.length === 1;
+    confirm.ask({
+      title: one ? `Delete ${names[0]}?` : `Delete ${names.length} keys?`,
+      body: one
+        ? `Iroha stops using ${names[0]} and forgets its secret. Undo brings it back.`
+        : `Iroha stops using ${names.slice(0, 5).join(", ")}${names.length > 5 ? ` and ${names.length - 5} more` : ""} and forgets their secrets. Undo brings them back.`,
+      confirmLabel: one ? "Delete key" : `Delete ${names.length} keys`,
+      onConfirm: async () => {
+        const res = await calls.bulkKeys(handle, "delete", names);
+        refresh();
+        // Toast: the confirm dialog has closed and the rows are gone; Undo after a delete.
+        reportBulk(res, names, "deleted", setResults, refresh);
+        if (names.includes(openKey ?? "")) setParam("key");
+      },
+    });
+  };
 
   // A keyless key: no secret, so Iroha sends no credential with it. A failure
   // shows at `at` (the empty state or the Add keys dialog), which stays.
@@ -233,7 +243,7 @@ export function KeysTab({
     clearEndpointGaps: (k, at) => void bulk("clear-endpoint-gaps", [k.name], "cleared of Endpoint Gaps", at),
     restrictToWorking: (k, at) => void bulk("restrict-to-working-endpoints", [k.name], "restricted to the Endpoints it works on", at),
     endpoints: (k) => setRestricting([k.name]),
-    remove: (k) => setDeleting([k.name]),
+    remove: (k) => askDelete([k.name]),
   };
 
   const filters = [
@@ -243,10 +253,11 @@ export function KeysTab({
   const detail = openKey ? byName.get(openKey) : undefined;
   const multipleEndpoints = (provider?.endpoints.length ?? 0) > 1;
 
-  const toolbar =
-    selected.size > 0 ? (
-      <div className="flex min-h-9 flex-wrap items-center gap-2">
-        <span className="mr-2 text-[15px] font-medium tabular">{selected.size} selected</span>
+  const bulkBar = (rows: UpstreamKey[]) => {
+    const names = rows.map((k) => k.name).sort(natural);
+    const withEndpointGaps = rows.filter((k) => k.endpoint_gaps.length > 0).map((k) => k.name);
+    return (
+      <>
         <Button icon={Play} onClick={() => void test(names, barSave)} loading={busy === "test"} size={phone ? "sm" : "md"}>
           Test
         </Button>
@@ -267,19 +278,9 @@ export function KeysTab({
             <MenuItem icon={Eraser} onSelect={() => void bulk("clear-model-gaps", names, "cleared of Model Gaps", barSave)}>
               Clear Model Gaps
             </MenuItem>
-            {names.some((n) => (byName.get(n)?.endpoint_gaps.length ?? 0) > 0) && (
+            {withEndpointGaps.length > 0 && (
               <>
-                <MenuItem
-                  icon={Waypoints}
-                  onSelect={() =>
-                    void bulk(
-                      "restrict-to-working-endpoints",
-                      names.filter((n) => (byName.get(n)?.endpoint_gaps.length ?? 0) > 0),
-                      "restricted to the Endpoints they work on",
-                      barSave,
-                    )
-                  }
-                >
+                <MenuItem icon={Waypoints} onSelect={() => void bulk("restrict-to-working-endpoints", withEndpointGaps, "restricted to the Endpoints they work on", barSave)}>
                   Restrict to working Endpoints
                 </MenuItem>
                 <MenuItem icon={Eraser} onSelect={() => void bulk("clear-endpoint-gaps", names, "cleared of Endpoint Gaps", barSave)}>
@@ -289,92 +290,76 @@ export function KeysTab({
             )}
             <MenuItem
               icon={Copy}
-              onSelect={() => void copied.copy(names.map((n) => byName.get(n)?.secret ?? "").filter(Boolean).join("\n"), `${names.length} key${names.length === 1 ? "" : "s"}`)}
+              onSelect={() => void copied.copy(rows.map((k) => k.secret).filter(Boolean).join("\n"), `${names.length} key${names.length === 1 ? "" : "s"}`)}
             >
               Copy keys
             </MenuItem>
             <MenuSeparator />
-            <MenuItem icon={Trash2} danger onSelect={() => setDeleting(names)}>
+            <MenuItem icon={Trash2} danger onSelect={() => askDelete(names)}>
               Delete…
             </MenuItem>
           </MenuContent>
         </Menu>
         <SaveStatus save={barSave} saving={false} className="ml-1" />
         <SaveError save={barSave} />
-        <div className="flex-1" />
-        <button type="button" className="text-[14px] text-fg-muted hover:text-fg" onClick={clearSelection}>
-          Clear selection
-        </button>
-      </div>
-    ) : (
-      <div className="flex flex-wrap items-center gap-2">
-        <SearchInput
-          className="min-w-0 flex-1 md:max-w-[320px] md:flex-none"
-          placeholder="Search keys"
-          aria-label="Search keys by name or secret"
-          value={q}
-          onChange={(e) => setParam("q", e.target.value)}
-        />
-        {phone ? (
-          <Select<StateFilter>
-            aria-label="Show keys"
-            value={filter}
-            onValueChange={(v) => setParam("state", v === "all" ? undefined : v)}
-            className="w-28"
-            items={(Object.keys(filterLabel) as StateFilter[]).map((f) => ({ value: f, label: f === "all" ? "All" : filterLabel[f] }))}
-          />
-        ) : (
-          <Segmented<StateFilter>
-            label="Show keys"
-            value={filter}
-            onChange={(v) => setParam("state", v === "all" ? undefined : v)}
-            items={(["all", "active", "cooling", "invalid", "disabled", "gaps"] as StateFilter[]).map((f) => ({
-              value: f,
-              label: (
-                <>
-                  {f === "all" ? "All" : filterLabel[f]}
-                  {f !== "all" && counts[f](all) > 0 && <span className="ml-1.5 text-fg-muted tabular">{counts[f](all)}</span>}
-                </>
-              ),
-            }))}
-          />
-        )}
-        {phone && all.length > 0 && (
-          <Button size="md" onClick={() => setSelecting((s) => !s)}>
-            {selecting ? "Done" : "Select"}
-          </Button>
-        )}
-      </div>
+      </>
     );
+  };
 
-  // Loading draws the key table from SAMPLE_KEYS (ui/Skeleton); the states below only once keys arrived.
-  let body: ReactNode;
-  if (keys.isError) body = <ErrorState title="Couldn't load Upstream Keys" error={keys.error} onRetry={() => void keys.refetch()} />;
-  else if (keys.data && all.length === 0)
-    body = (
-      <EmptyState
-        icon={KeyRound}
-        title="No Upstream Keys yet"
-        description={`Paste the keys ${handle} issued you, one per line. If its Endpoints need no key, add one keyless key instead.`}
-        action={
-          <span className="flex flex-wrap justify-center gap-2">
-            <Button variant="primary" onClick={() => setAdding(true)}>
-              Add keys
-            </Button>
-            <Button onClick={() => addKeyless(emptySave)} loading={busy === "keyless"}>
-              Add keyless key
-            </Button>
-            <SaveError save={emptySave} className="basis-full text-center" />
-          </span>
-        }
+  const toolbar = (
+    <>
+      <SearchInput
+        className="min-w-0 flex-1 md:max-w-[320px] md:flex-none"
+        placeholder="Search keys"
+        aria-label="Search keys by name or secret"
+        value={q}
+        onChange={(e) => setParam("q", e.target.value)}
       />
-    );
-  else if (keys.data && shown.length === 0)
-    body = (
-      <NoResults
-        title="No keys match"
-        filters={filters}
-        onClear={() =>
+      {phone ? (
+        <Select<StateFilter>
+          aria-label="Show keys"
+          value={filter}
+          onValueChange={(v) => setParam("state", v === "all" ? undefined : v)}
+          className="w-28"
+          items={(Object.keys(filterLabel) as StateFilter[]).map((f) => ({ value: f, label: f === "all" ? "All" : filterLabel[f] }))}
+        />
+      ) : (
+        <Segmented<StateFilter>
+          label="Show keys"
+          value={filter}
+          onChange={(v) => setParam("state", v === "all" ? undefined : v)}
+          items={(["all", "active", "cooling", "invalid", "disabled", "gaps"] as StateFilter[]).map((f) => ({
+            value: f,
+            label: (
+              <>
+                {f === "all" ? "All" : filterLabel[f]}
+                {f !== "all" && counts[f](all) > 0 && <span className="ml-1.5 text-fg-muted tabular">{counts[f](all)}</span>}
+              </>
+            ),
+          }))}
+        />
+      )}
+    </>
+  );
+
+  return (
+    <section aria-label="Upstream Keys">
+      <DataTable<UpstreamKey>
+        id="provider-keys"
+        label="Upstream Keys"
+        columns={columns}
+        data={keys.data}
+        sample={SAMPLE_KEYS}
+        getRowId={(k) => k.id}
+        rowName={(k) => k.name}
+        error={keys.isError ? keys.error : undefined}
+        onRetry={() => void keys.refetch()}
+        toolbar={toolbar}
+        search={q}
+        searchFn={searchKeys}
+        columnFilters={columnFilters}
+        filterChips={filters}
+        onClearFilters={() =>
           setParams(
             (p) => {
               const n = new URLSearchParams(p);
@@ -385,89 +370,38 @@ export function KeysTab({
             { replace: true },
           )
         }
+        sorting={sorting}
+        onSortingChange={(s) => setSortParams(setParams, (s[0]?.id as Sort) ?? "name", s[0]?.desc ?? false)}
+        bulk={({ rows }) => bulkBar(rows)}
+        rowActions={(k) => <KeyMenu k={k} actions={keyActions} multipleEndpoints={multipleEndpoints} />}
+        onRowClick={keyActions.open}
+        phoneRow={(k) => <KeyLine k={k} />}
+        empty={
+          <EmptyState
+            icon={KeyRound}
+            title="No Upstream Keys yet"
+            description={`Paste the keys ${handle} issued you, one per line. If its Endpoints need no key, add one keyless key instead.`}
+            action={
+              <span className="flex flex-wrap justify-center gap-2">
+                <Button variant="primary" onClick={() => setAdding(true)}>
+                  Add keys
+                </Button>
+                <Button onClick={() => addKeyless(emptySave)} loading={busy === "keyless"}>
+                  Add keyless key
+                </Button>
+                <SaveError save={emptySave} className="basis-full text-center" />
+              </span>
+            }
+          />
+        }
+        footer={({ shown, total }) => (
+          <>
+            {shown === total ? `${total} key${total === 1 ? "" : "s"}` : `${shown} of ${total} keys`}. Hover a state for its reason; shift-click to select a range.
+          </>
+        )}
       />
-    );
-  const keyTable = (rows: UpstreamKey[]) =>
-    phone ? (
-      <KeyList keys={rows} selecting={selecting || selected.size > 0} selected={selected} onToggle={toggle} actions={keyActions} />
-    ) : (
-      <Table>
-        <THead>
-          <tr>
-            <TH className="w-9">
-              <Checkbox
-                label={allShownSelected ? "Unselect all shown keys" : "Select all shown keys"}
-                checked={allShownSelected ? true : someSelected ? "mixed" : false}
-                onChange={(on) =>
-                  setSelected((s) => {
-                    const next = new Set(s);
-                    for (const k of shown) on ? next.add(k.name) : next.delete(k.name);
-                    return next;
-                  })
-                }
-              />
-            </TH>
-            <SortTH label="Name" by="name" sort={sort} desc={desc} setSort={(s, d) => setSortParams(setParams, s, d)} className="w-[24%]" />
-            <TH className="w-[20%]">Key</TH>
-            <SortTH label="State" by="state" sort={sort} desc={desc} setSort={(s, d) => setSortParams(setParams, s, d)} className="w-[24%]" />
-            <SortTH label="Last used" by="used" sort={sort} desc={desc} setSort={(s, d) => setSortParams(setParams, s, d)} />
-            <TH className="w-10">
-              <span className="sr-only">Actions</span>
-            </TH>
-          </tr>
-        </THead>
-        <TBody>
-          {rows.map((k, i) => (
-            <TR key={k.id} interactive selected={selected.has(k.name)} className="group" onClick={() => keyActions.open(k)}>
-              <TD onClick={(e) => e.stopPropagation()}>
-                <span
-                  onClickCapture={(e) => {
-                    if (e.shiftKey) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      toggle(k.name, !selected.has(k.name), i, true);
-                    }
-                  }}
-                >
-                  <Checkbox label={`Select ${k.name}`} checked={selected.has(k.name)} onChange={(on) => toggle(k.name, on, i, false)} />
-                </span>
-              </TD>
-              <TD className="text-[15px] font-medium">
-                <span className="truncate">{k.name}</span>
-              </TD>
-              <TD>
-                <SecretCell k={k} />
-              </TD>
-              <TD>
-                <span className="flex items-center gap-2">
-                  <KeyStateLabel state={k.state} plain={k.state.state !== "cooling"} />
-                  <GapsPill k={k} />
-                </span>
-              </TD>
-              <TD className="whitespace-nowrap tabular">{k.last_used_at ? timeAgo(k.last_used_at) : <span className="text-fg-muted">Never</span>}</TD>
-              <TD align="right" onClick={(e) => e.stopPropagation()}>
-                <KeyMenu k={k} actions={keyActions} multipleEndpoints={multipleEndpoints} />
-              </TD>
-            </TR>
-          ))}
-        </TBody>
-      </Table>
-    );
 
-  return (
-    <section aria-label="Upstream Keys">
-      {(keys.isPending || all.length > 0) && <div className="mb-4">{toolbar}</div>}
-      {body ?? (
-        <Skeleton data={keys.data && shown} sample={SAMPLE_KEYS} id={phone ? "provider-keys:phone" : "provider-keys"} label="Loading Upstream Keys">
-          {keyTable}
-        </Skeleton>
-      )}
-      {all.length > 0 && shown.length > 0 && (
-        <p className="mt-4 text-[13px] text-fg-muted">
-          {shown.length === all.length ? `${all.length} key${all.length === 1 ? "" : "s"}` : `${shown.length} of ${all.length} keys`}. Hover a state for its reason; shift-click to select a range.
-        </p>
-      )}
-
+      {confirm.dialog}
       <AddKeysDialog
         handle={handle}
         open={adding}
@@ -485,26 +419,6 @@ export function KeysTab({
         onRenamed={(n) => setParam("key", n)}
         actions={keyActions}
         testing={busy === "test"}
-      />
-      <ConfirmDialog
-        open={!!deleting}
-        onOpenChange={(o) => !o && setDeleting(undefined)}
-        title={deleting?.length === 1 ? `Delete ${deleting[0]}?` : `Delete ${deleting?.length} keys?`}
-        body={
-          deleting?.length === 1
-            ? `Iroha stops using ${deleting[0]} and forgets its secret. Undo brings it back.`
-            : `Iroha stops using ${deleting?.slice(0, 5).join(", ")}${(deleting?.length ?? 0) > 5 ? ` and ${(deleting?.length ?? 0) - 5} more` : ""} and forgets their secrets. Undo brings them back.`
-        }
-        confirmLabel={deleting?.length === 1 ? "Delete key" : `Delete ${deleting?.length} keys`}
-        onConfirm={async () => {
-          if (!deleting) return;
-          const res = await calls.bulkKeys(handle, "delete", deleting);
-          refresh();
-          // Toast: the confirm dialog has closed and the rows are gone; Undo after a delete.
-          reportBulk(res, deleting, "deleted", setResults, refresh);
-          if (deleting.includes(openKey ?? "")) setParam("key");
-          setSelected((s) => new Set([...s].filter((n) => !deleting.includes(n))));
-        }}
       />
       <EndpointsDialog
         handle={handle}
@@ -553,35 +467,9 @@ function setSortParams(setParams: ReturnType<typeof useSearchParams>[1], sort: S
   );
 }
 
-function SortTH({
-  label,
-  by,
-  sort,
-  desc,
-  setSort,
-  className,
-}: {
-  label: string;
-  by: Sort;
-  sort: Sort;
-  desc: boolean;
-  setSort: (s: Sort, desc: boolean) => void;
-  className?: string;
-}) {
-  const active = sort === by;
-  return (
-    <TH className={className} aria-sort={active ? (desc ? "descending" : "ascending") : undefined}>
-      <button type="button" onClick={() => setSort(by, active ? !desc : false)} className={cn("inline-flex items-center gap-1 hover:text-fg", active && "text-fg")}>
-        {label}
-        {active && (desc ? <ArrowUp size={13} /> : <ArrowDown size={13} />)}
-      </button>
-    </TH>
-  );
-}
-
 function SecretCell({ k }: { k: UpstreamKey }) {
   return (
-    <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+    <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{maskSecret(k.secret)}</Mono>
       {k.secret && <CopyButton icon value={k.secret} what="Key" label={`Copy ${k.name}`} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />}
     </span>
@@ -623,89 +511,63 @@ function KeyMenu({ k, actions, multipleEndpoints }: { k: UpstreamKey; actions: K
   // "Copy key" closes the menu, so the trigger it closes back to shows the result.
   const copied = useCopy();
   return (
-    <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" copy={copied.state} />
-      <MenuContent>
-        <MenuItem icon={Play} onSelect={() => actions.test(k)}>
-          Test
+    <RowMenu name={k.name} copy={copied.state}>
+      <MenuItem icon={Play} onSelect={() => actions.test(k)}>
+        Test
+      </MenuItem>
+      <MenuItem icon={MessageCircle} onSelect={() => actions.chat(k)}>
+        Test in Chat
+      </MenuItem>
+      {k.secret && (
+        <MenuItem icon={Copy} onSelect={() => void copied.copy(k.secret, "Key")}>
+          Copy key
         </MenuItem>
-        <MenuItem icon={MessageCircle} onSelect={() => actions.chat(k)}>
-          Test in Chat
+      )}
+      <MenuSeparator />
+      <MenuItem icon={k.enabled ? Pause : CircleCheck} onSelect={() => actions.toggle(k)}>
+        {k.enabled ? "Disable" : "Enable"}
+      </MenuItem>
+      {k.model_gaps.length > 0 && (
+        <MenuItem icon={Eraser} onSelect={() => actions.clearGaps(k)}>
+          Clear Model Gaps
         </MenuItem>
-        {k.secret && (
-          <MenuItem icon={Copy} onSelect={() => void copied.copy(k.secret, "Key")}>
-            Copy key
+      )}
+      {k.endpoint_gaps.length > 0 && (
+        <>
+          <MenuItem icon={Waypoints} onSelect={() => actions.restrictToWorking(k)}>
+            Restrict to working Endpoints
           </MenuItem>
-        )}
-        <MenuSeparator />
-        <MenuItem icon={k.enabled ? Pause : CircleCheck} onSelect={() => actions.toggle(k)}>
-          {k.enabled ? "Disable" : "Enable"}
-        </MenuItem>
-        {k.model_gaps.length > 0 && (
-          <MenuItem icon={Eraser} onSelect={() => actions.clearGaps(k)}>
-            Clear Model Gaps
+          <MenuItem icon={Eraser} onSelect={() => actions.clearEndpointGaps(k)}>
+            Clear Endpoint Gaps
           </MenuItem>
-        )}
-        {k.endpoint_gaps.length > 0 && (
-          <>
-            <MenuItem icon={Waypoints} onSelect={() => actions.restrictToWorking(k)}>
-              Restrict to working Endpoints
-            </MenuItem>
-            <MenuItem icon={Eraser} onSelect={() => actions.clearEndpointGaps(k)}>
-              Clear Endpoint Gaps
-            </MenuItem>
-          </>
-        )}
-        {multipleEndpoints && (
-          <MenuItem icon={Plug} onSelect={() => actions.endpoints(k)}>
-            Endpoints…
-          </MenuItem>
-        )}
-        <MenuSeparator />
-        <MenuItem icon={Trash2} danger onSelect={() => actions.remove(k)}>
-          Delete…
+        </>
+      )}
+      {multipleEndpoints && (
+        <MenuItem icon={Plug} onSelect={() => actions.endpoints(k)}>
+          Endpoints…
         </MenuItem>
-      </MenuContent>
-    </Menu>
+      )}
+      <MenuSeparator />
+      <MenuItem icon={Trash2} danger onSelect={() => actions.remove(k)}>
+        Delete…
+      </MenuItem>
+    </RowMenu>
   );
 }
 
-/** Phones (C31): two lines per key; Select shows checkboxes. */
-function KeyList({
-  keys,
-  selecting,
-  selected,
-  onToggle,
-  actions,
-}: {
-  keys: UpstreamKey[];
-  selecting: boolean;
-  selected: Set<string>;
-  onToggle: (name: string, on: boolean, index: number, shift: boolean) => void;
-  actions: KeyActions;
-}) {
+/** Phones (C31): a key in two lines. */
+function KeyLine({ k }: { k: UpstreamKey }) {
   return (
-    <ul className="divide-y divide-border border-y border-border">
-      {keys.map((k, i) => (
-        <li key={k.id} className={cn("flex items-center gap-3 py-3", selected.has(k.name) && "bg-selected")}>
-          {selecting && <Checkbox label={`Select ${k.name}`} checked={selected.has(k.name)} onChange={(on) => onToggle(k.name, on, i, false)} className="ml-1" />}
-          <button
-            type="button"
-            className="flex min-w-0 flex-1 items-center gap-3 text-left"
-            onClick={() => (selecting ? onToggle(k.name, !selected.has(k.name), i, false) : actions.open(k))}
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-mono text-[16px]">{k.name}</span>
-              <span className="block truncate font-mono text-[14px] text-fg-muted">{maskSecret(k.secret)}</span>
-            </span>
-            <span className="flex shrink-0 flex-col items-end text-[14px]">
-              <KeyStateLabel state={k.state} plain={k.state.state === "active" || k.state.state === "disabled"} />
-              <span className="text-fg-muted">{k.last_used_at ? timeAgo(k.last_used_at) : "Never used"}</span>
-            </span>
-          </button>
-        </li>
-      ))}
-    </ul>
+    <>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-mono text-[16px]">{k.name}</span>
+        <span className="block truncate font-mono text-[14px] text-fg-muted">{maskSecret(k.secret)}</span>
+      </span>
+      <span className="flex shrink-0 flex-col items-end text-[14px]">
+        <KeyStateLabel state={k.state} plain={k.state.state === "active" || k.state.state === "disabled"} />
+        <span className="text-fg-muted">{k.last_used_at ? timeAgo(k.last_used_at) : "Never used"}</span>
+      </span>
+    </>
   );
 }
 

@@ -272,7 +272,7 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 - Overview page and charts (beyond the Requests stats row).
 - Upstream Accounts and Management Key scopes.
 - Multiple Owners or tenants.
-- Any pipeline for gathering Upstream Keys from third parties; Iroha only holds keys the Owner is entitled to use.
+- Any pipeline for gathering Upstream Keys from third parties. Iroha holds the Upstream Keys and Endpoints the Owner puts in it and never goes looking for more; the Owner's choice of Providers, Endpoints and keys is their own.
 - Importing v1 request history.
 
 ## Further Notes

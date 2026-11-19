@@ -6,6 +6,7 @@
 - Read Skullet's docs that ship in `node_modules` and its GitHub repo/issues for performance guidance (e.g. one shared gradient vs one per bone, composited `transform` vs `background-position`, limits, `content-visibility`); note what you found in the notes folder (`skullet.md`).
 - Use the `animation-performance` skill. Keep the sweep if it can be made composite-only and cheap; if not, use a lighter effect (e.g. a pulse on opacity) for large skeletons only and keep the sweep for small ones. Stagger or skip the row reveal when many rows arrive at once (ticket 16's motion; reveal only what's in view).
 - Reduced motion stays respected.
+- **Skeleton rows are inert** (found by ticket 24): a click on a Requests feed row while the skeleton showed opened a sheet for the sample record (`gk_sample`). Skeleton rows (sample data) must not open sheets, menus or links, nor be focusable; check every table and sheet skeleton; test it.
 
 **Blocked by:** 25 (tables change how they scroll; measure on the new layout)
 

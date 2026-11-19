@@ -100,9 +100,10 @@ const testDescription = "Runs a chat turn through the Gateway exactly as a Calle
 	"The answer is the Gateway's answer in that Shape, byte for byte as a Caller would get it: the Shape's server-sent events (stream, the default) or JSON, " +
 	"the Shape's error envelope on failure, and the Request ID in x-request-id (GET /api/requests/{request} has every Attempt). " +
 	"upstream_key and endpoint pin every Attempt to that key and/or Endpoint of the model's Provider (model must be <provider>/<model>). " +
-	"With tool_check the request offers get_weather(city); the verdict (JSON: passed, reason, name, arguments, id) ends a stream as the SSE comment line " +
+	"tools names test tools to offer (GET /api/test/tools; tool_check: true alone means [\"get_weather\"]); the verdict on the model's calls " +
+	"(JSON: passed, reason, name, arguments, id, calls; it passes when every call names an offered tool with arguments valid against its schema) ends a stream as the SSE comment line " +
 	"\": iroha-tool-check {...}\" (SDKs ignore comments) and comes in the Iroha-Tool-Check header of a JSON answer. " +
-	"To continue after a tool call, send the assistant turn back with tool_calls: Iroha answers each with a made-up weather report. " +
+	"To continue after a tool call, send the assistant turn back with tool_calls: Iroha answers each with that tool's result. " +
 	"Errors before anything is sent (bad body, unknown pin or Gateway Key) use the admin error envelope. dry_run=true sends nothing and shows the request."
 
 // TestRoutes are the test chat's send route.
@@ -136,7 +137,7 @@ func (g *Gateway) serveTest(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, api.AsError(err))
 		return
 	}
-	b, err := testchat.Build(s)
+	b, err := testchat.Build(s, g.clock.Now())
 	if err != nil {
 		api.WriteError(w, api.AsError(err))
 		return
@@ -176,7 +177,7 @@ func (g *Gateway) serveTest(w http.ResponseWriter, r *http.Request) {
 	}
 	out := w
 	var buf *bufferedWriter
-	if s.ToolCheck && !b.Stream {
+	if s.Checked() && !b.Stream {
 		buf = &bufferedWriter{header: http.Header{}}
 		out = buf
 	}
@@ -186,13 +187,13 @@ func (g *Gateway) serveTest(w http.ResponseWriter, r *http.Request) {
 	g.run(x, caller, (*exchange).global)
 	untrack()
 
-	if !s.ToolCheck {
+	if !s.Checked() {
 		return
 	}
 	var check testchat.ToolCheck
 	if x.capture != nil {
 		status, answer := x.capture.Answer(b.Shape)
-		check = testchat.CheckTool(b.Shape, status, answer)
+		check = testchat.CheckTool(b.Shape, status, answer, s.Tools)
 	}
 	verdict, _ := json.Marshal(check)
 	if buf != nil {

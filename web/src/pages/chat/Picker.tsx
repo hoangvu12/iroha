@@ -7,7 +7,7 @@ import { createPopoverController, Popover, PopoverContent, PopoverTitle, Popover
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { formatNumber } from "@/lib/format";
 import { useGatewayKeys, useKeys, useProvider } from "@/pages/providers/api";
-import { KeyStateLabel, Segmented, Switch } from "@/pages/providers/controls";
+import { KeyStateLabel, Segmented } from "@/pages/providers/controls";
 import { Kbd } from "@/ui/bits";
 import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
@@ -20,7 +20,8 @@ import { bareModel, preferOf, providerOf, SHAPES, shapeLabel, useModelChoices } 
 import { recentModels } from "./store";
 
 // The composer's model button (C16, C27): the model, then Provider,
-// Upstream Key, Endpoint, Shape, Send as, Reasoning and the tool-call check.
+// Upstream Key, Endpoint, Shape, Send as and Reasoning (test tools are the
+// composer's wrench, tools.tsx).
 // Each row opens its own list in the same popover; the model list searches
 // on the server (GET /api/test/models), the picked model's Provider first
 // (else Pools first), and takes typed IDs.
@@ -219,13 +220,6 @@ function Main({ settings, onChange, open }: { settings: Settings; onChange: (p: 
             { value: "high", label: "High" },
           ]}
         />
-      </div>
-      <div className="flex items-center gap-3 border-t border-border px-4 py-3">
-        <span className="min-w-0 flex-1" aria-hidden>
-          <span className="block text-[14.5px] font-medium">Check tool calls</span>
-          <span className="block text-[13px] text-fg-muted">Offer a test tool and check the call</span>
-        </span>
-        <Switch label="Check tool calls" checked={settings.toolCheck} onChange={(toolCheck) => onChange({ toolCheck })} />
       </div>
     </ScrollArea>
   );

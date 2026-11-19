@@ -151,6 +151,128 @@ test("a row click opens the row, its Open button does too, and its controls and 
   expect(opened).toHaveBeenCalledTimes(2);
 });
 
+// ---- Select mode (UI ticket 25) ----
+
+function SelectableFruits(p: Partial<DataTableProps<Fruit>> & { opened: (name: string) => void; ate?: (name: string) => void }) {
+  const { opened, ate = () => {}, ...rest } = p;
+  return (
+    <Fruits
+      bulk={() => <Button>Eat</Button>}
+      onRowClick={(f) => opened(f.name)}
+      rowActions={(f) => (
+        <RowMenu name={f.name}>
+          <MenuItem onSelect={() => opened(f.name)}>Open</MenuItem>
+          <MenuItem onSelect={() => ate(f.name)}>Eat</MenuItem>
+        </RowMenu>
+      )}
+      {...rest}
+    />
+  );
+}
+const checked = (name: string) => screen.getByRole("checkbox", { name: `Select ${name}` }).getAttribute("aria-checked");
+
+test("select mode: once a row is selected, a click anywhere on a row toggles it instead of opening it", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  await user.click(screen.getByRole("checkbox", { name: "Select apple" }));
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+
+  await user.click(within(bodyRows()[1]).getByText("yellow"));
+  expect(checked("banana")).toBe("true");
+  expect(screen.getByRole("group", { name: "2 selected" })).toBeTruthy();
+  await user.click(within(bodyRows()[0]).getByText("180"));
+  expect(checked("apple")).toBe("false");
+  expect(opened).not.toHaveBeenCalled();
+
+  // The last one unselected leaves select mode: a click opens again.
+  await user.click(within(bodyRows()[1]).getByText("yellow"));
+  expect(screen.queryByRole("group", { name: /selected/ })).toBeNull();
+  await user.click(within(bodyRows()[2]).getByText("8"));
+  expect(opened).toHaveBeenCalledWith("cherry");
+});
+
+test("select mode: Shift+click on a row selects the range from the last one picked", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} data={many(6)} />);
+  await user.click(screen.getByRole("checkbox", { name: "Select fruit-002" }));
+  await user.keyboard("{Shift>}");
+  await user.click(within(bodyRows()[4]).getByText("4"));
+  await user.keyboard("{/Shift}");
+  expect(screen.getByRole("group", { name: "4 selected" })).toBeTruthy();
+  expect(["fruit-001", "fruit-002", "fruit-003", "fruit-004", "fruit-005", "fruit-006"].map(checked)).toEqual(["false", "true", "true", "true", "true", "false"]);
+  expect(opened).not.toHaveBeenCalled();
+});
+
+test("select mode: the name's Open button and the row menu's Open still open the row", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  await user.click(screen.getByRole("checkbox", { name: "Select apple" }));
+  await user.click(screen.getByRole("button", { name: "Open banana" }));
+  expect(opened).toHaveBeenLastCalledWith("banana");
+  await user.click(screen.getByRole("button", { name: "More for cherry" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Open" }));
+  expect(opened).toHaveBeenLastCalledWith("cherry");
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+  expect(checked("banana")).toBe("false");
+  expect(checked("cherry")).toBe("false");
+});
+
+test("the checkbox's whole cell selects the row, in and out of select mode, and never opens it", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  const cell = screen.getByRole("checkbox", { name: "Select banana" }).closest("td")!;
+  await user.click(cell);
+  expect(checked("banana")).toBe("true");
+  await user.click(cell);
+  expect(checked("banana")).toBe("false");
+  const head = screen.getByRole("checkbox", { name: "Select all rows on this page" }).closest("th")!;
+  await user.click(head);
+  expect(screen.getByRole("group", { name: "3 selected" })).toBeTruthy();
+  expect(opened).not.toHaveBeenCalled();
+});
+
+test("select mode: Space on a row's control toggles the row; Enter on its Open button still opens it", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  // Outside select mode Space presses the Open button as usual.
+  screen.getByRole("button", { name: "Open cherry" }).focus();
+  await user.keyboard(" ");
+  expect(opened).toHaveBeenLastCalledWith("cherry");
+
+  await user.click(screen.getByRole("checkbox", { name: "Select apple" }));
+  screen.getByRole("button", { name: "Open banana" }).focus();
+  await user.keyboard(" ");
+  expect(checked("banana")).toBe("true");
+  expect(opened).toHaveBeenCalledTimes(1);
+  await user.keyboard(" ");
+  expect(checked("banana")).toBe("false");
+  await user.keyboard("{Enter}");
+  expect(opened).toHaveBeenLastCalledWith("banana");
+});
+
+test("an agent in select mode selects rows by their boxes and still opens one by its name", async () => {
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  const run = await agent.act({
+    steps: [
+      { ref: "Select apple", action: "toggle" },
+      { ref: "Select cherry", action: "toggle" },
+    ],
+  });
+  expect(run.ok, run.error?.message).toBe(true);
+  const labels = agent.snapshot().filter((e) => !e.offPage).map((e) => e.label);
+  for (const l of ["Clear selection", "Select banana", "Open banana", "More for banana"]) expect(labels, `${l} is missing`).toContain(l);
+  const open = await agent.act({ steps: [{ ref: "Open banana", action: "press" }] });
+  expect(open.ok, open.error?.message).toBe(true);
+  expect(opened).toHaveBeenCalledWith("banana");
+  expect(screen.getByRole("group", { name: "2 selected" })).toBeTruthy();
+});
+
 test("pages of 25: numbered pages and Next move through them; the page size picked is remembered for this table", async () => {
   const user = userEvent.setup();
   const { unmount } = render(<Fruits data={many(60)} footer={(c) => `${c.from}–${c.to} of ${c.shown}`} />);
@@ -250,13 +372,15 @@ test("infinite: no pages; the end of the list loads more (Load more for the keyb
   expect(screen.queryByRole("button", { name: "Show older" })).toBeNull();
 });
 
-test("infinite: the end coming into view loads more", () => {
+test("infinite: the end coming into the window loads more (the page scrolls the rows, not the table)", () => {
   let fire: (e: { isIntersecting: boolean }[]) => void = () => {};
+  let root: unknown = "unset";
   vi.stubGlobal(
     "IntersectionObserver",
     class {
-      constructor(cb: typeof fire) {
+      constructor(cb: typeof fire, opts?: IntersectionObserverInit) {
         fire = cb;
+        root = opts?.root;
       }
       observe() {}
       disconnect() {}
@@ -264,8 +388,28 @@ test("infinite: the end coming into view loads more", () => {
   );
   const onLoadMore = vi.fn();
   render(<Fruits paging={{ mode: "infinite", hasMore: true, loadingMore: false, onLoadMore }} />);
+  expect(root).toBeNull();
   fire([{ isIntersecting: true }]);
   expect(onLoadMore).toHaveBeenCalledTimes(1);
+});
+
+test("a long table is as tall as its rows: its scroller only scrolls sideways, and the header moves with the page", () => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+    return this.tagName === "TABLE" ? 100 * 48 + 40 : this.tagName === "THEAD" ? 40 : 0;
+  });
+  render(<Fruits data={many(100)} paging={{ mode: "none" }} />);
+  expect(bodyRows()).toHaveLength(100);
+  const region = screen.getByRole("region", { name: "Fruit" });
+  // Nothing caps its height, and its header travels the table's height less its own while the page passes it.
+  expect(region.className).not.toMatch(/max-h-/);
+  expect(region.style.getPropertyValue("--table-stick-end")).toBe(`${100 * 48}px`);
 });
 
 test("loading shows the skeleton, an error shows Try again, no rows shows the empty state", async () => {
@@ -408,21 +552,31 @@ test("an agent sorts, selects, opens a row's menu and pages", async () => {
 
 // ---- Live rows (ticket 09) ----
 
-/** Lays rows out as a browser would: a 40 px header, 48 px rows, a 400 px scroller whose scrollTop moves them. */
+/**
+ * Lays rows out as a browser would on a page that scrolls (UI ticket 25): the table starts 100 px
+ * down the page, its header (40 px) sticks to the top of the window, rows are 48 px, and the
+ * page's scrollTop moves them.
+ */
 function layOut() {
   const box = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 800, width: 800, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const scroller = this.closest("[role=region]") as HTMLElement | null;
-    if (this.hasAttribute("data-row-id") && scroller) {
+    const y = page().scrollTop;
+    if (this.hasAttribute("data-row-id")) {
       const i = [...this.parentElement!.children].indexOf(this);
-      return box(40 + i * 48 - scroller.scrollTop, 48);
+      return box(140 + i * 48 - y, 48);
     }
-    if (this.getAttribute("role") === "region") return box(0, 400);
-    if (this.tagName === "THEAD") return box(0, 40);
+    if (this.tagName === "THEAD") return box(Math.max(0, 100 - y), 40);
     return box(0, 0);
   });
 }
-const scroller = () => screen.getByRole("region", { name: "Fruit" });
+const page = () => document.documentElement;
+function scrollPage(top: number) {
+  page().scrollTop = top;
+  fireEvent.scroll(document);
+}
+afterEach(() => {
+  page().scrollTop = 0;
+});
 const live = (data: Fruit[]) => (
   <Fruits data={data} defaultSorting={[]} paging={{ mode: "infinite", hasMore: false, loadingMore: false, onLoadMore: () => {}, newRowsLabel: (n) => `${n} new` }} />
 );
@@ -436,20 +590,20 @@ test("the open row is marked current", () => {
   expect(within(current[0]).getByText("apple")).toBeTruthy();
 });
 
-test("live rows: scrolled down, rows arriving on top keep the view still, and a pill counts them and goes back to the top", async () => {
+test("live rows: the page scrolled down, rows arriving on top keep the view still, and a pill counts them and goes back to the top", async () => {
   layOut();
   const user = userEvent.setup();
   const rows = many(40);
   const { rerender } = render(live(rows));
-  scroller().scrollTop = 480; // fruit-011 at the top of the view
-  fireEvent.scroll(scroller());
+  scrollPage(580); // fruit-011 just under the header stuck at the top of the window
   rerender(live([...arrived(2), ...rows]));
-  expect(scroller().scrollTop).toBe(480 + 2 * 48);
+  expect(page().scrollTop).toBe(580 + 2 * 48);
   expect(screen.getByRole("button", { name: "2 new" })).toBeTruthy();
   rerender(live([...arrived(3), ...rows]));
-  expect(scroller().scrollTop).toBe(480 + 3 * 48);
+  expect(page().scrollTop).toBe(580 + 3 * 48);
+  // Back to the first row: the table's top at the top of the window, its first row under the header.
   await user.click(screen.getByRole("button", { name: "3 new" }));
-  expect(scroller().scrollTop).toBe(0);
+  expect(page().scrollTop).toBe(100);
   expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
 });
 
@@ -468,18 +622,18 @@ test("live rows: at the top they come in on top; with the pointer over the rows 
   const user = userEvent.setup();
   const rows = many(40);
   const { rerender } = render(live(rows));
+  scrollPage(100); // the table's top at the window's top, its first row in view under the header
   rerender(live([...arrived(1), ...rows]));
-  expect(scroller().scrollTop).toBe(0);
+  expect(page().scrollTop).toBe(100);
   expect(names()[0]).toBe("new-0");
   expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
 
   await user.hover(screen.getByText("fruit-003"));
   rerender(live([...arrived(2), ...rows]));
-  expect(scroller().scrollTop).toBe(48);
+  expect(page().scrollTop).toBe(148);
   expect(screen.getByRole("button", { name: "1 new" })).toBeTruthy();
-  // Scrolling back to the top shows them: the pill goes.
-  scroller().scrollTop = 0;
-  fireEvent.scroll(scroller());
+  // Scrolling back to the first row shows them: the pill goes.
+  scrollPage(100);
   await waitFor(() => expect(screen.queryByRole("button", { name: "1 new" })).toBeNull());
 });
 

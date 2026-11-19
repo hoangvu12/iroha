@@ -9,6 +9,7 @@ import { useSnippets } from "./api";
 
 type Lang = "curl" | "python" | "typescript";
 const LABEL: Record<Lang, string> = { curl: "curl", python: "Python", typescript: "TypeScript" };
+const LEXER = { curl: "shell", python: "python", typescript: "typescript" } as const;
 
 /** curl, Python and TypeScript sending the current settings to the Gateway as a Caller (GET /api/test/snippets). */
 export function SnippetDialog({ open, onOpenChange, settings, prompt }: { open: boolean; onOpenChange: (o: boolean) => void; settings: Settings; prompt: string }) {
@@ -35,21 +36,10 @@ export function SnippetDialog({ open, onOpenChange, settings, prompt }: { open: 
       {sn.isError ? (
         <ErrorState title="Couldn't write the snippet" error={sn.error} onRetry={() => void sn.refetch()} />
       ) : (
-        <CodeBlock maxHeight="max-h-[50dvh]" nowrap>{code ?? "…"}</CodeBlock>
-      )}
-      {sn.data?.note && <p className="mt-3 text-[13.5px] text-fg-muted">{sn.data.note}</p>}
-      {lang !== "curl" && (
-        <p className="mt-2 text-[13px] text-fg-muted">
-          {settings.shape === "gemini"
-            ? "Needs nothing beyond the standard library (Node 18+ for TypeScript)."
-            : settings.shape === "anthropic-messages"
-              ? lang === "python"
-                ? "pip install anthropic"
-                : "npm install @anthropic-ai/sdk, then run as an ES module."
-              : lang === "python"
-                ? "pip install openai"
-                : "npm install openai, then run as an ES module."}
-        </p>
+        // All of it: the dialog scrolls as a page (UI ticket 28); long lines still scroll sideways.
+        <CodeBlock maxHeight={false} nowrap lang={code ? LEXER[lang] : "text"}>
+          {code ?? "…"}
+        </CodeBlock>
       )}
     </Dialog>
   );

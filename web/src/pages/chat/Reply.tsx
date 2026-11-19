@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { ChevronDown, CircleAlert, ExternalLink, Lightbulb, Wrench } from "lucide-react";
+import { ChevronDown, CircleAlert, ExternalLink, Lightbulb } from "lucide-react";
 import { animateIn } from "@ui-sdk/core";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
 import { seg } from "@/api/client";
@@ -16,6 +16,7 @@ import { Skeleton } from "@/ui/Skeleton";
 import { bareModel } from "./api";
 import { ModelTile } from "./Picker";
 import type { AssistantTurn, Part, Round } from "./store";
+import { toolIcon } from "./tools";
 
 // One assistant reply (C15): the model, then what it said and called in
 // order, a caret while it streams, a collapsed Details block (serving key,
@@ -81,13 +82,15 @@ function RoundView({ r, last, streaming }: { r: Round; last: boolean; streaming:
 function PartView({ p, caret }: { p: Part; caret: boolean }) {
   const [open, setOpen] = useState(false);
   const [touched, setTouched] = useState(false);
-  if (p.kind === "tool")
+  if (p.kind === "tool") {
+    const Icon = toolIcon(p.name);
     return (
       <div className="flex max-w-full items-start gap-2 self-start rounded-lg border border-border bg-bg px-3 py-2 font-mono text-[13px]">
-        <Wrench size={14} className="mt-0.5 shrink-0 text-fg-muted" />
+        <Icon size={14} className="mt-0.5 shrink-0 text-fg-muted" />
         <span className="min-w-0 whitespace-pre-wrap break-words">{callText(p.name, p.args)}</span>
       </div>
     );
+  }
   if (p.kind === "reasoning")
     return (
       // Open while it streams (open on first paint, so no animation). It folds at

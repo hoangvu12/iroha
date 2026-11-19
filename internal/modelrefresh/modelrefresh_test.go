@@ -305,6 +305,17 @@ func TestNoJobChangesOrDeletesUpstreamKeys(t *testing.T) {
 		t.Fatalf("keys before = %s", before)
 	}
 	keyEvents := len(srv.Logs("kind=key.state&limit=100"))
+	// USE-65: no job sends anything but a GET upstream (no inference, no key probe).
+	writes := func() int {
+		n := 0
+		for _, r := range up.Requests() {
+			if r.Method != http.MethodGet {
+				n++
+			}
+		}
+		return n
+	}
+	writesBefore := writes()
 
 	for range 3 * 24 {
 		srv.Clock.Advance(time.Hour)
@@ -315,6 +326,9 @@ func TestNoJobChangesOrDeletesUpstreamKeys(t *testing.T) {
 
 	if got := keys(); got != before {
 		t.Fatalf("a job changed Upstream Keys:\nbefore %s\nafter  %s", before, got)
+	}
+	if n := writes(); n != writesBefore {
+		t.Fatalf("jobs sent %d requests other than GET upstream", n-writesBefore)
 	}
 	if n := len(srv.Logs("kind=key.state&limit=100")); n != keyEvents {
 		t.Fatalf("key.state events went from %d to %d", keyEvents, n)

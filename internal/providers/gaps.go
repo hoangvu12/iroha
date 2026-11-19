@@ -41,7 +41,7 @@ func sortGaps(gaps []GapEntry) {
 var gapModelParam = api.Param{Name: "model", Description: "Only the Model Gaps for this model (as sent upstream). Default: every model."}
 
 const clearGapsDescription = "A cleared Model Gap lets the model reach the key again at once; if the Provider still refuses it, the next Request records the gap again (one Attempt). " +
-	"Gaps also clear by themselves 24 hours after they were recorded, when a key test passes, and when the key's name or secret is edited. Revertible through the Audit Entry."
+	"Gaps also clear by themselves 24 hours after they were recorded, when a key test passes, and when the key's name, secret or Endpoint restriction is edited. Revertible through the Audit Entry."
 
 func (h handlers) gapRoutes() []api.Route {
 	return []api.Route{

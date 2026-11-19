@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -82,7 +83,7 @@ type CreateUpstreamKey struct {
 // UpdateUpstreamKey is the body of PATCH /api/providers/{provider}/keys/{key}.
 type UpdateUpstreamKey struct {
 	Name      *string   `json:"name,omitempty"`
-	Secret    *string   `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling. A new name or secret clears the key's Model Gaps."`
+	Secret    *string   `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling. A new name, secret or Endpoint restriction clears the key's Model Gaps."`
 	Enabled   *bool     `json:"enabled,omitempty" doc:"false disables the key (no traffic until enabled); true enables it."`
 	Endpoints *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs); [] lifts the restriction."`
 }
@@ -461,14 +462,24 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 		}
 		in.Secret = &s
 	}
+	restricted := false // the Endpoints the key may use changed
 	if in.Endpoints != nil {
 		eps, err := resolveEndpoints(m.Ctx, m.Tx, p, *in.Endpoints)
+		if err != nil {
+			return UpstreamKey{}, err
+		}
+		was, err := keyEndpointIDsOf(m.Ctx, m.Tx, id)
 		if err != nil {
 			return UpstreamKey{}, err
 		}
 		if err := writeKeyEndpoints(m.Ctx, m.Tx, p.id, id, eps); err != nil {
 			return UpstreamKey{}, err
 		}
+		now, err := keyEndpointIDsOf(m.Ctx, m.Tx, id)
+		if err != nil {
+			return UpstreamKey{}, err
+		}
+		restricted = !slices.Equal(was, now)
 	}
 	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE upstream_keys SET name = coalesce(?, name), secret = coalesce(?, secret) WHERE id = ?`,
 		in.Name, in.Secret, id); err != nil {
@@ -484,9 +495,10 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 			return UpstreamKey{}, err
 		}
 	}
-	// Editing the key's name or secret clears its Model Gaps (ADR-0003).
+	// Editing the key's name, secret or Endpoint restriction clears its
+	// Model Gaps (ADR-0003).
 	renamed := in.Name != nil && *in.Name != before.Name
-	if renamed || (in.Secret != nil && *in.Secret != before.Secret) {
+	if renamed || restricted || (in.Secret != nil && *in.Secret != before.Secret) {
 		name := before.Name
 		if renamed {
 			name = *in.Name

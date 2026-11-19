@@ -113,10 +113,10 @@ func (x *exchange) refuseUnrecorded(e *api.Error) {
 	x.writeError(e)
 }
 
-// writeError writes e in the Caller's Shape: for OpenAI Shapes the OpenAI
-// error envelope, extended with Iroha's hint and the Request ID; on a
-// stream under way, the Shape's error event (stream.go). It returns the
-// HTTP status sent, 0 when the status line had already gone out.
+// writeError writes e in the Caller's Shape (errorEnvelope), extended with
+// Iroha's hint and the Request ID; on a stream under way, the Shape's error
+// event (stream.go). It returns the HTTP status sent, 0 when the status
+// line had already gone out.
 func (x *exchange) writeError(e *api.Error) int {
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -136,8 +136,17 @@ func (x *exchange) writeError(e *api.Error) int {
 	x.wrote = true
 	x.w.Header().Set("Content-Type", "application/json")
 	x.w.WriteHeader(e.Status)
-	_, _ = x.w.Write(append(compactJSON(openAIError(e, x.rec.ID)), '\n'))
+	_, _ = x.w.Write(append(compactJSON(errorEnvelope(x.rec.ShapeIn, e, x.rec.ID)), '\n'))
 	return e.Status
+}
+
+// errorEnvelope is e in the error envelope of Shape sh: Anthropic's for
+// Anthropic Messages, OpenAI's otherwise.
+func errorEnvelope(sh shape.Shape, e *api.Error, requestID string) map[string]any {
+	if sh == shape.AnthropicMessages {
+		return anthropicError(e, requestID)
+	}
+	return openAIError(e, requestID)
 }
 
 func errorType(status int) string {

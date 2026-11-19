@@ -1,0 +1,183 @@
+== request sent upstream ==
+{
+  "max_tokens": 1280,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Weather in Hanoi? Also what is in these images?",
+          "type": "text"
+        },
+        {
+          "source": {
+            "data": "iVBORw0KGgo=",
+            "media_type": "image/png",
+            "type": "base64"
+          },
+          "type": "image"
+        },
+        {
+          "source": {
+            "type": "url",
+            "url": "https://example.com/cat.jpg"
+          },
+          "type": "image"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "...",
+          "type": "text"
+        },
+        {
+          "id": "toolu_0",
+          "input": {
+            "path": "/tmp/a"
+          },
+          "name": "fs_read",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "content": "file a",
+          "tool_use_id": "toolu_0",
+          "type": "tool_result"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": "Now the weather.",
+      "role": "user"
+    }
+  ],
+  "model": "claude-sonnet-4-5",
+  "stream": true,
+  "system": [
+    {
+      "text": "You are terse.",
+      "type": "text"
+    }
+  ],
+  "thinking": {
+    "budget_tokens": 1024,
+    "type": "enabled"
+  },
+  "tool_choice": {
+    "disable_parallel_tool_use": true,
+    "type": "auto"
+  },
+  "tools": [
+    {
+      "description": "Get weather",
+      "input_schema": {
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "name": "get_weather"
+    },
+    {
+      "description": "Read a file",
+      "input_schema": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "fs_read"
+    },
+    {
+      "input_schema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "mcp_git_status"
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "message": {
+        "content": "Checking.",
+        "reasoning_content": "User wants weather and git status.",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"city\":\"Hanoi\"}",
+              "name": "get_weather"
+            },
+            "id": "toolu_1",
+            "type": "function"
+          },
+          {
+            "function": {
+              "arguments": "{}",
+              "name": "mcp:git status"
+            },
+            "id": "toolu_2",
+            "type": "function"
+          }
+        ]
+      }
+    }
+  ],
+  "created": 1767225600,
+  "id": "msg_01Tools",
+  "model": "claude-sonnet-4-5",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 42,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 35,
+    "prompt_tokens_details": {
+      "cached_tokens": 3
+    },
+    "total_tokens": 77
+  }
+}
+== stream to the Caller ==
+data: {"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"reasoning_content":"User wants weather."},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"reasoning_content":"\n"},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"Checking."},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"","name":"get_weather"},"id":"toolu_1","index":0,"type":"function"}]},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"{\"city\":"},"index":0,"type":"function"}]},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\"Hanoi\"}"},"index":0,"type":"function"}]},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"","name":"mcp:git status"},"id":"toolu_2","index":1,"type":"function"}]},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":""},"index":1,"type":"function"}]},"finish_reason":null,"index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls","index":0}],"created":1767225600,"id":"msg_01Tools","model":"claude-sonnet-4-5","object":"chat.completion.chunk"}
+
+data: [DONE]
+

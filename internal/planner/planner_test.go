@@ -118,6 +118,42 @@ func TestEndpointRestrictions(t *testing.T) {
 	}
 }
 
+func TestTranslationIsTheSecondTier(t *testing.T) {
+	chat := planner.Endpoint{ID: "ep_a", Name: "a", Shape: shape.OpenAIChat}
+	msgs := planner.Endpoint{ID: "ep_m", Name: "m", Shape: shape.AnthropicMessages, Renames: map[string]string{"glm": "glm-m"}}
+	gem := planner.Endpoint{ID: "ep_g", Name: "g", Shape: shape.Gemini}
+	key := func(name string, eps ...string) planner.Key {
+		return planner.Key{ID: "uk_" + name, Name: name, Secret: "sk-test-" + name, Endpoints: eps}
+	}
+	cooling := key("hot")
+	cooling.CoolingUntil = now.Add(time.Minute)
+	cases := []struct {
+		name  string
+		eps   []planner.Endpoint
+		keys  []planner.Key
+		want  string
+		empty string
+	}{
+		{"a same-Shape candidate wins", []planner.Endpoint{msgs, chat}, []planner.Key{key("k1")}, "k1@a:glm", ""},
+		{"no same-Shape Endpoint: translate", []planner.Endpoint{msgs, gem}, []planner.Key{key("k1")}, "k1@m:glm-m", ""},
+		{"same-Shape keys all cooling: translate", []planner.Endpoint{chat, msgs}, []planner.Key{cooling, key("claude", "ep_m")}, "claude@m:glm-m", ""},
+		{"no Shape Iroha translates to", []planner.Endpoint{gem}, []planner.Key{key("k1")}, "", planner.NoEndpoint},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := []planner.Provider{{ID: "p", Handle: "p", Endpoints: tc.eps, Keys: tc.keys}}
+			req := planner.Request{Shape: shape.OpenAIChat, Model: "glm", Now: now, Translate: []shape.Shape{shape.AnthropicMessages}}
+			r := planner.Plan(req, p, planner.Fixed(0))
+			if got := order(r); got != tc.want {
+				t.Fatalf("order = %q, want %q", got, tc.want)
+			}
+			if (tc.empty == "") != (r.Empty == nil) || (r.Empty != nil && r.Empty.Code != tc.empty) {
+				t.Fatalf("empty = %+v, want %q", r.Empty, tc.empty)
+			}
+		})
+	}
+}
+
 func TestCounterRotatesPerGroup(t *testing.T) {
 	c := planner.NewCounter()
 	p := []planner.Provider{{ID: "p", Handle: "p", Endpoints: []planner.Endpoint{{Name: "a", Shape: shape.OpenAIChat}}, Keys: keys("k1", "k2", "k3")}}

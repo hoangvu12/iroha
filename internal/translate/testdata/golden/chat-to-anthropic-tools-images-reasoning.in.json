@@ -1,0 +1,69 @@
+{
+  "from": "openai-chat",
+  "to": "anthropic-messages",
+  "model": "claude-sonnet-4-5",
+  "wire_model": "claude-sonnet-4-5",
+  "include_usage": false,
+  "request": {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "reasoning_effort": "high",
+    "stream": true,
+    "parallel_tool_calls": false,
+    "messages": [
+      {"role": "system", "content": "You are terse."},
+      {"role": "user", "content": [
+        {"type": "text", "text": "Weather in Hanoi? Also what is in these images?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}},
+        {"type": "image_url", "image_url": {"url": "https://example.com/cat.jpg"}}
+      ]},
+      {"role": "assistant", "content": null, "tool_calls": [
+        {"id": "toolu_0", "type": "function", "function": {"name": "fs.read", "arguments": "{\"path\":\"/tmp/a\"}"}}
+      ]},
+      {"role": "tool", "tool_call_id": "toolu_0", "content": "file a"},
+      {"role": "user", "content": "Now the weather."}
+    ],
+    "tools": [
+      {"type": "function", "function": {"name": "get_weather", "description": "Get weather",
+        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}},
+      {"type": "function", "function": {"name": "fs.read", "description": "Read a file",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+      {"type": "function", "function": {"name": "mcp:git status", "parameters": {"type": "object", "properties": {}}}}
+    ],
+    "tool_choice": {"type": "function", "function": {"name": "mcp:git status"}}
+  },
+  "answer": {
+    "id": "msg_01Tools",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-4-5",
+    "content": [
+      {"type": "thinking", "thinking": "User wants weather and git status.", "signature": "sig123"},
+      {"type": "text", "text": "Checking."},
+      {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Hanoi"}},
+      {"type": "tool_use", "id": "toolu_2", "name": "mcp_git_status", "input": {}}
+    ],
+    "stop_reason": "tool_use",
+    "stop_sequence": null,
+    "usage": {"input_tokens": 25, "output_tokens": 42, "cache_creation_input_tokens": 7, "cache_read_input_tokens": 3}
+  },
+  "stream": [
+    {"type": "message_start", "message": {"id": "msg_01Tools", "type": "message", "role": "assistant", "model": "claude-sonnet-4-5", "content": [], "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "output_tokens": 1, "cache_creation_input_tokens": 7, "cache_read_input_tokens": 3}}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "User wants weather."}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig123"}},
+    {"type": "content_block_stop", "index": 0},
+    {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Checking."}},
+    {"type": "content_block_stop", "index": 1},
+    {"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {}}},
+    {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"city\":"}},
+    {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "\"Hanoi\"}"}},
+    {"type": "content_block_stop", "index": 2},
+    {"type": "content_block_start", "index": 3, "content_block": {"type": "tool_use", "id": "toolu_2", "name": "mcp_git_status", "input": {}}},
+    {"type": "content_block_delta", "index": 3, "delta": {"type": "input_json_delta", "partial_json": ""}},
+    {"type": "content_block_stop", "index": 3},
+    {"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": null}, "usage": {"output_tokens": 42}},
+    {"type": "message_stop"}
+  ]
+}

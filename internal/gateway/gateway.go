@@ -33,6 +33,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/rules"
 	"github.com/hoangvu12/iroha/internal/shape"
+	"github.com/hoangvu12/iroha/internal/translate"
 )
 
 // Log event kinds of the Gateway.
@@ -99,20 +100,50 @@ const chatDescription = "OpenAI Chat Completions passthrough. Authenticate with 
 	"A Provider that does not exist, is disabled or archived, or is outside the Gateway Key's scope gets the same 403 provider_not_allowed. " +
 	"A stream with no upstream byte after 10 s is committed (200, keep-alive comments every 15 s of silence); failures after that arrive as a final data: {\"error\": ...} event."
 
+// MessagesRequest documents the body of the Anthropic Messages routes.
+// Iroha reads only model and stream; on passthrough everything else is
+// forwarded as sent.
+type MessagesRequest struct {
+	Model     string           `json:"model" doc:"The model, as the Provider names it (or as an Endpoint rename maps it)."`
+	MaxTokens int              `json:"max_tokens"`
+	Messages  []map[string]any `json:"messages"`
+	Stream    bool             `json:"stream,omitempty" doc:"true: the answer streams as Anthropic server-sent events."`
+}
+
+const translationNote = "When the Provider has no usable Endpoint speaking this Shape but has one speaking another Shape Iroha translates to, " +
+	"the request and answer (streams, tools, images, reasoning, usage) are translated; GET /api/requests/{request} shows shape_in and shape_out. "
+
+const messagesDescription = "Anthropic Messages. Authenticate with \"x-api-key: <Gateway Key>\" (the Anthropic SDK and Claude Code default) or \"Authorization: Bearer <Gateway Key>\"; " +
+	"Caller credentials are never forwarded. On an Endpoint speaking Anthropic Messages the body passes through unchanged except the model, " +
+	"with anthropic-version 2023-06-01 added when you send none; the answer passes through with its model field set to the model you asked for. " +
+	translationNote +
+	"Errors use the Anthropic envelope {\"type\":\"error\",\"error\":{\"type\",\"message\",\"code\",\"hint\",\"request_id\"}}. " +
+	"A stream with no upstream byte after 10 s is committed (200, ping events every 15 s of silence); failures after that arrive as a final error event."
+
 // Routes returns the inference routes.
 func (g *Gateway) Routes() []api.Route {
 	return []api.Route{{
 		Method: http.MethodPost, Path: "/providers/{handle}/v1/chat/completions", Tag: "Gateway", Auth: api.AuthCaller,
 		Summary:     "Send an OpenAI Chat Completions request to one Provider",
-		Description: chatDescription,
+		Description: chatDescription + " " + translationNote,
 		Request:     ChatCompletionRequest{}, Response: map[string]any{},
-		Raw: http.HandlerFunc(g.serveProviderChat),
+		Raw: g.serveProvider(shape.OpenAIChat),
+	}, {
+		Method: http.MethodPost, Path: "/providers/{handle}/v1/messages", Tag: "Gateway", Auth: api.AuthCaller,
+		Summary:     "Send an Anthropic Messages request to one Provider",
+		Description: messagesDescription,
+		Request:     MessagesRequest{}, Response: map[string]any{},
+		Raw: g.serveProvider(shape.AnthropicMessages),
 	}}
 }
 
-// serveProviderChat is POST /providers/{handle}/v1/chat/completions.
-func (g *Gateway) serveProviderChat(w http.ResponseWriter, r *http.Request) {
-	x := g.newExchange(w, r, shape.OpenAIChat)
+// serveProvider serves a provider-scoped route whose Caller speaks sh.
+func (g *Gateway) serveProvider(sh shape.Shape) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { g.serveScoped(w, r, sh) }
+}
+
+func (g *Gateway) serveScoped(w http.ResponseWriter, r *http.Request, sh shape.Shape) {
+	x := g.newExchange(w, r, sh)
 	defer g.track(x)()
 	caller, aerr := g.keys.Authenticate(r)
 	if aerr != nil {
@@ -122,7 +153,7 @@ func (g *Gateway) serveProviderChat(w http.ResponseWriter, r *http.Request) {
 	x.begin(caller)
 	defer x.finish()
 
-	body, cr, err := readChatBody(r)
+	body, cr, err := readBody(r, sh)
 	if err != nil {
 		x.fail(err)
 		return
@@ -136,7 +167,7 @@ func (g *Gateway) serveProviderChat(w http.ResponseWriter, r *http.Request) {
 	}
 	now := g.clock.Now()
 	g.expireGaps(x, &p, now)
-	plan := planner.Plan(planner.Request{Shape: x.rec.ShapeIn, Model: cr.model, Now: now}, []planner.Provider{p}, g.rotation)
+	plan := planner.Plan(planner.Request{Shape: sh, Model: cr.model, Now: now, Translate: translate.Targets(sh)}, []planner.Provider{p}, g.rotation)
 	if len(plan.Candidates) == 0 {
 		e := noCandidate(p.Handle, plan.Empty)
 		if plan.Empty.Code == planner.Cooling {
@@ -205,16 +236,26 @@ func noCandidate(handle string, e *planner.Empty) *api.Error {
 // maxCallerBody caps a Caller's request body.
 const maxCallerBody = 64 << 20
 
-// chatRequest is what Iroha reads of a Chat Completions body.
-type chatRequest struct {
-	model        string // trimmed
-	bodyModel    string // as written in the body
+// callerRequest is what Iroha reads of a Caller's body, whatever its Shape.
+type callerRequest struct {
+	shape        shape.Shape // the Caller's Shape
+	model        string      // trimmed
+	bodyModel    string      // as written in the body
 	stream       bool
-	includeUsage bool // the Caller asked for stream_options.include_usage
+	includeUsage bool // OpenAI Chat: the Caller asked for stream_options.include_usage
 }
 
-func readChatBody(r *http.Request) ([]byte, chatRequest, *api.Error) {
-	var cr chatRequest
+// bodyHints say what a body of each Shape must hold.
+var bodyHints = map[shape.Shape]string{
+	shape.OpenAIChat:        "Send an OpenAI Chat Completions JSON object with model and messages.",
+	shape.AnthropicMessages: "Send an Anthropic Messages JSON object with model, max_tokens and messages.",
+}
+
+// readBody reads a Caller's body written in sh. Every Shape whose body
+// names the model shares these rules: a JSON object, a non-blank string
+// model, stream only when it is exactly true.
+func readBody(r *http.Request, sh shape.Shape) ([]byte, callerRequest, *api.Error) {
+	cr := callerRequest{shape: sh}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxCallerBody+1))
 	if err != nil {
 		return nil, cr, api.BadRequest("Send the whole JSON body.", "The request body could not be read: %v", err)
@@ -222,7 +263,7 @@ func readChatBody(r *http.Request) ([]byte, chatRequest, *api.Error) {
 	if len(body) > maxCallerBody {
 		return nil, cr, api.Errorf(http.StatusRequestEntityTooLarge, "request_too_large", "Send a body of at most 64 MiB.", "The request body is larger than 64 MiB.")
 	}
-	hint := "Send an OpenAI Chat Completions JSON object with model and messages."
+	hint := bodyHints[sh]
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
 		return nil, cr, api.BadRequest(hint, "The request body is empty.")

@@ -1,0 +1,3 @@
+# Agents first: one HTTP admin API and a served skill, no CLI or MCP
+
+Most management of Iroha is done by the Owner's agents, and in v1 they worked through about thirty one-off scripts, some of which revealed production keys. In v2 the HTTP admin API is the only way to change state; the web UI is just another client of it. Agents learn it from a skill document and an OpenAPI description that the running server serves itself, so instructions always match the deployed version. Every change supports a dry run, works in bulk, is safe to repeat, and is recorded as a revertible Audit Entry naming its Admin Token. We chose not to build a CLI or an MCP server: the API plus the served skill was judged enough, and either can be added later as a thin client.

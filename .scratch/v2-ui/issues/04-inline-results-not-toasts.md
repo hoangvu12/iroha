@@ -69,3 +69,10 @@ The check found three layout problems, all fixed:
 **Left as is.**
 - A few plain `<button>` links (Models "Clear", key dialog links, "Clear selection") are not UI SDK parts, so agents can't see them. That is outside result feedback.
 - `/states` scrolls sideways on phones because of its table panel. It did before this ticket (see `shots/03/states-toasts-phone.png`), and it is a dev-only page.
+
+**After merging v2-ui** (tickets 10, 21, 22, motion):
+- The sheets' `CopyIconButton` is now a `CopyButton`.
+- The Key and Provider sheets show the Disable/Enable result beside the buttons.
+- Ticket 21's confirmed revert shows "Reverted" with Undo in its row.
+- Ticket 21's "Remove model" toast got its reason comment.
+- Web suite: 106/106.

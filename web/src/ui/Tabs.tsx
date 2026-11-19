@@ -23,7 +23,7 @@ export function TabList({ label, variant = "underline", className, children }: {
     return (
       <VariantContext.Provider value="segmented">
         <TabsList aria-label={label} className={cn("relative inline-flex rounded-lg bg-muted p-1", className)}>
-          <TabsIndicator className="absolute left-0 top-0 h-(--active-tab-height) w-(--active-tab-width) translate-x-(--active-tab-left) translate-y-(--active-tab-top) rounded-md bg-bg shadow-sm transition-[translate,width] duration-200 ease-out data-[activation-direction=none]:transition-none motion-reduce:transition-none" />
+          <TabsIndicator className="absolute left-0 top-0 h-(--active-tab-height) w-(--active-tab-width) translate-x-(--active-tab-left) translate-y-(--active-tab-top) rounded-md bg-bg shadow-sm transition-[translate,width] duration-indicator ease-out data-[activation-direction=none]:transition-none" />
           {children}
         </TabsList>
       </VariantContext.Provider>
@@ -33,7 +33,7 @@ export function TabList({ label, variant = "underline", className, children }: {
       <ScrollArea axis="x" bars={false} className={cn("shadow-[inset_0_-1px_0_var(--border)]", className)}>
         <TabsList aria-label={label} className="relative flex w-max min-w-full gap-6">
           {children}
-          <TabsIndicator className="absolute bottom-0 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) bg-fg transition-[translate,width] duration-200 ease-out data-[activation-direction=none]:transition-none motion-reduce:transition-none" />
+          <TabsIndicator className="absolute bottom-0 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) bg-fg transition-[translate,width] duration-indicator ease-out data-[activation-direction=none]:transition-none" />
         </TabsList>
       </ScrollArea>
     </VariantContext.Provider>

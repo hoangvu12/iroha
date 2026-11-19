@@ -156,7 +156,8 @@ describe("dialogs", () => {
     render(<Opener />);
     await user.click(screen.getByRole("button", { name: "Open it" }));
     expectDialogMotion(await screen.findByRole("dialog", { name: "Edit endpoint" }));
-    expect(classesOf(screen.getByRole("button", { name: "Close" }))).toContain("duration-press");
+    // The shared press (`@utility press`, ticket 13), as on every icon button.
+    expect(classesOf(screen.getByRole("button", { name: "Close" }))).toContain("press");
   });
 
   test("an alert dialog moves like a dialog; its confirm button dims at once while it works", async () => {

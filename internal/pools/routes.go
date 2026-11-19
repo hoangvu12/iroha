@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/ids"
+	"github.com/hoangvu12/iroha/internal/logos"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/store"
 )
@@ -123,7 +123,7 @@ type CreatePool struct {
 	Name    string         `json:"name" doc:"The model name Callers will send: no slash, 1 to 64 letters, digits, '.', '_' or '-'. Repeating a create with an existing name updates that Pool."`
 	Members *[]MemberInput `json:"members,omitempty" doc:"Every member in try order; replaces the list. Omit to keep an existing Pool's members (a new Pool then has none)."`
 	Budget  *BudgetInput   `json:"budget,omitempty"`
-	Maker   *string        `json:"maker,omitempty" doc:"Who makes the model, for the logo (e.g. anthropic); \"\" to guess it from the model name."`
+	Maker   *string        `json:"maker,omitempty" doc:"The Pool's logo: a model maker (e.g. openai) or a website (chatgpt.com, or a URL read for its host; a value with a dot is a website); \"\" to guess the maker from the model name."`
 }
 
 // UpdatePool is the body of PATCH /api/pools/{pool}.
@@ -131,7 +131,7 @@ type UpdatePool struct {
 	Name    *string        `json:"name,omitempty" doc:"A new name. Gateway Key scopes follow the Pool; Callers must use the new name."`
 	Members *[]MemberInput `json:"members,omitempty" doc:"Every member in try order; replaces the list. Reorder or switch members off by sending the list changed."`
 	Budget  *BudgetInput   `json:"budget,omitempty"`
-	Maker   *string        `json:"maker,omitempty" doc:"Who makes the model, for the logo; \"\" to guess it from the model name."`
+	Maker   *string        `json:"maker,omitempty" doc:"The Pool's logo: a model maker (e.g. openai) or a website (chatgpt.com, or a URL read for its host; a value with a dot is a website); \"\" to guess the maker from the model name."`
 }
 
 // PoolResult is the response of a single Pool change.
@@ -149,8 +149,6 @@ type PoolList struct {
 const MaxMembers = 32
 
 const membersHint = `Send "members": [{"provider": "<handle>", "model": "<model ID>"}, ...] in the order to try them, at most 32, each Provider and model once.`
-
-var makerPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 // Routes returns the Model Pool routes.
 func Routes(tr *audit.Trail, db *store.DB) []api.Route {
@@ -380,9 +378,9 @@ func (h handlers) apply(m *audit.Mutation, id string, in UpdatePool) (Pool, erro
 		}
 	}
 	if in.Maker != nil {
-		mk := strings.TrimSpace(*in.Maker)
-		if mk != "" && !makerPattern.MatchString(mk) {
-			return Pool{}, api.BadRequest("Use a lowercase maker ID such as anthropic, openai or zhipuai (letters, digits, '.', '_', '-'), or \"\" to guess it.", "maker %q is not valid.", mk)
+		mk, err := logos.ReadPoolLogo(*in.Maker)
+		if err != nil {
+			return Pool{}, logos.PoolLogoError(*in.Maker, err)
 		}
 		if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE pools SET maker = ? WHERE id = ?`, mk, id); err != nil {
 			return Pool{}, err

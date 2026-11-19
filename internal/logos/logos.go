@@ -1,6 +1,7 @@
 // Package logos resolves the logos the UI shows: a Provider's from its logo
 // domain (a site's favicon), a Model Pool's from its model's maker (the
-// maker's mark on models.dev, else the favicon of the maker's site). Iroha
+// maker's mark on models.dev, else the favicon of the maker's site) or from
+// a website the Owner names, looked up like a Provider's domain. Iroha
 // fetches and caches them and serves them from its own URLs, so the browser
 // never loads a third-party image. Where the images come from is two URL
 // templates (config --logo-favicons, --logo-makers), so tests point them at
@@ -135,6 +136,44 @@ func (s *Service) Maker(ctx context.Context, maker string) (*Image, error) {
 	}
 	return nil, nil
 }
+
+// Pool returns the logo of a Model Pool from its logo value (ReadPoolLogo):
+// a website's favicon, looked up like a Provider's logo domain, or a model
+// maker's logo (Maker); nil when there is none.
+func (s *Service) Pool(ctx context.Context, logo string) (*Image, error) {
+	if !IsSite(logo) {
+		return s.Maker(ctx, logo)
+	}
+	d, err := NormalizeDomain(logo)
+	if err != nil {
+		return nil, nil
+	}
+	return s.Domain(ctx, d)
+}
+
+// ErrBadMaker is returned by ReadPoolLogo for a maker ID it cannot read.
+var ErrBadMaker = errors.New("not a maker ID")
+
+// ReadPoolLogo reads what the Owner typed as a Model Pool's logo: a model
+// maker ("OpenAI" -> "openai") or a website ("chatgpt.com", or a URL read
+// for its host, as NormalizeDomain does). A value with a dot or a slash is a
+// website. "" stays "" (the maker is then guessed).
+func ReadPoolLogo(s string) (string, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch {
+	case s == "":
+		return "", nil
+	case strings.ContainsAny(s, "./"):
+		return NormalizeDomain(s)
+	case !CheckMaker(s):
+		return "", ErrBadMaker
+	}
+	return s, nil
+}
+
+// IsSite reports whether a Pool's logo value (ReadPoolLogo) names a website
+// rather than a model maker.
+func IsSite(logo string) bool { return strings.Contains(logo, ".") }
 
 // unknownMaker is a maker no source knows, read once to learn what the maker
 // source answers for one (models.dev sends a generic mark with 200).
@@ -369,9 +408,10 @@ var Makers = map[string]string{
 	"xiaomi":     "mi.com",
 }
 
-var makerPattern = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
+var makerPattern = regexp.MustCompile(`^[a-z0-9]+(?:[_-][a-z0-9]+)*$`)
 
-// CheckMaker reports whether maker can name a model maker.
+// CheckMaker reports whether maker can name a model maker (no dot: a value
+// with one is a website, see ReadPoolLogo).
 func CheckMaker(maker string) bool { return len(maker) <= 64 && makerPattern.MatchString(maker) }
 
 var labelPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)

@@ -34,6 +34,8 @@ func (r *Reader) Body(b []byte) {
 	switch r.sh {
 	case shape.OpenAIChat:
 		r.chat(b)
+	case shape.OpenAIResponses:
+		r.responses(b)
 	case shape.AnthropicMessages:
 		var v struct {
 			Usage *anthropicCounts `json:"usage"`
@@ -56,6 +58,8 @@ func (r *Reader) Event(data []byte) {
 	switch r.sh {
 	case shape.OpenAIChat:
 		r.chat(data)
+	case shape.OpenAIResponses:
+		r.responses(data)
 	case shape.AnthropicMessages:
 		var v struct {
 			Type    string `json:"type"`

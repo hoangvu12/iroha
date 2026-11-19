@@ -1,0 +1,118 @@
+== request sent upstream ==
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "Read a.txt. What is in this image?",
+          "type": "input_text"
+        },
+        {
+          "detail": "auto",
+          "image_url": "https://example.com/cat.jpg",
+          "type": "input_image"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "arguments": "{\"path\":\"/tmp\"}",
+      "call_id": "call_0",
+      "name": "fs_read",
+      "type": "function_call"
+    },
+    {
+      "call_id": "call_0",
+      "output": "a.txt",
+      "type": "function_call_output"
+    }
+  ],
+  "instructions": "You are terse.",
+  "max_output_tokens": 1024,
+  "model": "gpt-5-2025-08-07",
+  "reasoning": {
+    "effort": "low",
+    "summary": "detailed"
+  },
+  "store": false,
+  "stream": true,
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "description": "Read a file",
+      "name": "fs_read",
+      "parameters": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "message": {
+        "content": "A cat. Reading it.",
+        "reasoning_content": "Need the file.",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"path\":\"a.txt\"}",
+              "name": "fs.read"
+            },
+            "id": "call_9",
+            "type": "function"
+          }
+        ]
+      }
+    }
+  ],
+  "created": 1767225600,
+  "id": "resp_67ccd2bed1ec8190b14f964abc054267",
+  "model": "gpt-5",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 80,
+    "completion_tokens_details": {
+      "reasoning_tokens": 32
+    },
+    "prompt_tokens": 120,
+    "prompt_tokens_details": {
+      "cached_tokens": 64
+    },
+    "total_tokens": 200
+  }
+}
+== stream to the Caller ==
+data: {"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":null,"index":0}],"created":1767225600,"id":"resp_1","model":"gpt-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"reasoning_content":"Need the file."},"finish_reason":null,"index":0}],"created":1767225600,"id":"resp_1","model":"gpt-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"A cat. "},"finish_reason":null,"index":0}],"created":1767225600,"id":"resp_1","model":"gpt-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"Reading it."},"finish_reason":null,"index":0}],"created":1767225600,"id":"resp_1","model":"gpt-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"","name":"fs.read"},"id":"call_9","index":0,"type":"function"}]},"finish_reason":null,"index":0}],"created":1767225600,"id":"resp_1","model":"gpt-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"{\"path\":"},"id":"call_9","index":0,"type":"function"}]},"finish_reason":null,"index":0}],"created":1767225600,"id":"resp_1","model":"gpt-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\"a.txt\"}"},"id":"call_9","index":0,"type":"function"}]},"finish_reason":null,"index":0}],"created":1767225600,"id":"resp_1","model":"gpt-5","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls","index":0}],"created":1767225600,"id":"resp_1","model":"gpt-5","object":"chat.completion.chunk"}
+
+data: {"choices":[],"created":1767225600,"id":"resp_1","model":"gpt-5","object":"chat.completion.chunk","usage":{"completion_tokens":80,"completion_tokens_details":{"reasoning_tokens":32},"prompt_tokens":120,"prompt_tokens_details":{"cached_tokens":64},"total_tokens":200}}
+
+data: [DONE]
+

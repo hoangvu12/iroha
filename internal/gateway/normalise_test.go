@@ -149,6 +149,28 @@ func TestThinkTextMovesIntoReasoningOnEveryPath(t *testing.T) {
 	if thinking != "\nThe user said hi.\n" || text != "Hello there!" || names[len(names)-1] != "message_stop" {
 		t.Fatalf("thinking %q text %q events %v\n%s", thinking, text, names, resp.Text())
 	}
+
+	// An OpenAI Responses Caller (translated too) gets the answer text alone.
+	up.Enqueue(testkit.Raw(200, "application/json", minimaxThink))
+	resp = caller.Post("/providers/acme/v1/responses", map[string]any{"model": "minimax-m2", "input": "hi"}).Expect(200)
+	var r struct {
+		Output []struct {
+			Type    string
+			Content []struct{ Type, Text string }
+		}
+	}
+	resp.JSON(&r)
+	var out strings.Builder
+	for _, o := range r.Output {
+		for _, c := range o.Content {
+			if c.Type == "output_text" {
+				out.WriteString(c.Text)
+			}
+		}
+	}
+	if out.String() != "Hello there!" {
+		t.Fatalf("responses answer:\n%s", resp.Body)
+	}
 }
 
 func TestGLMContentBlocksAreFlattened(t *testing.T) {

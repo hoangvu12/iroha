@@ -35,8 +35,11 @@ const (
 
 // opFor is the operation path of an inference call in Shape sh.
 func opFor(sh shape.Shape) string {
-	if sh == shape.AnthropicMessages {
+	switch sh {
+	case shape.AnthropicMessages:
 		return opMessages
+	case shape.OpenAIResponses:
+		return opResponses
 	}
 	return opChat
 }
@@ -706,6 +709,8 @@ func (c *passRelay) data(p []byte) ([]byte, bool) {
 			}
 		}
 		return p, false
+	case shape.OpenAIResponses:
+		return echoResponsesEvent(p, c.model), false
 	}
 	return echoModel(p, c.model), false
 }

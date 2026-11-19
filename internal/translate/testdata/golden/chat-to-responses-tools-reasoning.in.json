@@ -1,0 +1,89 @@
+{
+  "from": "openai-chat",
+  "to": "openai-responses",
+  "model": "gpt-5",
+  "wire_model": "gpt-5-2025-08-07",
+  "include_usage": true,
+  "request": {
+    "model": "gpt-5",
+    "max_completion_tokens": 1024,
+    "reasoning_effort": "low",
+    "stream": true,
+    "stream_options": {"include_usage": true},
+    "messages": [
+      {"role": "system", "content": "You are terse."},
+      {"role": "user", "content": [
+        {"type": "text", "text": "Read a.txt. What is in this image?"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/cat.jpg"}}
+      ]},
+      {"role": "assistant", "content": null, "tool_calls": [
+        {"id": "call_0", "type": "function", "function": {"name": "fs.read", "arguments": "{\"path\":\"/tmp\"}"}}
+      ]},
+      {"role": "tool", "tool_call_id": "call_0", "content": "a.txt"}
+    ],
+    "tools": [
+      {"type": "function", "function": {"name": "fs.read", "description": "Read a file",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}
+    ],
+    "tool_choice": "auto"
+  },
+  "answer": {
+    "id": "resp_67ccd2bed1ec8190b14f964abc054267",
+    "object": "response",
+    "created_at": 1767225600,
+    "status": "completed",
+    "error": null,
+    "incomplete_details": null,
+    "instructions": "You are terse.",
+    "max_output_tokens": 1024,
+    "model": "gpt-5-2025-08-07",
+    "output": [
+      {"id": "rs_1", "type": "reasoning", "summary": [{"type": "summary_text", "text": "Need the file."}]},
+      {"id": "msg_1", "type": "message", "status": "completed", "role": "assistant",
+        "content": [{"type": "output_text", "annotations": [], "text": "A cat. Reading it."}]},
+      {"id": "fc_1", "type": "function_call", "status": "completed", "arguments": "{\"path\":\"a.txt\"}", "call_id": "call_9", "name": "fs_read"}
+    ],
+    "parallel_tool_calls": true,
+    "previous_response_id": null,
+    "reasoning": {"effort": "low", "summary": null},
+    "store": false,
+    "temperature": 1.0,
+    "text": {"format": {"type": "text"}},
+    "tool_choice": "auto",
+    "tools": [{"type": "function", "name": "fs_read", "description": "Read a file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}, "strict": false}],
+    "top_p": 1.0,
+    "truncation": "disabled",
+    "usage": {"input_tokens": 120, "input_tokens_details": {"cached_tokens": 64}, "output_tokens": 80, "output_tokens_details": {"reasoning_tokens": 32}, "total_tokens": 200},
+    "user": null,
+    "metadata": {}
+  },
+  "stream": [
+    {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_1", "object": "response", "created_at": 1767225600, "status": "in_progress", "error": null, "incomplete_details": null, "model": "gpt-5-2025-08-07", "output": [], "usage": null}},
+    {"type": "response.in_progress", "sequence_number": 1, "response": {"id": "resp_1", "object": "response", "created_at": 1767225600, "status": "in_progress", "error": null, "incomplete_details": null, "model": "gpt-5-2025-08-07", "output": [], "usage": null}},
+    {"type": "response.output_item.added", "sequence_number": 2, "output_index": 0, "item": {"id": "rs_1", "type": "reasoning", "summary": []}},
+    {"type": "response.reasoning_summary_part.added", "sequence_number": 3, "item_id": "rs_1", "output_index": 0, "summary_index": 0, "part": {"type": "summary_text", "text": ""}},
+    {"type": "response.reasoning_summary_text.delta", "sequence_number": 4, "item_id": "rs_1", "output_index": 0, "summary_index": 0, "delta": "Need the file."},
+    {"type": "response.reasoning_summary_text.done", "sequence_number": 5, "item_id": "rs_1", "output_index": 0, "summary_index": 0, "text": "Need the file."},
+    {"type": "response.reasoning_summary_part.done", "sequence_number": 6, "item_id": "rs_1", "output_index": 0, "summary_index": 0, "part": {"type": "summary_text", "text": "Need the file."}},
+    {"type": "response.output_item.done", "sequence_number": 7, "output_index": 0, "item": {"id": "rs_1", "type": "reasoning", "summary": [{"type": "summary_text", "text": "Need the file."}]}},
+    {"type": "response.output_item.added", "sequence_number": 8, "output_index": 1, "item": {"id": "msg_1", "type": "message", "status": "in_progress", "content": [], "role": "assistant"}},
+    {"type": "response.content_part.added", "sequence_number": 9, "item_id": "msg_1", "output_index": 1, "content_index": 0, "part": {"type": "output_text", "annotations": [], "text": ""}},
+    {"type": "response.output_text.delta", "sequence_number": 10, "item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": "A cat. "},
+    {"type": "response.output_text.delta", "sequence_number": 11, "item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": "Reading it."},
+    {"type": "response.output_text.done", "sequence_number": 12, "item_id": "msg_1", "output_index": 1, "content_index": 0, "text": "A cat. Reading it."},
+    {"type": "response.content_part.done", "sequence_number": 13, "item_id": "msg_1", "output_index": 1, "content_index": 0, "part": {"type": "output_text", "annotations": [], "text": "A cat. Reading it."}},
+    {"type": "response.output_item.done", "sequence_number": 14, "output_index": 1, "item": {"id": "msg_1", "type": "message", "status": "completed", "content": [{"type": "output_text", "annotations": [], "text": "A cat. Reading it."}], "role": "assistant"}},
+    {"type": "response.output_item.added", "sequence_number": 15, "output_index": 2, "item": {"id": "fc_1", "type": "function_call", "status": "in_progress", "arguments": "", "call_id": "call_9", "name": "fs_read"}},
+    {"type": "response.function_call_arguments.delta", "sequence_number": 16, "item_id": "fc_1", "output_index": 2, "delta": "{\"path\":"},
+    {"type": "response.function_call_arguments.delta", "sequence_number": 17, "item_id": "fc_1", "output_index": 2, "delta": "\"a.txt\"}"},
+    {"type": "response.function_call_arguments.done", "sequence_number": 18, "item_id": "fc_1", "output_index": 2, "arguments": "{\"path\":\"a.txt\"}"},
+    {"type": "response.output_item.done", "sequence_number": 19, "output_index": 2, "item": {"id": "fc_1", "type": "function_call", "status": "completed", "arguments": "{\"path\":\"a.txt\"}", "call_id": "call_9", "name": "fs_read"}},
+    {"type": "response.completed", "sequence_number": 20, "response": {"id": "resp_1", "object": "response", "created_at": 1767225600, "status": "completed", "error": null, "incomplete_details": null, "model": "gpt-5-2025-08-07",
+      "output": [
+        {"id": "rs_1", "type": "reasoning", "summary": [{"type": "summary_text", "text": "Need the file."}]},
+        {"id": "msg_1", "type": "message", "status": "completed", "content": [{"type": "output_text", "annotations": [], "text": "A cat. Reading it."}], "role": "assistant"},
+        {"id": "fc_1", "type": "function_call", "status": "completed", "arguments": "{\"path\":\"a.txt\"}", "call_id": "call_9", "name": "fs_read"}
+      ],
+      "usage": {"input_tokens": 120, "input_tokens_details": {"cached_tokens": 64}, "output_tokens": 80, "output_tokens_details": {"reasoning_tokens": 32}, "total_tokens": 200}}}
+  ]
+}

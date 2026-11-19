@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"slices"
 	"time"
 
@@ -31,6 +32,8 @@ type providerSnapshot struct {
 	// (not strict, discovery per Provider).
 	Strict    bool   `json:"strict,omitempty"`
 	Discovery string `json:"discovery,omitempty"`
+	// Ticket 11; "" is none.
+	ModelsDevBrand string `json:"models_dev_brand,omitempty"`
 }
 
 // Resource is the Provider resource of the audit machinery.
@@ -41,8 +44,8 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 	Load: func(ctx context.Context, q audit.Querier, id string) (*providerSnapshot, error) {
 		var s providerSnapshot
 		var created int64
-		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery FROM providers WHERE id = ?`, id).
-			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created, &s.MaxAttempts, &s.FirstByteSeconds, &s.Strict, &s.Discovery)
+		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand FROM providers WHERE id = ?`, id).
+			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created, &s.MaxAttempts, &s.FirstByteSeconds, &s.Strict, &s.Discovery, &s.ModelsDevBrand)
 		if s.Discovery == DiscoveryProvider {
 			s.Discovery = "" // the default, as entries written before ticket 10 have it
 		}
@@ -79,10 +82,11 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 		if discovery == "" {
 			discovery = DiscoveryProvider
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET name = excluded.name, enabled = excluded.enabled, archived = excluded.archived,
-			max_attempts = excluded.max_attempts, first_byte_seconds = excluded.first_byte_seconds, strict = excluded.strict, discovery = excluded.discovery`,
-			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt), s.MaxAttempts, s.FirstByteSeconds, s.Strict, discovery)
+			max_attempts = excluded.max_attempts, first_byte_seconds = excluded.first_byte_seconds, strict = excluded.strict, discovery = excluded.discovery,
+			models_dev_brand = excluded.models_dev_brand`,
+			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt), s.MaxAttempts, s.FirstByteSeconds, s.Strict, discovery, s.ModelsDevBrand)
 		return err
 	},
 })
@@ -98,11 +102,18 @@ type CreateProvider struct {
 
 // ModelListSettings change how a Provider's model list is kept and used.
 type ModelListSettings struct {
-	Strict    *bool   `json:"strict,omitempty" doc:"true: refuse models missing from the model list before any Attempt (404 model_not_found). Default false: unlisted models are forwarded."`
-	Discovery *string `json:"discovery,omitempty" enum:"none,provider,key" doc:"provider (default): read each Endpoint's model list with one key. key: read it with every key, so keys whose list names a model are tried first for it; use it when keys see different models. none: never discover."`
+	Strict         *bool   `json:"strict,omitempty" doc:"true: refuse models missing from the model list before any Attempt (404 model_not_found). Default false: unlisted models are forwarded."`
+	Discovery      *string `json:"discovery,omitempty" enum:"none,provider,key" doc:"provider (default): read each Endpoint's model list with one key. key: read it with every key, so keys whose list names a model are tried first for it; use it when keys see different models. none: never discover."`
+	ModelsDevBrand *string `json:"models_dev_brand,omitempty" doc:"The models.dev provider ID this Provider's models are looked up under for metadata, e.g. anthropic, openai, zai-coding-plan, alibaba-cn, openrouter. \"\" (default): none; models are looked up by name in models.dev's maker catalog only. Takes effect at the next model refresh."`
 }
 
+var brandPattern = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
+
 func (s ModelListSettings) check() error {
+	if b := s.ModelsDevBrand; b != nil && *b != "" && (len(*b) > 64 || !brandPattern.MatchString(*b)) {
+		return api.BadRequest("Use a models.dev provider ID: lowercase letters, digits, and single dots, dashes or underscores, e.g. \"zai-coding-plan\"; \"\" for none.",
+			"models_dev_brand %q is not a models.dev provider ID.", *b)
+	}
 	if s.Discovery != nil {
 		switch *s.Discovery {
 		case DiscoveryNone, DiscoveryProvider, DiscoveryKey:
@@ -322,12 +333,16 @@ func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider
 	if in.Discovery != nil {
 		discovery = *in.Discovery
 	}
+	brand := ""
+	if in.ModelsDevBrand != nil {
+		brand = *in.ModelsDevBrand
+	}
 	id = ids.New("pr")
 	if err := m.Track(Resource, id); err != nil {
 		return Provider{}, err
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO providers (id, handle, name, enabled, created_at, max_attempts, first_byte_seconds, strict, discovery) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, in.Handle, name, enabled, store.Millis(m.Now), zeroIfNil(in.MaxAttempts), zeroIfNil(in.FirstByteSeconds), strict, discovery); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO providers (id, handle, name, enabled, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, in.Handle, name, enabled, store.Millis(m.Now), zeroIfNil(in.MaxAttempts), zeroIfNil(in.FirstByteSeconds), strict, discovery, brand); err != nil {
 		return Provider{}, err
 	}
 	return readProvider(m.Ctx, m.Tx, id)
@@ -359,8 +374,8 @@ func (h handlers) updateProvider(m *audit.Mutation, id string, in UpdateProvider
 	}
 	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE providers SET name = coalesce(?, name), enabled = coalesce(?, enabled), archived = coalesce(?, archived),
 		max_attempts = coalesce(?, max_attempts), first_byte_seconds = coalesce(?, first_byte_seconds),
-		strict = coalesce(?, strict), discovery = coalesce(?, discovery) WHERE id = ?`,
-		in.Name, in.Enabled, in.Archived, in.MaxAttempts, in.FirstByteSeconds, in.Strict, in.Discovery, id); err != nil {
+		strict = coalesce(?, strict), discovery = coalesce(?, discovery), models_dev_brand = coalesce(?, models_dev_brand) WHERE id = ?`,
+		in.Name, in.Enabled, in.Archived, in.MaxAttempts, in.FirstByteSeconds, in.Strict, in.Discovery, in.ModelsDevBrand, id); err != nil {
 		return cur, err
 	}
 	return readProvider(m.Ctx, m.Tx, id)

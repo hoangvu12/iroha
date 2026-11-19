@@ -1,0 +1,185 @@
+== request sent upstream ==
+{
+  "max_tokens": 8000,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Weather in Hanoi? What is in these images?",
+          "type": "text"
+        },
+        {
+          "source": {
+            "data": "iVBORw0KGgo=",
+            "media_type": "image/png",
+            "type": "base64"
+          },
+          "type": "image"
+        },
+        {
+          "source": {
+            "type": "url",
+            "url": "https://example.com/cat.jpg"
+          },
+          "type": "image"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "claude-sonnet-4-5-20250929",
+  "stream": true,
+  "system": [
+    {
+      "text": "You are terse.",
+      "type": "text"
+    }
+  ],
+  "thinking": {
+    "budget_tokens": 6400,
+    "type": "enabled"
+  },
+  "tool_choice": {
+    "type": "auto"
+  },
+  "tools": [
+    {
+      "description": "Get weather",
+      "input_schema": {
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "name": "get_weather"
+    },
+    {
+      "input_schema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "mcp_weather_alerts"
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "created_at": 1767225600,
+  "error": null,
+  "id": "resp_req_golden",
+  "incomplete_details": null,
+  "model": "claude-sonnet-4-5",
+  "object": "response",
+  "output": [
+    {
+      "id": "msg_01Resp_reasoning_0",
+      "status": "completed",
+      "summary": [
+        {
+          "text": "Check alerts first.",
+          "type": "summary_text"
+        }
+      ],
+      "type": "reasoning"
+    },
+    {
+      "content": [
+        {
+          "annotations": [],
+          "text": "A cat. Checking alerts.",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_01Resp_msg_0",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    },
+    {
+      "arguments": "{}",
+      "call_id": "toolu_1",
+      "id": "toolu_1",
+      "name": "mcp:weather alerts",
+      "status": "completed",
+      "type": "function_call"
+    }
+  ],
+  "status": "completed",
+  "usage": {
+    "input_tokens": 60,
+    "input_tokens_details": {
+      "cached_tokens": 10
+    },
+    "output_tokens": 30,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 90
+  }
+}
+== stream to the Caller ==
+event: response.created
+data: {"response":{"created_at":1767225600,"error":null,"id":"resp_req_golden","incomplete_details":null,"model":"claude-sonnet-4-5","object":"response","output":[],"status":"in_progress","usage":null},"sequence_number":0,"type":"response.created"}
+
+event: response.output_item.added
+data: {"item":{"id":"resp_req_golden_reasoning_0","status":"in_progress","summary":[],"type":"reasoning"},"output_index":0,"sequence_number":1,"type":"response.output_item.added"}
+
+event: response.reasoning_summary_part.added
+data: {"item_id":"resp_req_golden_reasoning_0","output_index":0,"part":{"text":"","type":"summary_text"},"sequence_number":2,"summary_index":0,"type":"response.reasoning_summary_part.added"}
+
+event: response.reasoning_summary_text.delta
+data: {"delta":"Check alerts first.","item_id":"resp_req_golden_reasoning_0","output_index":0,"sequence_number":3,"summary_index":0,"type":"response.reasoning_summary_text.delta"}
+
+event: response.reasoning_summary_text.delta
+data: {"delta":"\n","item_id":"resp_req_golden_reasoning_0","output_index":0,"sequence_number":4,"summary_index":0,"type":"response.reasoning_summary_text.delta"}
+
+event: response.output_item.added
+data: {"item":{"content":[],"id":"resp_req_golden_msg_0","role":"assistant","status":"in_progress","type":"message"},"output_index":1,"sequence_number":5,"type":"response.output_item.added"}
+
+event: response.content_part.added
+data: {"content_index":0,"item_id":"resp_req_golden_msg_0","output_index":1,"part":{"annotations":[],"text":"","type":"output_text"},"sequence_number":6,"type":"response.content_part.added"}
+
+event: response.output_text.delta
+data: {"content_index":0,"delta":"A cat. ","item_id":"resp_req_golden_msg_0","output_index":1,"sequence_number":7,"type":"response.output_text.delta"}
+
+event: response.output_text.delta
+data: {"content_index":0,"delta":"Checking alerts.","item_id":"resp_req_golden_msg_0","output_index":1,"sequence_number":8,"type":"response.output_text.delta"}
+
+event: response.output_item.added
+data: {"item":{"arguments":"","call_id":"toolu_1","id":"toolu_1","name":"mcp:weather alerts","status":"in_progress","type":"function_call"},"item_id":"toolu_1","output_index":2,"sequence_number":9,"type":"response.output_item.added"}
+
+event: response.function_call_arguments.delta
+data: {"delta":"{}","item_id":"toolu_1","output_index":2,"sequence_number":10,"type":"response.function_call_arguments.delta"}
+
+event: response.output_text.done
+data: {"content_index":0,"item_id":"resp_req_golden_msg_0","output_index":1,"sequence_number":11,"text":"A cat. Checking alerts.","type":"response.output_text.done"}
+
+event: response.content_part.done
+data: {"content_index":0,"item_id":"resp_req_golden_msg_0","output_index":1,"part":{"annotations":[],"text":"A cat. Checking alerts.","type":"output_text"},"sequence_number":12,"type":"response.content_part.done"}
+
+event: response.output_item.done
+data: {"item":{"content":[{"annotations":[],"text":"A cat. Checking alerts.","type":"output_text"}],"id":"resp_req_golden_msg_0","role":"assistant","status":"completed","type":"message"},"output_index":1,"sequence_number":13,"type":"response.output_item.done"}
+
+event: response.reasoning_summary_text.done
+data: {"item_id":"resp_req_golden_reasoning_0","output_index":0,"sequence_number":14,"summary_index":0,"text":"Check alerts first.\n","type":"response.reasoning_summary_text.done"}
+
+event: response.reasoning_summary_part.done
+data: {"item_id":"resp_req_golden_reasoning_0","output_index":0,"part":{"text":"Check alerts first.\n","type":"summary_text"},"sequence_number":15,"summary_index":0,"type":"response.reasoning_summary_part.done"}
+
+event: response.output_item.done
+data: {"item":{"id":"resp_req_golden_reasoning_0","status":"completed","summary":[{"text":"Check alerts first.\n","type":"summary_text"}],"type":"reasoning"},"output_index":0,"sequence_number":16,"type":"response.output_item.done"}
+
+event: response.function_call_arguments.done
+data: {"arguments":"{}","item_id":"toolu_1","name":"mcp:weather alerts","output_index":2,"sequence_number":17,"type":"response.function_call_arguments.done"}
+
+event: response.output_item.done
+data: {"item":{"arguments":"{}","call_id":"toolu_1","id":"toolu_1","name":"mcp:weather alerts","status":"completed","type":"function_call"},"output_index":2,"sequence_number":18,"type":"response.output_item.done"}
+
+event: response.completed
+data: {"response":{"created_at":1767225600,"error":null,"id":"resp_req_golden","incomplete_details":null,"model":"claude-sonnet-4-5","object":"response","output":[{"id":"resp_req_golden_reasoning_0","status":"completed","summary":[{"text":"Check alerts first.\n","type":"summary_text"}],"type":"reasoning"},{"content":[{"annotations":[],"text":"A cat. Checking alerts.","type":"output_text"}],"id":"resp_req_golden_msg_0","role":"assistant","status":"completed","type":"message"},{"arguments":"{}","call_id":"toolu_1","id":"toolu_1","name":"mcp:weather alerts","status":"completed","type":"function_call"}],"status":"completed","usage":{"input_tokens":60,"input_tokens_details":{"cached_tokens":10},"output_tokens":30,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":90}},"sequence_number":19,"type":"response.completed"}
+

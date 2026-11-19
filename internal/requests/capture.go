@@ -145,6 +145,7 @@ func isEventStream(contentType string) bool {
 var reassemblers = map[shape.Shape]func(payloads [][]byte) (b []byte, ok bool){
 	shape.OpenAIChat:        reassembleChat,
 	shape.AnthropicMessages: reassembleAnthropic,
+	shape.OpenAIResponses:   reassembleResponses, // capture_responses.go
 }
 
 // reassemble turns a streamed answer into one answer in the Shape's own

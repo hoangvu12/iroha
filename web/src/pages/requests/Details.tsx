@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import { formatNumber } from "@/lib/format";
+import { rec, RecordLink } from "@/sheets/RecordLink";
 import type { RequestRecord } from "./api";
 import { Fact, failed, longShape, msOrSecs, ProviderLogo, secs, Summary } from "./bits";
 
@@ -41,26 +42,30 @@ export function RequestDetails({ r, onShowCaptured }: { r: RequestRecord; onShow
       <Section title="Route">
         <Fact label="Caller">{r.caller.name}</Fact>
         <Fact label="Gateway Key" mono>
-          {r.caller.gateway_key_id || (test ? "Test" : none)}
+          {r.caller.gateway_key_id ? <RecordLink record={rec.gatewayKey(r.caller.gateway_key_id)}>{r.caller.gateway_key_id}</RecordLink> : test ? "Test" : none}
         </Fact>
         <Fact label="Provider">
           {r.provider ? (
             <span className="inline-flex items-center gap-2">
               <ProviderLogo handle={r.provider} />
-              {r.provider}
+              <RecordLink record={rec.provider(r.provider)}>{r.provider}</RecordLink>
             </span>
           ) : (
             none
           )}
         </Fact>
-        <Fact label="Endpoint">{r.endpoint || none}</Fact>
+        <Fact label="Endpoint">{r.endpoint && r.provider ? <RecordLink record={rec.endpoint(r.provider, r.endpoint)}>{r.endpoint}</RecordLink> : r.endpoint || none}</Fact>
         <Fact label="Upstream Key" mono>
-          {r.upstream_key || none}
+          {r.upstream_key && r.provider ? <RecordLink record={rec.key(r.provider, r.upstream_key)}>{r.upstream_key}</RecordLink> : r.upstream_key || none}
         </Fact>
         <Fact label="Stream">{r.stream ? "Yes" : "No"}</Fact>
         <Fact label="Caller Shape">{longShape(r.shape_in)}</Fact>
         <Fact label="Upstream Shape">{r.shape_out ? longShape(r.shape_out) : none}</Fact>
-        {r.pool && <Fact label="Model Pool">{r.pool}</Fact>}
+        {r.pool && (
+          <Fact label="Model Pool">
+            <RecordLink record={rec.pool(r.pool)}>{r.pool}</RecordLink>
+          </Fact>
+        )}
         {r.wire_model && r.wire_model !== r.model && (
           <Fact label="Model sent" mono>
             {r.wire_model}

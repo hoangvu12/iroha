@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { formatNumber } from "@/lib/format";
-import { Button } from "@/ui/Button";
+import { Button, IconButton } from "@/ui/Button";
 import { Checkbox } from "@/ui/Checkbox";
 import { cn } from "@/ui/cn";
 import { Dialog } from "@/ui/Dialog";
@@ -94,14 +94,8 @@ export function ModelPicker({
               {picked.slice(0, CHIPS).map((m) => (
                 <span key={m} className="inline-flex h-7 max-w-full items-center gap-1 rounded-md bg-muted pl-2 pr-1 font-mono text-[12.5px] text-fg">
                   <span className="truncate">{m}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${m}`}
-                    onClick={() => setPicked((p) => p.filter((x) => x !== m))}
-                    className="rounded p-0.5 text-fg-muted hover:text-fg"
-                  >
-                    <X size={13} aria-hidden />
-                  </button>
+                  {/* A draft until Save: removing a chip loses nothing, so it doesn't ask. */}
+                  <IconButton icon={X} size="xs" danger label={`Remove ${m}`} onClick={() => setPicked((p) => p.filter((x) => x !== m))} />
                 </span>
               ))}
               {picked.length > CHIPS && (

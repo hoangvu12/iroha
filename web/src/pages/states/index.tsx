@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { Ellipsis, KeyRound, Plus, Trash2 } from "lucide-react";
+import { Ellipsis, KeyRound, Plus, Trash2, X } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
 import { ApiError } from "@/api/client";
-import { Button } from "@/ui/Button";
+import { Button, IconButton } from "@/ui/Button";
+import { ConfirmAction } from "@/ui/Confirm";
 import { CopyButton } from "@/ui/CopyButton";
 import { Input } from "@/ui/Input";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
@@ -77,10 +78,26 @@ export default function StatesPage() {
         <Panel title="Error" note="Says what failed and keeps the page around it.">
           <ErrorState title="Couldn't load Requests" error={timeout} onRetry={() => {}} />
         </Panel>
-        <Panel title="Confirm" note="Delete names what goes; revoke asks for the name. Red only on the button that does it.">
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setDel(true)}>Delete 3 keys…</Button>
-            <Button onClick={() => setRev(true)}>Revoke zeron-fleet…</Button>
+        <Panel title="Confirm" note="Destructive triggers are red and ask, naming what goes; revoke asks for the name. Solid red only on the button that does it.">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button danger onClick={() => setDel(true)}>
+              Delete 3 keys…
+            </Button>
+            <Button danger onClick={() => setRev(true)}>
+              Revoke zeron-fleet…
+            </Button>
+            <ConfirmAction
+              title="Remove gpt-4o from fast?"
+              body="Requests for fast stop going to gpt-4o. Undo puts it back in its place."
+              confirmLabel="Remove model"
+              onConfirm={() => new Promise((r) => setTimeout(r, 400))}
+            >
+              <IconButton icon={Trash2} label="Remove gpt-4o" danger />
+            </ConfirmAction>
+            <span className="inline-flex h-7 items-center gap-1 rounded-md bg-muted pl-2 pr-1 font-mono text-[12.5px]">
+              qwen3-max
+              <IconButton icon={X} size="xs" danger label="Remove qwen3-max (draft, doesn't ask)" />
+            </span>
           </div>
           <ConfirmDialog
             open={del}
@@ -136,7 +153,7 @@ export default function StatesPage() {
             </Button>
             <Button>Test</Button>
             <Button variant="ghost">Clear selection</Button>
-            <Button variant="danger">Delete</Button>
+            <Button danger>Delete…</Button>
           </div>
           <Table>
             <THead>

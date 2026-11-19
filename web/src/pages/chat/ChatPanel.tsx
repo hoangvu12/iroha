@@ -7,6 +7,7 @@ import { timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { IconButton } from "@/ui/Button";
+import { useConfirm } from "@/ui/Confirm";
 import { cn } from "@/ui/cn";
 import { describeError } from "@/ui/SaveStatus";
 import { Disclosure } from "@/ui/Disclosure";
@@ -38,6 +39,7 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
   const chat = currentChat(state);
   // A Test button whose chat couldn't be set up: said at the top of the panel it opened.
   const [setupError, setSetupError] = useState<string>();
+  const confirm = useConfirm();
 
   useEffect(() => {
     const { seq, target } = panel.request;
@@ -77,13 +79,25 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
             {chat.turns.length > 0 && (
               <>
                 <MenuSeparator />
-                <MenuItem icon={Trash2} danger onSelect={() => deleteChat(chat.id)}>
-                  Delete this chat
+                <MenuItem
+                  icon={Trash2}
+                  danger
+                  onSelect={() =>
+                    confirm.ask({
+                      title: `Delete ${chat.title}?`,
+                      body: "Its messages are removed from this browser. This can't be undone; Requests it sent stay in Requests.",
+                      confirmLabel: "Delete chat",
+                      onConfirm: () => deleteChat(chat.id),
+                    })
+                  }
+                >
+                  Delete this chat…
                 </MenuItem>
               </>
             )}
           </MenuContent>
         </Menu>
+        {confirm.dialog}
         <div className="flex-1" />
         <IconButton icon={SquarePen} label="New chat" size="sm" onClick={() => newChat()} />
         {mode === "sheet" ? (

@@ -232,7 +232,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
       <ConfirmDialog
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(undefined)}
-        title={`Remove ${removing?.provider} from ${name}?`}
+        title={`Remove ${removing?.provider} (${removing?.model}) from ${name}?`}
         body={`Requests for ${name} stop going to ${removing?.provider} (${removing?.model}). Undo puts it back in its place.`}
         confirmLabel="Remove member"
         onConfirm={async () => {

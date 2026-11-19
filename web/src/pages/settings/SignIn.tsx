@@ -83,8 +83,8 @@ function Sessions() {
           <p className="mt-1 text-sm text-fg-muted">Each stays signed in for 30 days from when it signed in.</p>
         </div>
         {others.length > 1 && (
-          <Button onClick={() => setEndingOthers(true)} className="self-start md:self-auto">
-            Sign out the others
+          <Button danger onClick={() => setEndingOthers(true)} className="self-start md:self-auto">
+            Sign out the others…
           </Button>
         )}
       </div>
@@ -172,8 +172,8 @@ function EndButton({ s, onEnd }: { s: OwnerSession; onEnd: (s: OwnerSession) => 
       </span>
     );
   return (
-    <Button size="sm" onClick={() => onEnd(s)}>
-      Sign out
+    <Button size="sm" danger="hover" aria-label={`Sign out ${browserName(s.user_agent)}`} onClick={() => onEnd(s)}>
+      Sign out…
     </Button>
   );
 }

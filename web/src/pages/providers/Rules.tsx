@@ -33,7 +33,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
           {r.source === "builtin" ? "Change (as your rule)…" : "Edit…"}
         </MenuItem>
         {r.source === "owner" && (
-          <MenuItem icon={r.overrides ? RotateCcw : Trash2} danger={!r.overrides} onSelect={() => setDeleting(r)}>
+          <MenuItem icon={r.overrides ? RotateCcw : Trash2} danger onSelect={() => setDeleting(r)}>
             {r.overrides ? "Restore the built-in rule…" : "Delete…"}
           </MenuItem>
         )}

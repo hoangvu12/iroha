@@ -8,7 +8,8 @@ export default mergeConfig(
       environment: "jsdom",
       setupFiles: ["./src/test/setup.ts"],
       include: ["src/**/*.test.{ts,tsx}"],
-      css: false,
+      // No CSS in tests, except the stylesheet's source for styles/motion.test.ts.
+      css: { include: [/styles[\\/]index\.css/] },
     },
   }),
 );

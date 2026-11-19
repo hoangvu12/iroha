@@ -12,7 +12,7 @@ import { SearchInput } from "@/ui/Input";
 import { LogoTile, PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { Menu, MenuContent, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { cn } from "@/ui/cn";
-import { fadeIn } from "@/ui/Reveal";
+import { riseIn } from "@/ui/Reveal";
 import { Chip, EmptyState } from "@/ui/States";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { type EntryFilter, type ResourceOption, useAuditEntries, useAuditFilters, useInvalidateAll } from "./api";
@@ -256,8 +256,8 @@ function Target({ entry }: { entry: AuditEntry }) {
 /** Under an opened row: what changed, before and after, and what Revert would do; on phones Revert too. */
 function Details({ entry, labels, phone }: { entry: AuditEntry; labels: Labels; phone: boolean }) {
   return (
-    // Fades in where it opens: no shift and no height, since the rows under it have already moved down (UI ticket 20).
-    <div className={cn("flex flex-col gap-4 pt-1 md:ml-[140px] md:max-w-[720px]", fadeIn)}>
+    // Enters like a row (UI ticket 20): a row's shift and a fade, never its height (the rows under it move down at once).
+    <div className={cn("flex flex-col gap-4 pt-1 md:ml-[140px] md:max-w-[720px]", riseIn)}>
       <EntryChanges entry={entry} labels={labels} />
       <RevertNote entry={entry} />
       {phone && (

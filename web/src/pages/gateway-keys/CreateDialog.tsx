@@ -103,7 +103,8 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
           </>
         }
       >
-        <div className={cn("flex flex-col gap-4", riseIn)}>
+        {/* Keyed: a new element, not the form's body reused, so its starting style applies. */}
+        <div key="created" className={cn("flex flex-col gap-4", riseIn)}>
           <div>
             <p className="mb-2 text-sm font-medium text-fg">Key for {key.name}</p>
             <CopyBox value={key.secret} what="Gateway Key" />

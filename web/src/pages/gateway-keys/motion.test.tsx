@@ -117,10 +117,14 @@ describe("the new key, shown once", () => {
         <CreateDialog open onOpenChange={() => {}} existing={[]} />
       </QueryClientProvider>,
     );
-    await user.type(screen.getByRole("textbox", { name: "Name" }), "linh");
+    const name = screen.getByRole("textbox", { name: "Name" });
+    // The form's body: the created view must not reuse it, or `@starting-style` never applies (a new element is what enters).
+    const formBody = name.closest("form")!.parentElement!;
+    await user.type(name, "linh");
     await user.click(screen.getByRole("radio", { name: "Everything" }));
     await user.click(screen.getByRole("button", { name: "Create key" }));
     const dialog = await screen.findByRole("dialog", { name: "Gateway Key created" });
+    expect(formBody.isConnected).toBe(false);
     const secret = within(dialog).getByText(CREATED.secret);
     expectRiseIn(secret.closest(".starting\\:opacity-0")!);
     expectRiseIn(within(dialog).getByText("Gateway Key created").closest(".starting\\:opacity-0")!);

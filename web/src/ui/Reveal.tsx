@@ -13,15 +13,14 @@ export const collapsePanelClass =
   "h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-collapse ease-out data-starting-style:h-0 data-ending-style:h-0";
 
 /**
- * Content that appears in place of other content after the page has painted
- * (a dialog turning into its result): rises a row's distance and fades in,
- * from `@starting-style`. Block or flex elements only (`translate` ignores
- * inline ones). Under reduced motion the shift is 0: a plain fade.
+ * Content that appears after the page has painted (a dialog turning into its
+ * result, details opening under a table row): rises a row's distance and fades
+ * in, from `@starting-style` (the row recipe). It must be a new element: give
+ * it a `key` when React would reuse the one before. Block or flex elements only
+ * (`translate` ignores inline ones). Under reduced motion the shift is 0: a
+ * plain fade.
  */
 export const riseIn = "transition-[opacity,translate] duration-list-in ease-out starting:translate-y-(--motion-shift-sm) starting:opacity-0";
-
-/** The same for content that must not move (details opening under a table row): a fade only. */
-export const fadeIn = "transition-opacity duration-fade ease-out starting:opacity-0";
 
 /** `label` names the section for agents, which see it as a collapsible with no trigger to name it. */
 export function Reveal({ open, label, children, className }: { open: boolean; label: string; children: ReactNode; className?: string }) {

@@ -36,15 +36,22 @@ export function Toaster() {
         ...({ "data-agent-hidden": true } as object),
         className: cn(
           "fixed bottom-4 right-4 w-[min(380px,calc(100vw-32px))]",
-          "h-[calc(var(--toast-stack-height)+(var(--toast-count)-1)*8px)] transition-[height] duration-300 motion-reduce:transition-none",
+          "h-[calc(var(--toast-stack-height)+(var(--toast-count)-1)*8px)] transition-[height] duration-toast ease-[ease] motion-reduce:transition-none",
         ),
+        // Motion ("Toast" recipe, architecture.md "UI motion system"): a new
+        // toast rises one own height from the bottom edge while the older ones
+        // move up on the same frame and curve; one that times out or is acted
+        // on fades in place; a swiped one follows the finger (no transition)
+        // and keeps going the way it was thrown. Under reduced motion only
+        // opacity transitions: nothing slides, a swiped toast fades where it was let go.
         children: (item) => (
           <Toast
             className={cn(
               "absolute inset-x-0 bottom-0 flex h-(--toast-height) select-none items-center gap-2.5 rounded-xl border border-border bg-elevated px-4 py-3 text-sm text-fg shadow-elevated",
-              "translate-x-(--toast-swipe-x,0px) translate-y-[calc(-1*(var(--toast-offset)+var(--toast-index)*8px))]",
-              "transition-[translate,opacity,height] duration-300 ease-out data-swiping:transition-none",
-              "data-starting-style:translate-y-full data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-opacity",
+              "translate-x-(--toast-swipe-x,0px) translate-y-[calc(var(--toast-swipe-y,0px)-var(--toast-offset)-var(--toast-index)*8px)]",
+              "transition-[translate,opacity,height] duration-toast ease-[ease] data-swiping:transition-none",
+              "data-starting-style:translate-y-(--motion-toast-offset) data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-opacity",
+              "motion-safe:data-[swipe-direction=right]:translate-x-full motion-safe:data-[swipe-direction=down]:translate-y-[calc(100%-var(--toast-offset)-var(--toast-index)*8px)]",
             )}
           >
             {icons[((item.data as { icon?: Icon } | undefined)?.icon ?? "ok") as Icon]}

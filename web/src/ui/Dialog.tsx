@@ -10,23 +10,25 @@ import {
   AlertDialogTitle,
 } from "@ui-sdk/react/alert-dialog";
 import { Dialog as SdkDialog, DialogBackdrop, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@ui-sdk/react/dialog";
-import { buttonClass } from "./Button";
+import { buttonClass, iconButtonClass } from "./Button";
 import { cn } from "./cn";
 import { Field, Input } from "./Input";
 import { ScrollArea } from "./ScrollArea";
 import { isApiError } from "@/api/client";
 
 // Dialogs grow from the middle and dim the page; the content keeps showing
-// what it showed while open until its exit has finished.
+// what it showed while open until its exit has finished. Motion: the "Dialog"
+// recipe of architecture.md "UI motion system" (no trigger origin; out faster
+// than in; under reduced motion the scale token is 1, so it only fades).
 
 const backdropClass =
-  "fixed inset-0 bg-overlay transition-opacity duration-150 data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-none";
+  "fixed inset-0 bg-overlay transition-opacity duration-dialog-in ease-out data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-dialog-out";
 
 const contentClass = cn(
   "fixed inset-0 m-auto flex h-fit w-[calc(100vw-32px)] max-h-[calc(100dvh-32px)] flex-col",
   "rounded-xl border border-border bg-elevated p-6 text-fg shadow-elevated outline-none",
-  "transition-[opacity,scale] duration-150 ease-out data-starting-style:scale-96 data-starting-style:opacity-0",
-  "data-ending-style:scale-96 data-ending-style:opacity-0 motion-reduce:transition-none",
+  "transition-[opacity,scale] duration-dialog-in ease-out data-starting-style:scale-(--motion-scale-popup) data-starting-style:opacity-0",
+  "data-ending-style:scale-(--motion-scale-popup) data-ending-style:opacity-0 data-ending-style:duration-dialog-out",
 );
 
 const titleClass = "pr-8 text-[17px] font-semibold text-fg";
@@ -77,7 +79,8 @@ export function Dialog({
         )}
         {shown.footer && <div className="mt-6 flex flex-wrap justify-end gap-2">{shown.footer}</div>}
         {closeButton && (
-          <DialogClose aria-label="Close" className="absolute right-4 top-4 rounded-md p-1 text-fg-muted hover:bg-muted hover:text-fg">
+          // An icon button like any other (its press and hover); centred where the old 24 px one was.
+          <DialogClose aria-label="Close" className={iconButtonClass("sm", false, "absolute right-3.5 top-3.5")}>
             <X size={16} aria-hidden />
           </DialogClose>
         )}
@@ -144,18 +147,19 @@ function Confirmation({
           </ScrollArea>
         )}
         {error && (
-          <p role="alert" className="mt-4 text-[13px] text-danger-text">
+          <p role="alert" className="mt-4 text-[13px] text-danger-text transition-opacity duration-list-in ease-out starting:opacity-0">
             {error}
           </p>
         )}
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           <AlertDialogClose className={buttonClass("secondary")}>Cancel</AlertDialogClose>
+          {/* While onConfirm runs the button dims at once (no spinner, not in the press transition). */}
           <AlertDialogClose
             ref={confirmRef}
             value="confirm"
             disabled={disabled}
             data-agent-confirm={agentConfirm ?? (typeof title === "string" ? title : confirmLabel)}
-            className={buttonClass(danger ? "danger" : "primary")}
+            className={buttonClass(danger ? "danger" : "primary", "md", "data-pending:opacity-70")}
             action={async () => {
               setError(undefined);
               try {

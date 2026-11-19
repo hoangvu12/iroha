@@ -18,6 +18,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/normalise"
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/rules"
@@ -34,8 +35,11 @@ const (
 
 // opFor is the operation path of an inference call in Shape sh.
 func opFor(sh shape.Shape) string {
-	if sh == shape.AnthropicMessages {
+	switch sh {
+	case shape.AnthropicMessages:
 		return opMessages
+	case shape.OpenAIResponses:
+		return opResponses
 	}
 	return opChat
 }
@@ -184,26 +188,28 @@ func deadlineContext(parent context.Context, c clock.Clock, deadline time.Time) 
 
 // upstreamCall is what one Attempt sends and how its answer reaches the
 // Caller: passed through (the Endpoint speaks the Caller's Shape) or
-// translated.
+// translated. Either way the Endpoint's normalisers apply to the body sent
+// and to the answer, before it is passed through or translated.
 type upstreamCall struct {
 	body   []byte
 	header http.Header
 	tr     *translate.Translation // nil on passthrough
 	pass   *passRelay             // passthrough only
+	norm   normalise.Set
 }
 
 // prepare builds the upstream call of candidate c. A non-nil error answers
 // the Caller: no other candidate would do better.
 func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (upstreamCall, *api.Error) {
 	ep := c.Endpoint.Shape
-	call := upstreamCall{header: x.r.Header}
+	call := upstreamCall{header: x.r.Header, norm: normalise.For(c.Endpoint.URL, ep)}
 	if ep == shape.AnthropicMessages && call.header.Get("Anthropic-Version") == "" {
 		call.header = call.header.Clone()
 		call.header.Set("Anthropic-Version", anthropicVersion)
 	}
 	if ep == cr.shape {
 		out, injected := preparePassthrough(body, cr, c.WireModel)
-		call.body = out
+		call.body = call.norm.RequestBody(out)
 		call.pass = &passRelay{shape: ep, model: cr.model, dropUsageChunk: injected}
 		return call, nil
 	}
@@ -225,7 +231,7 @@ func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (
 	case err != nil:
 		return call, api.Errorf(http.StatusInternalServerError, "translation_failed", "Report this with the Request ID; the request could not be translated.", "%v", err)
 	}
-	call.body, call.tr = out, tr
+	call.body, call.tr = call.norm.RequestBody(out), tr
 	return call, nil
 }
 
@@ -310,18 +316,29 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 		return a, f
 	}
 
+	stream := cr.stream && isEventStream(resp.Header)
+	// A whole answer is normalised before anything else reads it; one the
+	// normalisers find is a failure sent as a success is a failed Attempt.
+	if !stream {
+		if body := normaliseBody(resp, call.norm); body != nil {
+			f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), body
+			a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(body)
+			return a, f
+		}
+	}
+
 	// Usage is read from the Provider's own answer, before any translation.
 	ur := usage.NewReader(c.Endpoint.Shape)
 	var res relayResult
-	switch stream := cr.stream && isEventStream(resp.Header); {
+	switch {
 	case call.tr == nil && stream:
 		call.pass.usage = ur
-		res = x.relayStream(resp, call.pass.data)
+		res = x.relayStream(resp, call.pass.data, call.norm.Stream())
 	case call.tr == nil:
 		call.pass.usage = ur
 		res = x.relayBuffered(resp, call.pass.body)
 	case stream:
-		res = x.relayTranslatedStream(resp, call.tr, cr, ur)
+		res = x.relayTranslatedStream(resp, call.tr, cr, ur, call.norm.Stream())
 	default:
 		res = x.relayBuffered(resp, translatedBody(x, call.tr, ur))
 	}
@@ -478,12 +495,24 @@ func (x *exchange) relayBuffered(resp *http.Response, transform func(status int,
 }
 
 // relayStream forwards a server-sent event stream event by event, flushing
-// each as it arrives. transform sees each data payload and may change or
-// drop its event. A stream that breaks off ends with an error event.
-func (x *exchange) relayStream(resp *http.Response, transform func(payload []byte) ([]byte, bool)) relayResult {
+// each as it arrives. The normaliser ns (nil when none applies) sees each
+// event's data first; transform then sees each data payload and may change
+// or drop its event. A stream that breaks off ends with an error event.
+func (x *exchange) relayStream(resp *http.Response, transform func(payload []byte) ([]byte, bool), ns *normalise.Stream) relayResult {
 	var res relayResult
 	defer x.end()
 	x.writeHead(resp, "text/event-stream", true)
+	send := func(out []byte) bool {
+		if out == nil {
+			return true
+		}
+		if werr := x.send(out); werr != nil {
+			res.err = "the Caller went away mid-stream"
+			x.callerGone()
+			return false
+		}
+		return true
+	}
 	br := bufio.NewReaderSize(resp.Body, 32<<10)
 	for {
 		ev, err := readEvent(br)
@@ -491,16 +520,26 @@ func (x *exchange) relayStream(resp *http.Response, transform func(payload []byt
 			if res.firstByte.IsZero() {
 				res.firstByte = x.g.clock.Now()
 			}
-			if out := mapData(ev, transform); out != nil {
-				if werr := x.send(out); werr != nil {
-					res.err = "the Caller went away mid-stream"
-					x.callerGone()
-					return res
-				}
+			out, nerr := normaliseEvent(ev, ns, transform)
+			if nerr != nil {
+				res.err = "the Provider reported a failure mid-stream: " + nerr.Error()
+				x.fail(api.Errorf(http.StatusBadGateway, "upstream_stream_error", "Retry; GET /api/requests/"+x.rec.ID+" (Admin Token) shows the Attempt.",
+					"Provider %s's stream failed: %s", x.rec.Provider, nerr.Error()))
+				return res
+			}
+			if !send(out) {
+				return res
 			}
 		}
 		if err == nil {
 			continue
+		}
+		if errors.Is(err, io.EOF) && ns != nil { // the Provider ended its answer
+			for _, p := range ns.End() {
+				if out, drop := transform(p); !drop && !send(frameData(out)) {
+					return res
+				}
+			}
 		}
 		if !errors.Is(err, io.EOF) {
 			if x.ctx.Err() != nil {
@@ -540,6 +579,63 @@ func readEvent(br *bufio.Reader) ([]byte, error) {
 			return ev, nil
 		}
 	}
+}
+
+// normaliseEvent passes one upstream event through the normaliser ns and
+// transform and returns what to send the Caller (nil: nothing). An event the
+// normaliser leaves alone keeps its bytes; events it rewrites or adds are
+// written as data-only events (normalisers exist for OpenAI Chat streams,
+// which name no events).
+func normaliseEvent(ev []byte, ns *normalise.Stream, transform func([]byte) ([]byte, bool)) ([]byte, error) {
+	data, ok := eventData(ev)
+	if ns == nil || !ok {
+		return mapData(ev, transform), nil
+	}
+	payloads, err := ns.Event(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(payloads) == 1 && bytes.Equal(payloads[0], data) {
+		return mapData(ev, transform), nil
+	}
+	var out []byte
+	for _, p := range payloads {
+		if np, drop := transform(p); !drop {
+			out = append(out, frameData(np)...)
+		}
+	}
+	return out, nil
+}
+
+// frameData frames one data payload as a server-sent event.
+func frameData(p []byte) []byte {
+	return append(append([]byte("data: "), p...), "\n\n"...)
+}
+
+// normaliseBody runs the normalisers over a whole 2xx answer and puts the
+// result back as resp.Body. It returns the answer when the normalisers find
+// it is a failure the Provider sent as a success, nil otherwise.
+func normaliseBody(resp *http.Response, norm normalise.Set) []byte {
+	if norm.Empty() {
+		return nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody))
+	if err == nil {
+		out, nerr := norm.Body(data)
+		var nf *normalise.Failure
+		if errors.As(nerr, &nf) {
+			return capFailure(data)
+		}
+		data = out
+	}
+	var rest io.Reader = bytes.NewReader(data)
+	if err != nil {
+		rest = io.MultiReader(rest, errReader{err})
+	} else {
+		rest = io.MultiReader(rest, resp.Body) // anything past the limit
+	}
+	resp.Body = readCloser{rest, resp.Body}
+	return nil
 }
 
 // mapData applies f to every data line of an event. It returns ev itself
@@ -613,6 +709,8 @@ func (c *passRelay) data(p []byte) ([]byte, bool) {
 			}
 		}
 		return p, false
+	case shape.OpenAIResponses:
+		return echoResponsesEvent(p, c.model), false
 	}
 	return echoModel(p, c.model), false
 }
@@ -635,7 +733,7 @@ func translatedBody(x *exchange, tr *translate.Translation, ur *usage.Reader) fu
 // Caller's Shape and sends each result as it is ready. An error event from
 // the Provider, or a stream that ends before its answer did, ends the
 // Caller's stream with the Shape's error event.
-func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Translation, cr callerRequest, ur *usage.Reader) relayResult {
+func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Translation, cr callerRequest, ur *usage.Reader, ns *normalise.Stream) relayResult {
 	var res relayResult
 	defer x.end()
 	x.writeHead(resp, "text/event-stream", true)
@@ -650,6 +748,29 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 		x.fail(api.Errorf(http.StatusBadGateway, code, "Retry; GET /api/requests/"+x.rec.ID+" (Admin Token) shows the Attempt.",
 			"Provider %s's stream failed: %s", x.rec.Provider, msg))
 	}
+	// feed translates one upstream data payload and sends the result; false
+	// when the stream is over.
+	feed := func(data []byte) bool {
+		ur.Event(data)
+		out, terr := st.Event(x.ctx, data)
+		var ue *translate.UpstreamError
+		switch {
+		case errors.As(terr, &ue):
+			broken("upstream_stream_error", "the Provider reported an error mid-stream: "+ue.Error())
+			return false
+		case terr != nil:
+			broken("translation_failed", terr.Error())
+			return false
+		}
+		if len(out) > 0 {
+			if werr := x.send(out); werr != nil {
+				res.err = "the Caller went away mid-stream"
+				x.callerGone()
+				return false
+			}
+		}
+		return true
+	}
 	br := bufio.NewReaderSize(resp.Body, 32<<10)
 	for {
 		ev, rerr := readEvent(br)
@@ -657,27 +778,29 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 			if res.firstByte.IsZero() {
 				res.firstByte = x.g.clock.Now()
 			}
-			ur.Event(data)
-			out, terr := st.Event(x.ctx, data)
-			var ue *translate.UpstreamError
-			switch {
-			case errors.As(terr, &ue):
-				broken("upstream_stream_error", "the Provider reported an error mid-stream: "+ue.Error())
-				return res
-			case terr != nil:
-				broken("translation_failed", terr.Error())
-				return res
+			payloads := [][]byte{data}
+			if ns != nil {
+				var nerr error
+				if payloads, nerr = ns.Event(data); nerr != nil {
+					broken("upstream_stream_error", "the Provider reported a failure mid-stream: "+nerr.Error())
+					return res
+				}
 			}
-			if len(out) > 0 {
-				if werr := x.send(out); werr != nil {
-					res.err = "the Caller went away mid-stream"
-					x.callerGone()
+			for _, p := range payloads {
+				if !feed(p) {
 					return res
 				}
 			}
 		}
 		if rerr == nil {
 			continue
+		}
+		if errors.Is(rerr, io.EOF) && ns != nil { // the Provider ended its answer
+			for _, p := range ns.End() {
+				if !feed(p) {
+					return res
+				}
+			}
 		}
 		if !errors.Is(rerr, io.EOF) {
 			if x.ctx.Err() != nil {

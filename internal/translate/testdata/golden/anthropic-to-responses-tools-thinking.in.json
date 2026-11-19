@@ -1,0 +1,69 @@
+{
+  "from": "anthropic-messages",
+  "to": "openai-responses",
+  "model": "gpt-5",
+  "wire_model": "gpt-5",
+  "request": {
+    "model": "gpt-5",
+    "max_tokens": 4000,
+    "stream": true,
+    "thinking": {"type": "enabled", "budget_tokens": 2000},
+    "system": [{"type": "text", "text": "Be terse.", "cache_control": {"type": "ephemeral"}}],
+    "tools": [
+      {"name": "Read", "description": "Read a file", "input_schema": {"type": "object", "properties": {"file_path": {"type": "string"}}, "required": ["file_path"]}},
+      {"name": "mcp__github__create.issue", "input_schema": {"type": "object", "properties": {"title": {"type": "string"}}}}
+    ],
+    "messages": [
+      {"role": "user", "content": "Read /tmp/a.txt and file an issue about it."},
+      {"role": "assistant", "content": [
+        {"type": "text", "text": "Reading."},
+        {"type": "tool_use", "id": "toolu_1", "name": "Read", "input": {"file_path": "/tmp/a.txt"}}
+      ]},
+      {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "toolu_1", "content": "hello"}
+      ]}
+    ]
+  },
+  "answer": {
+    "id": "resp_2",
+    "object": "response",
+    "created_at": 1767225600,
+    "status": "completed",
+    "error": null,
+    "incomplete_details": null,
+    "model": "gpt-5-2025-08-07",
+    "output": [
+      {"id": "rs_2", "type": "reasoning", "summary": [{"type": "summary_text", "text": "File says hello."}]},
+      {"id": "msg_2", "type": "message", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "annotations": [], "text": "Filing it."}]},
+      {"id": "fc_2", "type": "function_call", "status": "completed", "arguments": "{\"title\":\"hello\"}", "call_id": "call_7", "name": "mcp__github__create_issue"}
+    ],
+    "usage": {"input_tokens": 300, "input_tokens_details": {"cached_tokens": 128}, "output_tokens": 60, "output_tokens_details": {"reasoning_tokens": 20}, "total_tokens": 360}
+  },
+  "stream": [
+    {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_2", "object": "response", "created_at": 1767225600, "status": "in_progress", "model": "gpt-5-2025-08-07", "output": [], "usage": null}},
+    {"type": "response.in_progress", "sequence_number": 1, "response": {"id": "resp_2", "object": "response", "created_at": 1767225600, "status": "in_progress", "model": "gpt-5-2025-08-07", "output": [], "usage": null}},
+    {"type": "response.output_item.added", "sequence_number": 2, "output_index": 0, "item": {"id": "rs_2", "type": "reasoning", "summary": []}},
+    {"type": "response.reasoning_summary_part.added", "sequence_number": 3, "item_id": "rs_2", "output_index": 0, "summary_index": 0, "part": {"type": "summary_text", "text": ""}},
+    {"type": "response.reasoning_summary_text.delta", "sequence_number": 4, "item_id": "rs_2", "output_index": 0, "summary_index": 0, "delta": "File says hello."},
+    {"type": "response.reasoning_summary_text.done", "sequence_number": 5, "item_id": "rs_2", "output_index": 0, "summary_index": 0, "text": "File says hello."},
+    {"type": "response.reasoning_summary_part.done", "sequence_number": 6, "item_id": "rs_2", "output_index": 0, "summary_index": 0, "part": {"type": "summary_text", "text": "File says hello."}},
+    {"type": "response.output_item.done", "sequence_number": 7, "output_index": 0, "item": {"id": "rs_2", "type": "reasoning", "summary": [{"type": "summary_text", "text": "File says hello."}]}},
+    {"type": "response.output_item.added", "sequence_number": 8, "output_index": 1, "item": {"id": "msg_2", "type": "message", "status": "in_progress", "content": [], "role": "assistant"}},
+    {"type": "response.content_part.added", "sequence_number": 9, "item_id": "msg_2", "output_index": 1, "content_index": 0, "part": {"type": "output_text", "annotations": [], "text": ""}},
+    {"type": "response.output_text.delta", "sequence_number": 10, "item_id": "msg_2", "output_index": 1, "content_index": 0, "delta": "Filing it."},
+    {"type": "response.output_text.done", "sequence_number": 11, "item_id": "msg_2", "output_index": 1, "content_index": 0, "text": "Filing it."},
+    {"type": "response.content_part.done", "sequence_number": 12, "item_id": "msg_2", "output_index": 1, "content_index": 0, "part": {"type": "output_text", "annotations": [], "text": "Filing it."}},
+    {"type": "response.output_item.done", "sequence_number": 13, "output_index": 1, "item": {"id": "msg_2", "type": "message", "status": "completed", "content": [{"type": "output_text", "annotations": [], "text": "Filing it."}], "role": "assistant"}},
+    {"type": "response.output_item.added", "sequence_number": 14, "output_index": 2, "item": {"id": "fc_2", "type": "function_call", "status": "in_progress", "arguments": "", "call_id": "call_7", "name": "mcp__github__create_issue"}},
+    {"type": "response.function_call_arguments.delta", "sequence_number": 15, "item_id": "fc_2", "output_index": 2, "delta": "{\"title\":\"hello\"}"},
+    {"type": "response.function_call_arguments.done", "sequence_number": 16, "item_id": "fc_2", "output_index": 2, "arguments": "{\"title\":\"hello\"}"},
+    {"type": "response.output_item.done", "sequence_number": 17, "output_index": 2, "item": {"id": "fc_2", "type": "function_call", "status": "completed", "arguments": "{\"title\":\"hello\"}", "call_id": "call_7", "name": "mcp__github__create_issue"}},
+    {"type": "response.completed", "sequence_number": 18, "response": {"id": "resp_2", "object": "response", "created_at": 1767225600, "status": "completed", "model": "gpt-5-2025-08-07",
+      "output": [
+        {"id": "rs_2", "type": "reasoning", "summary": [{"type": "summary_text", "text": "File says hello."}]},
+        {"id": "msg_2", "type": "message", "status": "completed", "content": [{"type": "output_text", "annotations": [], "text": "Filing it."}], "role": "assistant"},
+        {"id": "fc_2", "type": "function_call", "status": "completed", "arguments": "{\"title\":\"hello\"}", "call_id": "call_7", "name": "mcp__github__create_issue"}
+      ],
+      "usage": {"input_tokens": 300, "input_tokens_details": {"cached_tokens": 128}, "output_tokens": 60, "output_tokens_details": {"reasoning_tokens": 20}, "total_tokens": 360}}}
+  ]
+}

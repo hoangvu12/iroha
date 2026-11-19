@@ -50,7 +50,7 @@ type globalProvider struct {
 }
 
 type entryRow struct {
-	hidden                                      bool
+	hidden                                       bool
 	reported, overrides, external, externalBrand string
 }
 

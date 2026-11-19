@@ -142,9 +142,17 @@ func (g *Gateway) Routes() []api.Route {
 		Request:     MessagesRequest{}, Response: map[string]any{},
 		Raw: g.serveProvider(shape.AnthropicMessages),
 	}
+	responses := api.Route{
+		Method: http.MethodPost, Path: "/providers/{handle}/v1/responses", Tag: "Gateway", Auth: api.AuthCaller,
+		Summary:     "Send an OpenAI Responses request to one Provider",
+		Description: responsesDescription,
+		Request:     ResponsesRequest{}, Response: map[string]any{},
+		Raw: g.serveProvider(shape.OpenAIResponses),
+	}
 	return []api.Route{
 		chat, g.globalRoute(shape.OpenAIChat, chat),
 		messages, g.globalRoute(shape.AnthropicMessages, messages),
+		responses, g.globalRoute(shape.OpenAIResponses, responses),
 	}
 }
 
@@ -289,6 +297,7 @@ type callerRequest struct {
 var bodyHints = map[shape.Shape]string{
 	shape.OpenAIChat:        "Send an OpenAI Chat Completions JSON object with model and messages.",
 	shape.AnthropicMessages: "Send an Anthropic Messages JSON object with model, max_tokens and messages.",
+	shape.OpenAIResponses:   "Send an OpenAI Responses JSON object with model and input.",
 }
 
 // readBody reads a Caller's body written in sh. Every Shape whose body

@@ -1,6 +1,6 @@
 ## Global routes
 
-One base URL reaches every Provider a Gateway Key may use: `/v1/chat/completions` and `/v1/messages` (other Shapes' routes join them as they are added) take the model as `<provider handle>/<model ID>`, and `GET /v1/models` lists exactly those IDs.
+One base URL reaches every Provider a Gateway Key may use: `/v1/chat/completions`, `/v1/responses` and `/v1/messages` take the model as `<provider handle>/<model ID>`, and `GET /v1/models` lists exactly those IDs.
 
 - The model is split at the **first** slash; everything after it is the Provider's own model ID, slashes included: `openrouter/meta-llama/llama-3.3-70b` sends `meta-llama/llama-3.3-70b` to Provider `openrouter`. Endpoint renames then apply to that ID as on `/providers/<handle>/v1/...`.
 - The answer's `model` field (every stream event that has one included) reads the qualified name the Caller sent. The Request records it as `model`; the ID sent upstream is the Attempt's `wire_model`.

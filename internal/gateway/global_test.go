@@ -151,6 +151,36 @@ func TestGlobalRoutesRefuseEveryProviderOutOfReachAlike(t *testing.T) {
 	}
 }
 
+func TestGlobalResponsesEchoTheQualifiedName(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIResponses(t)
+	addEndpointProvider(t, srv, "acme", "openai-responses", up.URL(), "sk-test-oai")
+	caller := srv.Client(issue(t, srv, "codex", all))
+
+	resp := caller.Post("/v1/responses", responsesReq("acme/openai/gpt-5")).Expect(200)
+	if up.Last().Model != "openai/gpt-5" || resp.Map()["model"] != "acme/openai/gpt-5" {
+		t.Fatalf("upstream %q answer %s", up.Last().Model, resp.Body)
+	}
+	st := responsesReq("acme/openai/gpt-5")
+	st["stream"] = true
+	evs, _ := readResponses(t, caller.Post("/v1/responses", st).Expect(200).Events())
+	n := 0
+	for _, e := range evs {
+		if e.Response != nil {
+			if e.Response.Model != "acme/openai/gpt-5" {
+				t.Fatalf("%s names model %q", e.Type, e.Response.Model)
+			}
+			n++
+		}
+	}
+	if n == 0 {
+		t.Fatalf("no event named a model: %+v", evs)
+	}
+	if e := caller.Post("/v1/responses", responsesReq("gpt-5")).Expect(400).Err(); e.Code != "invalid_model_id" {
+		t.Fatalf("unqualified = %+v", e)
+	}
+}
+
 func TestGlobalMessagesPassThroughAndTranslateEchoingTheQualifiedName(t *testing.T) {
 	srv := testkit.Start(t)
 	ant := testkit.NewAnthropic(t)

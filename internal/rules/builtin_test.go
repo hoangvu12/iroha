@@ -191,7 +191,7 @@ func TestEveryBuiltinRuleHasARecordedCase(t *testing.T) {
 		covered[tc.rule] = true
 	}
 	// The generic rules are covered in rules_test.go.
-	for _, n := range []string{"unauthorized", "forbidden-model", "forbidden", "model-not-found", "rate-limited", "upstream-timeout", "network", "bad-request"} {
+	for _, n := range []string{"unauthorized", "forbidden-model", "forbidden", "model-not-found", "endpoint-path-not-found", "endpoint-body-too-large", "rate-limited", "upstream-timeout", "network", "bad-request"} {
 		covered[n] = true
 	}
 	for _, r := range rules.Builtin {

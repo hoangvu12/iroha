@@ -247,6 +247,15 @@ var Builtin = []Rule{
 		Description: "404 naming a model: this key cannot serve this model; try another key.",
 	},
 	{
+		// After model-not-found, so a 404 naming a model stays a Model Gap.
+		Name: "endpoint-path-not-found", Status: []string{"404"}, Body: `^\s*404 page not found\s*$|<title>\s*404`, Outcome: RetryElsewhere,
+		Description: "404 that is a web server's page (\"404 page not found\" as plain text, or an HTML page titled 404): the Endpoint's path is wrong, not the request. Try the next candidate (another Endpoint or key); the key is fine.",
+	},
+	{
+		Name: "endpoint-body-too-large", Status: []string{"413"}, Outcome: RetryElsewhere,
+		Description: "413: a proxy in front of this Endpoint limits the body size; another Endpoint may take the request. Try the next candidate; the key is fine.",
+	},
+	{
 		Name: "rate-limited", Status: []string{"429"}, Outcome: CoolingKeyModel,
 		Description: "429: cool the key for this model until Retry-After (else 60 s, doubling on repeats up to 1 h). Three models within 5 minutes cool the whole key.",
 	},

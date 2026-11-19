@@ -407,6 +407,16 @@ test("live rows: scrolled down, rows arriving on top keep the view still, and a 
   expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
 });
 
+test("a row arriving on top keeps the rows under it as they are (no remount: hover, focus and flashes stay)", () => {
+  const rows = many(5);
+  const { rerender } = render(live(rows));
+  const before = bodyRows();
+  rerender(live([...arrived(1), ...rows]));
+  const after = bodyRows().slice(1);
+  expect(after).toHaveLength(before.length);
+  after.forEach((row, i) => expect(row, `row ${i} was drawn again`).toBe(before[i]));
+});
+
 test("live rows: at the top they come in on top; with the pointer over the rows they wait above the view", async () => {
   layOut();
   const user = userEvent.setup();

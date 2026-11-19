@@ -429,17 +429,10 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     row.getToggleSelectedHandler()({ target: { checked: on }, shiftKey: (event as MouseEvent | undefined)?.shiftKey ?? false });
 
   // ---- Live rows (infinite with newRowsLabel) and the open row ----
-  const tableRef = useRef<HTMLTableElement>(null);
-  const bodyRef = useRef<HTMLTableSectionElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  // The rows are found under this root when needed: refs inside the Skeleton don't hold.
+  const rootRef = useRef<HTMLDivElement>(null);
   const newRowsLabel = paging.mode === "infinite" ? paging.newRowsLabel : undefined;
-  const hold = useHoldView({
-    enabled: !!newRowsLabel && !loading && state === undefined,
-    ids: pageRows.map((r) => r.id),
-    rows: useCallback(() => (phone ? listRef.current : bodyRef.current), [phone]),
-    scroller: useCallback(() => (phone ? null : (tableRef.current?.closest<HTMLElement>("[role=region]") ?? null)), [phone]),
-    inset: useCallback(() => tableRef.current?.tHead?.getBoundingClientRect().height ?? 0, []),
-  });
+  const hold = useHoldView({ enabled: !!newRowsLabel && !loading && state === undefined, ids: pageRows.map((r) => r.id), root: rootRef });
   const pill =
     newRowsLabel && hold.newAbove > 0 ? (
       <Button size="sm" className="pointer-events-auto rounded-full bg-elevated shadow-md" onClick={hold.toTop}>
@@ -451,13 +444,13 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const active = props.activeRowId;
   useEffect(() => {
     if (!active || loading) return;
-    const el = (phone ? listRef.current : bodyRef.current)?.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(active)}"]`);
+    const el = rootRef.current?.querySelector<HTMLElement>(`[data-rows] > [data-row-id="${CSS.escape(active)}"]`);
     el?.scrollIntoView?.({ block: "nearest" });
   }, [active, loading, phone]);
 
   const desktop = (
-    <ScrollArea axis="both" label={label} className="w-full" viewportClassName={props.maxHeight ?? "max-h-[calc(100dvh-4rem)]"} contentClassName="min-w-full">
-      <table ref={tableRef} aria-label={label} className={cn("w-full border-collapse text-left text-sm", props.dimmed && "opacity-60")}>
+    <ScrollArea axis="both" label={label} className="w-full" viewportClassName={cn(props.maxHeight ?? "max-h-[calc(100dvh-4rem)]", newRowsLabel && "[overflow-anchor:none]")} contentClassName="min-w-full">
+      <table aria-label={label} className={cn("w-full border-collapse text-left text-sm", props.dimmed && "opacity-60")}>
         <thead className="sticky top-0 z-[1] bg-bg shadow-[inset_0_-1px_0_var(--border)]">
           {table.getHeaderGroups().map((group) => (
             <tr key={group.id}>
@@ -486,8 +479,9 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
             </tr>
           ))}
         </thead>
-        <tbody ref={bodyRef}>
-          {pageRows.map((row) => {
+        <tbody data-rows="">
+          {/* flatMap: one flat list keyed by row ID, so a row arriving on top doesn't remount the rows under it. */}
+          {pageRows.flatMap((row) => {
             const r = row.original;
             const name = rowName(r);
             const selected = row.getIsSelected();
@@ -559,7 +553,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     <>
       {/* Sticks to the top of the page while the list scrolls under it. */}
       {pill && <div className="pointer-events-none sticky top-3 z-[2] flex h-0 justify-center">{pill}</div>}
-      <ul ref={listRef} aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && "opacity-60")}>
+      <ul data-rows="" aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && "opacity-60")}>
         {pageRows.map((row) => {
           const r = row.original;
           const name = rowName(r);
@@ -607,7 +601,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const pages = (paging.mode === "pages" || paging.mode === "server") && shown > Math.min(...sizes);
 
   return (
-    <div data-table={id}>
+    <div ref={rootRef} data-table={id}>
       {showToolbar && bar && <div className="mb-4">{bar}</div>}
       {state !== undefined ? (
         state

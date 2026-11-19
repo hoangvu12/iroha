@@ -665,3 +665,16 @@ The rest are optional.
 - Where they are: `ui/DataTable.test.tsx` (every mode, the keyboard, an agent test) and `pages/providers/Keys.test.tsx` (the page on the table: URL state, bulk calls, confirms, the row menu, an agent refused a delete).
 - What a page on DataTable tests: its own wiring (its columns' sort and filter, URL state, the API calls of bulk and row actions, confirms). Not the table again.
 - In jsdom: body rows are `within(getByRole("table", { name: label })).getAllByRole("row").slice(1)`. The size Select is `combobox "Rows per page"` with options "50 per page". IntersectionObserver exists only if stubbed.
+
+### UI ticket 09: the Requests feed on DataTable
+
+- **Feed** (`pages/requests/Feed.tsx`): `DataTable id="requests"` in infinite mode over `useRequestFeed`'s rows (pages flattened, live rows first). Columns are display columns built from `url-state.ts` `COLUMNS`; `?hide=` is `columnVisibility`. The server filters (`manualFiltering`, `manualSorting`, no column sorting); the chips stay above the table. A row opens the Request sheet; its "Open Request <id>" button sits in the first shown plain-text column (Time unless hidden). The open Request is `activeRowId`, and stepping ↓ onto the last loaded row loads the older ones. "Load older Requests" is the load-more button. Arriving rows flash once (`useArrivals`, by `data-row-id`; ticket 18 owns that motion).
+- **Numbered pages instead**: `FEED_PAGING = "pages"` in `Feed.tsx` (or `<RequestsFeed paging="pages" />`). That is DataTable server mode: the API pages by cursor, so a later page loads the older pages it needs first, and the shown rows stay dimmed meanwhile. `rowCount` comes from the stats.
+- **DataTable additions** (backwards compatible):
+  - `paging.newRowsLabel` makes an infinite table live, through `ui/hold-view.ts` `useHoldView`. Rows arriving on top don't move the view while the reader is scrolled down or the pointer is over the rows: the scroller moves by their height. The pill `newRowsLabel(n)` ("3 new") goes back to the top. The browser's own `overflow-anchor` is off there, since the hook does the anchoring.
+  - `activeRowId`: `aria-current="true"`, the selected tint, and the row scrolled into view when it changes.
+  - Every row is marked `data-row-id`; the row container is `data-rows`.
+  - Body rows are one flat keyed list, so a row added on top no longer redraws every row under it.
+  - Load-more observes again after each load, inside the table's scroller, so a short page keeps loading until there is no more.
+- **Refs inside DataTable's `Skeleton` don't hold**: Skullet replaces them on what it renders, and a ref object read `null` after the first update. Find elements from a ref outside it (DataTable's root `div`) with `querySelector`.
+- Tests: `pages/requests/Feed.test.tsx` (load older until none, Load older for the keyboard, live rows on top, URL state after a reload, numbered pages, agent test) and `ui/DataTable.test.tsx` ("live rows", "no remount", "loads again"; `layOut()` fakes row geometry for jsdom).

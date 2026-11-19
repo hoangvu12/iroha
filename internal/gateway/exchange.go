@@ -164,6 +164,8 @@ func errorType(status int) string {
 		return "permission_error"
 	case status == http.StatusNotFound:
 		return "not_found_error"
+	case status == http.StatusTooManyRequests:
+		return "rate_limit_error"
 	case status >= 500:
 		return "server_error"
 	}

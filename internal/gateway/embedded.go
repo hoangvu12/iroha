@@ -3,6 +3,7 @@ package gateway
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 
@@ -63,8 +64,22 @@ func streamError(resp *http.Response) []byte {
 // bufferedError reads a whole 2xx body; it returns the body when it is an
 // error and otherwise puts it back.
 func bufferedError(resp *http.Response) []byte {
+	return bufferedFailure(resp, rules.EmbeddedError)
+}
+
+// notJSON returns a whole 2xx body that is not JSON (an HTML page from a
+// broken proxy or a login wall), or nil, putting it back. Translation needs
+// JSON, so on a translated path such an answer is a failed Attempt; on
+// passthrough it is relayed as it came.
+func notJSON(resp *http.Response) []byte {
+	return bufferedFailure(resp, func(b []byte) bool { return !json.Valid(b) })
+}
+
+// bufferedFailure reads a whole 2xx body; it returns the body when failed
+// says it is a failure and otherwise puts it back.
+func bufferedFailure(resp *http.Response, failed func([]byte) bool) []byte {
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody))
-	if err == nil && rules.EmbeddedError(data) {
+	if err == nil && failed(data) {
 		return capFailure(data)
 	}
 	var rest io.Reader = bytes.NewReader(data)

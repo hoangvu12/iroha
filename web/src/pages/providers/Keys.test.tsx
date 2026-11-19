@@ -5,7 +5,7 @@ import { createAgent } from "@ui-sdk/react/agent";
 import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "@/ui/toast";
-import type { UpstreamKey } from "./api";
+import type { Endpoint, Provider, UpstreamKey } from "./api";
 import { KeysTab } from "./Keys";
 
 let approve = false;
@@ -37,18 +37,25 @@ function Where() {
   return <output aria-label="Where">{l.search}</output>;
 }
 
-function renderTab(keys: UpstreamKey[], url = "/providers/acme/keys") {
+function renderTab(keys: UpstreamKey[], url = "/providers/acme/keys", { provider, refuse = [] }: { provider?: Provider; refuse?: number[] } = {}) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (u, init) => {
     const path = String(u);
     if (path.startsWith("/api/providers/acme/keys") && (init?.method ?? "GET") === "GET") return answer({ upstream_keys: keys });
-    const items: string[] = JSON.parse(String(init?.body ?? "{}")).items ?? [];
-    return answer({ dry_run: false, audit_entry: "aud_1", succeeded: items.length, failed: 0, items: items.map((_, index) => ({ index, ok: true, outcome: "updated", changes: [] })) });
+    const items: unknown[] = JSON.parse(String(init?.body ?? "{}")).items ?? [];
+    const ok = (i: number) => !refuse.includes(i);
+    return answer({
+      dry_run: false,
+      audit_entry: "aud_1",
+      succeeded: items.filter((_, i) => ok(i)).length,
+      failed: refuse.length,
+      items: items.map((_, index) => (ok(index) ? { index, ok: true, outcome: "updated", changes: [] } : { index, ok: false, error: { code: "not_found", message: "No such key." }, changes: [] })),
+    });
   });
   vi.stubGlobal("fetch", fetch);
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={[url]}>
-        <KeysTab handle="acme" adding={false} setAdding={() => {}} />
+        <KeysTab handle="acme" provider={provider} adding={false} setAdding={() => {}} />
         <Where />
       </MemoryRouter>
       <Toaster />
@@ -113,6 +120,60 @@ test("selecting keys shows the bulk bar; Disable calls the bulk API and shows it
   await user.click(within(bar).getByRole("button", { name: "Disable" }));
   await waitFor(() => expect(posts(fetch)).toEqual([["/api/providers/acme/keys/bulk/disable", { items: ["team-1", "team-2"] }]]));
   expect(await within(bar).findByText("2 keys disabled", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+});
+
+const endpoint = (name: string): Endpoint => ({
+  id: `ep_${name}`,
+  provider: "acme",
+  name,
+  url: `https://${name}.example.com/v1`,
+  shape: "openai-chat",
+  auth_style: "bearer",
+  static_headers: {},
+  renames: {},
+  discovery_url: "",
+  created_at: "2026-11-19T00:00:00Z",
+});
+const acme = { handle: "acme", endpoints: [endpoint("eu"), endpoint("us"), endpoint("asia")] } as Provider;
+
+test("Edit… shows mixed values for the selected keys and sends one bulk update with only what changed, each key's own Endpoints kept", async () => {
+  const user = userEvent.setup();
+  const fetch = renderTab([key(1, { endpoints: ["eu"] }), key(2, { enabled: false }), key(3)], undefined, { provider: acme });
+  await user.click(await screen.findByRole("checkbox", { name: "Select all rows on this page" }));
+  const bar = screen.getByRole("group", { name: "3 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 3 keys" });
+  expect(within(dialog).getByRole("checkbox", { name: "Enabled" }).getAttribute("aria-checked")).toBe("mixed");
+  // team-2 and team-3 may use every Endpoint, team-1 only eu.
+  expect(within(dialog).getByRole("checkbox", { name: "eu" }).getAttribute("aria-checked")).toBe("true");
+  expect(within(dialog).getByRole("checkbox", { name: "us" }).getAttribute("aria-checked")).toBe("mixed");
+  // Take asia off every key; leave Enabled alone.
+  await user.click(within(dialog).getByRole("checkbox", { name: "asia" }));
+  await user.click(within(dialog).getByRole("checkbox", { name: "asia" }));
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 3 keys" }));
+  await waitFor(() =>
+    expect(posts(fetch)).toEqual([
+      [
+        "/api/providers/acme/keys/bulk/update",
+        { items: [{ key: "key_1", endpoints: ["eu"] }, { key: "key_2", endpoints: ["eu", "us"] }, { key: "key_3", endpoints: ["eu", "us"] }] },
+      ],
+    ]),
+  );
+  expect(await within(bar).findByText("3 keys changed", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+  expect(within(bar).getByRole("button", { name: "Undo: 3 keys changed" })).toBeTruthy();
+});
+
+test("a bulk edit that fails on some keys names them in the bar, with Undo for the rest", async () => {
+  const user = userEvent.setup();
+  renderTab([key(1), key(2), key(3)], undefined, { refuse: [1] });
+  await user.click(await screen.findByRole("checkbox", { name: "Select all rows on this page" }));
+  const bar = screen.getByRole("group", { name: "3 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 3 keys" });
+  await user.click(within(dialog).getByRole("checkbox", { name: "Enabled" })); // all on -> off
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 3 keys" }));
+  expect(await within(bar).findByText("2 keys changed; not changed: team-2 (No such key.)", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+  expect(within(bar).getByRole("button", { name: /^Undo/ })).toBeTruthy();
 });
 
 test("Delete… in the bulk menu is red and asks first, naming the count; Cancel deletes nothing", async () => {

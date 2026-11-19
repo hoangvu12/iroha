@@ -64,7 +64,8 @@ const order = () =>
   within(screen.getByRole("table", { name: "Members of fast" }))
     .getAllByRole("row")
     .slice(1)
-    .map((r) => within(r).getAllByRole("cell")[2].textContent);
+    // Cells: select box (UI ticket 30), order, handle, Provider.
+    .map((r) => within(r).getAllByRole("cell")[3].textContent);
 
 test("members sit in their order, numbered; the headers don't sort, since the order is what counts", async () => {
   await renderTab();
@@ -117,6 +118,21 @@ test("Remove… is red and asks, naming the member; confirming saves the Pool wi
   expect(saved()).toEqual([]);
   await user.click(screen.getByRole("button", { name: "Remove member" }));
   await waitFor(() => expect(saved()).toEqual([["acme", "kappa"]]));
+});
+
+test("Edit… switches the selected members off in one save, the others kept; the result and Undo show in the bar", async () => {
+  const user = userEvent.setup();
+  await renderTab();
+  await user.click(screen.getByRole("checkbox", { name: "Select acme (m-1)" }));
+  await user.click(screen.getByRole("checkbox", { name: "Select kappa (m-3)" }));
+  const bar = screen.getByRole("group", { name: "2 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 2 members" });
+  await user.click(within(dialog).getByRole("checkbox", { name: "On" }));
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 2 members" }));
+  await waitFor(() => expect(saved()).toEqual([["acme off", "zeta", "kappa off"]]));
+  expect(await within(bar).findByText("2 members switched off", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+  expect(within(bar).getByRole("button", { name: "Undo: 2 members switched off" })).toBeTruthy();
 });
 
 test("Test in Chat on a member opens the chat on its Provider and model", async () => {

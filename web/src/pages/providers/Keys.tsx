@@ -40,10 +40,11 @@ import { calls, errorText, maskSecret, natural, useKeys, useRefresh } from "./ap
 import { Reveal } from "@/ui/Reveal";
 import { appearClass, Checkbox, KeyStateLabel, Pill, ringRoom, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
 import { SAMPLE_KEYS } from "./samples";
+import { KeysBulkEdit } from "./BulkEdits";
 
 // The Keys tab (C01, C11, C20; phones C31): one line per Upstream Key in the
 // shared DataTable, sorted, filtered, searched and paged; selecting keys turns
-// the toolbar into "N selected" with Test, Disable and a ⋯ menu. Every bulk
+// the toolbar into "N selected" with Test, Disable, Edit… (UI ticket 30) and a ⋯ menu. Every bulk
 // action calls the bulk API and shows per-key results when any key failed. Its
 // result (with Undo, an Audit revert) shows where it was asked for: in the
 // selection bar, or in the key's dialog; from a row's menu, which has closed, it
@@ -121,7 +122,8 @@ export function KeysTab({
   const [restricting, setRestricting] = useState<string[]>();
   const [busy, setBusy] = useState<string>();
   // Results of what the selection bar did show in the bar.
-  const barSave = useSave({ describe: errorText });
+  // `refresh`: its Undo shows the keys as they were back at once.
+  const barSave = useSave({ refresh, describe: errorText });
   const emptySave = useSave({ describe: errorText });
   const copied = useCopy();
 
@@ -254,17 +256,14 @@ export function KeysTab({
         <Button icon={Pause} onClick={() => void bulk("disable", names, "disabled", barSave)} loading={busy === "disable"} size={phone ? "sm" : "md"}>
           Disable
         </Button>
+        {/* Enabled and Endpoints with mixed values shown (UI ticket 30); it replaces the bulk "Endpoints…", which started from the first key. */}
+        <KeysBulkEdit handle={handle} provider={provider} rows={rows} at={barSave} size={phone ? "sm" : "md"} />
         <Menu>
           <MenuIconTrigger icon={MoreHorizontal} label="More actions for the selected keys" bordered copy={copied.state} />
           <MenuContent align="start">
             <MenuItem icon={CircleCheck} onSelect={() => void bulk("enable", names, "enabled", barSave)}>
               Enable
             </MenuItem>
-            {multipleEndpoints && (
-              <MenuItem icon={Plug} onSelect={() => setRestricting(names)}>
-                Endpoints…
-              </MenuItem>
-            )}
             <MenuItem icon={Eraser} onSelect={() => void bulk("clear-model-gaps", names, "cleared of Model Gaps", barSave)}>
               Clear Model Gaps
             </MenuItem>

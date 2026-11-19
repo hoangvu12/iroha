@@ -409,6 +409,9 @@ export const calls = {
   addKeylessKey: (h: string, name: string) => api.post<KeyResult>(`${P(h)}/keys`, { name }),
   addKeys: (h: string, items: { secret: string }[], dryRun?: boolean) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }, { query: dry(dryRun) }),
   restrictKeys: (h: string, items: { name: string; endpoints: string[] }[]) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }),
+  /** Edits many keys (by name or ID) in one change and one Audit Entry; fields an item leaves out stay as that key has them (UI ticket 30). */
+  editKeys: (h: string, items: { key: string; enabled?: boolean; endpoints?: string[] }[]) =>
+    api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk/update`, { items }),
   updateKey: (h: string, key: string, body: Partial<Pick<UpstreamKey, "name" | "secret" | "enabled" | "endpoints">>) =>
     api.patch<KeyResult>(`${P(h)}/keys/${seg(key)}`, body),
   bulkKeys: (
@@ -427,7 +430,7 @@ export const calls = {
 
   saveModel: (h: string, body: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts }) => api.post<ModelResult>(`${P(h)}/models`, body),
   /** Many models' changes in one call and one Audit Entry; each item applies or fails on its own. */
-  saveModels: (h: string, items: { model: string; added?: boolean; hidden?: boolean }[]) => api.post<BulkResult<Model>>(`${P(h)}/models/bulk`, { items }),
+  saveModels: (h: string, items: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts }[]) => api.post<BulkResult<Model>>(`${P(h)}/models/bulk`, { items }),
   refreshModels: (h: string) => api.post<RefreshResult>(`${P(h)}/models/refresh`, {}, { timeoutMs: 120_000 }),
   resetModels: (h: string) => api.post<{ removed: string[]; kept: number }>(`${P(h)}/models/reset`),
 

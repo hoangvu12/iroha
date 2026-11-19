@@ -23,6 +23,7 @@ import type { Member, MemberInput, Pool } from "./api";
 import { calls, errorText, natural, successRate, useGatewayKeys, useModelIds, useOverview, useProviders, useRefresh } from "./api";
 import { ProviderTile, Select, Switch } from "./controls";
 import { SAMPLE_GATEWAY_KEYS_LITE, SAMPLE_OVERVIEW, SAMPLE_POOL } from "./samples";
+import { MembersBulkEdit } from "./BulkEdits";
 
 const inputs = (ms: Member[]): MemberInput[] => ms.map(({ provider, model, enabled }) => ({ provider, model, enabled }));
 
@@ -54,6 +55,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
   const confirm = useConfirm();
   const [order, setOrder] = useState<Member[]>([]);
   const [saving, saveMembers] = useSaveMembers(pool, setOrder);
+  const barSave = useSave({ refresh, describe: errorText });
 
   useEffect(() => setOrder(pool?.members ?? []), [pool]);
 
@@ -169,6 +171,13 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
             getRowId={(r) => r.key}
             rowName={memberName}
             rowActions={menu}
+            // On for several members at once, mixed shown (UI ticket 30).
+            bulk={({ rows }) => (
+              <>
+                <MembersBulkEdit pool={name} members={order} rows={rows} at={barSave} size={phone ? "sm" : "md"} />
+                <SaveStatus save={barSave} saving={false} className="ml-1" />
+              </>
+            )}
             phoneRow={(r) => <MemberLine r={r} />}
             phoneActions={(r) => <Switch checked={r.enabled} label={`${r.provider} on`} pending={saving.pending} onChange={(on) => flip(r.member, on)} />}
             // The order is the point: every member on one page, so a drag reaches any place.

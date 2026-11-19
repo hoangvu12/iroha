@@ -24,8 +24,10 @@ import (
 //
 // Candidates are tried in plan order. A failed Attempt is classified by the
 // Failure Rules; its outcome changes the key's Key State and says whether
-// to move on. A key that was refused (invalid, cooling, Model Gap) is not
-// tried again in this Request; a 5xx may be replayed once on the same key
+// to move on. A key that was refused (invalid, cooling) is not tried again
+// in this Request; a refusal of one key and model (model cooling, Model Gap)
+// keeps that key out for that wire model only, so it still serves the
+// Request on an Endpoint or Pool member sending another model; a 5xx may be replayed once on the same key
 // and Endpoint after every other candidate, once a pause has passed
 // (replayPause), but a timeout never is.
 
@@ -111,8 +113,9 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 	for _, c := range cands {
 		queue = append(queue, queued{c: c})
 	}
-	keyOut := map[string]bool{}  // key IDs refused for this Request
-	pairOut := map[string]bool{} // key ID + Endpoint ID that failed
+	keyOut := map[string]bool{}   // key IDs refused for this Request
+	modelOut := map[string]bool{} // key ID + wire model refused for this Request
+	pairOut := map[string]bool{}  // key ID + Endpoint ID that failed
 	replayed := map[string]bool{}
 	var failed []tried
 	stop := stopCandidates
@@ -121,7 +124,8 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 		q := queue[i]
 		c := q.c
 		pair := c.Key.ID + "\x00" + c.Endpoint.ID
-		if keyOut[c.Key.ID] || (pairOut[pair] && !q.replay) {
+		keyModel := c.Key.ID + "\x00" + c.WireModel
+		if keyOut[c.Key.ID] || modelOut[keyModel] || (pairOut[pair] && !q.replay) {
 			continue
 		}
 		if seq >= maxAttempts {
@@ -182,7 +186,12 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 				now := g.clock.Now()
 				queue = append(queue, queued{c: c, replay: true, notBefore: now.Add(replayPause(len(replayed), t.failure.Header, now))})
 			}
-		default: // invalid, cooling, Model Gap: this key is out for this Request
+		case rules.CoolingKeyModel, rules.ModelGap: // this key is out for this wire model
+			modelOut[keyModel] = true
+			if t.effect.Escalated { // the model cooling became the whole key's
+				keyOut[c.Key.ID] = true
+			}
+		default: // invalid, cooling: this key is out for this Request
 			keyOut[c.Key.ID] = true
 		}
 		if stop == stopRule {

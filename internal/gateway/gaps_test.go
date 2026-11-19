@@ -289,3 +289,33 @@ func TestModelGapsClearInBulkForSelectedKeys(t *testing.T) {
 		t.Fatalf("clear all = %+v", bulk)
 	}
 }
+
+// FAIL-66: a refusal scoped to one key and model (Model Gap, model
+// cooling) keeps the key serving other wire models in the same Request: on
+// an Endpoint that renames the Caller's model differently, or a Pool member
+// naming another model.
+func TestAPerModelRefusalLeavesTheKeyForOtherWireModelsInTheSameRequest(t *testing.T) {
+	srv := testkit.Start(t)
+	a, b := testkit.NewOpenAIChat(t), testkit.NewOpenAIChat(t)
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
+	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "a", "url": a.URL(), "shape": "openai-chat",
+		"renames": map[string]string{"m": "gpt-x", "n": "gpt-n1"}}).Expect(201)
+	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "b", "url": b.URL(), "shape": "openai-chat",
+		"renames": map[string]string{"m": "gpt-y", "n": "gpt-n2"}}).Expect(201)
+	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": "sk-test-a"}).Expect(201)
+	caller := srv.Client(issue(t, srv, "pi", all))
+	refuse(t, a, "sk-test-a gpt-x")
+
+	resp := caller.Post(chatPath, chat("m")).Expect(200)
+	r := readRequest(t, srv, resp.Header.Get("X-Request-Id"))
+	if len(r.Attempts) != 2 || r.Attempts[0].Outcome != "model_gap" || r.Attempts[1].Endpoint != "b" || r.Attempts[1].WireModel != "gpt-y" {
+		t.Fatalf("model gap: attempts = %+v", r.Attempts)
+	}
+
+	a.Enqueue(a.ErrorCode(429, "rate_limit_exceeded", "Slow down."))
+	resp = caller.Post(chatPath, chat("n")).Expect(200)
+	r = readRequest(t, srv, resp.Header.Get("X-Request-Id"))
+	if len(r.Attempts) != 2 || r.Attempts[0].Outcome != "cooling_key_model" || r.Attempts[1].WireModel != "gpt-n2" {
+		t.Fatalf("model cooling: attempts = %+v", r.Attempts)
+	}
+}

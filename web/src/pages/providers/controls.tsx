@@ -100,12 +100,17 @@ export function SettingsCard({ title, children, danger }: { title: string; child
   );
 }
 
+/**
+ * One setting across the page's wide frame: its title and hint on the left (the
+ * hint kept to a readable line), its control on the right in a column of at
+ * most 420 px, so a field never runs the frame wide. Stacked on phones.
+ */
 export function SettingsRow({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children?: ReactNode }) {
   return (
     <div className="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:gap-6 md:px-6">
       <div className="min-w-0 flex-1">
         <p className="text-[15px] font-medium">{title}</p>
-        {hint && <p className="mt-0.5 text-[14px] text-fg-muted">{hint}</p>}
+        {hint && <p className="mt-0.5 max-w-prose text-[14px] text-fg-muted">{hint}</p>}
       </div>
       {children && <div className="flex shrink-0 items-center gap-2 md:w-[min(420px,45%)] md:justify-end">{children}</div>}
     </div>

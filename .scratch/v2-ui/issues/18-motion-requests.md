@@ -72,3 +72,5 @@ Seeded Iroha (testkit seed outside the repo, plus a Request every 3 s while a fl
 | Panel and Attempt close instantly / collapse, cards swap at once | Kept | Close and selection are frequent while exploring; the canvas width changes at once anyway. Answered. |
 
 Verdict after the fixes: approve. Nothing animates on a keyboard action (↑/↓, j/k, canvas keys), hover colours only under `(hover: hover)` (Tailwind's `hover:`), everything moving holds still under reduced motion with fades kept.
+
+After `git merge v2-ui` (tickets 15, 16, 17 in): build and 304 web tests pass; the browser check run again on the merged build (`shots/18/merged/`) shows the same animations, none doubled by ticket 16's row motion (off in the live feed), and still nothing on ↑/↓.

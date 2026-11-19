@@ -23,7 +23,19 @@ There is no brand or status row; the Owner asked to remove it.
 
 - **Providers** show their brand logo in a round tile, as in v1's `ProviderIcon`, resolved through the backend from the Logo Domain.
 - **Model Pools** show the model family's logo in a rounded-square tile, so a Pool never looks like a Provider. For example glm-4.6 uses Zhipu and kimi-k2 uses Kimi.
+- Where the logo comes from (approved by the Owner):
+  - A Provider's logo comes from its Logo domain, which you can edit in Provider Settings.
+  - A Pool's maker is guessed from the model name, and you can edit it on the Pool.
+- If no logo is found, the tile shows the first letter of the name, still round for Providers and a rounded square for Pools. C25 and C30 show it with my-vllm and house-mix.
 - The mockups use LobeHub's icon set (`@lobehub/icons-static-png`) as stand-ins.
+
+## Test traffic
+
+A chat sent "as" a Gateway Key uses that key's access but is recorded with the Caller `Test (as <name>)`. It never counts as that key's traffic. The label shows up in three places:
+
+- The Caller column in Requests (C03, C04, C21, C32).
+- The Caller filter (C25, under "No results").
+- The chat's "Sending as" bar, with "Shows in Requests as Test (as zeron-fleet)" under it (C17, C33).
 
 ## Screens
 
@@ -44,9 +56,61 @@ There is no brand or status row; the Owner asked to remove it.
 | `C14-provider-settings.png` | Provider → Settings: rows in cards (General: Name, Logo, Enabled; Provider route; Danger zone) |
 | `C15-chat-from-provider-test.png` | The shared chat sheet, opened by Test on dashscope: tool call, collapsible Details per reply, streaming |
 | `C16-chat-model-picker.png` | The composer's model picker: model, then Provider, Upstream Key, Endpoint, Shape, Send as, Reasoning, tool-call check |
-| `C17-chat-as-gateway-key.png` | Chat opened from a Gateway Key: "Sending as zeron-fleet", only that key's models can be picked, message prefilled |
+| `C17-chat-as-gateway-key.png` | Chat opened from a Gateway Key: "Sending as zeron-fleet", shown in Requests as Test (as zeron-fleet), only that key's models can be picked |
 | `C18-request-route.png` | A Request's Route view: the path it took as a chain of cards on a canvas, with the selected Attempt's details on the right |
-| `C19-model-pool-route.png` | Model Pool glm-4.6, Route tab: where a Request would go right now, with the selected member's keys on the right |
+| `C19-model-pool-route.png` | Model Pool glm-4.6, Route tab: where a Request would go right now, with the selected member's keys on the right. Backed by a real API |
+| `C20-dark-provider-keys.png` | Dark: Provider → Keys, 3 selected |
+| `C21-dark-requests-detail.png` | Dark: Requests with the drawer open |
+| `C22-dark-request-route.png` | Dark: a Request's Route view |
+| `C23-dark-chat-panel.png` | Dark: the chat sheet over Provider → Keys |
+| `C24-dark-new-gateway-key.png` | Dark: New Gateway Key |
+| `C25-states.png` | States board: loading, empty, no results, error, confirm delete, confirm revoke, toasts with Undo, logo fallback |
+| `C26-request-captured.png` | Request drawer, Captured tab: Caller sent / Sent upstream / Response, each message in order, Copy as cURL, Replay in Chat |
+| `C27-chat-model-list.png` | The composer's full model list (from the picker's top row): search, All / Model Pools / Used recently, grouped by Pool and Provider, keyboard hints |
+| `C28-settings-admin-tokens.png` | Settings → Admin Tokens: name, token, created, last used, expires. Revoke from the ⋯ menu |
+| `C29-settings-audit-entries.png` | Settings → Audit Entries: grouped by day, who, what, target, Revert. One open to show before and after |
+| `C30-phone-providers.png` | Phone: Providers and Model Pools. The Iroha avatar top right opens Settings |
+| `C31-phone-provider-keys.png` | Phone: Provider → Keys, two lines per key |
+| `C32-phone-requests.png` | Phone: Requests, two lines per Request, failed rows tinted |
+| `C33-phone-chat.png` | Phone: chat sent as a Gateway Key |
+
+## Dark mode
+
+- The same screens and the same colour tokens, with a dark value for each, so nothing is drawn twice.
+- The page is near-black (#0E0E10), with the sidebar and canvas one step lighter.
+- Status colours are lighter versions of the light ones, and their tinted backgrounds are darker.
+- The primary button turns light, so it still stands out.
+- Logos use LobeHub's dark set, so black marks like z-ai and openrouter turn white.
+
+## States (C25)
+
+- **Loading:** grey bars in the shape of the rows, with no spinner.
+- **Empty:** one sentence and the one action that fills the page.
+- **No results:** the filters stay on screen as chips, with Clear filters underneath.
+- **Error:** says what failed, keeps the page around it, and offers Try again. The failed call is shown in small mono text.
+- **Confirm:** only for actions that can't be undone, or that remove something.
+  - Delete names exactly what will go.
+  - Revoke asks you to type the key's name.
+  - Red appears only on the button that does it.
+- **Toasts:** bottom right, for 6 s. Every change that can be put back gets Undo, including a Revert from Audit Entries. Disable, enable and clearing Model Gaps don't ask first; they rely on Undo.
+
+## Settings (C28, C29)
+
+These are kept as plain as the other pages: a title, two underline tabs and a table. There are no cards and no extra sections.
+
+- **Admin Tokens:**
+  - One line explains what a token can do, next to the New Admin Token button.
+  - A token not used for a month shows its Last used in amber.
+- **Audit Entries:**
+  - Each row has one fact per column: time, who (the Owner or an Admin Token), what changed, and on what.
+  - Opening a row shows before and after.
+  - Revert sits on the row. Changes that can't be undone, like a revoke, say "Can't be reverted" instead.
+
+## Phone (C30–C33)
+
+- The sidebar becomes a bottom tab bar: Providers, Gateway Keys, Requests and Chat. Settings sits behind the Iroha avatar at the top of Providers.
+- Tables become two-line rows: the main facts on the first line, the secondary ones under them. There are still no dot-chained facts.
+- On a phone, Chat is a full page and not a sheet. It has the same history button, model chip and "Sending as" bar.
 
 ## Route views
 
@@ -92,15 +156,10 @@ Research notes: only Cloudflare AI Gateway draws a real node graph (its routes a
 - One chat at a time, with no tabs. Each Test starts a new chat; earlier chats are in the history dropdown in the sheet header. The expand button turns the sheet into a full page.
 - Bulk Test on selected keys is a different thing: a quick check whose result shows on the rows, not a chat.
 
-## Still to do
+## How the images were made
 
-- Dark mode.
-- Phone layouts.
-- The states board: loading, empty, error, confirm and toasts.
-- The Captured view for a Request.
-- The model list that opens from the top row of the composer's picker.
-- Settings: Admin Tokens and Audit Entries.
+The design tool stopped drawing images partway through this work. It draws nothing at all for an image, not even its grey placeholder, and restarting Zeron isn't possible from the design side. So in C03, C04, C17 and C18–C33, the banner, logos and avatar were pasted onto the exports afterwards, at the same places and sizes. The layout is unaffected, since only the pictures inside the tiles were added.
 
-The design tool stopped loading images partway through, so in C04, C18 and C19 the banner and logos were pasted onto the exports afterwards, in the same places and sizes.
+The States board (C25) is exported at 1.5× instead of 2×, because at 2× it's too large for the exporter.
 
 The Login art is the 728×546 banner scaled up, so it looks soft at full size. A larger copy of the art would fix that.

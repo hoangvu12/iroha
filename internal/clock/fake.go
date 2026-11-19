@@ -95,6 +95,29 @@ func (f *Fake) BlockUntil(ctx context.Context, n int) error {
 	}
 }
 
+// BlockUntilDue waits until a timer or ticker is pending that fires at or
+// before t. Use it when code under test re-arms a timer after one fired,
+// before the next Advance: a count of waiters cannot tell a re-armed timer
+// from others coming and going.
+func (f *Fake) BlockUntilDue(ctx context.Context, t time.Time) error {
+	for {
+		f.mu.Lock()
+		for _, w := range f.waiters {
+			if !w.at.After(t) {
+				f.mu.Unlock()
+				return nil
+			}
+		}
+		ch := f.changed
+		f.mu.Unlock()
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 func (f *Fake) NewTimer(d time.Duration) Timer {
 	w := &fakeWaiter{clock: f, ch: make(chan time.Time, 1)}
 	f.mu.Lock()

@@ -91,6 +91,31 @@ func TestWithTimeoutUsesTheClock(t *testing.T) {
 	}
 }
 
+func TestBlockUntilDueWaitsForATimerAtOrBeforeTheTime(t *testing.T) {
+	c := clock.NewFake(t0)
+	c.NewTimer(time.Hour) // a later timer does not count
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := c.BlockUntilDue(ctx, t0.Add(time.Minute)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("with only a later timer: %v", err)
+	}
+	re := c.NewTimer(time.Second)
+	go func() {
+		<-re.C()
+		re.Reset(time.Minute) // the code under test re-arms after the fire
+	}()
+	c.Advance(time.Second)
+	if err := c.BlockUntilDue(context.Background(), t0.Add(time.Second+time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	c.Advance(time.Minute)
+	select {
+	case <-re.C():
+	default:
+		t.Fatal("the re-armed timer did not fire")
+	}
+}
+
 func TestSleepWakesOnAdvance(t *testing.T) {
 	c := clock.NewFake(t0)
 	done := make(chan error)

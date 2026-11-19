@@ -185,7 +185,10 @@ func deadlineContext(parent context.Context, c clock.Clock, deadline time.Time) 
 			t.Stop()
 		}
 	}()
-	disarm = func() { once.Do(func() { close(stop) }) }
+	// Stopping the timer here, not only in the goroutine, means that once
+	// disarm returns the deadline can no longer fire, however soon the
+	// clock moves on.
+	disarm = func() { once.Do(func() { t.Stop(); close(stop) }) }
 	return ctx, disarm, func() { disarm(); cancel(context.Canceled) }
 }
 

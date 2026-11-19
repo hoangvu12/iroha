@@ -1,6 +1,7 @@
 package gateway_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -345,9 +346,29 @@ func TestAThreeMinuteStreamWithLongPausesCompletes(t *testing.T) {
 	s := headers(t, openStream(t, caller))
 	s.expect(`"role":"assistant"`)
 	s.expect(`"one "`)
-	keepAlives := 0
+	// The keeper's timer is still the commit timer, due StreamCommitAfter
+	// after arrival; firing it only re-arms it for KeepAliveEvery after the
+	// last write. One Advance past both races the keeper (it may read the
+	// clock before or after the Advance ends and re-arm for a time already
+	// passed), so fire the commit timer alone and wait for the re-arm. From
+	// then on each keep-alive re-arms the timer before it is written, so
+	// once the Caller has it the next one is already set.
+	start := srv.Clock.Now()
+	srv.Clock.Advance(gateway.StreamCommitAfter)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Clock.BlockUntilDue(ctx, start.Add(gateway.KeepAliveEvery)); err != nil {
+		t.Fatalf("the keeper did not re-arm its timer: %v", err)
+	}
+	srv.Clock.Advance(gateway.KeepAliveEvery - gateway.StreamCommitAfter)
+	s.expect(": keep-alive")
+	keepAlives := 1
 	for i := 1; i < len(pieces); i++ {
-		for range time.Minute / gateway.KeepAliveEvery {
+		n := time.Minute / gateway.KeepAliveEvery
+		if i == 1 {
+			n-- // the gap's first keep-alive went out above
+		}
+		for range n {
 			srv.Clock.Advance(gateway.KeepAliveEvery)
 			s.expect(": keep-alive")
 			keepAlives++

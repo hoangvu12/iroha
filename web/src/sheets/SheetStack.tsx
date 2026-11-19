@@ -174,8 +174,8 @@ function SheetFrame({
         style={style}
         className={cn(
           "fixed inset-y-0 left-auto m-0 flex h-dvh max-h-none max-w-full flex-col border-l border-border bg-bg text-fg shadow-elevated outline-none",
-          "translate-x-[calc(var(--sheet-depth)*-100%)] transition-[translate] duration-200 ease-out motion-reduce:transition-none",
-          "data-starting-style:translate-x-full data-ending-style:translate-x-full",
+          "translate-x-[calc(var(--sheet-depth)*-100%)] transition-[translate] duration-sheet-in ease-drawer",
+          "data-starting-style:translate-x-(--motion-sheet-offset) data-ending-style:translate-x-(--motion-sheet-offset) data-ending-style:duration-sheet-out",
           away && "invisible",
         )}
       >

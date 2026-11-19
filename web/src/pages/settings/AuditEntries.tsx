@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { useMutation } from "@tanstack/react-query";
 import { ChevronDown, History, KeyRound, LockKeyhole, Monitor, RotateCcw, User } from "lucide-react";
 import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
@@ -14,7 +13,7 @@ import { LogoTile, PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { Menu, MenuContent, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { Chip, EmptyState, ErrorState, NoResults } from "@/ui/States";
 import { TableSkeleton } from "@/ui/Table";
-import { notify, notifyChange } from "@/ui/toast";
+import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { type EntryFilter, type ResourceOption, useAuditEntries, useAuditFilters, useInvalidateAll } from "./api";
 import { EntryChanges, RevertNote } from "./Changes";
 import { clockTime, dayLabel } from "./format";
@@ -336,14 +335,11 @@ function revertError(e: unknown): string {
   return e.hint ? `${e.message} ${e.hint}` : e.message;
 }
 
+/** Revert: the result (with Undo, which puts the change back) shows in its place, a failure under it. */
 function RevertControl({ entry }: { entry: AuditEntry }) {
   const invalidate = useInvalidateAll();
-  const revert = useMutation({
-    mutationFn: () => revertEntry(entry.id),
-    onSettled: invalidate,
-    onSuccess: (res) => notifyChange(`Change reverted: ${entry.summary}`, res, { onUndone: invalidate }),
-    onError: (e) => notify.error(`Couldn't revert. ${revertError(e)}`),
-  });
+  const reverting = useSave({ refresh: invalidate, describe: (e) => `Couldn't revert. ${revertError(e)}` });
+  if (reverting.done) return <SaveStatus save={reverting} className="whitespace-nowrap" />;
   if (entry.reverted_by) return <span className="whitespace-nowrap text-[14px] text-fg-muted">Reverted</span>;
   if (!entry.revertible)
     return (
@@ -360,13 +356,14 @@ function RevertControl({ entry }: { entry: AuditEntry }) {
         body={`${goes.length === 1 ? goes[0].name : goes.map((c) => c.name).join(", ")} ${goes.length === 1 ? "was" : "were"} made by this change and ${goes.length === 1 ? "goes" : "go"} with it. Undo brings ${goes.length === 1 ? "it" : "them"} back.`}
         confirmLabel="Revert and delete"
         onConfirm={async () => {
+          // A failure shows in the confirm dialog; once it closes, the result shows in this row like any revert.
           try {
             const res = await revertEntry(entry.id);
-            notifyChange(`Change reverted: ${entry.summary}`, res, { onUndone: invalidate });
+            await invalidate();
+            reverting.show({ message: "Reverted", entry: res.audit_entry, undone: true });
           } catch (e) {
+            void invalidate();
             throw new Error(revertError(e));
-          } finally {
-            invalidate();
           }
         }}
       >
@@ -376,8 +373,15 @@ function RevertControl({ entry }: { entry: AuditEntry }) {
       </ConfirmAction>
     );
   return (
-    <Button icon={RotateCcw} loading={revert.isPending} onClick={() => revert.mutate()}>
-      Revert
-    </Button>
+    <span className="flex flex-col items-end gap-1">
+      <Button
+        icon={RotateCcw}
+        loading={reverting.pending}
+        onClick={() => void reverting.run(() => revertEntry(entry.id), { message: () => ({ message: "Reverted", undone: true }) })}
+      >
+        Revert
+      </Button>
+      <SaveError save={reverting} className="text-right text-[12.5px] leading-snug" />
+    </span>
   );
 }

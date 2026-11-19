@@ -13,27 +13,29 @@ import { Field } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
-import { notify, notifyChange } from "@/ui/toast";
+import { type Save, SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
+import { notifyChange } from "@/ui/toast";
 import type { Member, MemberInput, Pool } from "./api";
 import { calls, errorText, natural, successRate, useGatewayKeys, useModelIds, useOverview, useProviders, useRefresh } from "./api";
 import { ProviderTile, Select, Switch } from "./controls";
 
 const inputs = (ms: Member[]): MemberInput[] => ms.map(({ provider, model, enabled }) => ({ provider, model, enabled }));
 
-/** Saves a Pool's members in a new order or state, with Undo. */
-function useSaveMembers(pool?: Pool) {
+/**
+ * Saves a Pool's members in a new order or state. The list stays where it
+ * was changed, so the result (with Undo) shows beside the Members heading;
+ * a failure there too, and the list goes back to what was saved.
+ */
+function useSaveMembers(pool: Pool | undefined, restore: (members: Member[]) => void): [Save, (members: Member[], what: string) => void] {
   const refresh = useRefresh();
-  return async (members: Member[], what: string) => {
+  const saving = useSave({ refresh, describe: errorText });
+  const save = (members: Member[], what: string) => {
     if (!pool) return;
-    try {
-      const res = await calls.updatePool(pool.name, { members: inputs(members) });
-      refresh();
-      notifyChange(what, res, { onUndone: refresh });
-    } catch (e) {
-      refresh();
-      notify.failure(`Couldn't change ${pool.name}`, e);
-    }
+    void saving.run(() => calls.updatePool(pool.name, { members: inputs(members) }), { message: what }).then((ok) => {
+      if (!ok) restore(pool.members);
+    });
   };
+  return [saving, save];
 }
 
 /** Members (C06): who serves the Pool, in order; drag or move to reorder, switch members on or off. */
@@ -41,11 +43,11 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
   const overview = useOverview();
   const gks = useGatewayKeys();
   const phone = useIsPhone();
-  const saveMembers = useSaveMembers(pool);
   const refresh = useRefresh();
   const navigate = useNavigate();
   const chat = useChatPanel();
   const [order, setOrder] = useState<Member[]>([]);
+  const [saving, saveMembers] = useSaveMembers(pool, setOrder);
   const [dragging, setDragging] = useState<number>();
   const [removing, setRemoving] = useState<Member>();
 
@@ -64,12 +66,12 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
     const [m] = next.splice(from, 1);
     next.splice(to, 0, m);
     setOrder(next);
-    void saveMembers(next, `${m.provider} moved to position ${to + 1}`);
+    saveMembers(next, `${m.provider} moved to position ${to + 1}`);
   };
   const flip = (i: number, on: boolean) => {
     const next = order.map((m, j) => (j === i ? { ...m, enabled: on } : m));
     setOrder(next);
-    void saveMembers(next, `${order[i].provider} switched ${on ? "on" : "off"} in ${name}`);
+    saveMembers(next, `${order[i].provider} switched ${on ? "on" : "off"}`);
   };
 
   const keysWith = (gks.data ?? []).filter((k) => !k.scope.all && k.scope.pools?.includes(name));
@@ -108,7 +110,11 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
         <Stat label="Failed" value={stats ? formatNumber(stats.failed) : "–"} />
       </div>
 
-      <h2 className="text-[17px] font-semibold">Members</h2>
+      <div className="flex min-h-7 flex-wrap items-center gap-x-4 gap-y-1">
+        <h2 className="text-[17px] font-semibold">Members</h2>
+        <SaveStatus save={saving} />
+        <SaveError save={saving} />
+      </div>
       <p className="mb-3 mt-1 text-[15px] text-fg-muted">
         Callers ask for {name}. Iroha tries the members top to bottom and moves on when one can't serve. {phone ? "" : "Drag to reorder."}
       </p>
@@ -136,7 +142,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
                 <span className="block truncate text-[16px] font-medium">{m.provider}</span>
                 <span className="block truncate font-mono text-[13px] text-fg-muted">{m.model}</span>
               </span>
-              <Switch checked={m.enabled} label={`${m.provider} on`} onChange={(on) => flip(i, on)} />
+              <Switch checked={m.enabled} label={`${m.provider} on`} pending={saving.pending} onChange={(on) => flip(i, on)} />
               {menu(m, i)}
             </li>
           ))}
@@ -187,7 +193,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
                   onDragEnd={() => {
                     setDragging(undefined);
                     const before = pool.members.map((x) => `${x.provider}/${x.model}`).join();
-                    if (order.map((x) => `${x.provider}/${x.model}`).join() !== before) void saveMembers(order, `Members of ${name} reordered`);
+                    if (order.map((x) => `${x.provider}/${x.model}`).join() !== before) saveMembers(order, "Members reordered");
                   }}
                   className={cn("group", dragging === i && "bg-subtle", !m.enabled && "text-fg-muted")}
                 >
@@ -206,7 +212,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
                   <TD align="right">{formatNumber(s?.requests ?? 0)}</TD>
                   <TD align="right">{r === undefined ? <span className="text-fg-subtle">–</span> : formatPercent(r)}</TD>
                   <TD className="pl-6">
-                    <Switch checked={m.enabled} label={`${m.provider} on`} onChange={(on) => flip(i, on)} />
+                    <Switch checked={m.enabled} label={`${m.provider} on`} pending={saving.pending} onChange={(on) => flip(i, on)} />
                   </TD>
                   <TD align="right">{menu(m, i)}</TD>
                 </TR>
@@ -239,6 +245,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
           const next = order.filter((m) => m !== removing);
           const res = await calls.updatePool(pool.name, { members: inputs(next) });
           refresh();
+          // Toast: the confirm dialog has closed and the row is gone; Undo after a removal.
           notifyChange(`${removing.provider} removed from ${name}`, res, { onUndone: refresh });
         }}
       />
@@ -286,6 +293,7 @@ export function AddMemberDialog({ pool, open, onOpenChange }: { pool: Pool; open
     try {
       const res = await calls.updatePool(pool.name, { members: [...inputs(pool.members), { provider, model: model.trim(), enabled: true }] });
       refresh();
+      // Toast: the Add member dialog closes on success.
       notifyChange(`${provider} added to ${pool.name}`, res, { onUndone: refresh });
       close(false);
     } catch (e) {

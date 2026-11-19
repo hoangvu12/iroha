@@ -1,15 +1,15 @@
 import type { ReactNode } from "react";
-import { ArrowUpRight, ChevronLeft, Copy, X } from "lucide-react";
+import { ArrowUpRight, ChevronLeft, X } from "lucide-react";
 import { Link } from "react-router";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { DialogClose, DialogTitle } from "@ui-sdk/react/dialog";
 import { isApiError } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
-import { buttonClass, IconButton, iconButtonClass } from "@/ui/Button";
+import { buttonClass, iconButtonClass } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { CopyButton } from "@/ui/CopyButton";
 import { ScrollArea } from "@/ui/ScrollArea";
 import { ErrorState } from "@/ui/States";
-import { notify } from "@/ui/toast";
 import { Tip } from "@/ui/Tooltip";
 
 // The parts every record sheet is made of: the bar (kind, Open page, Close),
@@ -139,28 +139,9 @@ export function SheetActions({ children, result }: { children: ReactNode; result
   );
 }
 
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Copies `text`; says so with a toast (ticket 04 turns this into "Copied" in place). */
+/** Copies `text` and says "Copied" in place (`CopyButton`, UI ticket 04). */
 export function CopyIconButton({ text, what }: { text: string; what: string }) {
-  return (
-    <IconButton
-      icon={Copy}
-      size="sm"
-      label={`Copy ${what}`}
-      onClick={async () => {
-        if (await copyText(text)) notify.copied(what);
-        else notify.error(`Couldn't copy the ${what}`);
-      }}
-    />
-  );
+  return <CopyButton icon value={text} what={what} label={`Copy ${what}`} />;
 }
 
 export const none = <span className="text-fg-subtle">–</span>;

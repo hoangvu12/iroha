@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { MoreHorizontal, Pencil, Plug, Trash2 } from "lucide-react";
 import { useIsPhone } from "@/lib/media";
-import { copyText } from "@/pages/settings/format";
 import { Button } from "@/ui/Button";
+import { useCopy } from "@/ui/CopyButton";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
@@ -40,23 +40,7 @@ export function EndpointsTab({
     return `${n} key${n === 1 ? "" : "s"}`;
   };
 
-  const menu = (e: Endpoint) => (
-    <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${e.name}`} size="sm" />
-      <MenuContent>
-        <MenuItem icon={Pencil} onSelect={() => setEditing(e)}>
-          Edit…
-        </MenuItem>
-        <MenuItem icon={Plug} onSelect={() => void copyText(e.url, "URL")}>
-          Copy URL
-        </MenuItem>
-        <MenuSeparator />
-        <MenuItem icon={Trash2} danger onSelect={() => setDeleting(e)}>
-          Delete…
-        </MenuItem>
-      </MenuContent>
-    </Menu>
-  );
+  const menu = (e: Endpoint) => <EndpointMenu e={e} onEdit={setEditing} onDelete={setDeleting} />;
 
   return (
     <section aria-label="Endpoints">
@@ -131,6 +115,7 @@ export function EndpointsTab({
           if (!deleting) return;
           const res = await calls.deleteEndpoint(handle, deleting.name);
           refresh();
+          // Toast: the confirm dialog has closed and the row is gone; Undo after a delete.
           notifyChange(`Endpoint ${deleting.name} deleted`, res, { onUndone: refresh });
         }}
       />
@@ -217,6 +202,7 @@ function EndpointDialog({
       const res = endpoint ? await calls.updateEndpoint(handle, endpoint.name, body) : await calls.createEndpoint(handle, body);
       refresh();
       const what = endpoint ? `Endpoint ${res.endpoint.name} saved` : `Endpoint ${res.endpoint.name} added`;
+      // Toast: the dialog closes on Save.
       notifyChange(res.keyless_key ? `${what}, with a keyless key` : what, res, { onUndone: refresh });
       onOpenChange(false);
     } catch (e) {
@@ -300,5 +286,27 @@ function EndpointDialog({
         {error && <p className="text-[13px] text-danger-text">{error}</p>}
       </form>
     </Dialog>
+  );
+}
+
+function EndpointMenu({ e, onEdit, onDelete }: { e: Endpoint; onEdit: (e: Endpoint) => void; onDelete: (e: Endpoint) => void }) {
+  // "Copy URL" closes the menu, so the trigger it closes back to shows the result.
+  const copied = useCopy();
+  return (
+    <Menu>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${e.name}`} size="sm" copy={copied.state} />
+      <MenuContent>
+        <MenuItem icon={Pencil} onSelect={() => onEdit(e)}>
+          Edit…
+        </MenuItem>
+        <MenuItem icon={Plug} onSelect={() => void copied.copy(e.url, "URL")}>
+          Copy URL
+        </MenuItem>
+        <MenuSeparator />
+        <MenuItem icon={Trash2} danger onSelect={() => onDelete(e)}>
+          Delete…
+        </MenuItem>
+      </MenuContent>
+    </Menu>
   );
 }

@@ -3,13 +3,13 @@ import { MessageCircle, Pause, Play } from "lucide-react";
 import { api, seg } from "@/api/client";
 import { useChatPanel } from "@/app/chat-panel";
 import { formatNumber, formatPercent } from "@/lib/format";
-import { calls, type KeyCounts, natural, qk, useKeys, useProvider, useRefresh } from "@/pages/providers/api";
+import { calls, errorText, type KeyCounts, natural, qk, useKeys, useProvider, useRefresh } from "@/pages/providers/api";
 import { KeyStateLabel } from "@/pages/providers/controls";
 import { shapeLabel } from "@/pages/providers/api";
 import { Status } from "@/ui/bits";
 import { Button } from "@/ui/Button";
 import { ProviderTile } from "@/ui/LogoTile";
-import { notify, notifyChange } from "@/ui/toast";
+import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { rec, RecordLink } from "../RecordLink";
 import {
   CopyIconButton,
@@ -43,6 +43,8 @@ export default function ProviderSheet({ record }: SheetBodyProps<"provider">) {
   const keys = useKeys(handle);
   const chat = useChatPanel();
   const refresh = useRefresh();
+  // The sheet stays open, so Disable/Enable says how it went beside its button (UI ticket 04).
+  const toggling = useSave({ refresh, describe: errorText });
   const page = `/providers/${seg(handle)}/keys`;
 
   if (!p.data)
@@ -69,15 +71,8 @@ export default function ProviderSheet({ record }: SheetBodyProps<"provider">) {
     <Status tone="gray">Disabled</Status>
   );
 
-  const toggle = async () => {
-    try {
-      const res = await calls.updateProvider(handle, { enabled: !pr.enabled });
-      refresh();
-      notifyChange(`${handle} ${pr.enabled ? "disabled" : "enabled"}`, res, { onUndone: refresh });
-    } catch (e) {
-      notify.failure(`Couldn't ${pr.enabled ? "disable" : "enable"} ${handle}`, e);
-    }
-  };
+  const toggle = () =>
+    void toggling.run(() => calls.updateProvider(handle, { enabled: !pr.enabled }), { message: `${handle} ${pr.enabled ? "disabled" : "enabled"}` });
 
   return (
     <>
@@ -95,10 +90,12 @@ export default function ProviderSheet({ record }: SheetBodyProps<"provider">) {
             Test {handle} in Chat
           </Button>
           {!pr.archived && (
-            <Button icon={pr.enabled ? Pause : Play} onClick={toggle}>
+            <Button icon={pr.enabled ? Pause : Play} loading={toggling.pending} onClick={toggle}>
               {pr.enabled ? `Disable ${handle}` : `Enable ${handle}`}
             </Button>
           )}
+          <SaveStatus save={toggling} saving={false} />
+          <SaveError save={toggling} className="basis-full" />
         </SheetActions>
         <SheetSection title="Facts">
           <Facts>

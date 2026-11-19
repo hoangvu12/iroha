@@ -9,7 +9,7 @@ import { KeyStateLabel } from "@/pages/providers/controls";
 import { Mono } from "@/ui/bits";
 import { Button } from "@/ui/Button";
 import { ProviderTile } from "@/ui/LogoTile";
-import { notify, notifyChange } from "@/ui/toast";
+import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { rec, RecordLink } from "../RecordLink";
 import { Fact, Facts, LinkList, LinkRow, SheetActions, SheetBar, SheetBody, SheetLoading, SheetProblem, SheetSection, SheetTitle } from "../Sheet";
 import type { SheetBodyProps } from "../SheetStack";
@@ -24,6 +24,8 @@ export default function KeySheet({ record }: SheetBodyProps<"key">) {
   const chat = useChatPanel();
   const refresh = useRefresh();
   const [result, setResult] = useState<string>();
+  // The sheet stays open, so Disable/Enable says how it went beside its button (UI ticket 04).
+  const toggling = useSave({ refresh: () => Promise.all([refresh(), q.refetch()]), describe: errorText });
   const page = `/providers/${seg(provider)}/keys?key=${seg(key)}`;
 
   if (!q.data)
@@ -59,15 +61,8 @@ export default function KeySheet({ record }: SheetBodyProps<"key">) {
     }
   };
 
-  const toggle = async () => {
-    try {
-      const res = await calls.updateKey(provider, k.name, { enabled: !k.enabled });
-      done();
-      notifyChange(`${k.name} ${k.enabled ? "disabled" : "enabled"}`, res, { onUndone: done });
-    } catch (e) {
-      notify.failure(`Couldn't ${k.enabled ? "disable" : "enable"} ${k.name}`, e);
-    }
-  };
+  const toggle = () =>
+    void toggling.run(() => calls.updateKey(provider, k.name, { enabled: !k.enabled }), { message: `${k.name} ${k.enabled ? "disabled" : "enabled"}` });
 
   return (
     <>
@@ -89,12 +84,14 @@ export default function KeySheet({ record }: SheetBodyProps<"key">) {
           <Button variant="primary" icon={Play} onClick={test}>
             Test {k.name}
           </Button>
-          <Button icon={k.enabled ? Pause : CircleSlash} onClick={toggle}>
+          <Button icon={k.enabled ? Pause : CircleSlash} loading={toggling.pending} onClick={toggle}>
             {k.enabled ? `Disable ${k.name}` : `Enable ${k.name}`}
           </Button>
           <Button icon={MessageCircle} onClick={() => chat.open({ kind: "upstream_key", provider, key: k.name })}>
             Chat with {k.name}
           </Button>
+          <SaveStatus save={toggling} saving={false} />
+          <SaveError save={toggling} className="basis-full" />
         </SheetActions>
         {(s.reason || s.rule || s.request_id) && (
           <SheetSection title="State">

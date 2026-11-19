@@ -10,7 +10,8 @@ import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, PasswordInput } from "@/ui/Input";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
-import { notify, notifyChange } from "@/ui/toast";
+import { describeError, SaveError, useSave } from "@/ui/SaveStatus";
+import { notifyChange } from "@/ui/toast";
 import { useChangePassword, useOwnerSessions, useRevokeOtherSessions, useRevokeOwnerSession } from "./api";
 import { shortDate } from "./format";
 
@@ -149,6 +150,7 @@ function Sessions() {
         confirmLabel="Sign them out"
         onConfirm={async () => {
           const res = await revokeOthers.mutateAsync(others.map((s) => s.id));
+          // Toast: the confirm dialog has closed.
           notifyChange(`${res.succeeded} browsers signed out`, res, { undoable: false });
         }}
       />
@@ -158,16 +160,16 @@ function Sessions() {
 
 function EndButton({ s, onEnd }: { s: OwnerSession; onEnd: (s: OwnerSession) => void }) {
   const signOut = useSignOut();
+  // Signing out works by leaving this page; a failure stays here, under the button.
+  const ending = useSave({ describe: (e) => `Couldn't sign out: ${describeError(e)}` });
   if (s.current)
     return (
-      <Button
-        size="sm"
-        icon={LogOut}
-        loading={signOut.isPending}
-        onClick={() => signOut.mutate(undefined, { onError: (e) => notify.failure("Couldn't sign out", e) })}
-      >
-        Sign out
-      </Button>
+      <span className="inline-flex flex-col items-end gap-1">
+        <Button size="sm" icon={LogOut} loading={ending.pending} onClick={() => void ending.run(() => signOut.mutateAsync(undefined), { quiet: true })}>
+          Sign out
+        </Button>
+        <SaveError save={ending} className="max-w-64 text-right text-[12.5px] leading-snug" />
+      </span>
     );
   return (
     <Button size="sm" danger="hover" aria-label={`Sign out ${browserName(s.user_agent)}`} onClick={() => onEnd(s)}>
@@ -189,6 +191,7 @@ function EndDialog({ session, onClose }: { session?: OwnerSession; onClose: () =
       onConfirm={async () => {
         if (!session) return;
         const res = await revoke.mutateAsync(session.id);
+        // Toast: the confirm dialog has closed.
         notifyChange(`${name} signed out`, res, { undoable: false });
       }}
     />
@@ -220,6 +223,7 @@ function PasswordDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
         onSuccess: (res) => {
           close(false);
           const others = res.changes.filter((c) => c.resource === "owner_session").length;
+          // Toast: the password dialog has closed.
           notifyChange(others ? `Password changed. ${others} other browsers signed out` : "Password changed", res, { undoable: false });
         },
         onError: (e) => {

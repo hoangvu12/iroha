@@ -5,9 +5,10 @@ import { useChatPanel } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { copyText, shortDate, shortSecret } from "@/pages/settings/format";
+import { shortDate, shortSecret } from "@/pages/settings/format";
 import { Button, IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { CopyButton, useCopy } from "@/ui/CopyButton";
 import { Mono } from "@/ui/bits";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
@@ -117,14 +118,16 @@ function Recent({ k }: { k: GatewayKey }) {
 function KeyMenu({ k, onRevoke, onDelete }: { k: GatewayKey } & Actions) {
   const navigate = useNavigate();
   const chat = useChatPanel();
+  // "Copy key" closes the menu, so the trigger it closes back to shows the result.
+  const copied = useCopy();
   return (
     <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" copy={copied.state} />
       <MenuContent>
         <MenuItem icon={Settings2} onSelect={() => navigate(`/gateway-keys/${encodeURIComponent(k.id)}`)}>
           Open settings
         </MenuItem>
-        <MenuItem icon={Copy} onSelect={() => void copyText(k.secret, "Gateway Key")}>
+        <MenuItem icon={Copy} onSelect={() => void copied.copy(k.secret, "Gateway Key")}>
           Copy key
         </MenuItem>
         <MenuItem icon={MessageCircle} onSelect={() => chat.open({ kind: "gateway_key", gatewayKey: k.name })}>
@@ -146,16 +149,7 @@ function SecretCell({ k }: { k: GatewayKey }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{shortSecret(k.secret)}</Mono>
-      <IconButton
-        icon={Copy}
-        label={`Copy ${k.name}'s key`}
-        size="sm"
-        className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-        onClick={(e) => {
-          e.stopPropagation();
-          void copyText(k.secret, "Gateway Key");
-        }}
-      />
+      <CopyButton icon value={k.secret} what="Gateway Key" label={`Copy ${k.name}'s key`} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />
     </span>
   );
 }

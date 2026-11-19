@@ -6,6 +6,7 @@ import { PageBody } from "@/app/PageBody";
 import { Button } from "@/ui/Button";
 import { TypeToConfirmDialog } from "@/ui/Dialog";
 import { Input } from "@/ui/Input";
+import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import type { Pool } from "./api";
 import { calls, errorText, useRefresh } from "./api";
@@ -20,8 +21,11 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
   const [maker, setMaker] = useState(pool.maker_guessed ? "" : pool.maker);
   const [attempts, setAttempts] = useState(pool.budget.max_attempts ? String(pool.budget.max_attempts) : "");
   const [firstByte, setFirstByte] = useState(pool.budget.first_byte_seconds ? String(pool.budget.first_byte_seconds) : "");
-  const [error, setError] = useState<{ field: string; text: string }>();
   const [deleting, setDeleting] = useState(false);
+  // Each setting shows its result where it was changed, a failure under its row.
+  const naming = useSave({ describe: errorText });
+  const makerSave = useSave({ refresh, describe: errorText });
+  const budgetSave = useSave({ refresh, describe: errorText });
 
   useEffect(() => {
     setName(pool.name);
@@ -30,19 +34,15 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
     setFirstByte(pool.budget.first_byte_seconds ? String(pool.budget.first_byte_seconds) : "");
   }, [pool]);
 
-  const save = async (field: string, body: Parameters<typeof calls.updatePool>[1], what: string) => {
-    setError(undefined);
-    try {
-      const res = await calls.updatePool(pool.name, body);
+  const update = (body: Parameters<typeof calls.updatePool>[1]) => () => calls.updatePool(pool.name, body);
+  const rename = (to: string) =>
+    naming.run(async () => {
+      const res = await calls.updatePool(pool.name, { name: to });
       refresh();
-      notifyChange(what, res, { onUndone: refresh });
-      if (body.name && body.name !== pool.name) navigate(`/providers/pools/${seg(body.name)}/settings`, { replace: true });
-    } catch (e) {
-      setError({ field, text: errorText(e) });
-    }
-  };
-
-  const err = (f: string) => error?.field === f && <p className="px-6 pb-3 text-[13px] text-danger-text">{error.text}</p>;
+      // Toast: the page moves to the Pool's new address and loads it again, so this field is gone.
+      notifyChange(`${pool.name} renamed to ${to}`, res, { onUndone: refresh });
+      navigate(`/providers/pools/${seg(to)}/settings`, { replace: true });
+    }, { quiet: true });
   const budgetChanged = attempts !== (pool.budget.max_attempts ? String(pool.budget.max_attempts) : "") || firstByte !== (pool.budget.first_byte_seconds ? String(pool.budget.first_byte_seconds) : "");
 
   return (
@@ -53,18 +53,18 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
             className="flex w-full gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              if (name.trim() && name.trim() !== pool.name) void save("name", { name: name.trim() }, `${pool.name} renamed to ${name.trim()}`);
+              if (name.trim() && name.trim() !== pool.name) void rename(name.trim());
             }}
           >
-            <Input aria-label="Name" mono value={name} onChange={(e) => setName(e.target.value)} />
+            <Input aria-label="Name" mono value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!naming.error} />
             {name.trim() !== pool.name && (
-              <Button type="submit" variant="primary">
+              <Button type="submit" variant="primary" loading={naming.pending}>
                 Save
               </Button>
             )}
           </form>
         </SettingsRow>
-        {err("name")}
+        <SaveError save={naming} className="px-6 pb-3" />
         <SettingsRow
           title="Logo"
           hint={
@@ -77,7 +77,7 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
             className="flex w-full items-start gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              void save("maker", { maker: maker.trim() }, maker.trim() ? `Logo set to ${maker.trim()}` : "Maker guessed again");
+              void makerSave.run(update({ maker: maker.trim() }), { message: maker.trim() ? `Logo set to ${maker.trim()}` : "Maker guessed again" });
             }}
           >
             <LogoInput
@@ -89,16 +89,18 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
               previewUrl={(v) => logoPreview({ maker: v })}
               onChange={setMaker}
               placeholder={pool.maker || "openai or chatgpt.com"}
-              invalid={error?.field === "maker"}
+              invalid={!!makerSave.error}
             />
-            {maker.trim() !== (pool.maker_guessed ? "" : pool.maker) && (
-              <Button type="submit" variant="primary">
+            {maker.trim() !== (pool.maker_guessed ? "" : pool.maker) ? (
+              <Button type="submit" variant="primary" loading={makerSave.pending}>
                 Save
               </Button>
+            ) : (
+              <SaveStatus save={makerSave} className="mt-2 shrink-0" />
             )}
           </form>
         </SettingsRow>
-        {err("maker")}
+        <SaveError save={makerSave} className="px-6 pb-3" />
       </SettingsCard>
 
       <SettingsCard title="Budget">
@@ -107,19 +109,21 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
             className="flex w-full items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              void save("budget", { budget: { max_attempts: Number(attempts) || 0, first_byte_seconds: Number(firstByte) || 0 } }, `Budget of ${pool.name} saved`);
+              void budgetSave.run(update({ budget: { max_attempts: Number(attempts) || 0, first_byte_seconds: Number(firstByte) || 0 } }), { message: "Budget saved" });
             }}
           >
             <Input aria-label="Attempts at most" inputMode="numeric" placeholder="Attempts" value={attempts} onChange={(e) => setAttempts(e.target.value)} />
             <Input aria-label="Seconds to the first byte" inputMode="numeric" placeholder="Seconds" value={firstByte} onChange={(e) => setFirstByte(e.target.value)} />
-            {budgetChanged && (
-              <Button type="submit" variant="primary">
+            {budgetChanged ? (
+              <Button type="submit" variant="primary" loading={budgetSave.pending}>
                 Save
               </Button>
+            ) : (
+              <SaveStatus save={budgetSave} className="shrink-0" />
             )}
           </form>
         </SettingsRow>
-        {err("budget")}
+        <SaveError save={budgetSave} className="px-6 pb-3" />
       </SettingsCard>
 
       <SettingsCard title="Danger zone" danger>
@@ -140,6 +144,7 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
         onConfirm={async () => {
           const res = await calls.deletePool(pool.name);
           refresh();
+          // Toast: the page navigates to the Providers list; Undo after a delete.
           notifyChange(`${pool.name} deleted`, res, { onUndone: refresh });
           navigate("/providers");
         }}

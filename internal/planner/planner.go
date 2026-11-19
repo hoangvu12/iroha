@@ -12,8 +12,9 @@
 // Caller's Shape, then those speaking a Shape the Gateway translates it to
 // (Request.Translate). Within a tier, Upstream Keys round-robin, each key
 // paired with every Endpoint of the tier it may use, in configured order;
-// then keys whose discovered list names the wire model (Key.Carries) move
-// ahead of the others, each group keeping that order.
+// then keys back from a cooling that ended (Key.Recovering) move behind the
+// others, and within each of those groups keys whose discovered list names
+// the wire model (Key.Carries) move ahead, each group keeping that order.
 //
 // Excluded: disabled and invalid keys, keys cooling at Request.Now, keys
 // with a live Model Gap for the wire model of that Endpoint (ticket 08), keys
@@ -310,18 +311,31 @@ func planTier(req Request, p *Provider, eps []*Endpoint, start int) ([]Candidate
 			skipped = addSkip(skipped, Skip{Provider: p, Key: k, Reason: SkipRestricted})
 		}
 	}
-	// Known carriers first, keeping the round-robin order within each group.
+	// Healthy keys before keys back from a cooling (FAIL-104), then known
+	// carriers first within each, keeping the round-robin order within each
+	// group. A cooling that ended with no success since (Key.Recovering: the
+	// key's own past cooling or one for this wire model) is likely still
+	// spent: after a 15 min billing cooling, dozens of such keys must not use
+	// up the budget while a key with no recent refusal waits. Both are
+	// orderings: every usable key stays in the plan.
 	slices.SortStableFunc(out, func(a, b Candidate) int {
-		ca, cb := a.Key.Carries[a.WireModel], b.Key.Carries[b.WireModel]
-		switch {
-		case ca && !cb:
-			return -1
-		case cb && !ca:
-			return 1
+		if c := cmpTrue(!a.Key.Recovering(a.WireModel), !b.Key.Recovering(b.WireModel)); c != 0 {
+			return c
 		}
-		return 0
+		return cmpTrue(a.Key.Carries[a.WireModel], b.Key.Carries[b.WireModel])
 	})
 	return out, skipped
+}
+
+// cmpTrue orders true before false.
+func cmpTrue(a, b bool) int {
+	switch {
+	case a && !b:
+		return -1
+	case b && !a:
+		return 1
+	}
+	return 0
 }
 
 // skip says why key k cannot serve wire model wm at now, or nil.

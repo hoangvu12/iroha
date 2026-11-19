@@ -160,6 +160,16 @@ test("a row click, or its chevron, shows the before and after under the row", as
   expect(rows()[2].textContent).toMatch(/enabled/i);
 });
 
+test("opened details fade in where they are (UI ticket 20): no shift, no height, a fade token", async () => {
+  const user = userEvent.setup();
+  renderTab(many(3));
+  await user.click(await screen.findByRole("button", { name: /^Show details of Upstream Key acme\/team-2 disabled/ }));
+  const details = rows()[2].querySelector("td > *")!;
+  const c = details.getAttribute("class")!.split(/\s+/);
+  for (const k of ["transition-opacity", "duration-fade", "ease-out", "starting:opacity-0"]) expect(c).toContain(k);
+  expect(c.filter((x) => /translate|transition-\[height|duration-\d/.test(x))).toEqual([]);
+});
+
 test("Revert in a row reverts it and shows the result, with Undo, in its place", async () => {
   const user = userEvent.setup();
   const fetch = renderTab(many(3));

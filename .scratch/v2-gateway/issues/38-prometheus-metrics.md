@@ -4,6 +4,10 @@
 
 **Blocked by:** none
 
-**Status:** needs-decision
+**Status:** closed (won't do)
 
 - [ ] If built: HTTP test reading the text format after a few Requests on both route kinds; no per-key or per-model labels beyond bounded sets
+
+## Comments
+
+- Closed by the Owner (2026-11-19): no Prometheus/Grafana in use; /api/requests/stats and the logs API cover monitoring.

@@ -4,6 +4,10 @@
 
 **Blocked by:** none
 
-**Status:** needs-decision
+**Status:** closed (won't do)
 
 - [ ] If built: a test per rule above through the HTTP seam; streams stay uncompressed and flushed per event
+
+## Comments
+
+- Closed by the Owner (2026-11-19): Cloudflare compresses at the edge.

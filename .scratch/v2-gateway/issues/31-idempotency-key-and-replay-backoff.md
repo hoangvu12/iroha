@@ -7,8 +7,12 @@
 
 **Blocked by:** none
 
-**Status:** needs-decision (confirm both are wanted; the pause spends first-byte budget)
+**Status:** ready-for-agent
 
 - [ ] `budget_test.go`: 500 then 200 on two Attempts carry the same minted key; a Caller value wins
 - [ ] Fake-clock test: one key, 503 then 200; the replay arrives only after the clock advances
 - [ ] Skill text (`20_gateway.md`) says what is sent
+
+## Comments
+
+- Owner decision (2026-11-19): build both parts.

@@ -4,7 +4,11 @@
 
 **Blocked by:** none
 
-**Status:** needs-decision (do Callers need it?)
+**Status:** closed (won't do)
 
 - [ ] `modelmeta` table cases for the aliases and precedence
 - [ ] `models` HTTP test: both lists carry the name; an Owner override wins
+
+## Comments
+
+- Closed by the Owner (2026-11-19): Callers see model IDs; no display names.

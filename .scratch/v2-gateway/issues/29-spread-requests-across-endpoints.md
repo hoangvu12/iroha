@@ -4,7 +4,11 @@
 
 **Blocked by:** none
 
-**Status:** needs-decision (preference order or pool)
+**Status:** closed (won't do)
 
 - [ ] Decision recorded in `docs/agents/architecture.md` ("The inference path", step 2)
 - [ ] If pool: planner table case and a gateway test showing two Endpoints each receive first Attempts; route preview shows the next Request's start
+
+## Comments
+
+- Closed by the Owner (2026-11-19): same-Shape Endpoints stay a preference order. Key failures (401, 429, Model Gap) already take the key off every Endpoint for the Request; only URL failures (5xx, network) move to the next Endpoint, so a second identical URL is a backup for outages. Keys that work on one Endpoint only are restricted to it (ticket 09; the v1 import does this).

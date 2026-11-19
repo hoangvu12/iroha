@@ -35,6 +35,7 @@ function reducedMotionRoot(s: CSSStyleSheet): Map<string, string> {
 const tokens: Record<string, string> = {
   "--duration-hover": "150ms",
   "--duration-press": "160ms",
+  "--duration-release": "100ms",
   "--duration-tooltip": "125ms",
   "--duration-popup-in": "180ms",
   "--duration-popup-out": "120ms",
@@ -71,10 +72,45 @@ describe("motion tokens", () => {
     expect(css).toMatch(/--ease-drawer:\s*cubic-bezier\(0\.32, 0\.72, 0, 1\)/);
   });
 
+  it("presses down slower than it lets go, for a pointer only, with hover colours on their own curve", () => {
+    // The `press` utility (ui/Button.tsx). Tailwind's @utility isn't plain CSS, so read the source.
+    const press = css.match(/@utility press \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(press, "@utility press").not.toBe("");
+    // Let go: the scale snaps back on --duration-release; colours on hover's duration and `ease`.
+    expect(press).toMatch(
+      /transition:\s*scale var\(--duration-release\) var\(--ease-out\),\s*background-color var\(--duration-hover\) ease,\s*color var\(--duration-hover\) ease;/,
+    );
+    // Held: down on --duration-press; never for a key press (focus-visible), a disabled or a pending button.
+    expect(press).toMatch(
+      /&:active:not\(:focus-visible\):not\(\[data-disabled\]\):not\(\[data-pending\]\)\s*\{[^}]*scale:\s*var\(--motion-scale-press\);[^}]*transition-duration:\s*var\(--duration-press\), var\(--duration-hover\), var\(--duration-hover\);/,
+    );
+  });
+
+  it("has a one-time rise-in that also plays on page load, built from the tokens", () => {
+    // @starting-style is skipped when an element is styled before the first
+    // frame (Chrome, a fast reload of the login page), so a page's first
+    // screen uses this keyframe entrance instead.
+    expect(css).toMatch(/--animate-rise-in:\s*rise-in var\(--duration-dialog-in\) var\(--ease-out\) backwards;/);
+    const rule = Array.from(sheet().cssRules).find((r): r is CSSKeyframesRule => r instanceof CSSKeyframesRule && r.name === "rise-in");
+    expect(rule, "@keyframes rise-in").toBeDefined();
+    const from = rule!.findRule("from") ?? rule!.findRule("0%");
+    expect(from?.style.getPropertyValue("opacity")).toBe("0");
+    expect(from?.style.getPropertyValue("translate")).toBe("0 var(--motion-shift)");
+  });
+
+  it("turns every transition off while the theme flips (app/theme.tsx)", () => {
+    const rule = Array.from(sheet().cssRules).find(
+      (r): r is CSSStyleRule => r instanceof CSSStyleRule && r.selectorText.includes(".theme-switching"),
+    );
+    expect(rule?.selectorText).toMatch(/\.theme-switching \*/);
+    expect(rule?.style.getPropertyValue("transition")).toBe("none");
+    expect(rule?.style.getPropertyPriority("transition")).toBe("important");
+  });
+
   it("holds movement still under reduced motion and keeps fades", () => {
     const reduce = reducedMotionRoot(sheet());
     // Nothing moves or changes size...
-    for (const name of ["--duration-press", "--duration-indicator", "--duration-collapse", "--duration-move", "--duration-sheet-in", "--duration-sheet-out"])
+    for (const name of ["--duration-press", "--duration-release", "--duration-indicator", "--duration-collapse", "--duration-move", "--duration-sheet-in", "--duration-sheet-out"])
       expect(reduce.get(name), name).toBe("0ms");
     for (const name of ["--motion-shift", "--motion-shift-sm"]) expect(reduce.get(name), name).toBe("0px");
     for (const name of ["--motion-sheet-offset", "--motion-toast-offset"]) expect(reduce.get(name), name).toBe("0%");

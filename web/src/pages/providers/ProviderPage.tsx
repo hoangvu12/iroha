@@ -10,8 +10,8 @@ import { Button, IconButton } from "@/ui/Button";
 import { RouteTabs } from "@/ui/Tabs";
 import { Skeleton } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
-import { notify } from "@/ui/toast";
-import { calls, useChange, useProvider } from "./api";
+import { SaveStatus, useSave } from "@/ui/SaveStatus";
+import { calls, errorText, useChange, useProvider } from "./api";
 import { Pill, ProviderTile } from "./controls";
 import { EndpointsTab } from "./Endpoints";
 import { KeysTab } from "./Keys";
@@ -38,15 +38,17 @@ export function ProviderPage() {
   const phone = useIsPhone();
   const [adding, setAdding] = useState(false);
   const refreshList = useChange(() => calls.refreshModels(handle));
+  // The outcome shows beside Refresh list, which stays on the page.
+  const refreshing = useSave();
 
   if (!tab) return <Navigate to={`/providers/${seg(handle)}/keys`} replace />;
   const p = provider.data;
 
   const refresh = () =>
-    refreshList.mutate(undefined, {
-      onSuccess: (r) => (r.outcome === "failed" ? notify.error(r.summary) : notify.success(r.summary)),
-      onError: (e) => notify.failure("Couldn't refresh the model list", e),
-    });
+    void refreshing.run(
+      () => refreshList.mutateAsync(undefined).catch((e) => ({ outcome: "failed" as const, summary: `Couldn't refresh the model list: ${errorText(e)}` })),
+      { message: (r) => ({ message: r.summary, tone: r.outcome === "failed" ? "bad" : "ok" }) },
+    );
 
   const label = primary[tab];
   const test = () => chat.open({ kind: "provider", provider: handle });
@@ -67,6 +69,7 @@ export function ProviderPage() {
             {label}
           </Button>
         ))}
+      {tab === "models" && <SaveStatus save={refreshing} saving={false} className="max-w-[min(360px,40vw)]" />}
       {tab === "models" &&
         (phone ? (
           <IconButton icon={RefreshCw} label="Refresh list" bordered onClick={refresh} disabled={refreshList.isPending} />

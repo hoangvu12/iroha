@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, test, vi } from "vitest";
+import { SheetStackProvider } from "@/sheets/stack";
 import type { RequestRecord } from "./api";
 import { RequestsFeed } from "./Feed";
 
@@ -44,7 +45,9 @@ test("changing a filter keeps the rows on screen until the new ones arrive, with
   const { container } = render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={["/requests?status=failed"]}>
-        <RequestsFeed />
+        <SheetStackProvider>
+          <RequestsFeed />
+        </SheetStackProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -66,7 +69,9 @@ test("the first load shows a skeleton of the feed, labelled for screen readers",
   render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={["/requests"]}>
-        <RequestsFeed />
+        <SheetStackProvider>
+          <RequestsFeed />
+        </SheetStackProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );

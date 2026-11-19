@@ -4,6 +4,7 @@ import { createAgent } from "@ui-sdk/react/agent";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { expect, test, vi } from "vitest";
+import { COPIED_MS, useCopy } from "./CopyButton";
 import { Menu, MenuCheckboxItem, MenuContent, MenuIconTrigger, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator, SubMenu } from "./Menu";
 
 const agent = createAgent();
@@ -108,6 +109,33 @@ test("radio items choose one value and close; checkbox items toggle and stay ope
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Failed" })));
   await user.keyboard("{Enter}");
   expect(screen.getByText("failed")).toBeTruthy();
+});
+
+test("a copy from a menu item shows on the trigger the menu closes back to, keeping its name", async () => {
+  const user = userEvent.setup();
+  function CopyMenu() {
+    const copied = useCopy();
+    return (
+      <Menu>
+        <MenuIconTrigger icon={MoreHorizontal} label="More for team-5" copy={copied.state} />
+        <MenuContent>
+          <MenuItem onSelect={() => void copied.copy("sk-team-5", "Key")}>Copy key</MenuItem>
+        </MenuContent>
+      </Menu>
+    );
+  }
+  render(<CopyMenu />);
+  const trigger = screen.getByRole("button", { name: "More for team-5" });
+  expect(trigger.hasAttribute("data-copy")).toBe(false);
+  await user.click(trigger);
+  await user.click(await screen.findByRole("menuitem", { name: "Copy key" }));
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(await navigator.clipboard.readText()).toBe("sk-team-5");
+  expect(document.activeElement).toBe(trigger);
+  await waitFor(() => expect(trigger.getAttribute("data-copy")).toBe("copied"));
+  expect(trigger.querySelector("svg.text-success")).not.toBeNull();
+  expect(screen.getByRole("button", { name: "More for team-5" })).toBe(trigger);
+  await waitFor(() => expect(trigger.hasAttribute("data-copy")).toBe(false), { timeout: COPIED_MS + 500 });
 });
 
 test("an agent finds each row's menu by its row name and runs an item", async () => {

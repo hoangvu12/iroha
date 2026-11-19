@@ -117,6 +117,7 @@
   /* Durations */
   --duration-hover: 150ms;       /* colour and background on hover, selection */
   --duration-press: 160ms;       /* :active scale on buttons */
+  --duration-release: 100ms;     /* ...and back when let go: the response snaps */
   --duration-tooltip: 125ms;     /* tooltip in (out is the same; instant after the first) */
   --duration-popup-in: 180ms;    /* menu, select, combobox, popover in */
   --duration-popup-out: 120ms;   /* ...and out: exits are faster than entrances */
@@ -170,6 +171,33 @@
   --transition-duration-list-out: var(--duration-list-out);
   --transition-duration-toast: var(--duration-toast);
   --transition-duration-fade: var(--duration-fade);
+
+  /* animate-rise-in: a page's first screen entering once (Login, Setup).
+     A keyframe, not @starting-style, because Chrome skips @starting-style
+     for elements styled before the first frame. Under reduced motion the
+     shift is 0, so it plays as a fade. `backwards`, not `both`: once done it
+     holds nothing, so the column doesn't keep a compositor layer. */
+  --animate-rise-in: rise-in var(--duration-dialog-in) var(--ease-out) backwards;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    translate: 0 var(--motion-shift);
+  }
+}
+
+/* press: every Button and icon button (ui/Button.tsx). Held, it scales down
+   on --duration-press; let go, it snaps back on --duration-release. Not for a
+   key (Space on a focused button is :active too, and a key never animates),
+   nor while disabled or pending. Hover colours keep their own duration and
+   `ease`. Under reduced motion press and release are 0 and the scale is 1. */
+@utility press {
+  transition: scale var(--duration-release) var(--ease-out), background-color var(--duration-hover) ease, color var(--duration-hover) ease;
+  &:active:not(:focus-visible):not([data-disabled]):not([data-pending]) {
+    scale: var(--motion-scale-press);
+    transition-duration: var(--duration-press), var(--duration-hover), var(--duration-hover);
+  }
 }
 
 @layer base {
@@ -201,11 +229,13 @@
     outline-offset: 2px;
   }
   /* Tailwind 4 dropped the pointer on buttons: every control that acts on a
-     press shows it, and none does while disabled. */
+     press shows it, and none does while disabled. On touch, a control never
+     double-tap-zooms, so a tap acts at once. */
   :is(button, a[href], summary, select, input:is([type="checkbox"], [type="radio"], [type="file"]),
     [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="menuitemradio"],
     [role="menuitemcheckbox"], [role="option"], [role="switch"], [role="checkbox"], [role="radio"]) {
     cursor: pointer;
+    touch-action: manipulation;
   }
   :is(button, a, summary, select, input, [role="button"], [role="link"], [role="tab"], [role="menuitem"],
     [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="switch"], [role="checkbox"],
@@ -312,6 +342,15 @@
   min-height: 0;
 }
 
+/* The theme flips in one step: app/theme.tsx sets this on <html> while .dark
+   changes, so hover-coloured parts don't fade behind the rest. Unlayered and
+   !important so no part's own transition survives it. */
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+}
+
 /*
  * Reduced motion: the one rule (architecture.md "UI motion system").
  * Holds still: anything that moves or changes size (slides, scales, presses,
@@ -324,6 +363,7 @@
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-press: 0ms;
+    --duration-release: 0ms;
     --duration-indicator: 0ms;
     --duration-collapse: 0ms;
     --duration-move: 0ms;

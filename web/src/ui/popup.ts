@@ -7,9 +7,10 @@ export const popupClass = cn(
   "data-starting-style:scale-96 data-starting-style:opacity-0 data-ending-style:scale-96 data-ending-style:opacity-0 motion-reduce:transition-none",
 );
 
-// Page shortcuts stand down while a dialog, menu or list popup is open.
+// Page shortcuts stand down while a dialog, menu or list popup is open
+// (record sheets, `data-sheet`, sit beside the page and don't count).
 const OPEN_POPUP = ["dialog", "alert-dialog", "menu", "select", "combobox"]
-  .map((p) => `[data-slot="${p}-content"][data-open]`)
+  .map((p) => `[data-slot="${p}-content"][data-open]:not([data-sheet])`)
   .join(", ");
 
 export function popupOpen(): boolean {

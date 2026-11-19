@@ -7,9 +7,9 @@ import { cn } from "@/ui/cn";
 import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { Tab, TabList, TabPanel, Tabs } from "@/ui/Tabs";
-import { notify } from "@/ui/toast";
+import { CopyButton } from "@/ui/CopyButton";
 import type { Capture, RequestRecord } from "./api";
-import { useCapture, useCaptureDays, useCopy } from "./api";
+import { useCapture, useCaptureDays } from "./api";
 import { CodeBlock, longShape } from "./bits";
 import { type Block, parseRequest, parseResponse } from "./messages";
 import { SAMPLE_CAPTURE } from "./samples";
@@ -23,7 +23,6 @@ type Side = "sent" | "response";
 export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () => void }) {
   const cap = useCapture(r.id, r.captured);
   const days = useCaptureDays();
-  const copy = useCopy();
   const [side, setSide] = useState<Side>("sent");
   const [raw, setRaw] = useState(false);
 
@@ -44,13 +43,12 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
 
   const curl = (c: Capture) => {
     const body = JSON.stringify(c.request.body);
-    const cmd = [
+    return [
       `curl ${window.location.origin}${r.route}`,
       `  -H "Authorization: Bearer $IROHA_KEY"`,
       `  -H "Content-Type: application/json"`,
       `  -d '${body.replace(/'/g, "'\\''")}'`,
     ].join(" \\\n");
-    void copy(cmd).then((ok) => (ok ? notify.copied("cURL command") : notify.error("The browser refused to copy.")));
   };
 
   return (
@@ -80,9 +78,9 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
       </TabPanel>
       <div className="mt-8 flex flex-wrap items-center gap-2">
         <p className="mr-auto text-[14px] text-fg-muted">{days.data ? `Bodies are kept for ${days.data} day${days.data === 1 ? "" : "s"}.` : ""}</p>
-        <Button icon={SquareTerminal} onClick={() => curl(c)}>
+        <CopyButton size="md" glyph={SquareTerminal} value={() => curl(c)} what="cURL command" label="Copy as cURL">
           Copy as cURL
-        </Button>
+        </CopyButton>
         <Button icon={MessageCircle} onClick={onReplay}>
           Replay in Chat
         </Button>

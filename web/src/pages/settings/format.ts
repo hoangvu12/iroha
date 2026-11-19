@@ -1,28 +1,3 @@
-import { notify } from "@/ui/toast";
-
-/** Copy text and toast "<what> copied" (C25). Falls back to a hidden textarea where the Clipboard API is missing (plain HTTP). */
-export async function copyText(text: string, what: string) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      ta.remove();
-      if (!ok) throw new Error("The browser refused to copy.");
-    }
-    notify.copied(what);
-  } catch (e) {
-    notify.failure(`Couldn't copy the ${what.toLowerCase()}`, e);
-  }
-}
-
 /** "iroha_admin_…a91e": the secret's prefix and last four characters. */
 export function shortSecret(secret: string): string {
   const cut = secret.lastIndexOf("_");

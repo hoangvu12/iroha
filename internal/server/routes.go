@@ -55,7 +55,7 @@ func (s *Server) routes() []api.Route {
 		s.gateway().PreviewRoutes(),
 		providers.OverviewRoutes(s.db),
 		s.gateway().TestRoutes(),
-		testchat.Routes(s.models(), gatewaykeys.New(s.db)),
+		testchat.Routes(s.models(), gatewaykeys.New(s.db), s.db),
 		logos.Routes(s.logos(), logos.Lookups{
 			ProviderDomain: func(ctx context.Context, ref string) (string, error) { return providers.LogoDomain(ctx, s.db, ref) },
 			PoolMaker:      func(ctx context.Context, ref string) (string, error) { return pools.MakerOf(ctx, s.db, ref) },

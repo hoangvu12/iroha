@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { Copy, KeyRound, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { Copy, KeyRound, MoreHorizontal, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import { timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button, IconButton } from "@/ui/Button";
+import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { CopyButton, useCopy } from "@/ui/CopyButton";
 import { Mono } from "@/ui/bits";
 import { Dialog, TypeToConfirmDialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
@@ -12,9 +14,10 @@ import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/u
 import { EmptyState, ErrorState } from "@/ui/States";
 import { Skeleton } from "@/ui/Skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
-import { notifyChange } from "@/ui/toast";
+import { SaveError, useSave } from "@/ui/SaveStatus";
+import { notify, notifyChange } from "@/ui/toast";
 import { type AdminToken, useAdminTokens, useCreateAdminToken, useInvalidateAll, useRevokeAdminToken } from "./api";
-import { copyText, lastUsed, shortDate, shortSecret } from "./format";
+import { lastUsed, shortDate, shortSecret } from "./format";
 import { SAMPLE_ADMIN_TOKENS } from "./samples";
 
 /** Settings → Admin Tokens (C28). */
@@ -79,11 +82,13 @@ function LastUsed({ t }: { t: AdminToken }) {
 }
 
 function TokenMenu({ t, onRevoke }: { t: AdminToken; onRevoke: (t: AdminToken) => void }) {
+  // "Copy token" closes the menu, so the trigger it closes back to shows the result.
+  const copied = useCopy();
   return (
     <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${t.name}`} size="sm" />
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${t.name}`} size="sm" copy={copied.state} />
       <MenuContent>
-        <MenuItem icon={Copy} onSelect={() => void copyText(t.secret, "Admin Token")}>
+        <MenuItem icon={Copy} onSelect={() => void copied.copy(t.secret, "Admin Token")}>
           Copy token
         </MenuItem>
         <MenuSeparator />
@@ -99,13 +104,7 @@ function SecretCell({ t }: { t: AdminToken }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{shortSecret(t.secret)}</Mono>
-      <IconButton
-        icon={Copy}
-        label={`Copy ${t.name}`}
-        size="sm"
-        className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-        onClick={() => void copyText(t.secret, "Admin Token")}
-      />
+      <CopyButton icon value={t.secret} what="Admin Token" label={`Copy ${t.name}`} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />
     </span>
   );
 }
@@ -173,7 +172,8 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string>();
-  const [made, setMade] = useState<AdminToken>();
+  const [made, setMade] = useState<{ token: AdminToken; entry?: string }>();
+  const undo = useSave({ refresh: invalidate });
 
   const close = (o: boolean) => {
     onOpenChange(o);
@@ -182,6 +182,7 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
       setNote("");
       setError(undefined);
       setMade(undefined);
+      undo.clear();
       create.reset();
     }
   };
@@ -194,38 +195,47 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
     create.mutate(
       { name: n, note: note.trim() || undefined },
       {
-        onSuccess: (res) => {
-          setMade(res.admin_token);
-          notifyChange(`Admin Token ${res.admin_token.name} created`, res, {
-            undoneMessage: `${res.admin_token.name} deleted`,
-            onUndone: invalidate,
-          });
-        },
+        // The dialog stays open on the new token, which says it was created; Undo is in its footer.
+        onSuccess: (res) => setMade({ token: res.admin_token, entry: res.audit_entry }),
         onError: (e) => setError(isApiError(e) ? `${e.message} ${e.hint}`.trim() : String(e)),
       },
     );
   };
 
   if (made) {
+    const { token, entry } = made;
+    // Undo deletes the token again and closes the dialog; with the dialog gone, a toast says so.
+    const undoCreate = async () => {
+      if (entry && (await undo.run(() => revertEntry(entry)))) {
+        close(false);
+        notify.success(`Admin Token ${token.name} deleted`);
+      }
+    };
     return (
       <Dialog
         open={open}
         onOpenChange={close}
         title="Admin Token created"
-        description={`Give it to ${made.name}. It works on every admin route, sent as a Bearer token.`}
+        description={`Give it to ${token.name}. It works on every admin route, sent as a Bearer token.`}
         footer={
-          <Button variant="primary" onClick={() => close(false)}>
-            Done
-          </Button>
+          <>
+            {entry && (
+              <Button variant="ghost" icon={RotateCcw} className="mr-auto" aria-label={`Undo: delete ${token.name}`} loading={undo.pending} onClick={() => void undoCreate()}>
+                Undo
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => close(false)}>
+              Done
+            </Button>
+          </>
         }
       >
         <div className="flex items-center gap-2 rounded-lg border border-border bg-subtle p-1.5 pl-3">
-          <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{made.secret}</Mono>
-          <Button size="sm" icon={Copy} onClick={() => void copyText(made.secret, "Admin Token")}>
-            Copy
-          </Button>
+          <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{token.secret}</Mono>
+          <CopyButton value={token.secret} what="Admin Token" />
         </div>
         <p className="mt-3 text-[13px] text-fg-muted">You can copy it again later from its row.</p>
+        <SaveError save={undo} className="mt-3" />
       </Dialog>
     );
   }
@@ -276,6 +286,7 @@ function RevokeDialog({ token, onClose }: { token?: AdminToken; onClose: () => v
       onConfirm={async () => {
         if (!token) return;
         const res = await revoke.mutateAsync(token.id);
+        // Toast: the confirm dialog has closed.
         notifyChange(`${token.name} revoked`, res, { undoable: false });
       }}
     />

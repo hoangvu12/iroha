@@ -1,9 +1,14 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { Ellipsis, KeyRound, Plus, Trash2 } from "lucide-react";
+import { Ellipsis, KeyRound, Plus, Trash2, X } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
 import { ApiError } from "@/api/client";
-import { Button } from "@/ui/Button";
+import { Button, IconButton } from "@/ui/Button";
+import { ConfirmAction } from "@/ui/Confirm";
+import { CopyButton } from "@/ui/CopyButton";
+import { Input } from "@/ui/Input";
+import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
+import { Switch } from "@/ui/Switch";
 import { ConfirmDialog, TypeToConfirmDialog } from "@/ui/Dialog";
 import { LogoTile } from "@/ui/LogoTile";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
@@ -77,10 +82,26 @@ export default function StatesPage() {
         <Panel title="Error" note="Says what failed and keeps the page around it.">
           <ErrorState title="Couldn't load Requests" error={timeout} onRetry={() => {}} />
         </Panel>
-        <Panel title="Confirm" note="Delete names what goes; revoke asks for the name. Red only on the button that does it.">
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setDel(true)}>Delete 3 keys…</Button>
-            <Button onClick={() => setRev(true)}>Revoke zeron-fleet…</Button>
+        <Panel title="Confirm" note="Destructive triggers are red and ask, naming what goes; revoke asks for the name. Solid red only on the button that does it.">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button danger onClick={() => setDel(true)}>
+              Delete 3 keys…
+            </Button>
+            <Button danger onClick={() => setRev(true)}>
+              Revoke zeron-fleet…
+            </Button>
+            <ConfirmAction
+              title="Remove gpt-4o from fast?"
+              body="Requests for fast stop going to gpt-4o. Undo puts it back in its place."
+              confirmLabel="Remove model"
+              onConfirm={() => new Promise((r) => setTimeout(r, 400))}
+            >
+              <IconButton icon={Trash2} label="Remove gpt-4o" danger />
+            </ConfirmAction>
+            <span className="inline-flex h-7 items-center gap-1 rounded-md bg-muted pl-2 pr-1 font-mono text-[12.5px]">
+              qwen3-max
+              <IconButton icon={X} size="xs" danger label="Remove qwen3-max (draft, doesn't ask)" />
+            </span>
           </div>
           <ConfirmDialog
             open={del}
@@ -100,7 +121,10 @@ export default function StatesPage() {
             onConfirm={() => new Promise((r) => setTimeout(r, 400))}
           />
         </Panel>
-        <Panel title="Toasts" note="Bottom right for 6 s. Every change that can be put back has Undo.">
+        <Panel title="Results in place" note="Copy says Copied on the button; a setting shows Saving, then its result beside it, a failure under it.">
+          <ResultsDemo />
+        </Panel>
+        <Panel title="Toasts" note="Only when the place that caused a result is gone. Bottom right for 6 s; a change that can be put back has Undo.">
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => notify.success("3 keys disabled", { label: "Undo", onClick: () => notify.success("Change reverted") })}>
               Change with Undo
@@ -108,7 +132,7 @@ export default function StatesPage() {
             <Button onClick={() => notify.error("Couldn't test team-5: 401 Invalid key", { label: "Open", onClick: () => {} })}>
               Failure
             </Button>
-            <Button onClick={() => notify.copied("Base URL")}>Copied</Button>
+
           </div>
         </Panel>
         <Panel title="Logo fallback" note="Round tiles for Providers, rounded squares for Pools.">
@@ -133,7 +157,7 @@ export default function StatesPage() {
             </Button>
             <Button>Test</Button>
             <Button variant="ghost">Clear selection</Button>
-            <Button variant="danger">Delete</Button>
+            <Button danger>Delete…</Button>
           </div>
           <KeyTable rows={KEY_ROWS} />
         </Panel>
@@ -185,5 +209,40 @@ function KeyTable({ rows }: { rows: string[][] }) {
         ))}
       </TBody>
     </Table>
+  );
+}
+
+/** CopyButton and an inline save, with a fake call that fails when the name is "taken". */
+function ResultsDemo() {
+  const [name, setName] = useState("team-5");
+  const [on, setOn] = useState(true);
+  const naming = useSave();
+  const switching = useSave();
+  const wait = <T,>(v: T, fail?: string) => new Promise<T>((ok, no) => setTimeout(() => (fail ? no(new Error(fail)) : ok(v)), 600));
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <CopyButton value="http://localhost/v1" what="Base URL" />
+        <CopyButton icon value="req_01HX" what="Request ID" bordered />
+      </div>
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void naming.run(() => wait({ audit_entry: undefined }, name === "taken" ? "taken is already used. Pick another name." : undefined), { message: `Renamed to ${name}` });
+        }}
+      >
+        <Input aria-label="Demo name" className="w-48" value={name} onChange={(e) => setName(e.target.value)} />
+        <Button type="submit" loading={naming.pending}>
+          Save
+        </Button>
+        <SaveStatus save={naming} />
+        <SaveError save={naming} className="basis-full" />
+      </form>
+      <div className="flex items-center gap-3">
+        <Switch label="Demo setting" checked={on} pending={switching.pending} onChange={(v) => void switching.run(() => wait(v).then(setOn), { message: v ? "Switched on" : "Switched off" })} />
+        <SaveStatus save={switching} saving={false} />
+      </div>
+    </div>
   );
 }

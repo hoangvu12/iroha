@@ -83,6 +83,27 @@ test("loading makes the button busy and unpressable; disabled is unpressable", a
   expect(onClick).not.toHaveBeenCalled();
 });
 
+test("buttons, icon buttons and button-styled links press down with the motion tokens, unless disabled or pending", () => {
+  // jsdom can't apply :active, so this pins the `press` utility (styles/index.css,
+  // pinned in motion.test.ts); the browser check sees it move.
+  render(
+    <>
+      <Button>Save</Button>
+      <IconButton icon={Trash2} label="Delete key" />
+    </>,
+  );
+  for (const cls of [
+    screen.getByRole("button", { name: "Save" }).className,
+    screen.getByRole("button", { name: "Delete key" }).className,
+    buttonClass("primary"),
+  ]) {
+    const classes = cls.split(" ");
+    expect(classes).toContain("press");
+    const others = classes.filter((c) => /^(transition|duration-|ease-)/.test(c));
+    expect(others, "press owns the transition").toEqual([]);
+  }
+});
+
 test("IconButton is named by its label", async () => {
   const user = userEvent.setup();
   const onClick = vi.fn();

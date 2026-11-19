@@ -393,14 +393,16 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
           const ep = await calls.createEndpoint(h, keyless ? { url: u, shape, auth_style: "none" } : { url: u, shape });
           added = ep.keyless_key?.name;
         } catch (e) {
-          notifyChange(`Provider ${h} added, without its Endpoint`, res, { onUndone: refresh });
-          setError({ url: errorText(e) });
+          // Toast: the Provider exists now, so the dialog closes and the page moves to its Endpoints;
+          // the refused Endpoint's reason goes with it (the dialog that could show it is gone).
+          notifyChange(`Provider ${h} added without its Endpoint: ${errorText(e)}`, res, { onUndone: refresh });
           refresh();
           navigate(`/providers/${seg(h)}/endpoints`);
           close(false);
           return;
         }
       }
+      // Toast: the dialog closes and the page moves to the new Provider.
       notifyChange(added ? `Provider ${h} added, with a keyless key` : `Provider ${h} added`, res, { undoneMessage: `${h} removed`, onUndone: refresh });
       refresh();
       close(false);
@@ -508,6 +510,7 @@ function NewPoolDialog({
       if (await api.get<Pool>(`/api/pools/${seg(n)}`).then(() => true, (e) => (isApiError(e) && e.status === 404 ? false : Promise.reject(e))))
         return setError(`A Model Pool is already named ${n}. Pick another name.`);
       const res = await calls.createPool({ name: n });
+      // Toast: the dialog closes and the page moves to the new Pool.
       notifyChange(`Model Pool ${n} created`, res, { undoneMessage: `${n} deleted`, onUndone: refresh });
       refresh();
       close(false);

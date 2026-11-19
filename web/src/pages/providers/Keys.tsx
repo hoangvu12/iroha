@@ -24,10 +24,11 @@ import { seg } from "@/api/client";
 import type { BulkResult } from "@/api/types";
 import { formatDate, formatDuration, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { copyText } from "@/pages/settings/format";
 import { Button, IconButton } from "@/ui/Button";
 import { Mono, StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
+import { CopyButton, useCopy } from "@/ui/CopyButton";
+import { type Done, type Save, SaveError, SaveStatus, toastDone, useSave } from "@/ui/SaveStatus";
 import { ScrollArea } from "@/ui/ScrollArea";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
@@ -44,8 +45,10 @@ import { SAMPLE_KEYS } from "./samples";
 // The Keys tab (C01, C11, C20; phones C31): one line per Upstream Key,
 // sorted, filtered and searched; selecting keys turns the toolbar into
 // "N selected" with Test, Disable and a ⋯ menu. Every bulk action calls the
-// bulk API, shows per-key results when any key failed, and toasts Undo
-// (Audit revert). ?q= searches; ?key=<name> opens a key.
+// bulk API and shows per-key results when any key failed. Its result (with
+// Undo, an Audit revert) shows where it was asked for: in the selection bar,
+// or in the key's dialog; from a row's menu, which has closed, it toasts.
+// ?q= searches; ?key=<name> opens a key.
 
 type StateFilter = "all" | "active" | "cooling" | "invalid" | "disabled" | "gaps";
 type Sort = "name" | "state" | "used";
@@ -92,6 +95,10 @@ export function KeysTab({
   const [restricting, setRestricting] = useState<string[]>();
   const [busy, setBusy] = useState<string>();
   const lastClicked = useRef<number>(-1);
+  // Results of what the selection bar did show in the bar.
+  const barSave = useSave({ describe: errorText });
+  const emptySave = useSave({ describe: errorText });
+  const copied = useCopy();
 
   const all = useMemo(() => keys.data ?? [], [keys.data]);
   const byName = useMemo(() => new Map(all.map((k) => [k.name, k])), [all]);
@@ -142,65 +149,89 @@ export function KeysTab({
     setSelecting(false);
   };
 
-  // Runs a bulk action; toasts Undo, and shows per-key results when any failed.
-  const bulk = async (
+  // Runs a change and shows its result at `at` (the bar, the key's dialog);
+  // without one it came from a row's menu, which has closed, so it toasts.
+  const perform = async (failure: string, fn: () => Promise<Done | undefined>, busyWith: string, at?: Save) => {
+    setBusy(busyWith);
+    try {
+      if (at) await at.run(fn, { message: (d) => d ?? { message: "Nothing changed" } });
+      else {
+        try {
+          const d = await fn();
+          // Toast: the row's menu has closed.
+          if (d) toastDone(d, refresh);
+        } catch (e) {
+          // Toast: an error with nowhere else to go (the row's menu has closed).
+          notify.failure(failure, e);
+        }
+      }
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const bulk = (
     action: "enable" | "disable" | "delete" | "clear-model-gaps" | "clear-endpoint-gaps" | "restrict-to-working-endpoints",
     items: string[],
     past: string,
-  ) => {
-    setBusy(action);
-    try {
-      const res = await calls.bulkKeys(handle, action, items);
-      refresh();
-      reportBulk(res, items, past, setResults, refresh);
-      if (action === "delete" && res.failed === 0) clearSelection();
-    } catch (e) {
-      notify.failure(`Couldn't ${action.replace(/-/g, " ")} the keys`, e);
-    } finally {
-      setBusy(undefined);
-    }
-  };
+    at?: Save,
+  ) =>
+    perform(
+      `Couldn't ${action.replace(/-/g, " ")} the keys`,
+      async () => {
+        const res = await calls.bulkKeys(handle, action, items);
+        await refresh();
+        if (action === "delete" && res.failed === 0) clearSelection();
+        return bulkDone(res, items, past, setResults);
+      },
+      action,
+      at,
+    );
 
-  const test = async (items: string[]) => {
-    setBusy("test");
-    try {
-      const res = await calls.testKeys(handle, items);
-      refresh();
-      if (items.length === 1 && res.items[0]?.result) {
-        const r = res.items[0].result;
-        if (r.passed) notify.success(`${items[0]} passed: ${r.status} in ${formatDuration(r.duration_ms)}`);
-        else notify.error(`${items[0]} failed: ${testFailure(r)}`, { label: "Details", onClick: () => setResults(testResults(res, items)) });
-      } else setResults(testResults(res, items));
-    } catch (e) {
-      notify.failure("Couldn't test the keys", e);
-    } finally {
-      setBusy(undefined);
-    }
-  };
+  const test = (items: string[], at?: Save) =>
+    perform(
+      "Couldn't test the keys",
+      async (): Promise<Done> => {
+        const res = await calls.testKeys(handle, items);
+        await refresh();
+        if (items.length === 1 && res.items[0]?.result) {
+          const r = res.items[0].result;
+          if (r.passed) return { message: `${items[0]} passed: ${r.status} in ${formatDuration(r.duration_ms)}` };
+          return { message: `${items[0]} failed: ${testFailure(r)}`, tone: "bad", action: { label: "Details", onClick: () => setResults(testResults(res, items)) } };
+        }
+        setResults(testResults(res, items));
+        return { message: `${res.passed} passed, ${res.failed} failed`, tone: res.failed ? "bad" : "ok" };
+      },
+      "test",
+      at,
+    );
 
-  // A keyless key: no secret, so Iroha sends no credential with it.
-  const addKeyless = async () => {
+  // A keyless key: no secret, so Iroha sends no credential with it. A failure
+  // shows at `at` (the empty state or the Add keys dialog), which stays.
+  const addKeyless = (at: Save) => {
     setBusy("keyless");
-    try {
-      const res = await calls.addKeylessKey(handle, keylessName(all));
-      refresh();
-      setAdding(false);
-      notifyChange(res.upstream_key.name === "keyless" ? "Keyless key added" : `Keyless key ${res.upstream_key.name} added`, res, { onUndone: refresh });
-    } catch (e) {
-      notify.failure("Couldn't add a keyless key", e);
-    } finally {
-      setBusy(undefined);
-    }
+    void at
+      .run(
+        async () => {
+          const res = await calls.addKeylessKey(handle, keylessName(all));
+          refresh();
+          setAdding(false);
+          // Toast: the empty state (or the Add keys dialog) it came from is gone now.
+          notifyChange(res.upstream_key.name === "keyless" ? "Keyless key added" : `Keyless key ${res.upstream_key.name} added`, res, { onUndone: refresh });
+        },
+        { quiet: true },
+      )
+      .finally(() => setBusy(undefined));
   };
 
   const keyActions: KeyActions = {
     open: (k) => setParam("key", k.name),
-    test: (k) => void test([k.name]),
+    test: (k, at) => void test([k.name], at),
     chat: (k) => chat.open({ kind: "upstream_key", provider: handle, key: k.name }),
-    toggle: (k) => void bulk(k.enabled ? "disable" : "enable", [k.name], k.enabled ? "disabled" : "enabled"),
-    clearGaps: (k) => void bulk("clear-model-gaps", [k.name], "cleared of Model Gaps"),
-    clearEndpointGaps: (k) => void bulk("clear-endpoint-gaps", [k.name], "cleared of Endpoint Gaps"),
-    restrictToWorking: (k) => void bulk("restrict-to-working-endpoints", [k.name], "restricted to the Endpoints it works on"),
+    toggle: (k, at) => void bulk(k.enabled ? "disable" : "enable", [k.name], k.enabled ? "disabled" : "enabled", at),
+    clearGaps: (k, at) => void bulk("clear-model-gaps", [k.name], "cleared of Model Gaps", at),
+    clearEndpointGaps: (k, at) => void bulk("clear-endpoint-gaps", [k.name], "cleared of Endpoint Gaps", at),
+    restrictToWorking: (k, at) => void bulk("restrict-to-working-endpoints", [k.name], "restricted to the Endpoints it works on", at),
     endpoints: (k) => setRestricting([k.name]),
     remove: (k) => setDeleting([k.name]),
   };
@@ -216,16 +247,16 @@ export function KeysTab({
     selected.size > 0 ? (
       <div className="flex min-h-9 flex-wrap items-center gap-2">
         <span className="mr-2 text-[15px] font-medium tabular">{selected.size} selected</span>
-        <Button icon={Play} onClick={() => void test(names)} loading={busy === "test"} size={phone ? "sm" : "md"}>
+        <Button icon={Play} onClick={() => void test(names, barSave)} loading={busy === "test"} size={phone ? "sm" : "md"}>
           Test
         </Button>
-        <Button icon={Pause} onClick={() => void bulk("disable", names, "disabled")} loading={busy === "disable"} size={phone ? "sm" : "md"}>
+        <Button icon={Pause} onClick={() => void bulk("disable", names, "disabled", barSave)} loading={busy === "disable"} size={phone ? "sm" : "md"}>
           Disable
         </Button>
         <Menu>
-          <MenuIconTrigger icon={MoreHorizontal} label="More actions for the selected keys" bordered />
+          <MenuIconTrigger icon={MoreHorizontal} label="More actions for the selected keys" bordered copy={copied.state} />
           <MenuContent align="start">
-            <MenuItem icon={CircleCheck} onSelect={() => void bulk("enable", names, "enabled")}>
+            <MenuItem icon={CircleCheck} onSelect={() => void bulk("enable", names, "enabled", barSave)}>
               Enable
             </MenuItem>
             {multipleEndpoints && (
@@ -233,7 +264,7 @@ export function KeysTab({
                 Endpoints…
               </MenuItem>
             )}
-            <MenuItem icon={Eraser} onSelect={() => void bulk("clear-model-gaps", names, "cleared of Model Gaps")}>
+            <MenuItem icon={Eraser} onSelect={() => void bulk("clear-model-gaps", names, "cleared of Model Gaps", barSave)}>
               Clear Model Gaps
             </MenuItem>
             {names.some((n) => (byName.get(n)?.endpoint_gaps.length ?? 0) > 0) && (
@@ -245,19 +276,20 @@ export function KeysTab({
                       "restrict-to-working-endpoints",
                       names.filter((n) => (byName.get(n)?.endpoint_gaps.length ?? 0) > 0),
                       "restricted to the Endpoints they work on",
+                      barSave,
                     )
                   }
                 >
                   Restrict to working Endpoints
                 </MenuItem>
-                <MenuItem icon={Eraser} onSelect={() => void bulk("clear-endpoint-gaps", names, "cleared of Endpoint Gaps")}>
+                <MenuItem icon={Eraser} onSelect={() => void bulk("clear-endpoint-gaps", names, "cleared of Endpoint Gaps", barSave)}>
                   Clear Endpoint Gaps
                 </MenuItem>
               </>
             )}
             <MenuItem
               icon={Copy}
-              onSelect={() => void copyText(names.map((n) => byName.get(n)?.secret ?? "").filter(Boolean).join("\n"), `${names.length} key${names.length === 1 ? "" : "s"}`)}
+              onSelect={() => void copied.copy(names.map((n) => byName.get(n)?.secret ?? "").filter(Boolean).join("\n"), `${names.length} key${names.length === 1 ? "" : "s"}`)}
             >
               Copy keys
             </MenuItem>
@@ -267,6 +299,8 @@ export function KeysTab({
             </MenuItem>
           </MenuContent>
         </Menu>
+        <SaveStatus save={barSave} saving={false} className="ml-1" />
+        <SaveError save={barSave} />
         <div className="flex-1" />
         <button type="button" className="text-[14px] text-fg-muted hover:text-fg" onClick={clearSelection}>
           Clear selection
@@ -327,9 +361,10 @@ export function KeysTab({
             <Button variant="primary" onClick={() => setAdding(true)}>
               Add keys
             </Button>
-            <Button onClick={() => void addKeyless()} loading={busy === "keyless"}>
+            <Button onClick={() => addKeyless(emptySave)} loading={busy === "keyless"}>
               Add keyless key
             </Button>
+            <SaveError save={emptySave} className="basis-full text-center" />
           </span>
         }
       />
@@ -438,7 +473,7 @@ export function KeysTab({
         open={adding}
         onOpenChange={setAdding}
         onResults={setResults}
-        onKeyless={() => void addKeyless()}
+        onKeyless={addKeyless}
         keylessPending={busy === "keyless"}
       />
       <KeyDialog
@@ -465,6 +500,7 @@ export function KeysTab({
           if (!deleting) return;
           const res = await calls.bulkKeys(handle, "delete", deleting);
           refresh();
+          // Toast: the confirm dialog has closed and the rows are gone; Undo after a delete.
           reportBulk(res, deleting, "deleted", setResults, refresh);
           if (deleting.includes(openKey ?? "")) setParam("key");
           setSelected((s) => new Set([...s].filter((n) => !deleting.includes(n))));
@@ -547,15 +583,7 @@ function SecretCell({ k }: { k: UpstreamKey }) {
   return (
     <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
       <Mono className="text-fg-muted">{maskSecret(k.secret)}</Mono>
-      {k.secret && (
-        <IconButton
-          icon={Copy}
-          label={`Copy ${k.name}`}
-          size="sm"
-          className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-          onClick={() => void copyText(k.secret, "Key")}
-        />
-      )}
+      {k.secret && <CopyButton icon value={k.secret} what="Key" label={`Copy ${k.name}`} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />}
     </span>
   );
 }
@@ -578,22 +606,25 @@ function GapsPill({ k }: { k: UpstreamKey }) {
   );
 }
 
+/** What a key's row menu and dialog can do; `at` is where the result shows (none: a toast, from a closed menu). */
 type KeyActions = {
   open: (k: UpstreamKey) => void;
-  test: (k: UpstreamKey) => void;
+  test: (k: UpstreamKey, at?: Save) => void;
   chat: (k: UpstreamKey) => void;
-  toggle: (k: UpstreamKey) => void;
-  clearGaps: (k: UpstreamKey) => void;
-  clearEndpointGaps: (k: UpstreamKey) => void;
-  restrictToWorking: (k: UpstreamKey) => void;
+  toggle: (k: UpstreamKey, at?: Save) => void;
+  clearGaps: (k: UpstreamKey, at?: Save) => void;
+  clearEndpointGaps: (k: UpstreamKey, at?: Save) => void;
+  restrictToWorking: (k: UpstreamKey, at?: Save) => void;
   endpoints: (k: UpstreamKey) => void;
   remove: (k: UpstreamKey) => void;
 };
 
 function KeyMenu({ k, actions, multipleEndpoints }: { k: UpstreamKey; actions: KeyActions; multipleEndpoints: boolean }) {
+  // "Copy key" closes the menu, so the trigger it closes back to shows the result.
+  const copied = useCopy();
   return (
     <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" copy={copied.state} />
       <MenuContent>
         <MenuItem icon={Play} onSelect={() => actions.test(k)}>
           Test
@@ -602,7 +633,7 @@ function KeyMenu({ k, actions, multipleEndpoints }: { k: UpstreamKey; actions: K
           Test in Chat
         </MenuItem>
         {k.secret && (
-          <MenuItem icon={Copy} onSelect={() => void copyText(k.secret, "Key")}>
+          <MenuItem icon={Copy} onSelect={() => void copied.copy(k.secret, "Key")}>
             Copy key
           </MenuItem>
         )}
@@ -683,14 +714,14 @@ function KeyList({
 type ResultRow = { name: string; ok: boolean; text: ReactNode; tone?: "green" | "red" | "gray" };
 type Results = { title: string; summary: string; rows: ResultRow[] };
 
-function reportBulk(res: BulkResult<UpstreamKey>, items: string[], past: string, show: (r: Results) => void, refresh: () => void) {
+/** A bulk change's result (with its Audit Entry for Undo); shows per-key results when any key failed. */
+function bulkDone(res: BulkResult<UpstreamKey>, items: string[], past: string, show: (r: Results) => void): Done | undefined {
   const n = res.succeeded;
   const what = `${n} key${n === 1 ? "" : "s"}`;
-  if (n > 0) notifyChange(items.length === 1 && res.failed === 0 ? `${items[0]} ${past}` : `${what} ${past}`, res, { onUndone: refresh });
   if (res.failed > 0)
     show({
       title: `${res.failed} of ${items.length} key${items.length === 1 ? "" : "s"} not ${past}`,
-      summary: n > 0 ? `${what} ${past}. Undo from the toast puts them back.` : "Nothing changed.",
+      summary: n > 0 ? `${what} ${past}. Undo puts them back.` : "Nothing changed.",
       rows: res.items.map((it) => ({
         name: items[it.index] ?? `#${it.index + 1}`,
         ok: it.ok,
@@ -698,6 +729,14 @@ function reportBulk(res: BulkResult<UpstreamKey>, items: string[], past: string,
         tone: it.ok ? "green" : "red",
       })),
     });
+  if (n === 0) return undefined;
+  return { message: items.length === 1 && res.failed === 0 ? `${items[0]} ${past}` : `${what} ${past}`, entry: res.audit_entry };
+}
+
+/** A bulk change whose place is gone (a dialog that closed): its toast. */
+function reportBulk(res: BulkResult<UpstreamKey>, items: string[], past: string, show: (r: Results) => void, refresh: () => void) {
+  const d = bulkDone(res, items, past, show);
+  if (d) toastDone(d, refresh);
 }
 
 function testFailure(r: KeyTestResult): string {
@@ -794,10 +833,11 @@ function AddKeysDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onResults: (r: Results) => void;
-  onKeyless: () => void;
+  onKeyless: (at: Save) => void;
   keylessPending: boolean;
 }) {
   const refresh = useRefresh();
+  const keylessSave = useSave({ describe: errorText });
   const [text, setText] = useState("");
   const [testAfter, setTestAfter] = useState(true);
   const [preview, setPreview] = useState<{ secrets: string[]; res?: BulkResult<UpstreamKey>; error?: string }>();
@@ -831,6 +871,7 @@ function AddKeysDialog({
       setText("");
       setPreview(undefined);
       setError(undefined);
+      keylessSave.clear();
     }
   };
 
@@ -854,11 +895,13 @@ function AddKeysDialog({
       );
       refresh();
       const added = res.items.filter((it) => it.ok && it.outcome === "created").map((it) => it.result?.name ?? "");
+      // Toast: the dialog closes once the keys are in.
       notifyChange(`${added.length} key${added.length === 1 ? "" : "s"} added`, res, { onUndone: refresh });
       close(false);
       if (testAfter && added.length) {
         const t = await calls.testKeys(handle, added);
         refresh();
+        // Toast: a background test finishing after the dialog closed.
         if (t.failed === 0) notify.success(`All ${added.length} new key${added.length === 1 ? "" : "s"} passed the test`);
         else onResults(testResults(t, added));
       }
@@ -932,13 +975,14 @@ function AddKeysDialog({
       {secrets.length === 0 && (
         <p className="mt-4 text-[14px] text-fg-muted">
           No key needed?{" "}
-          <button type="button" className="text-info hover:underline disabled:opacity-60" disabled={keylessPending} onClick={onKeyless}>
+          <button type="button" className="text-info hover:underline disabled:opacity-60" disabled={keylessPending} onClick={() => onKeyless(keylessSave)}>
             Add a keyless key
           </button>{" "}
           instead: Iroha then sends no credential.
         </p>
       )}
       {error && <p className="mt-3 text-[13px] text-danger-text">{error}</p>}
+      <SaveError save={keylessSave} className="mt-3" />
     </Dialog>
   );
 }
@@ -963,10 +1007,12 @@ function EndpointsDialog({
   const refresh = useRefresh();
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string>();
   const eps = provider?.endpoints ?? [];
 
   useEffect(() => {
     if (!names) return;
+    setError(undefined);
     // Start from what the first key allows.
     const first = keys.get(names[0]);
     setChosen(new Set(first?.endpoints ?? []));
@@ -976,6 +1022,7 @@ function EndpointsDialog({
   const save = async () => {
     if (!names) return;
     setPending(true);
+    setError(undefined);
     try {
       const list = eps.filter((e) => chosen.has(e.name)).map((e) => e.name);
       const res = await calls.restrictKeys(
@@ -983,10 +1030,12 @@ function EndpointsDialog({
         names.map((name) => ({ name, endpoints: list.length === eps.length ? [] : list })),
       );
       refresh();
+      // Toast: the dialog closes on Save.
       reportBulk(res, names, list.length && list.length < eps.length ? `limited to ${list.join(", ")}` : "allowed on every Endpoint", onResults, refresh);
       onClose();
     } catch (e) {
-      notify.failure("Couldn't change the Endpoints", e);
+      // The dialog stays open, so the failure shows in it.
+      setError(errorText(e));
     } finally {
       setPending(false);
     }
@@ -1030,6 +1079,11 @@ function EndpointsDialog({
           </li>
         ))}
       </ul>
+      {error && (
+        <p role="alert" className="mt-3 text-[13px] text-danger-text">
+          {error}
+        </p>
+      )}
     </Dialog>
   );
 }
@@ -1059,13 +1113,18 @@ function KeyDialog({
   const [shown, setShown] = useState(false);
   const [name, setName] = useState("");
   const [secret, setSecret] = useState<string>();
-  const [error, setError] = useState<string>();
-  const [pending, setPending] = useState(false);
+  // The dialog stays open, so results show in it: a rename beside the Name
+  // field, a new secret under the key, everything else in the footer.
+  const nameSave = useSave({ refresh, describe: errorText });
+  const secretSave = useSave({ refresh, describe: errorText });
+  const actionSave = useSave({ describe: errorText });
 
   useEffect(() => {
     setName(k?.name ?? "");
     setSecret(undefined);
-    setError(undefined);
+    nameSave.clear();
+    secretSave.clear();
+    actionSave.clear();
     setShown(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [k?.id]);
@@ -1076,41 +1135,44 @@ function KeyDialog({
     );
   if (!k) return null;
 
-  const save = async (body: { name?: string; secret?: string }, what: string) => {
-    setPending(true);
-    setError(undefined);
-    try {
-      const res = await calls.updateKey(handle, k.name, body);
-      refresh();
-      notifyChange(what, res, { onUndone: refresh });
-      setSecret(undefined);
-      if (body.name && body.name !== k.name) onRenamed(body.name);
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setPending(false);
-    }
-  };
+  const rename = (to: string) =>
+    void nameSave.run(
+      async () => {
+        const res = await calls.updateKey(handle, k.name, { name: to });
+        onRenamed(to);
+        return res;
+      },
+      { message: `Renamed to ${to}` },
+    );
+  const replace = (to: string) =>
+    void secretSave.run(
+      async () => {
+        const res = await calls.updateKey(handle, k.name, { secret: to });
+        setSecret(undefined);
+        return res;
+      },
+      { message: "Key replaced" },
+    );
 
-  const clearGap = async (model?: string) => {
-    try {
-      const res = await calls.clearKeyGaps(handle, k.name, model);
-      refresh();
-      notifyChange(model ? `Model Gap for ${model} cleared on ${k.name}` : `Model Gaps cleared on ${k.name}`, res, { onUndone: refresh });
-    } catch (e) {
-      notify.failure("Couldn't clear the Model Gap", e);
-    }
-  };
+  const clearGap = (model?: string) =>
+    void actionSave.run(
+      async () => {
+        const res = await calls.clearKeyGaps(handle, k.name, model);
+        await refresh();
+        return res;
+      },
+      { message: model ? `Model Gap for ${model} cleared` : "Model Gaps cleared" },
+    );
 
-  const clearEndpointGap = async (endpoint?: string) => {
-    try {
-      const res = await calls.clearEndpointGaps(handle, k.name, endpoint);
-      refresh();
-      notifyChange(endpoint ? `Endpoint Gap on ${endpoint} cleared on ${k.name}` : `Endpoint Gaps cleared on ${k.name}`, res, { onUndone: refresh });
-    } catch (e) {
-      notify.failure("Couldn't clear the Endpoint Gap", e);
-    }
-  };
+  const clearEndpointGap = (endpoint?: string) =>
+    void actionSave.run(
+      async () => {
+        const res = await calls.clearEndpointGaps(handle, k.name, endpoint);
+        await refresh();
+        return res;
+      },
+      { message: endpoint ? `Endpoint Gap on ${endpoint} cleared` : "Endpoint Gaps cleared" },
+    );
 
   const eps = provider?.endpoints ?? [];
   const s = k.state;
@@ -1143,7 +1205,7 @@ function KeyDialog({
           <div className="flex items-center gap-1 rounded-lg border border-border bg-subtle py-1 pl-3 pr-1">
             <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{k.secret ? (shown ? k.secret : maskSecret(k.secret)) : "Keyless: no credential is sent"}</Mono>
             {k.secret && <IconButton icon={shown ? EyeOff : Eye} label={shown ? "Hide the key" : "Show the key"} size="sm" onClick={() => setShown((x) => !x)} />}
-            {k.secret && <IconButton icon={Copy} label="Copy the key" size="sm" onClick={() => void copyText(k.secret, "Key")} />}
+            {k.secret && <CopyButton icon value={k.secret} what="Key" label="Copy the key" />}
             <Button size="sm" variant="ghost" onClick={() => setSecret(secret === undefined ? "" : undefined)}>
               {secret !== undefined ? "Cancel" : k.secret ? "Replace" : "Add a secret"}
             </Button>
@@ -1153,31 +1215,35 @@ function KeyDialog({
               className="mt-2 flex gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                void save({ secret: secret.trim() }, `${k.name}: key replaced`);
+                replace(secret.trim());
               }}
             >
-              <Input mono autoFocus placeholder="The new key" value={secret} onChange={(e) => setSecret(e.target.value)} aria-label="New key" />
-              <Button type="submit" variant="primary" loading={pending} disabled={!secret.trim()}>
+              <Input mono autoFocus placeholder="The new key" value={secret} onChange={(e) => setSecret(e.target.value)} aria-label="New key" aria-invalid={!!secretSave.error} />
+              <Button type="submit" variant="primary" loading={secretSave.pending} disabled={!secret.trim()}>
                 Save
               </Button>
             </form>
           )}
+          <SaveStatus save={secretSave} saving={false} className="mt-2" />
+          <SaveError save={secretSave} className="mt-2" />
         </section>
 
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (name.trim() && name.trim() !== k.name) void save({ name: name.trim() }, `${k.name} renamed to ${name.trim()}`);
+            if (name.trim() && name.trim() !== k.name) rename(name.trim());
           }}
         >
-          <Field label="Name" hint="Unique within the Provider; Requests and Audit Entries show it." error={error}>
+          <Field label="Name" hint="Unique within the Provider; Requests and Audit Entries show it." error={nameSave.error}>
             {(p) => (
-              <div className="flex gap-2">
-                <Input {...p} mono autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} />
-                {name.trim() !== k.name && (
-                  <Button type="submit" variant="primary" loading={pending}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input {...p} mono className="min-w-48 flex-1" autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} />
+                {name.trim() !== k.name ? (
+                  <Button type="submit" variant="primary" loading={nameSave.pending}>
                     Rename
                   </Button>
+                ) : (
+                  <SaveStatus save={nameSave} className="shrink-0" />
                 )}
               </div>
             )}
@@ -1245,7 +1311,7 @@ function KeyDialog({
                   ))}
                 </ul>
                 <div className="mt-2 flex justify-end">
-                  <Button size="sm" icon={Waypoints} onClick={() => actions.restrictToWorking(k)}>
+                  <Button size="sm" icon={Waypoints} onClick={() => actions.restrictToWorking(k, actionSave)}>
                     Restrict to working Endpoints
                   </Button>
                 </div>
@@ -1267,19 +1333,24 @@ function KeyDialog({
       </div>
 
       <div className="mt-7 flex flex-wrap items-center gap-2 border-t border-border pt-5">
-        <Button variant="ghost" icon={Trash2} className="text-danger-text" onClick={() => actions.remove(k)}>
-          Delete
+        <Button variant="ghost" danger icon={Trash2} onClick={() => actions.remove(k)}>
+          Delete…
         </Button>
         <div className="flex-1" />
-        <Button icon={k.enabled ? Pause : CircleSlash} onClick={() => actions.toggle(k)}>
+        <Button icon={k.enabled ? Pause : CircleSlash} onClick={() => actions.toggle(k, actionSave)}>
           {k.enabled ? "Disable" : "Enable"}
         </Button>
         <Button icon={MessageCircle} onClick={() => actions.chat(k)}>
           Test in Chat
         </Button>
-        <Button variant="primary" icon={Play} loading={testing} onClick={() => actions.test(k)}>
+        <Button variant="primary" icon={Play} loading={testing} onClick={() => actions.test(k, actionSave)}>
           Test
         </Button>
+      </div>
+      {/* Its own line under the buttons that caused it, so a long result never squeezes them. */}
+      <div className="mt-3 flex min-h-5 flex-wrap items-center justify-end gap-x-2 empty:hidden">
+        <SaveStatus save={actionSave} saving={false} />
+        <SaveError save={actionSave} />
       </div>
     </Dialog>
   );

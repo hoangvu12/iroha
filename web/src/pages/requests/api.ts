@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api, seg } from "@/api/client";
 
@@ -255,16 +255,4 @@ export function useCaptureDays() {
     select: (s) => s.settings.find((x) => x.name === "retention.captures_days")?.value,
     staleTime: 60_000,
   });
-}
-
-/** Copy text to the clipboard; resolves false when the browser refuses. */
-export function useCopy() {
-  return useCallback(async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
 }

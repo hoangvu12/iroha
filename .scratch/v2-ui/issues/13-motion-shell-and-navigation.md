@@ -42,10 +42,10 @@ Rejected:
 
 ### Built
 
-- **Press** (#1): `ui/Button.tsx` `press` on `Button`, `IconButton` and `buttonClass` links: `transition-[scale,background-color,color] duration-press ease-out active:not-data-disabled:not-data-pending:scale-(--motion-scale-press)`, in place of `transition-colors`.
+- **Press** (#1): `@utility press` in `styles/index.css`, put on `Button`, `IconButton` and `buttonClass` links by `ui/Button.tsx` in place of `transition-colors`. Held by a pointer it scales to `--motion-scale-press` on `duration-press` (160) `ease-out`; let go it comes back on the new `duration-release` (100). Hover colours run on `duration-hover ease`. A key press (`:focus-visible`), a disabled and a pending button don't scale. (Changed after review, below.)
 - **Theme** (#2): `app/theme.tsx` `applyTheme` puts `theme-switching` on `<html>` (`styles/index.css`: `transition: none !important` on everything) while `.dark` flips, forces a style read, and takes the class off two frames later (a second switch cancels the first one's removal). It also keeps `meta[name=theme-color]` on the chosen theme (`index.html` has one tag per scheme, and its pre-paint script sets them too).
 - **Login/Setup column** (#3): `animate-rise-in` (new: `@keyframes rise-in` from `opacity 0` and `translate 0 var(--motion-shift)`, `duration-dialog-in ease-out`, fill `backwards`). It started as `@starting-style`, but the browser check showed Chrome skips that on a fast reload when the column is styled before the first frame (1 of 3 reloads played). A keyframe plays on every load (4 of 4).
-- **Errors** (#4): `Field`'s `FieldError` and Setup's form error (now `role="alert"`) fade in, `starting:opacity-0 transition-opacity duration-list-in ease-out`.
+- **Errors** (#4): `Field`'s `FieldError` and Setup's form error (now `role="alert"`) drop 4px out of their field and fade in: `transition-[opacity,translate] duration-list-in ease-out starting:-translate-y-(--motion-shift-sm) starting:opacity-0`. (It was a plain fade until the review, below.)
 - **Health notice** (#5): list recipe via `starting:` (shift-sm + fade, `duration-list-in`).
 - **Sidebar** (#6): no transition on nav items (hover and the current page are instant).
 - **Mobile**: `theme-color`, `touch-action: manipulation` on controls, `select-none` plus no callout on the tab bar and header avatar (and `select-none` on nav items and the Owner trigger), `overscroll-contain` on the sidebar scroller, safe-area padding on the sidebar (left) and login column (left/right), `enterKeyHint` (login: go; setup: next, next, go). Not checked on a real phone: no device here. The callout, `touch-action` and safe areas need one.
@@ -75,13 +75,24 @@ CDP `Tracing`, headed Chrome (headless presents about 10 fps, so its frame count
   - An earlier run at about 66 fps (4×) had 0 long frames in 169 during presses.
 - **Why the box stays unticked:** the cc frame reporter counted dropped frames even in windows with nothing moving, and more at 1× than at 4×, so this desktop's headed window doesn't give a clean drop count. GPU and main-thread work per frame during presses is under 0.5 ms and 3.4 ms. The one-off 38–50 ms gaps have no long task behind them. A check on a real 60 Hz device would settle it.
 
-### Review (`review-animations` is not installed here; I checked the diff myself against its checklist from `animate` and `emil-design-eng`)
+### Review (`review-animations`, from its SKILL.md and STANDARDS.md, on `git diff 1ece9bf...agent/ui13 -- web` after merging v2-ui at 7aeb970)
 
-- Fixed: the entrance used `@starting-style`, which Chrome skips before the first frame. It is now a keyframe.
-- Fixed: the keyframe used fill `both`, which kept the column's animation effect, and so a compositor layer, after it ended. It is now `backwards`.
-- Answered: holding Space on a focused button also scales it (`:active`). Kept: it is feedback for a held press, not a shortcut, and native buttons do the same.
-- Answered: under reduced motion `duration-press` is 0, so a Button's hover colour also changes at once. That is stricter than needed, and accepted.
-- For ticket 20: `settings/AuditEntries.tsx`'s IconButton passes `className="transition-transform"`, which now collides with the press transition list (`cn` has no tailwind-merge). Audit finding #6 already moves that rotation onto the chevron.
-- Clean: no `transition-all`, no `scale(0)`, no `ease-in`, no layout properties, nothing on keyboard shortcuts, exits not slower than entrances, hover gated by Tailwind 4's `hover:`.
+Findings against its ten standards. Each "Fixed" has a test that was red first: `styles/motion.test.ts` "presses down slower than it lets go, for a pointer only, with hover colours on their own curve", `ui/Button.test.tsx` (every button carries `press` and no other transition class), `ui/Input.test.tsx` "an error drops in from its field and fades, with the motion tokens".
 
-Flaky, not this ticket: `ui/toast.test.tsx` "an action on a toast runs and closes it" failed once in a full run under load and passed when run alone and in the next full run.
+| # | Standard | Where | Finding | Result |
+|---|---|---|---|---|
+| 1 | Asymmetric enter/exit | press | Down and back both ran 160 ms `ease-out`, and the escalation list names symmetric press/release. | Fixed: new token `--duration-release: 100ms` (0 under reduced motion). The scale goes down on `duration-press`, back on `duration-release`. |
+| 2 | Frequency, a11y | press | Space on a focused button is `:active`, so a key press scaled the button, and a keyboard action should not animate. I had kept this before the review. | Fixed: `:active:not(:focus-visible)`. A pointer press still scales, a key press doesn't. |
+| 3 | Easing, a11y | press | Hover colours rode the scale's `duration-press ease-out`: a colour change should use `ease`, and reduced motion made it instant, though a colour fade is not movement. | Fixed: per-property list, `background-color`/`color` on `duration-hover ease`. Only the scale goes to 0 under reduced motion. Tailwind can't write a per-property duration as classes, so the press is now one `@utility press` in `styles/index.css` and `ui/Button.tsx` uses the class name. |
+| 4 | Justified, cohesion | Field error, Setup form error | A plain fade in: the escalation list names pure-fade entrances, and an error has a place it comes from (its field). | Fixed: 4 px drop (`starting:-translate-y-(--motion-shift-sm)`) plus fade, `duration-list-in ease-out`, the same recipe as the health notice. No shake. |
+| 5 | Origin, GPU-only | login column | The entrance used `@starting-style`, which Chrome skips when the column is styled before the first frame, and fill `both` kept the effect (and a layer) after it ended. | Fixed before the review (browser check): keyframe `rise-in`, fill `backwards`. |
+| 6 | Choreography | login column | Heading, text and form enter as one block, not staggered. | Kept: one entrance per container on the first screen. A stagger would add a delay token for a screen seen once per session. |
+| 7 | Interruptibility | theme flip | `theme-switching` also cuts the Owner menu's exit fade at the flip frame. | Kept: the whole page changes colour in that frame, so a fading menu in the old colours would be the odd one out. |
+| 8 | Asymmetric enter/exit | health notice | Enters with shift + fade, leaves at once. | Kept: it leaves because the news is good, and nothing should hold the eye on it. |
+| 9 | Cohesion | `settings/AuditEntries.tsx` (ticket 20) | Its IconButton passes `className="transition-transform"`, which collides with the press transition (`cn` has no tailwind-merge). | Not this ticket's area. Audit finding #6 already moves that rotation onto the chevron. |
+
+Clean: no `transition-all`, no `scale(0)`, no `ease-in`, no layout properties, nothing on keyboard shortcuts or the sidebar, every duration under 300 ms, `hover:` gated by `@media (hover: hover)`, one reduced-motion rule on `:root`, all moving properties composited (see the trace).
+
+Decision: approve after fixes 1–4. The trace above was recorded before them. The changes only add a shorter release and a 4 px translate, both composited.
+
+Flaky, not this ticket: `ui/toast.test.tsx` "an action on a toast runs and closes it" failed once in a full run under load and passed when run alone and in the next full run. Also not this ticket: since v2-ui's ticket 22 `pages/providers/Models.test.tsx` "Test in Chat on a model row..." leaves an unhandled `[ui-sdk] A toaster opened, but no host renders it` error. It happens when that file runs alone too, and all its tests pass.

@@ -74,7 +74,10 @@ export function SetupPage() {
           )}
         </Field>
         {server.other && (
-          <p role="alert" className="text-[13px] text-danger-text transition-opacity duration-list-in ease-out starting:opacity-0">
+          <p
+            role="alert"
+            className="text-[13px] text-danger-text transition-[opacity,translate] duration-list-in ease-out starting:-translate-y-(--motion-shift-sm) starting:opacity-0"
+          >
             {server.other}
           </p>
         )}

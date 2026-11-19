@@ -51,8 +51,8 @@ type Options struct {
 	Recorder   *requests.Recorder
 	KeyStates  *keystate.Store
 	// Rules gives the Failure Rules in force for the next Attempt; nil
-	// means the built-in rules. Ticket 06 passes the live set with the
-	// Owner's rules merged in.
+	// means the built-in rules. The server passes failurerules.Store.Set:
+	// the built-ins merged with the Owner's rules, reloaded on every change.
 	Rules func() *rules.Set
 }
 
@@ -132,6 +132,7 @@ func (g *Gateway) serveProviderChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := g.clock.Now()
+	g.expireGaps(x, &p, now)
 	plan := planner.Plan(planner.Request{Shape: x.rec.ShapeIn, Model: cr.model, Now: now}, []planner.Provider{p}, g.rotation)
 	if len(plan.Candidates) == 0 {
 		e := noCandidate(p.Handle, plan.Empty)
@@ -178,6 +179,11 @@ func noCandidate(handle string, e *planner.Empty) *api.Error {
 	if e.Code == planner.Cooling {
 		until := e.Until.UTC().Format(time.RFC3339)
 		return api.Errorf(http.StatusServiceUnavailable, "keys_cooling", "Retry after "+until+" (see Retry-After); GET /api/providers/"+handle+"/summary (Admin Token) lists the coolings.",
+			"%s", e.Message).WithDetails(map[string]string{"reason": e.Code, "until": until})
+	}
+	if e.Code == planner.ModelGap {
+		until := e.Until.UTC().Format(time.RFC3339)
+		return api.Errorf(http.StatusNotFound, "model_unavailable", "Use another model; the Provider refused it to every usable key. The gaps expire by "+until+", or the Owner clears them (GET /api/providers/"+handle+"/model-gaps).",
 			"%s", e.Message).WithDetails(map[string]string{"reason": e.Code, "until": until})
 	}
 	hint := "Ask the Owner to add an Upstream Key to " + handle + " (POST /api/providers/" + handle + "/keys)."

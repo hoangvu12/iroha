@@ -9,6 +9,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/admintokens"
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
+	"github.com/hoangvu12/iroha/internal/failurerules"
 	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/jobs"
@@ -37,6 +38,7 @@ func (s *Server) routes() []api.Route {
 		requests.Routes(s.db),
 		settings.Routes(s.audit, s.db),
 		jobs.Routes(s.jobs),
+		failurerules.Routes(s.audit, s.db),
 		s.gateway().Routes(),
 		s.gateway().AdminRoutes(),
 	)
@@ -92,7 +94,7 @@ func (s *Server) coreRoutes() []api.Route {
 func (s *Server) gateway() *gateway.Gateway {
 	if s.gw == nil {
 		s.gw = gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db),
-			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log)})
+			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log), Rules: s.rules.Set})
 	}
 	return s.gw
 }

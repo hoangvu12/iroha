@@ -125,7 +125,7 @@ type ProviderList struct {
 // Routes returns the Provider, Endpoint and Upstream Key routes.
 func Routes(tr *audit.Trail, db *store.DB, log *slog.Logger) []api.Route {
 	h := handlers{tr: tr, db: db, log: log}
-	return slices.Concat(h.providerRoutes(), []api.Route{h.summaryRoute()}, h.endpointRoutes(), h.keyRoutes())
+	return slices.Concat(h.providerRoutes(), []api.Route{h.summaryRoute()}, h.endpointRoutes(), h.keyRoutes(), h.gapRoutes())
 }
 
 type handlers struct {

@@ -151,6 +151,8 @@ func TestKeyStatesExcludeKeys(t *testing.T) {
 	cooled := k("was", func(k *planner.Key) { k.CoolingUntil = now.Add(-time.Second) }) // past cooling: usable
 	modelCool := k("mc", func(k *planner.Key) { k.ModelCooling = map[string]time.Time{"glm": soon} })
 	ok := k("ok", func(*planner.Key) {})
+	gap := k("gap", func(k *planner.Key) { k.ModelGaps = map[string]time.Time{"glm": later} })
+	oldGap := k("old", func(k *planner.Key) { k.ModelGaps = map[string]time.Time{"glm": now} }) // expired: usable
 
 	cases := []struct {
 		name      string
@@ -169,6 +171,12 @@ func TestKeyStatesExcludeKeys(t *testing.T) {
 			"", "off:disabled bad:invalid", planner.NoUsableKey, time.Time{}},
 		{"cooling until the earliest end", []planner.Endpoint{chat}, []planner.Key{invalid, cooling, modelCool},
 			"", "bad:invalid cool:cooling mc:cooling_model:glm", planner.Cooling, soon},
+		{"a Model Gap is per wire model", []planner.Endpoint{chat, chatB}, []planner.Key{gap, oldGap},
+			"gap@b:glm-b old@a:glm old@b:glm-b", "gap:model_gap:glm", "", time.Time{}},
+		{"every usable key has a Model Gap", []planner.Endpoint{chat}, []planner.Key{disabled, gap},
+			"", "off:disabled gap:model_gap:glm", planner.ModelGap, later},
+		{"cooling beats a Model Gap", []planner.Endpoint{chat}, []planner.Key{gap, modelCool},
+			"", "gap:model_gap:glm mc:cooling_model:glm", planner.Cooling, soon},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

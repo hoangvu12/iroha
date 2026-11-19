@@ -88,6 +88,7 @@ type UpstreamKey struct {
 	Enabled       bool                    `json:"enabled" doc:"false: the Owner disabled the key; its state is disabled."`
 	State         keystate.State          `json:"state" doc:"The key's one Key State and why it is in it."`
 	CoolingModels []keystate.ModelCooling `json:"cooling_models" doc:"Models this key is cooling for while it serves the others."`
+	ModelGaps     []keystate.ModelGap     `json:"model_gaps" doc:"Models the Provider refused this key; they are not sent to it until each gap expires or is cleared. The key's Key State is unaffected."`
 	Endpoints     []string                `json:"endpoints" doc:"Names of the Endpoints this key is restricted to; empty: every Endpoint of the Provider."`
 	CreatedAt     time.Time               `json:"created_at"`
 	LastUsedAt    *time.Time              `json:"last_used_at,omitempty" doc:"Last Attempt with this key, to the minute; absent when never used."`
@@ -249,6 +250,7 @@ func scanKey(row interface{ Scan(...any) error }) (UpstreamKey, *keystate.OwnerD
 // withState sets the visible Key State of k from its record at now.
 func withState(k UpstreamKey, d *keystate.OwnerDisabled, rec keystate.Record, now time.Time) UpstreamKey {
 	k.State, k.CoolingModels = keystate.View(d, rec, now)
+	k.ModelGaps = rec.LiveGaps(now)
 	return k
 }
 
@@ -439,6 +441,7 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 			}
 			k.ModelCooling[m.Model] = m.Until
 		}
+		k.ModelGaps = rec.GapsByModel()
 	}
 	return r, true, nil
 }

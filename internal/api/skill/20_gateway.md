@@ -15,7 +15,7 @@ POST /api/gateway-keys                      {"name": "discord-bot", "scope": {"a
 - **Upstream Keys** added without a name are matched by secret: pasting the same key twice never makes a duplicate, and new keys get the next free name `key-N`. A named key without a secret is a keyless slot that sends no credential in any auth style; a 401 to a keyless Attempt moves on without making the key invalid. `"endpoints": ["eu"]` on a key (create, bulk or `PATCH`) restricts it: it is only ever sent to those Endpoints; `[]` lifts it. Deleting an Endpoint takes it out of keys' restrictions in the same Audit Entry, and is refused with `409 endpoint_in_use` while a key may use that Endpoint alone. Secrets are always readable with `GET /api/providers/<handle>/keys`.
 - **Gateway Key scopes** are `{"all": true}` or `{"providers": [{"provider": "acme"}, {"provider": "other", "models": ["glm-4.6"]}]}`. The answer contains the key's secret; it stays readable with `GET /api/gateway-keys/<name>`.
 
-Iroha uses a Provider's Upstream Keys in turn (round-robin), skipping keys that are disabled, invalid or cooling; when an Attempt fails it moves on to the next key within the Request budget (see "Key States and Failure Rules").
+Iroha uses a Provider's Upstream Keys in turn (round-robin), skipping keys that are disabled, invalid or cooling, and keys with a Model Gap for the model; when an Attempt fails it moves on to the next key within the Request budget (see "Key States and Failure Rules").
 
 ## Calling the Gateway
 
@@ -28,6 +28,7 @@ Callers send the Gateway Key as `Authorization: Bearer <key>`, `x-api-key: <key>
 - `502 upstream_redirect`, `endpoint_misconfigured`: the Endpoint needs fixing; no other key is tried.
 - `503 no_candidate`: nothing can serve this until the Owner acts. `details.reason` is `no_endpoint`, `no_upstream_key` or `no_usable_key` (every key disabled, invalid or restricted to Endpoints that cannot serve the Request).
 - `503 keys_cooling`: every usable key is cooling; `Retry-After` and `details.until` say when the first is back. No Attempt was made.
+- `404 model_unavailable`: the Provider refused this model to every usable key (`details.reason` `model_gap`; `details.until` is when the first gap expires). Use another model.
 - When every Attempt failed, the error lists them in `details.attempts` (key, status, rule, outcome, reason, action) and `details.summary` (one line): `400`-class `upstream_rejected` (the Provider refused the request itself, with its status and message; no other key is tried), `504 upstream_timeout` (no first byte within the time budget), `503 upstream_unavailable` with `Retry-After` (the keys tried are cooling), otherwise `502 upstream_failed`.
 
 ## Reading Requests

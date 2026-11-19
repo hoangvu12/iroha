@@ -82,7 +82,7 @@ type CreateUpstreamKey struct {
 // UpdateUpstreamKey is the body of PATCH /api/providers/{provider}/keys/{key}.
 type UpdateUpstreamKey struct {
 	Name      *string   `json:"name,omitempty"`
-	Secret    *string   `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling."`
+	Secret    *string   `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling. A new name or secret clears the key's Model Gaps."`
 	Enabled   *bool     `json:"enabled,omitempty" doc:"false disables the key (no traffic until enabled); true enables it."`
 	Endpoints *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs); [] lifts the restriction."`
 }
@@ -484,6 +484,17 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 			return UpstreamKey{}, err
 		}
 	}
+	// Editing the key's name or secret clears its Model Gaps (ADR-0003).
+	renamed := in.Name != nil && *in.Name != before.Name
+	if renamed || (in.Secret != nil && *in.Secret != before.Secret) {
+		name := before.Name
+		if renamed {
+			name = *in.Name
+		}
+		if err := clearGaps(m, p, id, name, "", "The key was edited by "+m.Actor.Name+".", logs); err != nil {
+			return UpstreamKey{}, err
+		}
+	}
 	after, err := readKey(m.Ctx, m.Tx, id, m.Now)
 	if err == nil {
 		logs.add(before, after)
@@ -503,9 +514,12 @@ func setEnabled(m *audit.Mutation, id string, enabled bool) error {
 	return err
 }
 
-// stateLogs collects the Key State changes of a mutation, logged as
-// key.state once it committed.
-type stateLogs struct{ changes [][2]UpstreamKey }
+// stateLogs collects the Key State and Model Gap changes of a mutation,
+// logged as key.state and model_gap once it committed.
+type stateLogs struct {
+	changes [][2]UpstreamKey
+	gaps    []keystate.GapEvent
+}
 
 func (l *stateLogs) add(before, after UpstreamKey) {
 	if l != nil && (before.State.State != after.State.State || before.State.Reason != after.State.Reason) {
@@ -517,6 +531,7 @@ func (l *stateLogs) emit(log *slog.Logger, handle string) {
 	for _, ch := range l.changes {
 		keystate.LogChange(log, keystate.Key{ID: ch[1].ID, Name: ch[1].Name, Provider: handle}, ch[0].State.State, ch[1].State.State, ch[1].State.Reason)
 	}
+	keystate.LogGaps(log, l.gaps)
 }
 
 func (h handlers) deleteKey(m *audit.Mutation, p ref, s string) (UpstreamKey, error) {

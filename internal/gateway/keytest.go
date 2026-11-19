@@ -72,7 +72,7 @@ var (
 
 const keyTestDescription = "Sends a tiny real chat call (\"" + keyTestPrompt + "\", at most 16 tokens) with the key, in the Endpoint's Shape and auth style, " +
 	"on the first Endpoint the key may use (or ?endpoint=). " +
-	"A pass makes an invalid or cooling key active again. A failure is read by the Failure Rules like any Attempt, so a 401 makes the key invalid and a 429 cools it; " +
+	"A pass makes an invalid or cooling key active again and clears its Model Gaps. A failure is read by the Failure Rules like any Attempt, so a 401 makes the key invalid and a 429 cools it; " +
 	"a keyless test (empty secret or auth style none) sends no credential, so a 401 then leaves the key as it is. " +
 	"Disabled keys are tested too and stay disabled. The test is not recorded as a Request."
 
@@ -236,7 +236,7 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 		res.Rule, res.Outcome, res.Reason = d.Rule, string(d.Outcome), d.Reason
 		res.Action = "Key State unchanged."
 		switch d.Outcome {
-		case rules.Invalid, rules.CoolingKey, rules.CoolingKeyModel:
+		case rules.Invalid, rules.CoolingKey, rules.CoolingKeyModel, rules.ModelGap:
 			eff, err := g.states.Fail(ctx, keystate.Failure{Key: key, Model: wire, Decision: d})
 			if err != nil {
 				return res, err

@@ -66,8 +66,9 @@ type ModelCooling struct {
 // Record is the stored runtime state of one key (key_states and
 // key_model_cooling), whether or not it is current.
 type Record struct {
-	Key    *row  // nil: active since added
-	Models []row // every key-and-model cooling row, current or past
+	Key    *row       // nil: active since added
+	Models []row      // every key-and-model cooling row, current or past
+	Gaps   []ModelGap // every stored Model Gap, live or expired, soonest expiry first
 }
 
 type row struct {
@@ -141,7 +142,11 @@ func read(ctx context.Context, q Querier, keysQuery string, arg string) (map[str
 		rec.Models = append(rec.Models, r)
 		out[id] = rec
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return out, readGaps(ctx, q, keysQuery, arg, out)
 }
 
 // Invalid reports whether the key is invalid.
@@ -249,11 +254,13 @@ type Effect struct {
 	Model     string    // set when only this model cools
 	Until     time.Time // cooling end
 	Escalated bool      // a model cooling escalated to the whole key
+	GapUntil  time.Time // model_gap: when the Model Gap for Model expires
 	Action    string    // one line for the Attempt's record
 }
 
-// Fail applies a decision with outcome invalid, cooling_key or
-// cooling_key_model. Other outcomes change nothing.
+// Fail applies a decision with outcome invalid, cooling_key,
+// cooling_key_model or model_gap (which records a Model Gap and leaves the
+// Key State alone). Other outcomes change nothing.
 func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 	ctx = context.WithoutCancel(ctx)
 	now := s.db.Clock().Now().UTC()
@@ -264,13 +271,22 @@ func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 	}
 	var eff Effect
 	var events []event
+	var gaps []GapEvent
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
-		events = nil
+		events, gaps = nil, nil
 		cur, err := ForKey(ctx, tx, f.Key.ID)
 		if err != nil {
 			return err
 		}
 		switch d.Outcome {
+		case rules.ModelGap:
+			until, err := putGap(ctx, tx, f.Key.ID, f.Model, reason, d.Rule, f.RequestID, now)
+			if err != nil {
+				return err
+			}
+			eff = Effect{Model: f.Model, GapUntil: until,
+				Action: fmt.Sprintf("Upstream Key %s has a Model Gap for %s until %s; its Key State is unchanged and it keeps serving other models.", f.Key.Name, f.Model, until.Format(time.RFC3339))}
+			gaps = append(gaps, GapEvent{Op: GapCreated, Key: f.Key, Model: f.Model, Reason: reason, Until: until, RequestID: f.RequestID})
 		case rules.Invalid:
 			if cur.Invalid() {
 				eff = Effect{Action: "Upstream Key " + f.Key.Name + " stays invalid."}
@@ -356,6 +372,7 @@ func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 	for _, e := range events {
 		s.logEvent(f.Key, f.RequestID, e)
 	}
+	LogGaps(s.log, gaps)
 	return eff, nil
 }
 
@@ -497,11 +514,13 @@ func (s *Store) Succeeded(ctx context.Context, k Key, model, requestID string) e
 }
 
 // TestPassed makes the key active after a passing key test: invalid and
-// cooling end, and the tested model's cooling is cleared.
+// cooling end, the tested model's cooling is cleared, and every Model Gap of
+// the key is cleared (the Provider may have upgraded the key's plan).
 func (s *Store) TestPassed(ctx context.Context, k Key, model string) error {
 	ctx = context.WithoutCancel(ctx)
 	now := s.db.Clock().Now().UTC()
 	var from string
+	var gaps []GapEvent
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
 		cur, err := ForKey(ctx, tx, k.ID)
 		if err != nil {
@@ -511,10 +530,16 @@ func (s *Store) TestPassed(ctx context.Context, k Key, model string) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM key_model_cooling WHERE key_id = ? AND model = ?`, k.ID, model); err != nil {
 			return err
 		}
+		if gaps, err = ClearGaps(ctx, tx, k, "", "A key test passed ("+model+").", now, nil); err != nil {
+			return err
+		}
 		return putKey(ctx, tx, k.ID, row{State: Active, Reason: "A key test passed (" + model + ").", Since: now})
 	})
 	if err == nil && from != Active {
 		s.logEvent(k, "", event{from: from, to: Active, reason: "A key test passed (" + model + ")."})
+	}
+	if err == nil {
+		LogGaps(s.log, gaps)
 	}
 	return err
 }

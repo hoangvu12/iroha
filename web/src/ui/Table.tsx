@@ -1,0 +1,95 @@
+import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from "react";
+import { cn } from "./cn";
+
+// Table primitives in the calm style of the design: one fact per cell,
+// hairline row borders, grey header labels, no zebra stripes. Pages build
+// their tables from these (and may add sorting, selection, etc. on top).
+
+export function Table({ className, ...rest }: HTMLAttributes<HTMLTableElement>) {
+  return (
+    <div className="w-full overflow-x-auto">
+      <table className={cn("w-full border-collapse text-left text-sm", className)} {...rest} />
+    </div>
+  );
+}
+
+export function THead({ className, ...rest }: HTMLAttributes<HTMLTableSectionElement>) {
+  return <thead className={cn("border-b border-border", className)} {...rest} />;
+}
+
+export function TBody(props: HTMLAttributes<HTMLTableSectionElement>) {
+  return <tbody {...props} />;
+}
+
+export function TR({
+  className,
+  selected,
+  interactive,
+  tone,
+  ...rest
+}: HTMLAttributes<HTMLTableRowElement> & { selected?: boolean; interactive?: boolean; tone?: "danger" }) {
+  return (
+    <tr
+      aria-selected={selected || undefined}
+      className={cn(
+        "border-b border-border last:border-b-0",
+        interactive && "cursor-pointer hover:bg-subtle",
+        tone === "danger" && "bg-danger-tint/50",
+        selected && "bg-selected hover:bg-selected",
+        className,
+      )}
+      {...rest}
+    />
+  );
+}
+
+export function TH({ className, align, ...rest }: ThHTMLAttributes<HTMLTableCellElement> & { align?: "right" }) {
+  return (
+    <th
+      scope="col"
+      className={cn("h-10 px-1.5 text-[13px] font-normal text-fg-muted first:pl-1.5", align === "right" && "text-right", className)}
+      {...rest}
+    />
+  );
+}
+
+export function TD({ className, align, mono, ...rest }: TdHTMLAttributes<HTMLTableCellElement> & { align?: "right"; mono?: boolean }) {
+  return (
+    <td
+      className={cn(
+        "h-12 px-1.5 align-middle",
+        align === "right" && "text-right tabular",
+        mono && "font-mono text-[13px] text-fg-muted",
+        className,
+      )}
+      {...rest}
+    />
+  );
+}
+
+/** Loading: grey bars in the shape of the rows, no spinner (C25). */
+export function TableSkeleton({ columns, rows = 5 }: { columns: string[]; rows?: number }) {
+  const widths = ["w-16", "w-24", "w-20", "w-28", "w-14", "w-24"];
+  return (
+    <Table aria-busy="true" aria-label="Loading">
+      <THead>
+        <tr>
+          {columns.map((c) => (
+            <TH key={c}>{c}</TH>
+          ))}
+        </tr>
+      </THead>
+      <TBody>
+        {Array.from({ length: rows }, (_, r) => (
+          <tr key={r}>
+            {columns.map((c, i) => (
+              <td key={c} className="h-12 px-1.5">
+                <div className={cn("skeleton h-2.5 rounded-full bg-muted", widths[(r + i * 2) % widths.length])} />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </TBody>
+    </Table>
+  );
+}

@@ -305,6 +305,17 @@ func TestOwnerAdditionsSurviveRefreshesAndAreAudited(t *testing.T) {
 	if l := list(t, srv, ""); names(l) != "m9" {
 		t.Fatalf("list = %s", names(l))
 	}
+	// MOD-61: taking an addition off a model discovery still finds keeps it,
+	// visible and discovered.
+	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "m9", "added": true}).Expect(201)
+	res = models.ModelResult{}
+	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "m9", "added": false}).Expect(200).JSON(&res)
+	if res.Outcome != "deleted" || res.AuditEntry == "" || res.Model.Added || !res.Model.Visible || !res.Model.Discovered {
+		t.Fatalf("remove from a discovered model = %+v", res)
+	}
+	if l := list(t, srv, ""); names(l) != "m9" || !l.Models[0].Visible || l.Counts.Added != 0 {
+		t.Fatalf("list = %+v", l)
+	}
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": " padded "}).Expect(400)
 }
 

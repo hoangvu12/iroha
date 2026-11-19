@@ -1,6 +1,7 @@
 package providers_test
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -153,6 +154,8 @@ func TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited(t *testing.T) {
 		{"static_headers": map[string]string{"X-A": "line\r\nbreak"}},
 		{"renames": map[string]string{"glm": ""}},
 		{"renames": map[string]string{" glm": "x"}},
+		{"renames": map[string]string{strings.Repeat("m", 257): "x"}}, // MOD-13: names are at most 256 characters
+		{"renames": manyRenames(1001)},                                  // MOD-13: at most 1000 renames
 	} {
 		if e := srv.Admin.Post(base, ep(bad)).Expect(400).Err(); e.Hint == "" {
 			t.Errorf("%v: no hint", bad)
@@ -188,6 +191,24 @@ func TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited(t *testing.T) {
 	if len(entries.Entries) != 3 { // created, edited, revert
 		t.Fatalf("entries for acme/eu = %d", len(entries.Entries))
 	}
+
+	// MOD-13: the caps themselves are accepted; {} clears the renames.
+	srv.Admin.Patch(base+"/eu", map[string]any{"renames": manyRenames(1000)}).Expect(200)
+	srv.Admin.Patch(base+"/eu", map[string]any{"renames": map[string]string{strings.Repeat("m", 256): "x"}}).Expect(200)
+	var cleared providers.EndpointResult
+	srv.Admin.Patch(base+"/eu", map[string]any{"renames": map[string]string{}}).Expect(200).JSON(&cleared)
+	if len(cleared.Endpoint.Renames) != 0 || !slices.Equal(cleared.Changes[0].Fields, []string{"renames"}) {
+		t.Fatalf("cleared = %+v", cleared)
+	}
+}
+
+// manyRenames is n distinct renames.
+func manyRenames(n int) map[string]string {
+	m := map[string]string{}
+	for i := range n {
+		m[fmt.Sprintf("m-%d", i)] = fmt.Sprintf("wire-%d", i)
+	}
+	return m
 }
 
 func TestKeysAreRestrictedToEndpointsAndEndpointDeletesKeepThemConsistent(t *testing.T) {

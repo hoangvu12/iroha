@@ -18,6 +18,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/modelmeta"
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/shape"
@@ -258,7 +259,7 @@ func (s *Store) read(ctx context.Context, rt *providers.Routing, j *listJob) {
 			j.got, j.used, j.res.Outcome, j.res.Found, j.res.Error = got, k, ListOK, len(got), ""
 			return
 		}
-		j.res.Outcome, j.res.Error = ListFailed, err.Error()
+		j.res.Outcome, j.res.Error = ListFailed, scrub(err.Error(), k.Secret) // an answer may echo the key
 	}
 }
 
@@ -289,7 +290,8 @@ func (s *Store) fetch(ctx context.Context, rt *providers.Routing, ep *planner.En
 			return nil, status, fmt.Errorf("the answer could not be read: %s", scrub(err.Error(), k.Secret))
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return nil, status, fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet(body))
+			// Scrubbed before cutting, so no part of an echoed key is left.
+			return nil, status, fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet([]byte(scrub(string(body), k.Secret))))
 		}
 		if len(body) > maxListBody {
 			return nil, status, fmt.Errorf("the answer is larger than %d MiB", maxListBody>>20)
@@ -524,8 +526,11 @@ func (s *Store) apply(ctx context.Context, rt *providers.Routing, jobs []*listJo
 					rt.ID, j.ep.ID, keyRef(j), e.id, store.Millis(now)); err != nil {
 					return err
 				}
+				// The first list (in Endpoint and key order) whose object says
+				// something of the model wins; an object that says nothing
+				// (a bare {"id": ...}) keeps the facts reported before.
 				raw := ""
-				if e.raw != nil && !reported[e.id] {
+				if e.raw != nil && !reported[e.id] && !modelmeta.Normalize(e.raw).IsZero() {
 					raw, reported[e.id] = string(e.raw), true
 				}
 				if _, err := tx.ExecContext(ctx, `INSERT INTO provider_models (id, provider_id, model, reported, discovered_at) VALUES (?, ?, ?, ?, ?)

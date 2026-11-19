@@ -4,13 +4,12 @@ import { isApiError } from "@/api/client";
 import { type OwnerSession, useSignOut } from "@/api/session";
 import { PageBody } from "@/app/PageBody";
 import { timeAgo } from "@/lib/format";
-import { useIsPhone } from "@/lib/media";
 import { Button } from "@/ui/Button";
-import { ConfirmDialog, Dialog } from "@/ui/Dialog";
+import { useConfirm } from "@/ui/Confirm";
+import { type SortingState, DataTable, columnsFor } from "@/ui/DataTable";
+import { Dialog } from "@/ui/Dialog";
 import { Field, PasswordInput } from "@/ui/Input";
-import { EmptyState, ErrorState } from "@/ui/States";
-import { Skeleton } from "@/ui/Skeleton";
-import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { EmptyState } from "@/ui/States";
 import { describeError, SaveError, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import { useChangePassword, useOwnerSessions, useRevokeOtherSessions, useRevokeOwnerSession } from "./api";
@@ -32,8 +31,9 @@ export function SignInTab() {
             </h2>
             <p className="mt-1 text-sm text-fg-muted">Changing it signs out every other browser.</p>
           </div>
+          {/* "…": it opens the dialog, whose own button is "Save the new password" (distinct names for agents). */}
           <Button onClick={() => setChanging(true)} className="self-start md:self-auto">
-            Change password
+            Change password…
           </Button>
         </div>
       </section>
@@ -67,13 +67,87 @@ export function browserName(ua: string): string {
   return browser || os || ua.split(/[ /]/)[0] || "Unknown browser";
 }
 
+const seen = (s: OwnerSession) => s.last_seen_at ?? s.created_at;
+
+const col = columnsFor<OwnerSession>();
+const columns = col.columns([
+  col.accessor((s) => browserName(s.user_agent), {
+    id: "browser",
+    header: "Browser",
+    sortFn: (a, b) => browserName(a.original.user_agent).localeCompare(browserName(b.original.user_agent)) || b.original.created_at.localeCompare(a.original.created_at),
+    meta: { width: "w-[34%]", className: "whitespace-nowrap text-[15px]" },
+    cell: ({ row }) => (
+      <span title={row.original.user_agent}>
+        <span className="font-medium">{browserName(row.original.user_agent)}</span>
+        {row.original.current && <span className="ml-2.5 text-fg-muted">This browser</span>}
+      </span>
+    ),
+  }),
+  col.accessor("created_at", {
+    id: "created",
+    header: "Signed in",
+    sortFn: (a, b) => a.original.created_at.localeCompare(b.original.created_at),
+    meta: { className: "tabular" },
+    cell: ({ row }) => shortDate(row.original.created_at),
+  }),
+  col.accessor(seen, {
+    id: "seen",
+    header: "Last seen",
+    // The most recently seen first; this browser is seen now.
+    sortFn: (a, b) => Number(b.original.current) - Number(a.original.current) || seen(b.original).localeCompare(seen(a.original)),
+    meta: { className: "tabular" },
+    cell: ({ row }) => (row.original.current ? "Now" : timeAgo(seen(row.original))),
+  }),
+  col.accessor("expires_at", {
+    id: "expires",
+    header: "Expires",
+    sortFn: (a, b) => a.original.expires_at.localeCompare(b.original.expires_at),
+    meta: { className: "tabular" },
+    cell: ({ row }) => shortDate(row.original.expires_at),
+  }),
+]);
+
+// The newest sign-in first.
+const NEWEST: SortingState = [{ id: "created", desc: true }];
+
+/** A browser's name in its controls; two of the same kind are told apart by when they signed in. */
+function sessionName(s: OwnerSession, all: OwnerSession[]): string {
+  const name = browserName(s.user_agent);
+  return all.filter((x) => browserName(x.user_agent) === name).length > 1 ? `${name}, signed in ${shortDate(s.created_at)}` : name;
+}
+
 function Sessions() {
   const sessions = useOwnerSessions();
-  const phone = useIsPhone();
+  const revoke = useRevokeOwnerSession();
   const revokeOthers = useRevokeOtherSessions();
-  const [ending, setEnding] = useState<OwnerSession>();
-  const [endingOthers, setEndingOthers] = useState(false);
-  const others = (sessions.data ?? []).filter((s) => !s.current);
+  const confirm = useConfirm();
+  const all = sessions.data ?? [];
+  const others = all.filter((s) => !s.current).sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  const askEnd = (s: OwnerSession) => {
+    const name = sessionName(s, all);
+    confirm.ask({
+      title: `Sign out ${name}?`,
+      body: `That browser goes back to the login page on its next click. It signed in on ${shortDate(s.created_at)}.`,
+      confirmLabel: "Sign it out",
+      onConfirm: async () => {
+        const res = await revoke.mutateAsync(s.id);
+        // Toast: the confirm dialog has closed and the row is gone.
+        notifyChange(`${name} signed out`, res, { undoable: false });
+      },
+    });
+  };
+  const askEndOthers = () =>
+    confirm.ask({
+      title: `Sign out ${others.length} other browsers?`,
+      body: "Each goes back to the login page on its next click. This browser stays signed in.",
+      confirmLabel: "Sign them out",
+      onConfirm: async () => {
+        const res = await revokeOthers.mutateAsync(others.map((s) => s.id));
+        // Toast: the confirm dialog has closed and the rows are gone.
+        notifyChange(`${res.succeeded} browsers signed out`, res, { undoable: false });
+      },
+    });
 
   return (
     <section aria-labelledby="sessions-h">
@@ -85,120 +159,61 @@ function Sessions() {
           <p className="mt-1 text-sm text-fg-muted">Each stays signed in for 30 days from when it signed in.</p>
         </div>
         {others.length > 1 && (
-          <Button danger onClick={() => setEndingOthers(true)} className="self-start md:self-auto">
-            Sign out the others…
+          <Button danger onClick={askEndOthers} className="self-start md:self-auto">
+            Sign out the other browsers…
           </Button>
         )}
       </div>
 
-      {sessions.isError ? (
-        <ErrorState title="Couldn't load signed-in browsers" error={sessions.error} onRetry={() => void sessions.refetch()} />
-      ) : (
-      <Skeleton data={sessions.data} sample={SAMPLE_SESSIONS} id={phone ? "owner-sessions:phone" : "owner-sessions"} label="Loading signed-in browsers">
-      {(list) => list.length === 0 ? (
-        <EmptyState icon={Monitor} title="No browser is signed in" description="Agents use Admin Tokens, so this stays empty until you sign in." />
-      ) : phone ? (
-        <ul className="divide-y divide-border border-y border-border">
-          {list.map((s) => (
-            <li key={s.id} className="flex items-center gap-3 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[16px] font-medium">{browserName(s.user_agent)}</p>
-                <p className="mt-0.5 text-[14px] text-fg-muted">
-                  {s.current ? "This browser" : `Last seen ${timeAgo(s.last_seen_at ?? s.created_at)}`}
-                </p>
-              </div>
-              <EndButton s={s} onEnd={setEnding} />
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <Table>
-          <THead>
-            <tr>
-              <TH className="w-[30%]">Browser</TH>
-              <TH>Signed in</TH>
-              <TH>Last seen</TH>
-              <TH>Expires</TH>
-              <TH>
-                <span className="sr-only">Actions</span>
-              </TH>
-            </tr>
-          </THead>
-          <TBody>
-            {list.map((s) => (
-              <TR key={s.id} className="h-[60px]">
-                <TD className="text-[15px]" title={s.user_agent}>
-                  <span className="font-medium">{browserName(s.user_agent)}</span>
-                  {s.current && <span className="ml-2.5 text-fg-muted">This browser</span>}
-                </TD>
-                <TD className="tabular">{shortDate(s.created_at)}</TD>
-                <TD className="tabular">{s.current ? "Now" : timeAgo(s.last_seen_at ?? s.created_at)}</TD>
-                <TD className="tabular">{shortDate(s.expires_at)}</TD>
-                <TD align="right">
-                  <EndButton s={s} onEnd={setEnding} />
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      )}
-      </Skeleton>
-      )}
-
-      <EndDialog session={ending} onClose={() => setEnding(undefined)} />
-      <ConfirmDialog
-        open={endingOthers}
-        onOpenChange={setEndingOthers}
-        title={`Sign out ${others.length} other browsers?`}
-        body="Each goes back to the login page on its next click. This browser stays signed in."
-        confirmLabel="Sign them out"
-        onConfirm={async () => {
-          const res = await revokeOthers.mutateAsync(others.map((s) => s.id));
-          // Toast: the confirm dialog has closed.
-          notifyChange(`${res.succeeded} browsers signed out`, res, { undoable: false });
-        }}
+      <DataTable<OwnerSession>
+        id="owner-sessions"
+        label="Signed-in browsers"
+        columns={columns}
+        data={sessions.data}
+        sample={SAMPLE_SESSIONS}
+        getRowId={(s) => s.id}
+        rowName={(s) => sessionName(s, all)}
+        error={sessions.isError ? sessions.error : undefined}
+        errorTitle="Couldn't load signed-in browsers"
+        onRetry={() => void sessions.refetch()}
+        defaultSorting={NEWEST}
+        rowActions={(s) => <EndButton s={s} name={sessionName(s, all)} onEnd={askEnd} />}
+        phoneRow={(s) => (
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[16px] font-medium">{browserName(s.user_agent)}</p>
+            <p className="mt-0.5 text-[14px] text-fg-muted">{s.current ? "This browser" : `Last seen ${timeAgo(seen(s))}`}</p>
+          </div>
+        )}
+        empty={<EmptyState icon={Monitor} title="No browser is signed in" description="Agents use Admin Tokens, so this stays empty until you sign in." />}
       />
+      {confirm.dialog}
     </section>
   );
 }
 
-function EndButton({ s, onEnd }: { s: OwnerSession; onEnd: (s: OwnerSession) => void }) {
+function EndButton({ s, name, onEnd }: { s: OwnerSession; name: string; onEnd: (s: OwnerSession) => void }) {
   const signOut = useSignOut();
   // Signing out works by leaving this page; a failure stays here, under the button.
   const ending = useSave({ describe: (e) => `Couldn't sign out: ${describeError(e)}` });
   if (s.current)
     return (
       <span className="inline-flex flex-col items-end gap-1">
-        <Button size="sm" icon={LogOut} loading={ending.pending} onClick={() => void ending.run(() => signOut.mutateAsync(undefined), { quiet: true })}>
+        <Button
+          size="sm"
+          icon={LogOut}
+          aria-label="Sign out this browser"
+          loading={ending.pending}
+          onClick={() => void ending.run(() => signOut.mutateAsync(undefined), { quiet: true })}
+        >
           Sign out
         </Button>
         <SaveError save={ending} className="max-w-64 text-right text-[12.5px] leading-snug" />
       </span>
     );
   return (
-    <Button size="sm" danger="hover" aria-label={`Sign out ${browserName(s.user_agent)}`} onClick={() => onEnd(s)}>
+    <Button size="sm" danger="hover" aria-label={`Sign out ${name}…`} onClick={() => onEnd(s)}>
       Sign out…
     </Button>
-  );
-}
-
-function EndDialog({ session, onClose }: { session?: OwnerSession; onClose: () => void }) {
-  const revoke = useRevokeOwnerSession();
-  const name = session ? browserName(session.user_agent) : "";
-  return (
-    <ConfirmDialog
-      open={!!session}
-      onOpenChange={(o) => !o && onClose()}
-      title={`Sign out ${name}?`}
-      body={`That browser goes back to the login page on its next click. It signed in on ${session ? shortDate(session.created_at) : ""}.`}
-      confirmLabel="Sign it out"
-      onConfirm={async () => {
-        if (!session) return;
-        const res = await revoke.mutateAsync(session.id);
-        // Toast: the confirm dialog has closed.
-        notifyChange(`${name} signed out`, res, { undoable: false });
-      }}
-    />
   );
 }
 
@@ -248,7 +263,7 @@ function PasswordDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
         <>
           <Button onClick={() => close(false)}>Cancel</Button>
           <Button variant="primary" type="submit" form="change-password" loading={change.isPending}>
-            Change password
+            Save the new password
           </Button>
         </>
       }

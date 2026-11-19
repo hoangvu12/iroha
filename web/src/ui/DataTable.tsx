@@ -40,6 +40,7 @@ import { Button as SdkButton } from "@ui-sdk/react/button";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "./Button";
 import { Checkbox } from "./Checkbox";
+import { useHoldView } from "./hold-view";
 import { cn } from "./cn";
 import type { CopyState } from "./CopyButton";
 import { Menu, MenuContent, MenuIconTrigger } from "./Menu";
@@ -142,8 +143,12 @@ export type DataTablePaging =
   | { mode: "pages"; sizes?: number[] }
   /** Numbered pages the server cuts: `data` is the current page, `rowCount` all rows the filters match. */
   | { mode: "server"; pagination: PaginationState; onPaginationChange: (u: Updater<PaginationState>) => void; rowCount: number; sizes?: number[] }
-  /** One growing list: `onLoadMore` runs when its end scrolls into view (or "Load more" is pressed). */
-  | { mode: "infinite"; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void; moreLabel?: string }
+  /**
+   * One growing list: `onLoadMore` runs when its end scrolls into view (or "Load more" is pressed).
+   * `newRowsLabel` makes it live: rows arriving on top don't move the view while the reader is
+   * scrolled down or pointing at a row, and a pill with this text ("3 new") goes back to the top.
+   */
+  | { mode: "infinite"; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void; moreLabel?: string; newRowsLabel?: (count: number) => string }
   /** Every row at once (short, fixed lists). */
   | { mode: "none" };
 
@@ -225,6 +230,8 @@ export type DataTableProps<T extends RowData> = {
   /** Clicking a row (not one of its controls) opens it. Mark the name column `meta: { opens: true }` for the keyboard. */
   onRowClick?: (row: T) => void;
   rowTone?: (row: T) => "danger" | undefined;
+  /** The row open beside the table (its sheet): highlighted, `aria-current`, and scrolled into view when it changes. */
+  activeRowId?: string;
   /** Expandable rows: what shows under a row once its chevron is pressed. */
   renderExpanded?: (row: T) => ReactNode;
 
@@ -422,9 +429,45 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
 
   const toggleRow = (row: DataRow<T>, on: boolean, event?: Event) =>
     row.getToggleSelectedHandler()({ target: { checked: on }, shiftKey: (event as MouseEvent | undefined)?.shiftKey ?? false });
+  // A click on a row opens it; a table of expandable rows that open nothing shows the row's details instead.
+  const rowClick = (row: DataRow<T>): (() => void) | undefined =>
+    onRowClick ? () => onRowClick(row.original) : renderExpanded ? () => row.toggleExpanded() : undefined;
+  const expandButton = (row: DataRow<T>, name: string) => {
+    const open = row.getIsExpanded();
+    return (
+      <IconButton
+        icon={ChevronRight}
+        size="sm"
+        label={open ? `Hide details of ${name}` : `Show details of ${name}`}
+        aria-expanded={open}
+        className={cn("[&_svg]:transition-[rotate] [&_svg]:duration-collapse [&_svg]:ease-out", open && "[&_svg]:rotate-90")}
+        onClick={() => row.toggleExpanded()}
+      />
+    );
+  };
+
+  // ---- Live rows (infinite with newRowsLabel) and the open row ----
+  // The rows are found under this root when needed: refs inside the Skeleton don't hold.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const newRowsLabel = paging.mode === "infinite" ? paging.newRowsLabel : undefined;
+  const hold = useHoldView({ enabled: !!newRowsLabel && !loading && state === undefined, ids: pageRows.map((r) => r.id), root: rootRef });
+  const pill =
+    newRowsLabel && hold.newAbove > 0 ? (
+      <Button size="sm" className="pointer-events-auto rounded-full bg-elevated shadow-md" onClick={hold.toTop}>
+        <ArrowUp size={14} aria-hidden />
+        {newRowsLabel(hold.newAbove)}
+      </Button>
+    ) : null;
+  // Stepping through rows from the sheet (↑/↓) keeps the open row in view.
+  const active = props.activeRowId;
+  useEffect(() => {
+    if (!active || loading) return;
+    const el = rootRef.current?.querySelector<HTMLElement>(`[data-rows] > [data-row-id="${CSS.escape(active)}"]`);
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [active, loading, phone]);
 
   const desktop = (
-    <ScrollArea axis="both" label={label} className="w-full" viewportClassName={props.maxHeight ?? "max-h-[calc(100dvh-4rem)]"} contentClassName="min-w-full">
+    <ScrollArea axis="both" label={label} className="w-full" viewportClassName={cn(props.maxHeight ?? "max-h-[calc(100dvh-4rem)]", newRowsLabel && "[overflow-anchor:none]")} contentClassName="min-w-full">
       <table aria-label={label} className={cn("w-full border-collapse text-left text-sm", props.dimmed && "opacity-60")}>
         <thead className="sticky top-0 z-[1] bg-bg shadow-[inset_0_-1px_0_var(--border)]">
           {table.getHeaderGroups().map((group) => (
@@ -454,29 +497,36 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
             </tr>
           ))}
         </thead>
-        <tbody>
-          {pageRows.map((row) => {
+        <tbody data-rows="">
+          {/* flatMap: one flat list keyed by row ID, so a row arriving on top doesn't remount the rows under it. */}
+          {pageRows.flatMap((row) => {
             const r = row.original;
             const name = rowName(r);
             const selected = row.getIsSelected();
             const open = row.getIsExpanded();
+            const click = rowClick(row);
+            const current = active !== undefined && row.id === active;
             return [
               <tr
                 key={row.id}
+                data-row-id={row.id}
+                aria-current={current ? "true" : undefined}
+                data-active={current || undefined}
                 data-selected={selected || undefined}
                 data-tone={props.rowTone?.(r)}
                 onClick={
-                  onRowClick &&
+                  click &&
                   ((e) => {
                     const own = (e.target as Element).closest(OWN_TARGET);
-                    if (!own || !e.currentTarget.contains(own)) onRowClick(r);
+                    if (!own || !e.currentTarget.contains(own)) click();
                   })
                 }
                 className={cn(
                   "group border-b border-border last:border-b-0",
-                  onRowClick && "cursor-pointer hover:bg-subtle",
+                  click && "cursor-pointer hover:bg-subtle",
                   "data-[tone=danger]:bg-danger-tint/50",
                   "data-selected:bg-selected data-selected:hover:bg-selected",
+                  "scroll-mt-10 data-active:bg-selected data-active:hover:bg-selected",
                   open && "border-b-0",
                 )}
               >
@@ -485,18 +535,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
                     <Checkbox label={`Select ${name}`} checked={selected} onChange={(on, ev) => toggleRow(row, on, ev)} />
                   </td>
                 )}
-                {renderExpanded && (
-                  <td className={cn(tdClass, "w-9")}>
-                    <IconButton
-                      icon={ChevronRight}
-                      size="sm"
-                      label={open ? `Hide details of ${name}` : `Show details of ${name}`}
-                      aria-expanded={open}
-                      className={cn("[&_svg]:transition-[rotate] [&_svg]:duration-collapse [&_svg]:ease-out", open && "[&_svg]:rotate-90")}
-                      onClick={() => row.toggleExpanded()}
-                    />
-                  </td>
-                )}
+                {renderExpanded && <td className={cn(tdClass, "w-9")}>{expandButton(row, name)}</td>}
                 {row.getVisibleCells().map((cell) => (
                   <BodyCell key={cell.id} cell={cell} name={name} onOpen={onRowClick && (() => onRowClick(r))} render={<table.FlexRender cell={cell} />} />
                 ))}
@@ -520,14 +559,25 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const showChecks = !!bulk && (selecting || selectedCount > 0);
   const list = phoneRow && (
     <>
-      <ul aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && "opacity-60")}>
+      {/* Sticks to the top of the page while the list scrolls under it. */}
+      {pill && <div className="pointer-events-none sticky top-3 z-[2] flex h-0 justify-center">{pill}</div>}
+      <ul data-rows="" aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && "opacity-60")}>
         {pageRows.map((row) => {
           const r = row.original;
           const name = rowName(r);
           const selected = row.getIsSelected();
           const content = phoneRow(r);
+          const current = active !== undefined && row.id === active;
           return (
-            <li key={row.id} data-selected={selected || undefined} data-tone={props.rowTone?.(r)} className="flex items-center gap-3 py-3 data-selected:bg-selected data-[tone=danger]:bg-danger-tint/50">
+            <li
+              key={row.id}
+              data-row-id={row.id}
+              aria-current={current ? "true" : undefined}
+              data-active={current || undefined}
+              data-selected={selected || undefined}
+              data-tone={props.rowTone?.(r)}
+              className="flex flex-wrap items-center gap-3 py-3 data-active:bg-selected data-selected:bg-selected data-[tone=danger]:bg-danger-tint/50"
+            >
               {showChecks && <Checkbox label={`Select ${name}`} checked={selected} onChange={(on, ev) => toggleRow(row, on, ev)} className="ml-1" />}
               {showChecks ? (
                 // The checkbox is the control; a tap anywhere on the row toggles it too.
@@ -538,11 +588,24 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
                 <SdkButton aria-label={`Open ${name}`} className="flex min-w-0 flex-1 items-center gap-3 text-left outline-none focus-visible:bg-subtle" onClick={() => onRowClick(r)}>
                   {content}
                 </SdkButton>
+              ) : renderExpanded ? (
+                // The chevron is the control; a tap on the row shows its details too.
+                <div
+                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                  onClick={(e) => {
+                    const own = (e.target as Element).closest(OWN_TARGET);
+                    if (!own || !e.currentTarget.contains(own)) row.toggleExpanded();
+                  }}
+                >
+                  {content}
+                </div>
               ) : (
                 <div className="flex min-w-0 flex-1 items-center gap-3">{content}</div>
               )}
               {!showChecks && props.phoneActions?.(r)}
               {!onRowClick && !showChecks && rowActions?.(r)}
+              {renderExpanded && !onRowClick && !showChecks && expandButton(row, name)}
+              {renderExpanded && row.getIsExpanded() && <div className="min-w-0 basis-full">{renderExpanded(r)}</div>}
             </li>
           );
         })}
@@ -560,13 +623,27 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const pages = (paging.mode === "pages" || paging.mode === "server") && shown > Math.min(...sizes);
 
   return (
-    <div data-table={id}>
+    <div ref={rootRef} data-table={id}>
       {showToolbar && bar && <div className="mb-4">{bar}</div>}
       {state !== undefined ? (
         state
       ) : (
         <Skeleton data={data} sample={sample} id={phone ? `table:${id}:phone` : `table:${id}`} label={`Loading ${label}`}>
-          {() => (phone ? list : desktop)}
+          {() =>
+            phone ? (
+              list
+            ) : (
+              <>
+                {/* The "N new" pill floats over the table's first rows, under its header. */}
+                {pill && (
+                  <div className="relative z-[2] h-0">
+                    <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">{pill}</div>
+                  </div>
+                )}
+                {desktop}
+              </>
+            )
+          }
         </Skeleton>
       )}
       {data && state === undefined && (props.footer || pages) && (
@@ -647,19 +724,22 @@ function LoadMore({ paging }: { paging: Extract<DataTablePaging, { mode: "infini
   const ref = useRef<HTMLDivElement>(null);
   const latest = useRef(paging);
   latest.current = paging;
+  // Observed again after each load: an observer reports only changes, and a load
+  // that leaves the end in view (short pages, a tall screen) changes nothing.
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
+    if (!el || paging.loadingMore || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(
       ([e]) => {
         const p = latest.current;
         if (e.isIntersecting && p.hasMore && !p.loadingMore) p.onLoadMore();
       },
-      { rootMargin: "240px 0px" },
+      // The table's own scroller, so the margin counts there (null: the page).
+      { root: el.closest("[role=region]"), rootMargin: "240px 0px" },
     );
     io.observe(el);
     return () => io.disconnect();
-  }, []);
+  }, [paging.loadingMore, paging.hasMore]);
   if (!paging.hasMore) return null;
   return (
     <div ref={ref} className="flex justify-center py-4">

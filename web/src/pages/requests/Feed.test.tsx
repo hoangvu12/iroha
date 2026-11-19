@@ -1,20 +1,27 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createAgent } from "@ui-sdk/react/agent";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, test, vi } from "vitest";
 import { SheetStackProvider } from "@/sheets/stack";
 import type { RequestRecord } from "./api";
-import { RequestsFeed } from "./Feed";
+import { type FeedPaging, RequestsFeed } from "./Feed";
 
-afterEach(() => vi.unstubAllGlobals());
+const agent = createAgent();
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+const STATS = { requests: 1, in_progress: 0, succeeded: 0, failed: 1, retried: 0, tokens: { input: 0, output: 0, cache_read: 0, reasoning: 0, total: 0 } };
 
-function request(id: string, status: number): RequestRecord {
+function request(id: string, status = 200, startedAt = new Date().toISOString()): RequestRecord {
   return {
     id,
-    started_at: new Date().toISOString(),
+    started_at: startedAt,
     state: "completed",
     status,
     caller: { kind: "gateway_key", name: "linh" },
@@ -28,53 +35,179 @@ function request(id: string, status: number): RequestRecord {
   };
 }
 
-test("changing a filter keeps the rows on screen until the new ones arrive, with no skeleton", async () => {
-  let release!: (r: Response) => void;
+/** A fake Iroha: `list(params)` answers GET /api/requests; stats and filters are fixed. */
+function iroha(list: (p: URLSearchParams) => unknown | Promise<Response>, stats: unknown = STATS) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
     const url = new URL(String(input), "http://iroha.test");
-    if (url.pathname === "/api/requests" && !url.searchParams.has("changed_after")) {
-      if (url.searchParams.get("status") === "failed") return json({ requests: [request("req_failed", 502)], cursor: 1 });
-      return new Promise<Response>((resolve) => (release = resolve));
+    if (url.pathname === "/api/requests") {
+      const body = await list(url.searchParams);
+      return body instanceof Response ? body : json(body);
     }
-    if (url.pathname === "/api/requests/stats") return json({ requests: 1, in_progress: 0, succeeded: 0, failed: 1, retried: 0, tokens: { input: 0, output: 0, cache_read: 0, reasoning: 0, total: 0 } });
+    if (url.pathname === "/api/requests/stats") return json(stats);
     if (url.pathname === "/api/requests/filters") return json({ callers: [], providers: [], pools: [], models: [] });
     return json({});
   });
   vi.stubGlobal("fetch", fetch);
-  const user = userEvent.setup();
-  const { container } = render(
+  return fetch;
+}
+
+/** The end of the list is always in view (a real observer reports it as soon as it observes). */
+function endInView() {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      cb: (e: { isIntersecting: boolean }[]) => void;
+      constructor(cb: (e: { isIntersecting: boolean }[]) => void) {
+        this.cb = cb;
+      }
+      observe() {
+        this.cb([{ isIntersecting: true }]);
+      }
+      disconnect() {}
+    },
+  );
+}
+
+function renderFeed(url = "/requests", paging?: FeedPaging) {
+  return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <MemoryRouter initialEntries={["/requests?status=failed"]}>
+      <MemoryRouter initialEntries={[url]}>
         <SheetStackProvider>
-          <RequestsFeed />
+          <RequestsFeed paging={paging} />
         </SheetStackProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
 
-  await screen.findByRole("row", { name: "Request req_failed" });
+const opener = (id: string) => screen.queryByRole("button", { name: `Open Request ${id}` });
+const shownIds = () =>
+  within(screen.getByRole("table", { name: "Requests" }))
+    .getAllByRole("row")
+    .slice(1)
+    .map((r) => r.getAttribute("data-row-id"));
+const listCalls = (fetch: ReturnType<typeof iroha>) =>
+  fetch.mock.calls.map(([u]) => new URL(String(u), "http://iroha.test")).filter((u) => u.pathname === "/api/requests" && !u.searchParams.has("changed_after"));
+
+test("changing a filter keeps the rows on screen until the new ones arrive, with no skeleton", async () => {
+  let release!: (r: Response) => void;
+  iroha((p) => {
+    if (p.has("changed_after")) return { requests: [], cursor: 1 };
+    if (p.get("status") === "failed") return { requests: [request("req_failed", 502)], cursor: 1 };
+    return new Promise<Response>((resolve) => (release = resolve));
+  });
+  const user = userEvent.setup();
+  const { container } = renderFeed("/requests?status=failed");
+
+  await waitFor(() => expect(opener("req_failed")).toBeTruthy());
   await user.click(screen.getByRole("button", { name: "Remove filter" }));
   await waitFor(() => expect(release).toBeTypeOf("function"));
 
-  expect(screen.getByRole("row", { name: "Request req_failed" })).toBeTruthy();
+  expect(opener("req_failed")).toBeTruthy();
   expect(container.querySelector("[aria-busy=true]")).toBeNull();
 
   release(json({ requests: [request("req_ok", 200)], cursor: 2 }));
-  await screen.findByRole("row", { name: "Request req_ok" });
-  expect(screen.queryByRole("row", { name: "Request req_failed" })).toBeNull();
+  await waitFor(() => expect(opener("req_ok")).toBeTruthy());
+  expect(opener("req_failed")).toBeNull();
 });
 
 test("the first load shows a skeleton of the feed, labelled for screen readers", async () => {
   vi.stubGlobal("fetch", vi.fn<typeof globalThis.fetch>(() => new Promise<Response>(() => {})));
-  render(
-    <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter initialEntries={["/requests"]}>
-        <SheetStackProvider>
-          <RequestsFeed />
-        </SheetStackProvider>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  renderFeed();
   expect(screen.getByText("Loading Requests")).toBeTruthy();
   expect(screen.queryAllByRole("row")).toHaveLength(0);
+});
+
+test("scrolling to the end loads older Requests with the API's next_before, until there are none", async () => {
+  endInView();
+  const fetch = iroha((p) => {
+    if (p.has("changed_after")) return { requests: [], cursor: 1 };
+    if (p.get("before") === "req_2") return { requests: [request("req_3")], next_before: "req_3", cursor: 1 };
+    if (p.get("before") === "req_3") return { requests: [request("req_4")], cursor: 1 };
+    return { requests: [request("req_1"), request("req_2")], next_before: "req_2", cursor: 1 };
+  });
+  renderFeed();
+  await waitFor(() => expect(shownIds()).toEqual(["req_1", "req_2", "req_3", "req_4"]));
+  expect(listCalls(fetch).map((u) => u.searchParams.get("before"))).toEqual([null, "req_2", "req_3"]);
+  expect(screen.queryByRole("button", { name: "Load older Requests" })).toBeNull();
+});
+
+test("Load older Requests is there for the keyboard while there are older ones", async () => {
+  iroha((p) => {
+    if (p.has("changed_after")) return { requests: [], cursor: 1 };
+    if (p.get("before") === "req_1") return { requests: [request("req_2")], cursor: 1 };
+    return { requests: [request("req_1")], next_before: "req_1", cursor: 1 };
+  });
+  const user = userEvent.setup();
+  renderFeed();
+  await user.click(await screen.findByRole("button", { name: "Load older Requests" }));
+  await waitFor(() => expect(shownIds()).toEqual(["req_1", "req_2"]));
+  expect(screen.queryByRole("button", { name: "Load older Requests" })).toBeNull();
+});
+
+test("new Requests arrive live on top of the feed", async () => {
+  const older = new Date(Date.now() - 60_000).toISOString();
+  let polls = 0;
+  iroha((p) => {
+    if (p.has("changed_after")) return polls++ === 0 ? { requests: [request("req_new")], cursor: 2 } : { requests: [], cursor: 2 };
+    return { requests: [request("req_old", 200, older)], cursor: 1 };
+  });
+  renderFeed();
+  await waitFor(() => expect(shownIds()).toEqual(["req_old"]));
+  await waitFor(() => expect(shownIds()).toEqual(["req_new", "req_old"]), { timeout: 4000 });
+});
+
+test("filters, the time range and the open Request come back from the URL after a reload", async () => {
+  const fetch = iroha((p) => (p.has("changed_after") ? { requests: [], cursor: 1 } : { requests: [request("req_1", 502), request("req_2", 500)], cursor: 1 }));
+  renderFeed("/requests?status=failed&range=24h&sheet=request:req_2");
+  await waitFor(() => expect(opener("req_2")).toBeTruthy());
+  const list = listCalls(fetch)[0].searchParams;
+  expect(list.get("status")).toBe("failed");
+  expect(list.get("since")).toBe("24h");
+  expect(screen.getByText("Status is Failed")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Time: Last 24 hours" })).toBeTruthy();
+  expect(opener("req_2")!.closest("tr")!.getAttribute("aria-current")).toBe("true");
+  expect(opener("req_1")!.closest("tr")!.getAttribute("aria-current")).toBeNull();
+});
+
+test("numbered pages, if the Owner prefers them: a later page loads the older Requests it needs", async () => {
+  const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => request(`req_${String(from + i).padStart(3, "0")}`));
+  const fetch = iroha(
+    (p) => {
+      if (p.has("changed_after")) return { requests: [], cursor: 1 };
+      if (p.get("before") === "req_100") return { requests: page(101, 20), cursor: 1 };
+      return { requests: page(1, 100), next_before: "req_100", cursor: 1 };
+    },
+    { ...STATS, requests: 120 },
+  );
+  const user = userEvent.setup();
+  renderFeed("/requests", "pages");
+  await waitFor(() => expect(shownIds()).toHaveLength(25));
+  expect(listCalls(fetch)).toHaveLength(1);
+  const pages = screen.getByRole("navigation", { name: "Pages of Requests" });
+  await user.click(within(pages).getByRole("button", { name: "Page 5" }));
+  await waitFor(() => expect(shownIds()[0]).toBe("req_101"));
+  expect(shownIds()).toHaveLength(20);
+  expect(listCalls(fetch).map((u) => u.searchParams.get("before"))).toEqual([null, "req_100"]);
+});
+
+test("an agent finds the feed's controls by name, opens a Request and loads older ones", async () => {
+  iroha((p) => {
+    if (p.has("changed_after")) return { requests: [], cursor: 1 };
+    if (p.get("before") === "req_1") return { requests: [request("req_2")], cursor: 1 };
+    return { requests: [request("req_1")], next_before: "req_1", cursor: 1 };
+  });
+  renderFeed();
+  await screen.findByRole("button", { name: "Load older Requests" });
+  const entries = agent.snapshot().filter((e) => !e.offPage && e.component !== "more");
+  for (const e of entries) expect(e.label, `${e.component} ${e.ref} has no name`).toBeTruthy();
+  const labels = entries.map((e) => e.label);
+  for (const l of ["Search Requests", "Open Request req_1", "Load older Requests", "Requests"]) expect(labels, `${l} is missing`).toContain(l);
+
+  const more = await agent.act({ steps: [{ ref: "Load older Requests", action: "press" }] });
+  expect(more.ok, more.error?.message).toBe(true);
+  await waitFor(() => expect(shownIds()).toEqual(["req_1", "req_2"]));
+  const open = await agent.act({ steps: [{ ref: "Open Request req_2", action: "press" }] });
+  expect(open.ok, open.error?.message).toBe(true);
+  await waitFor(() => expect(opener("req_2")!.closest("tr")!.getAttribute("aria-current")).toBe("true"));
 });

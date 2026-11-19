@@ -1,31 +1,74 @@
 import { useState } from "react";
-import { Copy, KeyRound, MoreHorizontal, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, KeyRound, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import { timeAgo } from "@/lib/format";
-import { useIsPhone } from "@/lib/media";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { useConfirm } from "@/ui/Confirm";
 import { CopyButton, useCopy } from "@/ui/CopyButton";
+import { type SortingState, DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
 import { Mono } from "@/ui/bits";
-import { Dialog, TypeToConfirmDialog } from "@/ui/Dialog";
+import { Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
-import { EmptyState, ErrorState } from "@/ui/States";
-import { Skeleton } from "@/ui/Skeleton";
-import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { MenuItem, MenuSeparator } from "@/ui/Menu";
+import { EmptyState } from "@/ui/States";
 import { SaveError, useSave } from "@/ui/SaveStatus";
 import { notify, notifyChange } from "@/ui/toast";
 import { type AdminToken, useAdminTokens, useCreateAdminToken, useInvalidateAll, useRevokeAdminToken } from "./api";
 import { lastUsed, shortDate, shortSecret } from "./format";
 import { SAMPLE_ADMIN_TOKENS } from "./samples";
 
-/** Settings → Admin Tokens (C28). */
+const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+
+const col = columnsFor<AdminToken>();
+const columns = col.columns([
+  col.accessor("name", {
+    header: "Name",
+    sortFn: (a, b) => natural(a.original.name, b.original.name),
+    meta: { width: "w-[22%]", className: "text-[15px] font-medium" },
+    cell: ({ row }) => <span title={row.original.note || undefined}>{row.original.name}</span>,
+  }),
+  col.display({ id: "token", header: "Token", meta: { width: "w-[24%]" }, cell: ({ row }) => <SecretCell t={row.original} /> }),
+  col.accessor("created_at", {
+    id: "created",
+    header: "Created",
+    sortFn: (a, b) => a.original.created_at.localeCompare(b.original.created_at) || natural(a.original.name, b.original.name),
+    meta: { width: "w-[16%]", className: "tabular" },
+    cell: ({ row }) => shortDate(row.original.created_at),
+  }),
+  col.accessor((t) => t.last_used_at ?? "", {
+    id: "used",
+    header: "Last used",
+    // The most recent use first, then by name.
+    sortFn: (a, b) => (b.original.last_used_at ?? "").localeCompare(a.original.last_used_at ?? "") || natural(a.original.name, b.original.name),
+    meta: { className: "tabular" },
+    cell: ({ row }) => <LastUsed t={row.original} />,
+  }),
+]);
+
+// Oldest first, as the API lists them.
+const BY_CREATED: SortingState = [{ id: "created", desc: false }];
+
+/** Settings → Admin Tokens (C28), on the shared DataTable (UI ticket 08). */
 export function AdminTokensTab() {
   const tokens = useAdminTokens();
-  const phone = useIsPhone();
   const [creating, setCreating] = useState(false);
-  const [revoking, setRevoking] = useState<AdminToken>();
+  const confirm = useConfirm();
+  const revoke = useRevokeAdminToken();
+  // Revoking can't be undone: it asks for the name typed (UI ticket 21).
+  const askRevoke = (token: AdminToken) =>
+    confirm.ask({
+      title: `Revoke ${token.name}?`,
+      body: "Scripts and agents using this token get 401 straight away. A revoked token can't be turned back on.",
+      typeToConfirm: token.name,
+      confirmLabel: "Revoke token",
+      onConfirm: async () => {
+        const res = await revoke.mutateAsync(token.id);
+        // Toast: the confirm dialog has closed and the row is gone.
+        notifyChange(`${token.name} revoked`, res, { undoable: false });
+      },
+    });
 
   return (
     <section aria-label="Admin Tokens">
@@ -38,33 +81,31 @@ export function AdminTokensTab() {
         </Button>
       </div>
 
-      {tokens.isError ? (
-        <ErrorState title="Couldn't load Admin Tokens" error={tokens.error} onRetry={() => void tokens.refetch()} />
-      ) : (
-      <Skeleton data={tokens.data} sample={SAMPLE_ADMIN_TOKENS} id={phone ? "admin-tokens:phone" : "admin-tokens"} label="Loading Admin Tokens">
-      {(list) => list.length === 0 ? (
-        <EmptyState
-          icon={KeyRound}
-          title="No Admin Tokens"
-          description="Make one for each script or agent that manages Iroha, so each change says who made it."
-        />
-      ) : (
-        <>
-          {phone ? (
-            <TokenList tokens={list} onRevoke={setRevoking} />
-          ) : (
-            <TokenTable tokens={list} onRevoke={setRevoking} />
-          )}
-          <p className="mt-5 text-[13px] text-fg-muted">
-            Copy a token whenever a script needs it. Revoke one from its ⋯ menu.
-          </p>
-        </>
-      )}
-      </Skeleton>
-      )}
+      <DataTable<AdminToken>
+        id="admin-tokens"
+        label="Admin Tokens"
+        columns={columns}
+        data={tokens.data}
+        sample={SAMPLE_ADMIN_TOKENS}
+        getRowId={(t) => t.id}
+        rowName={(t) => t.name}
+        error={tokens.isError ? tokens.error : undefined}
+        onRetry={() => void tokens.refetch()}
+        defaultSorting={BY_CREATED}
+        rowActions={(t) => <TokenMenu t={t} onRevoke={askRevoke} />}
+        phoneRow={(t) => <TokenLine t={t} />}
+        empty={
+          <EmptyState
+            icon={KeyRound}
+            title="No Admin Tokens"
+            description="Make one for each script or agent that manages Iroha, so each change says who made it."
+          />
+        }
+        footer={({ total }) => `${total} Admin Token${total === 1 ? "" : "s"}. Copy a token whenever a script needs it. Revoke one from its ⋯ menu.`}
+      />
 
+      {confirm.dialog}
       <CreateDialog open={creating} onOpenChange={setCreating} existing={tokens.data ?? []} />
-      <RevokeDialog token={revoking} onClose={() => setRevoking(undefined)} />
     </section>
   );
 }
@@ -85,18 +126,15 @@ function TokenMenu({ t, onRevoke }: { t: AdminToken; onRevoke: (t: AdminToken) =
   // "Copy token" closes the menu, so the trigger it closes back to shows the result.
   const copied = useCopy();
   return (
-    <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${t.name}`} size="sm" copy={copied.state} />
-      <MenuContent>
-        <MenuItem icon={Copy} onSelect={() => void copied.copy(t.secret, "Admin Token")}>
-          Copy token
-        </MenuItem>
-        <MenuSeparator />
-        <MenuItem icon={Trash2} danger onSelect={() => onRevoke(t)}>
-          Revoke…
-        </MenuItem>
-      </MenuContent>
-    </Menu>
+    <RowMenu name={t.name} copy={copied.state}>
+      <MenuItem icon={Copy} onSelect={() => void copied.copy(t.secret, "Admin Token")}>
+        Copy token
+      </MenuItem>
+      <MenuSeparator />
+      <MenuItem icon={Trash2} danger onSelect={() => onRevoke(t)}>
+        Revoke…
+      </MenuItem>
+    </RowMenu>
   );
 }
 
@@ -109,63 +147,18 @@ function SecretCell({ t }: { t: AdminToken }) {
   );
 }
 
-function TokenTable({ tokens, onRevoke }: { tokens: AdminToken[]; onRevoke: (t: AdminToken) => void }) {
+/** Phones: two lines per token, name, then the token and its last use; the menu at the end. */
+function TokenLine({ t }: { t: AdminToken }) {
   return (
-    <Table>
-      <THead>
-        <tr>
-          <TH className="w-[22%]">Name</TH>
-          <TH className="w-[24%]">Token</TH>
-          <TH className="w-[16%]">Created</TH>
-          <TH>Last used</TH>
-          <TH className="w-10">
-            <span className="sr-only">Actions</span>
-          </TH>
-        </tr>
-      </THead>
-      <TBody>
-        {tokens.map((t) => (
-          <TR key={t.id} className="group h-[60px]">
-            <TD className="text-[15px] font-medium" title={t.note || undefined}>
-              {t.name}
-            </TD>
-            <TD>
-              <SecretCell t={t} />
-            </TD>
-            <TD className="tabular text-fg">{shortDate(t.created_at)}</TD>
-            <TD className="tabular">
-              <LastUsed t={t} />
-            </TD>
-            <TD align="right">
-              <TokenMenu t={t} onRevoke={onRevoke} />
-            </TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
+    <div className="min-w-0 flex-1">
+      <p className="truncate text-[16px] font-medium">{t.name}</p>
+      <p className="mt-0.5 flex items-center justify-between gap-3 text-[14px] text-fg-muted">
+        <Mono>{shortSecret(t.secret)}</Mono>
+        <LastUsed t={t} />
+      </p>
+    </div>
   );
 }
-
-/** Phones: two lines per token, name and menu, then the token and its last use. */
-function TokenList({ tokens, onRevoke }: { tokens: AdminToken[]; onRevoke: (t: AdminToken) => void }) {
-  return (
-    <ul className="divide-y divide-border border-y border-border">
-      {tokens.map((t) => (
-        <li key={t.id} className="flex items-center gap-3 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[16px] font-medium">{t.name}</p>
-            <p className="mt-0.5 flex items-center justify-between gap-3 text-[14px] text-fg-muted">
-              <Mono>{shortSecret(t.secret)}</Mono>
-              <LastUsed t={t} />
-            </p>
-          </div>
-          <TokenMenu t={t} onRevoke={onRevoke} />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenChange: (o: boolean) => void; existing: AdminToken[] }) {
   const create = useCreateAdminToken();
   const invalidate = useInvalidateAll();
@@ -270,25 +263,5 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
         </Field>
       </form>
     </Dialog>
-  );
-}
-
-function RevokeDialog({ token, onClose }: { token?: AdminToken; onClose: () => void }) {
-  const revoke = useRevokeAdminToken();
-  return (
-    <TypeToConfirmDialog
-      open={!!token}
-      onOpenChange={(o) => !o && onClose()}
-      title={`Revoke ${token?.name ?? ""}?`}
-      body="Scripts and agents using this token get 401 straight away. A revoked token can't be turned back on."
-      name={token?.name ?? ""}
-      confirmLabel="Revoke token"
-      onConfirm={async () => {
-        if (!token) return;
-        const res = await revoke.mutateAsync(token.id);
-        // Toast: the confirm dialog has closed.
-        notifyChange(`${token.name} revoked`, res, { undoable: false });
-      }}
-    />
   );
 }

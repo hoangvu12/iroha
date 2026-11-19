@@ -78,17 +78,19 @@ export function useRevokeAdminToken() {
 
 export type EntryFilter = { q: string; actor: string; resource: string };
 
-const PAGE = 50;
-
-/** Audit Entries newest first, a page at a time ("Show older" reads the next). */
-export function useAuditEntries(f: EntryFilter) {
+/**
+ * Audit Entries newest first, `limit` at a time: each page of the table is one
+ * page of the API, read with the cursor of the page before (`next_before`), so
+ * page N is read once pages 1 to N-1 are.
+ */
+export function useAuditEntries(f: EntryFilter, limit: number) {
   return useInfiniteQuery({
-    queryKey: [...keys.entries, "list", f],
+    queryKey: [...keys.entries, "list", f, limit],
     initialPageParam: "",
     queryFn: ({ pageParam, signal }) =>
       api.get<AuditEntryPage>("/api/audit-entries", {
         signal,
-        query: { q: f.q, actor: f.actor, resource: f.resource, before: pageParam, limit: PAGE },
+        query: { q: f.q, actor: f.actor, resource: f.resource, before: pageParam, limit },
       }),
     getNextPageParam: (last) => last.next_before ?? undefined,
     // A filter change is a new query: keep the shown entries until the new ones land, so no skeleton flashes.

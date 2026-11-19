@@ -1,26 +1,62 @@
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { ChevronDown, History, KeyRound, LockKeyhole, Monitor, RotateCcw, User } from "lucide-react";
 import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import type { Actor, AuditEntry } from "@/api/types";
 import { useIsPhone } from "@/lib/media";
-import { Button, IconButton, buttonClass } from "@/ui/Button";
-import { cn } from "@/ui/cn";
+import { Button, buttonClass } from "@/ui/Button";
 import { ConfirmAction } from "@/ui/Confirm";
+import { DataTable, columnsFor, useTablePaging } from "@/ui/DataTable";
 import { SearchInput } from "@/ui/Input";
 import { LogoTile, PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { Menu, MenuContent, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
-import { Chip, EmptyState, ErrorState, NoResults } from "@/ui/States";
-import { Skeleton } from "@/ui/Skeleton";
+import { Chip, EmptyState } from "@/ui/States";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { type EntryFilter, type ResourceOption, useAuditEntries, useAuditFilters, useInvalidateAll } from "./api";
 import { EntryChanges, RevertNote } from "./Changes";
 import { clockTime, dayLabel } from "./format";
 import { SAMPLE_AUDIT_ENTRIES } from "./samples";
 
-/** Settings → Audit Entries (C29): every change, grouped by day, with Revert on the row. */
+// Settings → Audit Entries (C29) on the shared DataTable (UI ticket 08): every
+// change, newest first, in numbered pages; a row shows its before and after
+// under it, and Revert sits in the row. The filters live in the URL
+// (?q=&actor=&resource=), so other pages can link to a filtered history.
+// The API reads older entries from a cursor (`before`), so each page of the
+// table is one page of the API, read once the page before it is; the total
+// isn't known until the last page is. Columns don't sort: the server's order
+// (newest first) is the only one a cursor can page.
+
+type Labels = Map<string, ResourceOption>;
+
+/** Entries that start a new day on the page, which show the day over their time. */
+const DayStarts = createContext<Set<string>>(new Set());
+const LabelsOf = createContext<Labels>(new Map());
+
+const entryName = (e: AuditEntry) => `${e.summary} at ${clockTime(e.time)}`;
+
+const col = columnsFor<AuditEntry>();
+const columns = col.columns([
+  col.display({ id: "time", header: "Time", meta: { width: "w-[92px]" }, cell: ({ row }) => <When entry={row.original} /> }),
+  col.display({
+    id: "actor",
+    header: "Changed by",
+    meta: { width: "w-[16%]", className: "max-w-0 text-[15px] text-fg-muted" },
+    cell: ({ row }) => <ActorName actor={row.original.actor} />,
+  }),
+  col.display({ id: "change", header: "Change", meta: { className: "max-w-0 text-[15px] font-medium" }, cell: ({ row }) => <Summary entry={row.original} /> }),
+  col.display({ id: "target", header: "On", meta: { width: "w-[24%]", className: "max-w-0 text-[15px]" }, cell: ({ row }) => <Target entry={row.original} /> }),
+  col.display({
+    id: "revert",
+    header: () => <span className="sr-only">Revert</span>,
+    meta: { width: "w-[150px]", label: "Revert", className: "text-right" },
+    cell: ({ row }) => <RevertControl entry={row.original} />,
+  }),
+]);
+
+/** Settings → Audit Entries (C29): every change, newest first, with Revert on the row. */
 export function AuditEntriesTab() {
+  const phone = useIsPhone();
   const [params, setParams] = useSearchParams();
   const actor = params.get("actor") ?? "";
   const resource = params.get("resource") ?? "";
@@ -37,14 +73,48 @@ export function AuditEntriesTab() {
       },
       { replace: true },
     );
-  useEffect(() => setParam("q", q), [q]);
+  useEffect(() => setParam("q", q), [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [pagination, setPagination] = useTablePaging("audit-entries");
   const filter: EntryFilter = { q, actor, resource };
-  const entries = useAuditEntries(filter);
+  const entries = useAuditEntries(filter, pagination.pageSize);
   const filters = useAuditFilters();
-  const labels = useMemo(() => new Map((filters.data?.resources ?? []).map((r) => [r.name, r])), [filters.data]);
+  const labels = useMemo<Labels>(() => new Map((filters.data?.resources ?? []).map((r) => [r.name, r])), [filters.data]);
   const actorLabel = (filters.data?.actors ?? []).find((a) => a.filter === actor)?.name ?? actor;
   const resourceLabel = labels.get(resource)?.plural ?? resource.replace(/_/g, " ");
+
+  // A new filter starts again on page 1 (the table does that for the search itself).
+  const filterKey = `${actor}\n${resource}`;
+  const [lastFilter, setLastFilter] = useState(filterKey);
+  if (lastFilter !== filterKey) {
+    setLastFilter(filterKey);
+    if (pagination.pageIndex !== 0) setPagination((p) => ({ ...p, pageIndex: 0 }));
+  }
+
+  // Page N of the table is page N of the API: read it when it's asked for.
+  const pages = entries.data?.pages ?? [];
+  const wanted = pagination.pageIndex;
+  const { hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage } = entries;
+  useEffect(() => {
+    if (wanted >= pages.length && hasNextPage && !isFetchingNextPage && !isPlaceholderData) void fetchNextPage();
+  }, [wanted, pages.length, hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage]);
+  // Until it lands the page before stays, dimmed.
+  const shownIndex = Math.min(wanted, Math.max(0, pages.length - 1));
+  const rows = entries.data ? (pages[shownIndex]?.entries ?? []) : undefined;
+  const loaded = pages.reduce((n, p) => n + p.entries.length, 0);
+  // Pages past the last one read are one page more while the API has older entries.
+  const rowCount = loaded + (hasNextPage ? pagination.pageSize : 0);
+
+  const dayStarts = useMemo(() => {
+    const starts = new Set<string>();
+    let last = "";
+    for (const e of rows ?? []) {
+      const day = dayLabel(e.time);
+      if (day !== last) starts.add(e.id);
+      last = day;
+    }
+    return starts;
+  }, [rows]);
 
   const chips = [
     ...(q ? [{ label: `Text is “${q}”`, onRemove: () => setText("") }] : []),
@@ -56,82 +126,85 @@ export function AuditEntriesTab() {
     setParams({}, { replace: true });
   };
 
-  const all = entries.data?.pages.flatMap((p) => p.entries) ?? [];
+  const toolbar = (
+    <>
+      <SearchInput
+        placeholder="Search changes"
+        aria-label="Search changes"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        className="min-w-0 flex-1 md:w-[300px] md:flex-none"
+      />
+      <Menu>
+        <MenuTrigger className={buttonClass("secondary", "md", "gap-1.5")}>
+          {actor ? actorLabel : "Anyone"}
+          <ChevronDown size={15} aria-hidden className="text-fg-muted" />
+        </MenuTrigger>
+        <MenuContent align="start" className="min-w-56" maxHeight="max-h-[min(60vh,calc(var(--available-height)-2px))]">
+          <MenuRadioGroup label="Changed by" value={actor} onValueChange={(v) => setParam("actor", v)}>
+            <MenuRadioItem value="">Anyone</MenuRadioItem>
+            {(filters.data?.actors ?? []).map((a) => (
+              <MenuRadioItem key={a.filter} value={a.filter}>
+                <ActorIcon kind={a.kind} />
+                <span className="truncate">{a.name}</span>
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+          <MenuSeparator />
+          <MenuRadioGroup label="Changed what" value={resource} onValueChange={(v) => setParam("resource", v)}>
+            <MenuRadioItem value="">Everything</MenuRadioItem>
+            {(filters.data?.resources ?? []).map((r) => (
+              <MenuRadioItem key={r.name} value={r.name}>
+                {r.plural}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuContent>
+      </Menu>
+      {resource && <Chip label={`Only ${resourceLabel}`} onRemove={() => setParam("resource", "")} />}
+    </>
+  );
 
+  const from = shownIndex * pagination.pageSize + 1;
   return (
     <section aria-label="Audit Entries">
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <SearchInput
-          placeholder="Search changes"
-          aria-label="Search changes"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="min-w-0 flex-1 md:w-[300px] md:flex-none"
-        />
-        <Menu>
-          <MenuTrigger className={buttonClass("secondary", "md", "gap-1.5")}>
-            {actor ? actorLabel : "Anyone"}
-            <ChevronDown size={15} aria-hidden className="text-fg-muted" />
-          </MenuTrigger>
-          <MenuContent align="start" className="min-w-56" maxHeight="max-h-[min(60vh,calc(var(--available-height)-2px))]">
-            <MenuRadioGroup label="Changed by" value={actor} onValueChange={(v) => setParam("actor", v)}>
-              <MenuRadioItem value="">Anyone</MenuRadioItem>
-              {(filters.data?.actors ?? []).map((a) => (
-                <MenuRadioItem key={a.filter} value={a.filter}>
-                  <ActorIcon kind={a.kind} />
-                  <span className="truncate">{a.name}</span>
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-            <MenuSeparator />
-            <MenuRadioGroup label="Changed what" value={resource} onValueChange={(v) => setParam("resource", v)}>
-              <MenuRadioItem value="">Everything</MenuRadioItem>
-              {(filters.data?.resources ?? []).map((r) => (
-                <MenuRadioItem key={r.name} value={r.name}>
-                  {r.plural}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </MenuContent>
-        </Menu>
-        {resource && <Chip label={`Only ${resourceLabel}`} onRemove={() => setParam("resource", "")} />}
-      </div>
-
-      {entries.isError ? (
-        <ErrorState title="Couldn't load Audit Entries" error={entries.error} onRetry={() => void entries.refetch()} />
-      ) : (
-      // Measured from sample entries grouped by day, like the real list. A filter change keeps the list (dimmed).
-      <Skeleton
-        data={entries.data ? all : undefined}
-        sample={SAMPLE_AUDIT_ENTRIES}
-        id="audit-entries"
-        label="Loading Audit Entries"
-        className={cn("transition-opacity", entries.isPlaceholderData && "opacity-60")}
-      >
-      {(all) => all.length === 0 ? (
-        chips.length > 0 ? (
-          <NoResults title="No changes match these filters" filters={chips} onClear={clear} />
-        ) : (
-          <EmptyState
-            icon={History}
-            title="No changes yet"
-            description="Every change to Iroha's configuration shows up here, with who made it and a way to revert it."
+      <LabelsOf.Provider value={labels}>
+        <DayStarts.Provider value={dayStarts}>
+          <DataTable<AuditEntry>
+            id="audit-entries"
+            label="Audit Entries"
+            columns={columns}
+            data={rows}
+            sample={SAMPLE_AUDIT_ENTRIES}
+            getRowId={(e) => e.id}
+            rowName={entryName}
+            error={entries.isError ? entries.error : undefined}
+            onRetry={() => void entries.refetch()}
+            toolbar={toolbar}
+            search={q}
+            manualFiltering
+            filterChips={chips}
+            noResultsTitle="No changes match these filters"
+            onClearFilters={clear}
+            paging={{ mode: "server", pagination, onPaginationChange: setPagination, rowCount }}
+            dimmed={isPlaceholderData || wanted !== shownIndex}
+            renderExpanded={(e) => <Details entry={e} labels={labels} phone={phone} />}
+            phoneRow={(e) => <EntryLine entry={e} />}
+            empty={
+              <EmptyState
+                icon={History}
+                title="No changes yet"
+                description="Every change to Iroha's configuration shows up here, with who made it and a way to revert it."
+              />
+            }
+            footer={() =>
+              rows && rows.length > 0
+                ? `${from}–${from + rows.length - 1} of ${hasNextPage ? `more than ${loaded}` : loaded} changes`
+                : null
+            }
           />
-        )
-      ) : (
-        <>
-          <EntryList entries={all} labels={labels} />
-          {entries.hasNextPage && (
-            <div className="mt-6 flex justify-center">
-              <Button loading={entries.isFetchingNextPage} onClick={() => void entries.fetchNextPage()}>
-                Show older changes
-              </Button>
-            </div>
-          )}
-        </>
-      )}
-      </Skeleton>
-      )}
+        </DayStarts.Provider>
+      </LabelsOf.Provider>
     </section>
   );
 }
@@ -145,35 +218,71 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-type Labels = Map<string, ResourceOption>;
-
-function EntryList({ entries, labels }: { entries: AuditEntry[]; labels: Labels }) {
-  const [open, setOpen] = useState<string>();
-  const groups: { day: string; entries: AuditEntry[] }[] = [];
-  for (const e of entries) {
-    const day = dayLabel(e.time);
-    const last = groups[groups.length - 1];
-    if (last && last.day === day) last.entries.push(e);
-    else groups.push({ day, entries: [e] });
-  }
+/** The time; the first entry of each day on the page shows the day over it. */
+function When({ entry }: { entry: AuditEntry }) {
+  const first = useContext(DayStarts).has(entry.id);
   return (
-    <div className="flex flex-col gap-6">
-      {groups.map((g) => (
-        <section key={g.day} aria-label={g.day}>
-          <h3 className="mb-1 px-2.5 text-[13px] font-medium text-fg-muted">{g.day}</h3>
-          <ul>
-            {g.entries.map((e) => (
-              <EntryRow
-                key={e.id}
-                entry={e}
-                labels={labels}
-                open={open === e.id}
-                onToggle={() => setOpen((o) => (o === e.id ? undefined : e.id))}
-              />
-            ))}
-          </ul>
-        </section>
-      ))}
+    <span className="flex flex-col leading-tight">
+      {first && <span className="text-[12.5px] font-medium text-fg-muted">{dayLabel(entry.time)}</span>}
+      <span className="font-mono text-[13.5px] text-fg-muted">{clockTime(entry.time)}</span>
+    </span>
+  );
+}
+
+function Summary({ entry }: { entry: AuditEntry }) {
+  const target = targetOf(entry);
+  return (
+    <span className="block truncate" title={entry.summary}>
+      {what(entry, target)}
+    </span>
+  );
+}
+
+function Target({ entry }: { entry: AuditEntry }) {
+  const labels = useContext(LabelsOf);
+  const target = targetOf(entry);
+  if (!target) return null;
+  const targetLabel = target.parent ? target.name : `${labels.get(target.resource)?.label ?? target.resource} ${target.name}`;
+  return (
+    <span className="flex min-w-0 items-center gap-2.5" title={targetLabel}>
+      <TargetIcon resource={target.resource} name={target.name} />
+      <TargetName t={target} />
+    </span>
+  );
+}
+
+/** Under an opened row: what changed, before and after, and what Revert would do; on phones Revert too. */
+function Details({ entry, labels, phone }: { entry: AuditEntry; labels: Labels; phone: boolean }) {
+  return (
+    <div className="flex flex-col gap-4 pt-1 md:ml-[140px] md:max-w-[720px]">
+      <EntryChanges entry={entry} labels={labels} />
+      <RevertNote entry={entry} />
+      {phone && (
+        <div>
+          <RevertControl entry={entry} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Phones: what changed and when, then who and on what (C31). */
+function EntryLine({ entry }: { entry: AuditEntry }) {
+  const target = targetOf(entry);
+  const first = useContext(DayStarts).has(entry.id);
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="truncate text-[15.5px] font-medium">{what(entry, target)}</p>
+        <span className="shrink-0 font-mono text-[13px] text-fg-muted">
+          {first && <span className="mr-1.5 font-sans">{dayLabel(entry.time)}</span>}
+          {clockTime(entry.time)}
+        </span>
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-3 text-[14px] text-fg-muted">
+        <ActorName actor={entry.actor} />
+        {target && <TargetName t={target} />}
+      </div>
     </div>
   );
 }
@@ -185,7 +294,7 @@ function ActorIcon({ kind }: { kind: Actor["kind"] }) {
 
 function ActorName({ actor }: { actor: Actor }) {
   return (
-    <span className="inline-flex min-w-0 items-center gap-2">
+    <span className="inline-flex min-w-0 max-w-full items-center gap-2">
       <ActorIcon kind={actor.kind} />
       <span className="truncate">{actor.name}</span>
     </span>
@@ -248,93 +357,6 @@ function what(e: AuditEntry, target?: { name: string }) {
   return e.summary;
 }
 
-/** The desktop row and its opened details share columns: time, who, what, on what, Revert, chevron. */
-const ROW_GRID = "grid grid-cols-[64px_minmax(0,0.8fr)_minmax(0,1.4fr)_minmax(0,1fr)_136px_28px] gap-x-4 px-2.5";
-
-function EntryRow({ entry, labels, open, onToggle }: { entry: AuditEntry; labels: Labels; open: boolean; onToggle: () => void }) {
-  const phone = useIsPhone();
-  const target = targetOf(entry);
-  const summary = what(entry, target);
-  const detailsId = `entry-${entry.id}`;
-  const targetLabel = target && (target.parent ? target.name : `${labels.get(target.resource)?.label ?? target.resource} ${target.name}`);
-
-  const toggle = (
-    <IconButton
-      icon={ChevronDown}
-      label={open ? "Hide before and after" : "Show before and after"}
-      size="sm"
-      aria-expanded={open}
-      aria-controls={detailsId}
-      onClick={(ev) => {
-        ev.stopPropagation();
-        onToggle();
-      }}
-      className={cn("transition-transform", open && "rotate-180")}
-    />
-  );
-
-  return (
-    <li className={cn("rounded-lg", open && "bg-subtle")}>
-      {phone ? (
-        <div className="flex cursor-pointer items-start gap-2 px-1 py-3" onClick={onToggle}>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline justify-between gap-3">
-              <p className="truncate text-[15.5px] font-medium">{summary}</p>
-              <span className="shrink-0 font-mono text-[13px] text-fg-muted">{clockTime(entry.time)}</span>
-            </div>
-            <div className="mt-1 flex items-center justify-between gap-3 text-[14px] text-fg-muted">
-              <ActorName actor={entry.actor} />
-              {target && <TargetName t={target} />}
-            </div>
-          </div>
-          {toggle}
-        </div>
-      ) : (
-        <div className={cn(ROW_GRID, "min-h-[64px] cursor-pointer items-center")} onClick={onToggle}>
-          <span className="font-mono text-[13.5px] text-fg-muted">{clockTime(entry.time)}</span>
-          <span className="min-w-0 text-[15px] text-fg-muted">
-            <ActorName actor={entry.actor} />
-          </span>
-          <span className="truncate text-[15px] font-medium" title={entry.summary}>
-            {summary}
-          </span>
-          <span className="flex min-w-0 items-center gap-2.5 text-[15px]" title={targetLabel}>
-            {target && (
-              <>
-                <TargetIcon resource={target.resource} name={target.name} />
-                <TargetName t={target} />
-              </>
-            )}
-          </span>
-          <span className="flex justify-end" onClick={(ev) => ev.stopPropagation()}>
-            <RevertControl entry={entry} />
-          </span>
-          {toggle}
-        </div>
-      )}
-      {open &&
-        (phone ? (
-          <div id={detailsId} className="flex flex-col gap-5 px-3 pb-4 pt-1">
-            <EntryChanges entry={entry} labels={labels} />
-            <RevertNote entry={entry} />
-            <div>
-              <RevertControl entry={entry} />
-            </div>
-          </div>
-        ) : (
-          <div id={detailsId} className={cn(ROW_GRID, "items-start pb-5 pt-1")}>
-            <div className="col-start-3">
-              <EntryChanges entry={entry} labels={labels} />
-            </div>
-            <div className="col-span-3 pt-1">
-              <RevertNote entry={entry} />
-            </div>
-          </div>
-        ))}
-    </li>
-  );
-}
-
 function revertError(e: unknown): string {
   if (!isApiError(e)) return e instanceof Error ? e.message : String(e);
   if (e.code === "audit_conflict") {
@@ -345,7 +367,10 @@ function revertError(e: unknown): string {
   return e.hint ? `${e.message} ${e.hint}` : e.message;
 }
 
-/** Revert: the result (with Undo, which puts the change back) shows in its place, a failure under it. */
+/**
+ * Revert: the result (with Undo, which puts the change back) shows in its place, a failure under it.
+ * Named "Revert <summary>" so each row's button is its own for agents.
+ */
 function RevertControl({ entry }: { entry: AuditEntry }) {
   const invalidate = useInvalidateAll();
   const reverting = useSave({ refresh: invalidate, describe: (e) => `Couldn't revert. ${revertError(e)}` });
@@ -377,15 +402,16 @@ function RevertControl({ entry }: { entry: AuditEntry }) {
           }
         }}
       >
-        <Button danger="hover" icon={RotateCcw}>
+        <Button danger="hover" icon={RotateCcw} aria-label={`Revert ${entry.summary}…`}>
           Revert…
         </Button>
       </ConfirmAction>
     );
   return (
-    <span className="flex flex-col items-end gap-1">
+    <span className="inline-flex flex-col items-end gap-1">
       <Button
         icon={RotateCcw}
+        aria-label={`Revert ${entry.summary}`}
         loading={reverting.pending}
         onClick={() => void reverting.run(() => revertEntry(entry.id), { message: () => ({ message: "Reverted", undone: true }) })}
       >

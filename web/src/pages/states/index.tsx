@@ -1,21 +1,20 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { Ellipsis, KeyRound, Plus, Trash2, X } from "lucide-react";
+import { KeyRound, Plus, Trash2, X } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
 import { ApiError } from "@/api/client";
 import { Button, IconButton } from "@/ui/Button";
-import { ConfirmAction } from "@/ui/Confirm";
+import { ConfirmAction, useConfirm } from "@/ui/Confirm";
 import { CopyButton } from "@/ui/CopyButton";
+import { type DataTableProps, type SortingState, DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
 import { Input } from "@/ui/Input";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { Switch } from "@/ui/Switch";
 import { ConfirmDialog, TypeToConfirmDialog } from "@/ui/Dialog";
 import { LogoTile } from "@/ui/LogoTile";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
-import { Status } from "@/ui/bits";
-import { EmptyState, ErrorState, NoResults } from "@/ui/States";
-import { Skeleton } from "@/ui/Skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/ui/Table";
+import { MenuItem, MenuSeparator } from "@/ui/Menu";
+import { Mono, Status } from "@/ui/bits";
+import { EmptyState } from "@/ui/States";
 import { notify } from "@/ui/toast";
 
 // /states: the shared components in every state (design C25), for anyone
@@ -23,7 +22,7 @@ import { notify } from "@/ui/toast";
 
 function Panel({ title, note, children }: { title: string; note: string; children: ReactNode }) {
   return (
-    <section>
+    <section aria-label={title}>
       <h2 className="mb-3 text-[15px] font-semibold">
         {title} <span className="ml-1.5 font-normal text-fg-muted">{note}</span>
       </h2>
@@ -50,37 +49,33 @@ export default function StatesPage() {
         description="How a page looks while it loads, when it has nothing to show, when something fails, and when it asks before acting."
       />
       <div className="grid gap-8 lg:grid-cols-2">
-        <Panel title="Loading" note="Measured from the real rows, so nothing moves when they land. No spinners.">
-          {/* Never loads: the skeleton of the table below, drawn from its rows. */}
-          <Skeleton data={null} sample={KEY_ROWS} label="Loading keys">
-            {(rows) => <KeyTable rows={rows} />}
-          </Skeleton>
+        <Panel title="Loading" note="The table's skeleton, measured from its sample rows, so nothing moves when they land. No spinners.">
+          {/* Never loads. */}
+          <DemoTable id="states-loading" data={undefined} />
         </Panel>
-        <Panel title="Empty" note="One sentence and the one action that fills it.">
-          <EmptyState
-            icon={KeyRound}
-            title="No Upstream Keys yet"
-            description="Paste keys from dashscope and Iroha starts routing to them."
-            action={
-              <Button variant="primary" icon={Plus}>
-                Add keys
-              </Button>
+        <Panel title="Empty" note="One sentence and the one action that fills it; the toolbar hides.">
+          <DemoTable
+            id="states-empty"
+            data={[]}
+            empty={
+              <EmptyState
+                icon={KeyRound}
+                title="No Upstream Keys yet"
+                description="Paste keys from dashscope and Iroha starts routing to them."
+                action={
+                  <Button variant="primary" icon={Plus}>
+                    Add keys
+                  </Button>
+                }
+              />
             }
           />
         </Panel>
-        <Panel title="No results" note="Filters stay visible so they're easy to undo.">
-          <NoResults
-            title="No requests match these filters"
-            description="Nothing from Test (as zeron-fleet) failed in the last 24 hours."
-            filters={[
-              { label: "Caller is Test (as zeron-fleet)", onRemove: () => {} },
-              { label: "Status is 5xx", onRemove: () => {} },
-            ]}
-            onClear={() => {}}
-          />
+        <Panel title="No results" note="Filters stay visible as chips, so they're easy to undo.">
+          <NoResultsDemo />
         </Panel>
         <Panel title="Error" note="Says what failed and keeps the page around it.">
-          <ErrorState title="Couldn't load Requests" error={timeout} onRetry={() => {}} />
+          <DemoTable id="states-error" data={undefined} error={timeout} errorTitle="Couldn't load Requests" onRetry={() => {}} />
         </Panel>
         <Panel title="Confirm" note="Destructive triggers are red and ask, naming what goes; revoke asks for the name. Solid red only on the button that does it.">
           <div className="flex flex-wrap items-center gap-2">
@@ -150,8 +145,8 @@ export default function StatesPage() {
             ))}
           </div>
         </Panel>
-        <Panel title="Table, buttons, menu" note="One fact per cell; one primary button per page.">
-          <div className="mb-4 flex flex-wrap gap-2">
+        <Panel title="Buttons" note="One primary button per page.">
+          <div className="flex flex-wrap gap-2">
             <Button variant="primary" icon={Plus}>
               Add Provider
             </Button>
@@ -159,56 +154,122 @@ export default function StatesPage() {
             <Button variant="ghost">Clear selection</Button>
             <Button danger>Delete…</Button>
           </div>
-          <KeyTable rows={KEY_ROWS} />
+        </Panel>
+        <Panel title="Table" note="One fact per cell. Sort, select for the bulk bar, a row menu, details under a row, pages.">
+          <TableDemo />
         </Panel>
       </div>
     </>
   );
 }
 
-const KEY_ROWS = [
-  ["team-1", "sk-…a91f", "green", "Active"],
-  ["team-3", "sk-…0be4", "amber", "Cooling"],
-  ["team-5", "sk-…c3a8", "red", "Invalid"],
-  ["team-7", "sk-…f02b", "gray", "Disabled"],
-];
+type DemoKey = { id: string; name: string; secret: string; tone: "green" | "amber" | "red" | "gray"; state: string };
 
-function KeyTable({ rows }: { rows: string[][] }) {
+const STATES: Pick<DemoKey, "tone" | "state">[] = [
+  { tone: "green", state: "Active" },
+  { tone: "amber", state: "Cooling" },
+  { tone: "red", state: "Invalid" },
+  { tone: "gray", state: "Disabled" },
+];
+const DEMO_KEYS: DemoKey[] = Array.from({ length: 12 }, (_, i) => ({
+  id: `k${i + 1}`,
+  name: `team-${i + 1}`,
+  secret: `sk-…${(0xa91f + i * 2741).toString(16).slice(-4)}`,
+  ...STATES[i % 4],
+}));
+
+const col = columnsFor<DemoKey>();
+const demoColumns = col.columns([
+  col.accessor("name", { header: "Name", sortFn: "alphanumeric", meta: { className: "font-medium" } }),
+  col.display({ id: "key", header: "Key", cell: ({ row }) => <Mono className="text-fg-muted">{row.original.secret}</Mono> }),
+  col.accessor("state", { header: "State", cell: ({ row }) => <Status tone={row.original.tone}>{row.original.state}</Status> }),
+]);
+const BY_NAME: SortingState = [{ id: "name", desc: false }];
+
+/** The demo table in one state: `data` undefined loads, `[]` is empty, `error` failed. */
+function DemoTable(p: Partial<DataTableProps<DemoKey>> & { id: string }) {
   return (
-    <Table>
-      <THead>
-        <tr>
-          <TH>Name</TH>
-          <TH>Key</TH>
-          <TH>State</TH>
-          <TH />
-        </tr>
-      </THead>
-      <TBody>
-        {rows.map(([n, k, tone, s], i) => (
-          <TR key={n} selected={i === 1}>
-            <TD className="font-medium">{n}</TD>
-            <TD mono>{k}</TD>
-            <TD>
-              <Status tone={tone as "green"}>{s}</Status>
-            </TD>
-            <TD align="right">
-              <Menu>
-                <MenuIconTrigger icon={Ellipsis} label={`Actions for ${n}`} size="sm" />
-                <MenuContent>
-                  <MenuItem>Test</MenuItem>
-                  <MenuItem>Disable</MenuItem>
-                  <MenuSeparator />
-                  <MenuItem icon={Trash2} danger>
-                    Delete
-                  </MenuItem>
-                </MenuContent>
-              </Menu>
-            </TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
+    <DataTable<DemoKey>
+      label="Upstream Keys"
+      columns={demoColumns}
+      data={DEMO_KEYS}
+      sample={DEMO_KEYS.slice(0, 4)}
+      getRowId={(k) => k.id}
+      rowName={(k) => k.name}
+      defaultSorting={BY_NAME}
+      paging={{ mode: "none" }}
+      maxHeight="max-h-80"
+      {...p}
+    />
+  );
+}
+
+function NoResultsDemo() {
+  const [q, setQ] = useState("qwen");
+  const [cooling, setCooling] = useState(true);
+  const chips = [
+    ...(q ? [{ label: `Search: ${q}`, onRemove: () => setQ("") }] : []),
+    ...(cooling ? [{ label: "Cooling", onRemove: () => setCooling(false) }] : []),
+  ];
+  return (
+    <DemoTable
+      id="states-no-results"
+      data={DEMO_KEYS.slice(0, 4)}
+      search={q}
+      columnFilters={cooling ? [{ id: "state", value: "Cooling" }] : []}
+      filterChips={chips}
+      noResultsTitle="No keys match"
+      onClearFilters={() => {
+        setQ("");
+        setCooling(false);
+      }}
+    />
+  );
+}
+
+function TableDemo() {
+  const confirm = useConfirm();
+  const askDelete = (names: string[]) =>
+    confirm.ask({
+      title: names.length === 1 ? `Delete ${names[0]}?` : `Delete ${names.length} keys?`,
+      body: `${names.slice(0, 5).join(", ")}${names.length > 5 ? ` and ${names.length - 5} more` : ""} will be removed. Undo brings ${names.length === 1 ? "it" : "them"} back.`,
+      confirmLabel: names.length === 1 ? "Delete key" : `Delete ${names.length} keys`,
+      onConfirm: () => new Promise((r) => setTimeout(r, 400)),
+    });
+  return (
+    <>
+      <DemoTable
+        id="states-table"
+        label="Demo keys"
+        paging={{ mode: "pages", sizes: [5, 10] }}
+        bulk={({ rows }) => (
+          <>
+            <Button size="sm">Test</Button>
+            <Button size="sm" danger onClick={() => askDelete(rows.map((k) => k.name))}>
+              Delete…
+            </Button>
+          </>
+        )}
+        rowActions={(k) => (
+          <RowMenu name={k.name}>
+            <MenuItem>Test</MenuItem>
+            <MenuItem>Disable</MenuItem>
+            <MenuSeparator />
+            <MenuItem icon={Trash2} danger onSelect={() => askDelete([k.name])}>
+              Delete…
+            </MenuItem>
+          </RowMenu>
+        )}
+        rowTone={(k) => (k.state === "Invalid" ? "danger" : undefined)}
+        renderExpanded={(k) => (
+          <p className="text-sm text-fg-muted">
+            {k.name} was added on Nov 3 and is {k.state.toLowerCase()}.
+          </p>
+        )}
+        footer={({ shown }) => `${shown} keys. Shift-click to select a range.`}
+      />
+      {confirm.dialog}
+    </>
   );
 }
 

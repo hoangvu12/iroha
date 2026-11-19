@@ -682,3 +682,27 @@ The Providers and Model Pools lists (`pages/providers/List.tsx`), Endpoints, Mod
   - Inside a Skullet sample `RowHandle` renders a plain span, because the sample renders outside the Root.
   - Agents see the group "Order of <pool>'s members" with the action `move(key, index)`. The handles aren't in the snapshot.
 - Pool Members' row menu is named "More for <provider> (<model>)". It holds Move up/down, Test in Chat, Open, and a danger Remove… that asks first.
+
+### UI ticket 09: the Requests feed on DataTable
+
+- **Feed** (`pages/requests/Feed.tsx`): `DataTable id="requests"` in infinite mode over `useRequestFeed`'s rows (pages flattened, live rows first). Columns are display columns built from `url-state.ts` `COLUMNS`; `?hide=` is `columnVisibility`. The server filters (`manualFiltering`, `manualSorting`, no column sorting); the chips stay above the table. A row opens the Request sheet; its "Open Request <id>" button sits in the first shown plain-text column (Time unless hidden). The open Request is `activeRowId`, and stepping ↓ onto the last loaded row loads the older ones. "Load older Requests" is the load-more button. Arriving rows flash once (`useArrivals`, by `data-row-id`; ticket 18 owns that motion).
+- **Numbered pages instead**: `FEED_PAGING = "pages"` in `Feed.tsx` (or `<RequestsFeed paging="pages" />`). That is DataTable server mode: the API pages by cursor, so a later page loads the older pages it needs first, and the shown rows stay dimmed meanwhile. `rowCount` comes from the stats.
+- **DataTable additions** (backwards compatible):
+  - `paging.newRowsLabel` makes an infinite table live, through `ui/hold-view.ts` `useHoldView`. Rows arriving on top don't move the view while the reader is scrolled down or the pointer is over the rows: the scroller moves by their height. The pill `newRowsLabel(n)` ("3 new") goes back to the top. The browser's own `overflow-anchor` is off there, since the hook does the anchoring.
+  - `activeRowId`: `aria-current="true"`, the selected tint, and the row scrolled into view when it changes.
+  - Every row is marked `data-row-id`; the row container is `data-rows`.
+  - Body rows are one flat keyed list, so a row added on top no longer redraws every row under it.
+  - Load-more observes again after each load, inside the table's scroller, so a short page keeps loading until there is no more.
+- **Refs inside DataTable's `Skeleton` don't hold**: Skullet replaces them on what it renders, and a ref object read `null` after the first update. Find elements from a ref outside it (DataTable's root `div`) with `querySelector`.
+- Tests: `pages/requests/Feed.test.tsx` (load older until none, Load older for the keyboard, live rows on top, URL state after a reload, numbered pages, agent test) and `ui/DataTable.test.tsx` ("live rows", "no remount", "loads again"; `layOut()` fakes row geometry for jsdom).
+
+### UI ticket 08: Gateway Keys and Settings tables
+
+- **On DataTable**: Gateway Keys (`?q=` searches name or key, `?sort=name|access|used|requests&dir=desc`), Revoked Gateway Keys (under the "Revoked keys" Disclosure, newest revoke first), Admin Tokens (oldest first), Audit Entries and Settings → Sign-in's signed-in browsers (newest sign-in first). Each pages 25/50/100 with its size remembered (`gateway-keys`, `gateway-keys-revoked`, `admin-tokens`, `audit-entries`, `owner-sessions`); the pager only shows past 25 rows.
+- **Asking first**: Revoke… (name typed), Delete… and Sign out… go through one `useConfirm` per table. `pages/gateway-keys/confirm.tsx` `useKeyQuestions()` holds the Gateway Key questions; the key page's danger zone still renders them as `RevokeDialog`/`DeleteDialog`.
+- **A Gateway Key's name** is a real link to its page (UI SDK Button rendered as a router `Link`, named "Open <name>"), so Ctrl/⌘-click still opens a tab; the row click navigates too.
+- **Audit Entries** pages over the API's cursor: page N of the table is page N of `GET /api/audit-entries?before=&limit=<page size>` (`useAuditEntries(filter, limit)`, an infinite query keyed by filter and size), read when it's asked for; the total is unknown until the last page, so `rowCount` is the loaded rows plus one page while `next_before` comes back, and the footer says "26–50 of more than 50 changes". The URL filters (`?q=&actor=&resource=`) are unchanged; a new filter goes back to page 1. Columns don't sort (only the server's newest-first order can be paged by a cursor). The first entry of each day on a page shows the day over its time. Revert is a column (in the details on phones), named "Revert <summary>" so each row's button is its own.
+- **DataTable additions** (backwards compatible, tested in `ui/DataTable.test.tsx`): with `renderExpanded` and no `onRowClick`, a click on the row (not its controls) shows or hides its details; on phones, an expandable row gets its chevron at the end and its details under it.
+- **Sign-in names** (agents match labels by word): "Change password…" opens the dialog whose button is "Save the new password"; the current browser's button is "Sign out this browser", the others "Sign out <browser>…" (with "signed in <date>" when two are the same kind); "Sign out the other browsers…".
+- `/states` shows DataTable loading, empty, no results, error, and a table with sort, bulk bar, row menu, details and pages.
+- Tests: `pages/gateway-keys/List.test.tsx`, `pages/settings/AdminTokens.test.tsx`, `AuditEntries.test.tsx`, `SignIn.test.tsx`, `pages/states/States.test.tsx` (incl. agent tests).

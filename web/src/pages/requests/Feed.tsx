@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode, RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { Activity, ChevronDown, Columns3, ListFilter } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
@@ -24,9 +24,9 @@ import {
   SubMenu,
 } from "@/ui/Menu";
 import { Tip } from "@/ui/Tooltip";
-import { Chip, EmptyState, ErrorState, NoResults } from "@/ui/States";
+import { Chip, EmptyState, NoResults } from "@/ui/States";
 import { Skeleton } from "@/ui/Skeleton";
-import { Table, TBody, TD, TH, THead } from "@/ui/Table";
+import { type DataColumn, type DataTablePaging, DataTable, columnsFor, useTablePaging } from "@/ui/DataTable";
 import type { FilterOptions, RequestRecord, Stats } from "./api";
 import { useFilterOptions, useRequestFeed, useRequestStats } from "./api";
 import { SAMPLE_CALLERS, SAMPLE_REQUESTS, SAMPLE_STATS } from "./samples";
@@ -34,20 +34,54 @@ import { clock, compactNumber, failed, PoolTag, ProviderLogo, secs, shapeInOut, 
 import { useLendRequestRows } from "@/sheets/stack";
 import { COLUMNS, type ColumnId, type FilterKey, RANGES, type RequestsUrl, STATUSES, useRequestsUrl } from "./url-state";
 
-/** Requests (C03, C04, C32): stats for the current filters and the live feed; a row opens the Request sheet. */
-export function RequestsFeed() {
+/**
+ * How the feed pages. "live" (spec "Pagination"): new Requests come in on top and
+ * older ones load as you scroll. "pages": numbered pages with a page size, if the
+ * Owner prefers them (live rows then push the rows down a page).
+ */
+export type FeedPaging = "live" | "pages";
+export const FEED_PAGING: FeedPaging = "live";
+
+/** Requests (C03, C04, C32): stats for the current filters and the live feed on the DataTable; a row opens the Request sheet. */
+export function RequestsFeed({ paging = FEED_PAGING }: { paging?: FeedPaging }) {
   const url = useRequestsUrl();
   const phone = useIsPhone();
   const [live, setLive] = useState(true);
   const feed = useRequestFeed(url.query, live);
   const stats = useRequestStats(url.query, live);
   const options = useFilterOptions(url.rangeInfo.since);
+  const pages = feed.pages;
   const rows = feed.rows;
+  const loaded = pages.data ? rows : undefined;
   // The Request sheet (the first of the sheet stack) seeds from these rows and steps through them.
   useLendRequestRows(rows);
 
   const chips = filterChips(url);
-  const visible = COLUMNS.filter((c) => !url.hidden.has(c.id));
+  const columns = useMemo(() => feedColumns(url.hidden), [url.hidden]);
+  const columnVisibility = useMemo(() => Object.fromEntries([...url.hidden].map((id) => [id, false])), [url.hidden]);
+  const loadOlder = () => void pages.fetchNextPage();
+
+  // Stepping (↓) onto the last loaded row loads the older ones, so ↓ keeps going.
+  const last = rows[rows.length - 1]?.id;
+  useEffect(() => {
+    if (url.selected && url.selected === last && pages.hasNextPage && !pages.isFetchingNextPage) loadOlder();
+  }, [url.selected, last, pages.hasNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const numbered = useNumberedPages(paging === "pages", loaded, pages, stats.data?.requests, JSON.stringify(url.query));
+  const tablePaging: DataTablePaging = numbered
+    ? numbered.paging
+    : {
+        mode: "infinite",
+        hasMore: !!pages.hasNextPage,
+        loadingMore: pages.isFetchingNextPage,
+        onLoadMore: loadOlder,
+        moreLabel: "Load older Requests",
+        newRowsLabel: (n) => `${n} new`,
+      };
+
+  // Requests that arrived live flash once (motion: UI ticket 18 tunes it).
+  const box = useRef<HTMLDivElement>(null);
+  useArrivals(box, feed.added);
 
   return (
     <>
@@ -73,41 +107,91 @@ export function RequestsFeed() {
       )}
 
       {/* A filter change keeps the rows shown (dimmed) until the new ones arrive: no skeleton over data. */}
-      <Skeleton
-        data={feed.pages.data ? rows : undefined}
-        sample={SAMPLE_REQUESTS}
-        id={phone ? "requests-feed:phone" : "requests-feed"}
-        label="Loading Requests"
-        className={cn("transition-opacity", feed.pages.isPlaceholderData && "opacity-60")}
-        error={feed.pages.isError && <ErrorState title="Couldn't load Requests" error={feed.pages.error} onRetry={() => void feed.pages.refetch()} />}
-      >
-        {(rows) =>
-          rows.length === 0 ? (
-            chips.length > 0 ? (
-              <NoResults title="No requests match these filters" description={noResultsLine(url)} onClear={url.clearFilters} />
-            ) : (
-              <Empty url={url} />
-            )
-          ) : (
-            <>
-              {phone ? (
-                <PhoneList rows={rows} added={feed.added} onOpen={url.select} selected={url.selected} />
-              ) : (
-                <FeedTable rows={rows} added={feed.added} columns={visible.map((c) => c.id)} onOpen={url.select} selected={url.selected} />
-              )}
-              {feed.pages.hasNextPage && (
-                <div className="mt-6 flex justify-center">
-                  <Button loading={feed.pages.isFetchingNextPage} onClick={() => void feed.pages.fetchNextPage()}>
-                    Show older Requests
-                  </Button>
-                </div>
-              )}
-            </>
-          )
-        }
-      </Skeleton>
+      <div ref={box}>
+        <DataTable
+          id="requests"
+          label="Requests"
+          columns={columns}
+          data={numbered ? numbered.rows : loaded}
+          sample={SAMPLE_REQUESTS}
+          getRowId={(r) => r.id}
+          rowName={(r) => `Request ${r.id}`}
+          columnVisibility={columnVisibility}
+          manualFiltering
+          manualSorting
+          filterChips={chips}
+          onClearFilters={url.clearFilters}
+          noResults={<NoResults title="No Requests match these filters" description={noResultsLine(url)} onClear={url.clearFilters} />}
+          empty={<Empty url={url} />}
+          error={pages.isError ? pages.error : undefined}
+          errorTitle="Couldn't load Requests"
+          onRetry={() => void pages.refetch()}
+          onRowClick={(r) => url.select(r.id)}
+          activeRowId={url.selected}
+          rowTone={(r) => (failed(r) ? "danger" : undefined)}
+          phoneRow={(r) => <PhoneRow r={r} />}
+          paging={tablePaging}
+          dimmed={pages.isPlaceholderData || numbered?.waiting}
+          footer={({ shown }) => countLine(shown, stats.data?.requests, !!numbered)}
+        />
+      </div>
     </>
   );
+}
+
+/** "Showing 200 of 12,840 Requests" while older ones are still to load; "12,840 Requests" once all are. */
+function countLine(shown: number, total: number | undefined, numbered: boolean): string {
+  const of = total ?? shown;
+  const noun = of === 1 ? "Request" : "Requests";
+  if (numbered || shown >= of) return `${formatNumber(of)} ${noun}`;
+  return `Showing ${formatNumber(shown)} of ${formatNumber(of)} ${noun}`;
+}
+
+type FeedPages = ReturnType<typeof useRequestFeed>["pages"];
+
+/**
+ * Numbered pages over the feed: the API pages by cursor (`before`), so a page
+ * further on loads the older Requests it needs first; the rows shown stay (dimmed)
+ * until it has them. Null in live mode.
+ */
+function useNumberedPages(on: boolean, loaded: RequestRecord[] | undefined, pages: FeedPages, total: number | undefined, query: string) {
+  const [pagination, setPagination] = useTablePaging("requests");
+  // New filters start again on page 1.
+  const lastQuery = useRef(query);
+  useEffect(() => {
+    if (lastQuery.current === query) return;
+    lastQuery.current = query;
+    setPagination((p) => ({ ...p, pageIndex: 0 }));
+  }, [query, setPagination]);
+
+  const start = pagination.pageIndex * pagination.pageSize;
+  const end = start + pagination.pageSize;
+  const waiting = on && !!loaded && loaded.length < end && !!pages.hasNextPage;
+  useEffect(() => {
+    if (waiting && !pages.isFetchingNextPage) void pages.fetchNextPage();
+  }, [waiting, pages.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const shown = useRef<RequestRecord[] | undefined>(undefined);
+  if (!on) return null;
+  if (!waiting) shown.current = loaded?.slice(start, end);
+  const count = loaded ? (pages.hasNextPage ? Math.max(total ?? 0, loaded.length + 1) : loaded.length) : 0;
+  const paging: DataTablePaging = { mode: "server", pagination, onPaginationChange: setPagination, rowCount: count };
+  return { rows: shown.current ?? (loaded ? [] : undefined), waiting, paging };
+}
+
+/** Rows that arrived live get one background flash (reduced motion: none). */
+function useArrivals(box: RefObject<HTMLDivElement | null>, added: Set<string>) {
+  const seen = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    const fresh = [...added].filter((id) => !seen.current.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) seen.current.add(id);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    for (const id of fresh) {
+      const el = box.current?.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`);
+      el?.animate?.([{ backgroundColor: "var(--info-tint)" }, { backgroundColor: "transparent" }], { duration: 1600, easing: "ease-out" });
+    }
+  }, [added, box]);
 }
 
 function LiveToggle({ live, onToggle, phone }: { live: boolean; onToggle: () => void; phone: boolean }) {
@@ -402,218 +486,96 @@ function Empty({ url }: { url: RequestsUrl }) {
   );
 }
 
-/** Fades a row in once when it arrived live. */
-function useArrival<T extends HTMLElement>(isNew: boolean) {
-  const ref = useRef<T>(null);
-  useLayoutEffect(() => {
-    if (!isNew || !ref.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    ref.current.animate([{ backgroundColor: "var(--info-tint)" }, { backgroundColor: "transparent" }], { duration: 1600, easing: "ease-out" });
-  }, []); // only on mount: a row is new once
-  return ref;
-}
+const dash = <span className="text-fg-subtle">–</span>;
+const col = columnsFor<RequestRecord>();
 
-function FeedTable({
-  rows,
-  added,
-  columns,
-  onOpen,
-  selected,
-}: {
-  rows: RequestRecord[];
-  added: Set<string>;
-  columns: ColumnId[];
-  onOpen: (id: string) => void;
-  selected?: string;
-}) {
-  return (
-    <Table>
-      <THead>
-        <tr>
-          {columns.map((id) => {
-            const c = COLUMNS.find((x) => x.id === id)!;
-            return (
-              <TH key={id} align={"right" in c && c.right ? "right" : undefined} className="whitespace-nowrap px-2.5 first:pl-3.5 last:pr-3.5">
-                {c.label}
-              </TH>
-            );
-          })}
-        </tr>
-      </THead>
-      <TBody>
-        {rows.map((r) => (
-          <FeedRow key={r.id} r={r} isNew={added.has(r.id)} columns={columns} onOpen={onOpen} selected={selected === r.id} />
-        ))}
-      </TBody>
-    </Table>
+/** What each column shows; one fact per cell. */
+const cells: Record<ColumnId, (r: RequestRecord) => ReactNode> = {
+  time: (r) => clock(r.started_at),
+  status: (r) => <StatusCell r={r} />,
+  caller: (r) => (
+    <span className="block max-w-[200px] truncate" title={r.caller.name}>
+      {r.caller.name}
+    </span>
+  ),
+  model: (r) => (
+    <span className="inline-flex max-w-[260px] items-center gap-2">
+      <span className="truncate font-medium" title={r.model}>
+        {r.model || dash}
+      </span>
+      {r.pool && <PoolTag />}
+    </span>
+  ),
+  provider: (r) =>
+    r.provider ? (
+      <span className="inline-flex items-center gap-2">
+        <ProviderLogo handle={r.provider} />
+        {r.provider}
+      </span>
+    ) : (
+      dash
+    ),
+  key: (r) => r.upstream_key || "–",
+  shape: (r) => shapeInOut(r),
+  attempts: (r) => (
+    <span title={r.attempt_count > 1 ? "Retried" : undefined} className={cn(r.attempt_count > 1 && "font-semibold text-warning", r.attempt_count === 0 && "text-fg-subtle")}>
+      {r.attempt_count}
+    </span>
+  ),
+  first_token: (r) => (r.state === "completed" && !failed(r) ? secs(r.first_byte_ms) : dash),
+  duration: (r) => (r.state === "in_progress" ? dash : secs(r.duration_ms)),
+  input: (r) => (r.usage ? formatNumber(r.usage.input) : dash),
+  output: (r) => (r.usage ? formatNumber(r.usage.output) : dash),
+};
+
+const cellClass: Partial<Record<ColumnId, string>> = { time: "font-mono text-[13px] text-fg-muted", key: "font-mono text-[13px] text-fg-muted" };
+
+// The column whose cell is the row's "Open Request <id>" button (keyboard, agents): the first one shown that holds plain text.
+const OPENERS: ColumnId[] = ["time", "model", "caller", "key", "shape", "duration", "first_token", "attempts", "input", "output", "status", "provider"];
+
+/** The feed's columns; `hidden` (the URL's ?hide=) only moves the Open button to a column still shown. */
+function feedColumns(hidden: Set<string>): DataColumn<RequestRecord>[] {
+  const opens = OPENERS.find((id) => !hidden.has(id));
+  return col.columns(
+    COLUMNS.map((c) =>
+      col.display({
+        id: c.id,
+        header: c.label,
+        cell: ({ row }) => cells[c.id](row.original),
+        meta: {
+          align: "right" in c && c.right ? "right" : undefined,
+          className: cn("whitespace-nowrap text-[14.5px]", cellClass[c.id]),
+          opens: c.id === opens,
+        },
+      }),
+    ),
   );
 }
 
-const dash = <span className="text-fg-subtle">–</span>;
-
-function FeedRow({
-  r,
-  isNew,
-  columns,
-  onOpen,
-  selected,
-}: {
-  r: RequestRecord;
-  isNew: boolean;
-  columns: ColumnId[];
-  onOpen: (id: string) => void;
-  selected: boolean;
-}) {
-  const ref = useArrival<HTMLTableRowElement>(isNew);
-  const bad = failed(r);
-  const ok = r.state === "completed" && !bad;
-  const cell = "whitespace-nowrap px-2.5 first:pl-3.5 last:pr-3.5 text-[14.5px]";
-  const render: Record<ColumnId, ReactNode> = {
-    time: (
-      <TD key="time" mono className={cell}>
-        {clock(r.started_at)}
-      </TD>
-    ),
-    status: (
-      <TD key="status" className={cell}>
-        <StatusCell r={r} />
-      </TD>
-    ),
-    caller: (
-      <TD key="caller" className={cn(cell, "max-w-[200px] truncate")} title={r.caller.name}>
-        {r.caller.name}
-      </TD>
-    ),
-    model: (
-      <TD key="model" className={cell}>
-        <span className="inline-flex max-w-[260px] items-center gap-2">
-          <span className="truncate font-medium" title={r.model}>
-            {r.model || dash}
-          </span>
-          {r.pool && <PoolTag />}
+/** A Request on a phone (C32): status, model and time; then the Caller, retries and the Provider. */
+function PhoneRow({ r }: { r: RequestRecord }) {
+  const tone = statusTone(r.status, r.state);
+  return (
+    <div className="min-w-0 flex-1 px-1">
+      <div className="flex items-center gap-2.5">
+        <StatusDot tone={tone} />
+        <span className={cn("shrink-0 text-[16px] font-medium tabular", tone === "red" && "text-danger-text", tone === "amber" && "text-warning")}>
+          {r.state === "in_progress" ? "…" : r.state === "interrupted" ? "–" : r.status}
         </span>
-      </TD>
-    ),
-    provider: (
-      <TD key="provider" className={cell}>
-        {r.provider ? (
-          <span className="inline-flex items-center gap-2">
+        <span className="min-w-0 truncate text-[16px] font-semibold">{r.model || "–"}</span>
+        {r.pool && <PoolTag />}
+        <span className="ml-auto shrink-0 font-mono text-[14px] text-fg-muted">{clock(r.started_at)}</span>
+      </div>
+      <div className="mt-1 flex items-center gap-3 pl-[18px] text-[15px] text-fg-muted">
+        <span className="min-w-0 flex-1 truncate">{r.caller.name}</span>
+        {r.attempt_count > 1 && <span className="shrink-0">{r.attempt_count} attempts</span>}
+        {r.provider && (
+          <span className="inline-flex shrink-0 items-center gap-2 text-fg">
             <ProviderLogo handle={r.provider} />
             {r.provider}
           </span>
-        ) : (
-          dash
         )}
-      </TD>
-    ),
-    key: (
-      <TD key="key" mono className={cell}>
-        {r.upstream_key || "–"}
-      </TD>
-    ),
-    shape: (
-      <TD key="shape" className={cell}>
-        {shapeInOut(r)}
-      </TD>
-    ),
-    attempts: (
-      <TD key="attempts" align="right" className={cn(cell, r.attempt_count > 1 && "font-semibold text-warning", r.attempt_count === 0 && "text-fg-subtle")}>
-        <span title={r.attempt_count > 1 ? "Retried" : undefined}>{r.attempt_count}</span>
-      </TD>
-    ),
-    first_token: (
-      <TD key="first_token" align="right" className={cell}>
-        {ok ? secs(r.first_byte_ms) : dash}
-      </TD>
-    ),
-    duration: (
-      <TD key="duration" align="right" className={cell}>
-        {r.state === "in_progress" ? dash : secs(r.duration_ms)}
-      </TD>
-    ),
-    input: (
-      <TD key="input" align="right" className={cell}>
-        {r.usage ? formatNumber(r.usage.input) : dash}
-      </TD>
-    ),
-    output: (
-      <TD key="output" align="right" className={cell}>
-        {r.usage ? formatNumber(r.usage.output) : dash}
-      </TD>
-    ),
-  };
-  return (
-    <tr
-      ref={ref}
-      aria-selected={selected || undefined}
-      tabIndex={0}
-      aria-label={`Request ${r.id}`}
-      onClick={() => onOpen(r.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onOpen(r.id);
-      }}
-      className={cn(
-        "cursor-pointer border-b border-border outline-none last:border-b-0 focus-visible:bg-subtle",
-        selected ? "bg-selected" : bad ? "bg-danger-tint/60 hover:bg-danger-tint" : "hover:bg-subtle",
-      )}
-    >
-      {columns.map((c) => render[c])}
-    </tr>
-  );
-}
-
-function PhoneList({
-  rows,
-  added,
-  onOpen,
-  selected,
-}: {
-  rows: RequestRecord[];
-  added: Set<string>;
-  onOpen: (id: string) => void;
-  selected?: string;
-}) {
-  return (
-    <ul className="-mx-4">
-      {rows.map((r) => (
-        <PhoneRow key={r.id} r={r} isNew={added.has(r.id)} onOpen={onOpen} selected={selected === r.id} />
-      ))}
-    </ul>
-  );
-}
-
-function PhoneRow({ r, isNew, onOpen, selected }: { r: RequestRecord; isNew: boolean; onOpen: (id: string) => void; selected: boolean }) {
-  const ref = useArrival<HTMLLIElement>(isNew);
-  const bad = failed(r);
-  const tone = statusTone(r.status, r.state);
-  return (
-    <li ref={ref} className={cn(bad && "bg-danger-tint/60", selected && "bg-selected")}>
-      <button type="button" onClick={() => onOpen(r.id)} className="block w-full px-4 py-3 text-left">
-        <div className="flex items-center gap-2.5">
-          <StatusDot tone={tone} />
-          <span
-            className={cn(
-              "shrink-0 text-[16px] font-medium tabular",
-              tone === "red" && "text-danger-text",
-              tone === "amber" && "text-warning",
-            )}
-          >
-            {r.state === "in_progress" ? "…" : r.state === "interrupted" ? "–" : r.status}
-          </span>
-          <span className="min-w-0 truncate text-[16px] font-semibold">{r.model || "–"}</span>
-          {r.pool && <PoolTag />}
-          <span className="ml-auto shrink-0 font-mono text-[14px] text-fg-muted">{clock(r.started_at)}</span>
-        </div>
-        <div className="mt-1 flex items-center gap-3 pl-[18px] text-[15px] text-fg-muted">
-          <span className="min-w-0 flex-1 truncate">{r.caller.name}</span>
-          {r.attempt_count > 1 && <span className="shrink-0">{r.attempt_count} attempts</span>}
-          {r.provider && (
-            <span className="inline-flex shrink-0 items-center gap-2 text-fg">
-              <ProviderLogo handle={r.provider} />
-              {r.provider}
-            </span>
-          )}
-        </div>
-      </button>
-    </li>
+      </div>
+    </div>
   );
 }

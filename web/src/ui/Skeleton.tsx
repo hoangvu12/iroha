@@ -52,8 +52,8 @@ export function Skeleton<T>({
 }
 
 // Skullet walks the sample's element tree and re-sets each element's children
-// with React.Children.map, which turns a single child into an array; an inline
-// `asChild` trigger (a row's menu button) then can't slot and the page crashes.
+// with React.Children.map, which turns a single child into an array; a part
+// that takes one element as its trigger (`Tip`, a row's menu) then crashes the page.
 // Rendering the sample inside this component keeps its elements out of that walk.
 function Sample({ render }: { render: () => ReactNode }) {
   return render();

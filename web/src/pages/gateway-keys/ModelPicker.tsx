@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { X } from "lucide-react";
 import { formatNumber } from "@/lib/format";
 import { Button } from "@/ui/Button";
+import { Checkbox } from "@/ui/Checkbox";
 import { cn } from "@/ui/cn";
 import { Dialog } from "@/ui/Dialog";
 import { SearchInput } from "@/ui/Input";
-import { Skeleton } from "@/ui/Skeleton";
-import { useProviderModels } from "./api";
-import { Checkbox, RadioOption } from "./bits";
 import { ProviderTile } from "@/ui/LogoTile";
+import { RadioCards } from "@/ui/Radio";
+import { useProviderModels } from "./api";
+import { Skeleton } from "@/ui/Skeleton";
 import { SAMPLE_MODEL_IDS } from "./samples";
 
 // The model picker behind a checked Provider's "All models" (C02): every
@@ -78,15 +79,16 @@ export function ModelPicker({
         </>
       }
     >
-      <div role="radiogroup" className="flex flex-col gap-1">
-        <RadioOption
-          checked={!only}
-          onSelect={() => setOnly(false)}
-          title="All models"
-          description={`Every model of ${provider}, including ones it adds later`}
-        />
-        <RadioOption checked={only} onSelect={() => setOnly(true)} title="Only these" description="The models you tick below, exactly as Callers name them" />
-      </div>
+      <RadioCards
+        label="Which models"
+        value={only ? "only" : "all"}
+        onValueChange={(v) => setOnly(v === "only")}
+        className="flex flex-col gap-1"
+        options={[
+          { value: "all", title: "All models", description: `Every model of ${provider}, including ones it adds later` },
+          { value: "only", title: "Only these", description: "The models you tick below, exactly as Callers name them" },
+        ]}
+      />
       {only && (
         <div className="mt-4">
           {picked.length > 0 && (
@@ -100,7 +102,7 @@ export function ModelPicker({
                     onClick={() => setPicked((p) => p.filter((x) => x !== m))}
                     className="rounded p-0.5 text-fg-muted hover:text-fg"
                   >
-                    <X size={13} />
+                    <X size={13} aria-hidden />
                   </button>
                 </span>
               ))}
@@ -184,8 +186,6 @@ function ModelList({
       ) : (
         <div
           ref={items === SAMPLE_MODEL_IDS ? undefined : box}
-          role="listbox"
-          aria-multiselectable="true"
           aria-label={`Models of ${provider}`}
           onScroll={(e) => setTop(e.currentTarget.scrollTop)}
           className={cn("relative overflow-y-auto", models.isPlaceholderData && "opacity-60")}
@@ -198,19 +198,15 @@ function ModelList({
               const isExtra = extra !== undefined && at === items.length - 1;
               const on = pickedSet.has(m);
               return (
-                <button
+                <label
                   key={isExtra ? `extra:${m}` : m}
-                  type="button"
-                  role="option"
-                  aria-selected={on}
-                  onClick={() => toggle(m)}
                   style={{ top: at * ROW, height: ROW }}
-                  className="absolute inset-x-0 flex items-center gap-3 px-3 text-left hover:bg-subtle"
+                  className="absolute inset-x-0 flex cursor-pointer items-center gap-3 px-3 hover:bg-subtle"
                 >
-                  {isExtra && !on ? <Plus size={16} className="shrink-0 text-fg-muted" /> : <Checkbox checked={on} />}
+                  <Checkbox label={m} checked={on} onChange={() => toggle(m)} />
                   <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-fg">{m}</span>
                   {isExtra && <span className="shrink-0 text-[12px] text-fg-muted">Not in the list</span>}
-                </button>
+                </label>
               );
             })}
           </div>

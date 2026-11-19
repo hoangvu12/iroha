@@ -13,11 +13,13 @@ import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Dialog } from "@/ui/Dialog";
 import { Input } from "@/ui/Input";
+import { Switch } from "@/ui/Switch";
+import { Tip } from "@/ui/Tooltip";
 import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { notify, notifyChange } from "@/ui/toast";
 import { type GatewayKey, useCaptureDays, useGatewayKey, useInvalidateKeys, useUpdateKey } from "./api";
-import { baseUrls, Switch } from "./bits";
+import { baseUrls } from "./bits";
 import { DeleteDialog, RevokeDialog } from "./confirm";
 import { requestsHref } from "./List";
 import { SAMPLE_GATEWAY_KEY } from "./samples";
@@ -85,15 +87,17 @@ export function KeyPage() {
         }
         actions={
           // The chat sends as this key (its scope applies) and records "Test (as <name>)".
-          <Button
-            icon={MessageCircle}
-            aria-label={`Test as ${g.name}`}
-            title={g.revoked ? "A revoked key can't send Requests" : `Chat as ${g.name}`}
-            disabled={g.revoked}
-            onClick={() => chat.open({ kind: "gateway_key", gatewayKey: g.name })}
-          >
-            {!phone && "Test"}
-          </Button>
+          <Tip label={g.revoked ? "A revoked key can't send Requests" : `Chat as ${g.name}`} type="description">
+            <Button
+              icon={MessageCircle}
+              aria-label={`Test as ${g.name}`}
+              disabled={g.revoked}
+              focusableWhenDisabled
+              onClick={() => chat.open({ kind: "gateway_key", gatewayKey: g.name })}
+            >
+              {!phone && "Test"}
+            </Button>
+          </Tip>
         }
       />
 

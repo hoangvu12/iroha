@@ -457,15 +457,7 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
         </Field>
         {url.trim() && (
           <Field label="Shape" hint="The API format the URL speaks.">
-            {(p) => (
-              <Select {...p} value={shape} onChange={(e) => setShape(e.target.value as Shape)}>
-                {SHAPES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-            )}
+            {() => <Select value={shape} onValueChange={(v) => setShape(v as Shape)} items={SHAPES} />}
           </Field>
         )}
         {url.trim() && (

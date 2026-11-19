@@ -1,45 +1,92 @@
-import * as DM from "@radix-ui/react-dropdown-menu";
-import type { ComponentType, ReactNode } from "react";
-import { Check } from "lucide-react";
+import type { ComponentType, ReactElement, ReactNode } from "react";
+import { Check, ChevronRight } from "lucide-react";
+import {
+  Menu as SdkMenu,
+  MenuCheckboxItem as SdkMenuCheckboxItem,
+  MenuContent as SdkMenuContent,
+  MenuGroup as SdkMenuGroup,
+  MenuGroupLabel,
+  MenuItem as SdkMenuItem,
+  MenuItemIndicator,
+  MenuRadioGroup as SdkMenuRadioGroup,
+  MenuRadioItem as SdkMenuRadioItem,
+  MenuSeparator as SdkMenuSeparator,
+  MenuSub,
+  MenuSubContent,
+  MenuSubTrigger,
+  MenuTrigger as SdkMenuTrigger,
+} from "@ui-sdk/react/menu";
+import { iconButtonClass } from "./Button";
 import { cn } from "./cn";
+import { popupClass } from "./popup";
+import { ScrollArea } from "./ScrollArea";
+import { Tip } from "./Tooltip";
 
-// Menus (the ⋯ on rows, the Owner menu). Radix gives keyboard navigation
-// and focus handling; these wrappers give the look.
+// Menus (the ⋯ on rows, the Owner menu, the Requests filters) on UI SDK's
+// Menu: one Menu per row, its trigger named for the row.
 
-export const Menu = DM.Root;
-export const MenuTrigger = DM.Trigger;
-export const MenuGroup = DM.Group;
-export const MenuRadioGroup = DM.RadioGroup;
+export const Menu = SdkMenu;
+export const MenuTrigger = SdkMenuTrigger;
+
+type Icon = ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
+
+// An icon-only trigger, named by its label, which is also its tooltip.
+export function MenuIconTrigger({
+  icon: Icon,
+  label,
+  size = "md",
+  bordered,
+  className,
+}: {
+  icon: Icon;
+  label: string;
+  size?: "sm" | "md";
+  bordered?: boolean;
+  className?: string;
+}) {
+  return (
+    <Tip label={label} type="label">
+      <SdkMenuTrigger className={iconButtonClass(size, bordered, className)}>
+        <Icon size={size === "sm" ? 15 : 17} aria-hidden />
+      </SdkMenuTrigger>
+    </Tip>
+  );
+}
 
 export function MenuContent({
   children,
   align = "end",
   side,
   className,
+  maxHeight = "max-h-[calc(var(--available-height)-2px)]",
+  finalFocus,
 }: {
   children: ReactNode;
   align?: "start" | "center" | "end";
   side?: "top" | "right" | "bottom" | "left";
   className?: string;
+  maxHeight?: string;
+  finalFocus?: "trigger" | "none" | string;
 }) {
   return (
-    <DM.Portal>
-      <DM.Content
-        align={align}
-        side={side}
-        sideOffset={6}
-        collisionPadding={8}
-        className={cn("z-50 min-w-44 rounded-lg border border-border bg-elevated p-1 text-sm shadow-elevated", className)}
-      >
+    <SdkMenuContent
+      align={align}
+      side={side}
+      sideOffset={6}
+      collisionPadding={8}
+      finalFocus={finalFocus}
+      className={cn(popupClass, "min-w-44 p-0", className)}
+    >
+      <ScrollArea viewportClassName={maxHeight} contentClassName="p-1">
         {children}
-      </DM.Content>
-    </DM.Portal>
+      </ScrollArea>
+    </SdkMenuContent>
   );
 }
 
 const itemClass =
   "flex h-8 select-none items-center gap-2 rounded-md px-2 text-fg outline-none " +
-  "data-[highlighted]:bg-muted data-[disabled]:opacity-50";
+  "data-highlighted:bg-muted data-open:bg-muted data-disabled:opacity-50 data-destructive:text-danger-text";
 
 export function MenuItem({
   children,
@@ -47,39 +94,126 @@ export function MenuItem({
   icon: Icon,
   danger,
   disabled,
-  shortcut,
+  render,
+  label,
 }: {
   children: ReactNode;
   onSelect?: (e: Event) => void;
-  icon?: ComponentType<{ size?: number; className?: string }>;
+  icon?: Icon;
   danger?: boolean;
   disabled?: boolean;
-  shortcut?: string;
+  render?: ReactElement;
+  label?: string;
 }) {
   return (
-    <DM.Item onSelect={onSelect} disabled={disabled} className={cn(itemClass, danger && "text-danger-text")}>
-      {Icon && <Icon size={15} className={danger ? "" : "text-fg-muted"} />}
-      <span className="flex-1">{children}</span>
-      {shortcut && <span className="text-xs text-fg-subtle">{shortcut}</span>}
-    </DM.Item>
+    <SdkMenuItem
+      // The menu closes at once; a returned Promise would keep it open and pending.
+      onSelect={onSelect && ((e) => void onSelect(e))}
+      disabled={disabled}
+      destructive={danger}
+      render={render}
+      label={label}
+      className={itemClass}
+    >
+      {Icon && <Icon size={15} aria-hidden className={danger ? "" : "text-fg-muted"} />}
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+    </SdkMenuItem>
   );
 }
 
-export function MenuRadioItem({ value, children }: { value: string; children: ReactNode }) {
+export function MenuRadioGroup({
+  label,
+  value,
+  onValueChange,
+  children,
+}: {
+  label?: ReactNode;
+  value: string;
+  onValueChange: (v: string) => void;
+  children: ReactNode;
+}) {
   return (
-    <DM.RadioItem value={value} className={cn(itemClass, "pl-8 relative")}>
-      <DM.ItemIndicator className="absolute left-2 inline-flex">
-        <Check size={15} />
-      </DM.ItemIndicator>
+    <SdkMenuRadioGroup value={value} onValueChange={(v) => onValueChange(String(v))}>
+      {label && <MenuGroupLabel className={labelClass}>{label}</MenuGroupLabel>}
       {children}
-    </DM.RadioItem>
+    </SdkMenuRadioGroup>
   );
 }
 
+// Radio items close the menu: each is a choice, not a setting to toggle along.
+export function MenuRadioItem({ value, children, label, count }: { value: string; children: ReactNode; label?: string; count?: number }) {
+  return (
+    <SdkMenuRadioItem value={value} label={label} closeOnSelect className={cn(itemClass, "relative pl-8")}>
+      <MenuItemIndicator className="absolute left-2 inline-flex">
+        <Check size={15} aria-hidden />
+      </MenuItemIndicator>
+      <span className="flex min-w-0 flex-1 items-center gap-2 truncate">{children}</span>
+      {count !== undefined && <span className="tabular text-xs text-fg-subtle">{count}</span>}
+    </SdkMenuRadioItem>
+  );
+}
+
+export function MenuCheckboxItem({
+  value,
+  checked,
+  onCheckedChange,
+  children,
+  count,
+}: {
+  value: string;
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+  children: ReactNode;
+  count?: number;
+}) {
+  return (
+    <SdkMenuCheckboxItem value={value} checked={checked} onCheckedChange={(v) => onCheckedChange(v)} className={cn(itemClass, "relative pl-8")}>
+      <MenuItemIndicator className="absolute left-2 inline-flex">
+        <Check size={15} aria-hidden />
+      </MenuItemIndicator>
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {count !== undefined && <span className="tabular text-xs text-fg-subtle">{count}</span>}
+    </SdkMenuCheckboxItem>
+  );
+}
+
+const labelClass = "px-2 pb-1 pt-1.5 text-xs text-fg-muted";
+
+export function MenuGroup({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <SdkMenuGroup>
+      <MenuGroupLabel className={labelClass}>{label}</MenuGroupLabel>
+      {children}
+    </SdkMenuGroup>
+  );
+}
+
+// A line of text in a menu that is not an item, like a status or "Loading…".
 export function MenuLabel({ children }: { children: ReactNode }) {
-  return <DM.Label className="px-2 pb-1 pt-1.5 text-xs text-fg-muted">{children}</DM.Label>;
+  return <div className={labelClass}>{children}</div>;
 }
 
 export function MenuSeparator() {
-  return <DM.Separator className="-mx-1 my-1 h-px bg-border" />;
+  return <SdkMenuSeparator className="-mx-1 my-1 h-px bg-border" />;
+}
+
+export function SubMenu({ label, value, children }: { label: string; value?: ReactNode; children: ReactNode }) {
+  return (
+    <MenuSub>
+      <MenuSubTrigger className={itemClass}>
+        <span className="flex-1">{label}</span>
+        {value && <span className="max-w-32 truncate text-xs text-fg-muted">{value}</span>}
+        <ChevronRight size={14} aria-hidden className="text-fg-muted" />
+      </MenuSubTrigger>
+      <MenuSubContent
+        sideOffset={6}
+        collisionPadding={8}
+        className={cn(popupClass, "min-w-52 max-w-80 p-0")}
+      >
+        <ScrollArea viewportClassName="max-h-[min(420px,calc(var(--available-height)-2px))]" contentClassName="p-1">
+          {children}
+        </ScrollArea>
+      </MenuSubContent>
+    </MenuSub>
+  );
 }

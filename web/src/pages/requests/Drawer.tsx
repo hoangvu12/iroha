@@ -7,8 +7,11 @@ import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
 import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { ScrollArea } from "@/ui/ScrollArea";
 import { Skeleton } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
+import { popupOpen } from "@/ui/popup";
+import { Tab as UITab, TabList, TabPanel, Tabs } from "@/ui/Tabs";
 import { notify } from "@/ui/toast";
 import type { RequestRecord } from "./api";
 import { useCopy, useRequest } from "./api";
@@ -26,7 +29,7 @@ type Tab = "details" | "attempts" | "captured";
 function busyTarget(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
   if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return true;
-  return !!document.querySelector('[role="dialog"][aria-modal="true"], [role="menu"]');
+  return popupOpen();
 }
 
 /**
@@ -98,7 +101,7 @@ export function RequestDrawer({
       {req.isError && !r ? (
         <ErrorState title="Couldn't load this Request" error={req.error} onRetry={() => void req.refetch()} />
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
+        <ScrollArea className="flex-1" contentClassName="px-6 pb-10">
           {/* Opened from the feed, the row seeds it and no skeleton shows; from a link, the Details tab is measured. */}
           <Skeleton data={r} sample={SAMPLE_REQUEST} id="request-drawer" label="Loading Request">
             {(r) => (
@@ -111,36 +114,35 @@ export function RequestDrawer({
             </div>
             <StatusPill r={r} />
           </header>
-          <nav className="mb-6 flex gap-7 border-b border-border" aria-label="Request tabs">
-            {(
-              [
-                ["details", "Details"],
-                ["attempts", "Attempts"],
-                ["captured", "Captured"],
-              ] as const
-            ).map(([t, label]) => (
-              <button
-                key={t}
-                type="button"
-                aria-current={tab === t ? "page" : undefined}
-                onClick={() => setTab(t)}
-                className={cn(
-                  "-mb-px whitespace-nowrap border-b-2 pb-2.5 text-[15.5px] transition-colors",
-                  tab === t ? "border-fg text-fg" : "border-transparent text-fg-muted hover:text-fg",
-                )}
-              >
-                {label}
-                {t === "attempts" && <span className="ml-2 tabular text-fg-muted">{r.attempt_count}</span>}
-              </button>
-            ))}
-          </nav>
-          {tab === "details" && <RequestDetails r={r} onShowCaptured={() => setTab("captured")} />}
-          {tab === "attempts" && <AttemptList r={r} loading={!r.attempts && req.isFetching} onOpenRoute={openRoute} />}
-          {tab === "captured" && <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />}
+          <Tabs value={tab} onValueChange={(t) => t && setTab(t as Tab)}>
+            <TabList label="Request tabs" className="mb-6">
+              {(
+                [
+                  ["details", "Details"],
+                  ["attempts", "Attempts"],
+                  ["captured", "Captured"],
+                ] as const
+              ).map(([t, label]) => (
+                <UITab key={t} value={t}>
+                  {label}
+                  {t === "attempts" && <span className="ml-2 tabular text-fg-muted">{r.attempt_count}</span>}
+                </UITab>
+              ))}
+            </TabList>
+            <TabPanel value="details">
+              <RequestDetails r={r} onShowCaptured={() => setTab("captured")} />
+            </TabPanel>
+            <TabPanel value="attempts">
+              <AttemptList r={r} loading={!r.attempts && req.isFetching} onOpenRoute={openRoute} />
+            </TabPanel>
+            <TabPanel value="captured">
+              <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />
+            </TabPanel>
+          </Tabs>
           </>
             )}
           </Skeleton>
-        </div>
+        </ScrollArea>
       )}
     </aside>
   );

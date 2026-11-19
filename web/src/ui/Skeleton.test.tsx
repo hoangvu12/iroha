@@ -1,10 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { createAgent } from "@ui-sdk/react/agent";
 import { expect, test, vi } from "vitest";
-import { Ellipsis } from "lucide-react";
+import { Copy } from "lucide-react";
 import { Button, IconButton } from "./Button";
 import { ProviderTile } from "./LogoTile";
-import { Menu, MenuTrigger } from "./Menu";
+import { Tip } from "./Tooltip";
 import { Skeleton } from "./Skeleton";
 
 const agent = createAgent();
@@ -59,18 +59,16 @@ test("an agent sees no control of the sample while loading, and the real ones on
   expect(pressed).toHaveBeenCalledWith("acme");
 });
 
-test("a sample with an inline asChild trigger (a row's menu) draws its skeleton without crashing the page", () => {
+test("a sample with an inline trigger taking one element (a row's tooltip) draws its skeleton without crashing the page", () => {
   const { container } = render(
     <Skeleton data={undefined} sample={SAMPLE} label="Loading Endpoints">
       {(rows) => (
         <ul>
           {rows.map((r) => (
             <li key={r.handle}>
-              <Menu>
-                <MenuTrigger asChild>
-                  <IconButton icon={Ellipsis} label={`More for ${r.handle}`} size="sm" />
-                </MenuTrigger>
-              </Menu>
+              <Tip label={`Copy ${r.handle}'s URL`}>
+                <IconButton icon={Copy} label={`Copy ${r.handle}'s URL`} size="sm" />
+              </Tip>
             </li>
           ))}
         </ul>

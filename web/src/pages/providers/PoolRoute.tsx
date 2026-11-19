@@ -1,13 +1,15 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link } from "react-router";
-import { ArrowUpRight, CircleX, Layers, Maximize, Minus, Plus, X } from "lucide-react";
+import { ArrowUpRight, CircleX, Layers, X } from "lucide-react";
 import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
 import { Button, buttonClass, IconButton } from "@/ui/Button";
 import type { Tone } from "@/ui/bits";
 import { StatusDot } from "@/ui/bits";
+import { Canvas } from "@/ui/Canvas";
 import { cn } from "@/ui/cn";
+import { ScrollArea } from "@/ui/ScrollArea";
 import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/ui/States";
 import type { Pool, PreviewMember, RoutePreview, Shape } from "./api";
@@ -50,7 +52,6 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
   const preview = useRoutePreview(name, shape);
   const phone = useIsPhone();
   const [selected, setSelected] = useState<Node>();
-  const [scale, setScale] = useState(1);
   const pv = preview.data;
 
   if (pool && pool.members.length === 0)
@@ -130,7 +131,7 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
   );
 
   const panel = (
-    <Skeleton data={pv} sample={SAMPLE_PREVIEW} label="Loading the route's details">
+    <Skeleton data={pv} sample={SAMPLE_PREVIEW} label="Loading the route's details" className="skeleton-fill">
       {(pv) => <SidePanel pv={pv} pool={pool} node={current ?? firstNode(pv)} onClose={() => setSelected(undefined)} />}
     </Skeleton>
   );
@@ -143,13 +144,13 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
         <span className={cn("font-medium", preview.isError ? "text-danger-text" : "text-success")}>{preview.isError ? "Stale" : "Live"}</span>
         <span className="text-fg-muted">Where a request would go right now</span>
       </span>
-      <Select aria-label="The Caller's Shape" value={shape} onChange={(e) => setShape(e.target.value as Shape)} className="w-48">
-        {SHAPES.map((s) => (
-          <option key={s.value} value={s.value}>
-            As {s.label}
-          </option>
-        ))}
-      </Select>
+      <Select<Shape>
+        aria-label="The Caller's Shape"
+        value={shape}
+        onValueChange={setShape}
+        className="w-48"
+        items={SHAPES.map((s) => ({ value: s.value, label: `As ${s.label}` }))}
+      />
     </div>
   );
 
@@ -166,22 +167,17 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
 
   return (
     <div className="flex h-[max(560px,calc(100dvh-300px))] overflow-hidden rounded-xl border border-border">
-      <div className="relative min-w-0 flex-1 overflow-auto bg-subtle" style={dots}>
-        <div className="sticky left-0 top-0 z-10 p-4">{live}</div>
-        <div className="pb-24 pt-2" style={{ transform: `scale(${scale})`, transformOrigin: "50% 0" }}>
-          {chain}
-        </div>
-        <div className="sticky bottom-4 left-0 flex justify-center">
-          <div className="flex items-center gap-1 rounded-xl border border-border bg-elevated px-1.5 py-1 shadow-elevated">
-            <IconButton icon={Minus} label="Zoom out" size="sm" onClick={() => setScale((s) => Math.max(0.5, Math.round((s / 1.2) * 100) / 100))} />
-            <span className="w-12 text-center text-[13.5px] tabular">{Math.round(scale * 100)}%</span>
-            <IconButton icon={Plus} label="Zoom in" size="sm" onClick={() => setScale((s) => Math.min(1.6, Math.round(s * 1.2 * 100) / 100))} />
-            <span className="mx-1 h-5 w-px bg-border" />
-            <IconButton icon={Maximize} label="Reset the zoom" size="sm" onClick={() => setScale(1)} />
-          </div>
-        </div>
-      </div>
-      <aside className="w-[380px] shrink-0 overflow-y-auto border-l border-border bg-bg">{panel}</aside>
+      <Canvas
+        label={`Route of ${name}`}
+        className="min-w-0 flex-1"
+        worldClassName="flex flex-col items-center pb-28 pt-20"
+        overlay={<div className="absolute left-0 top-0 p-4">{live}</div>}
+      >
+        {chain}
+      </Canvas>
+      <ScrollArea label="Selected step" className="w-[380px] shrink-0 border-l border-border bg-bg" contentClassName="flex min-h-full flex-col *:grow">
+        {panel}
+      </ScrollArea>
     </div>
   );
 }

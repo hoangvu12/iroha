@@ -6,6 +6,7 @@ import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/ui/States";
+import { Tab, TabList, TabPanel, Tabs } from "@/ui/Tabs";
 import { notify } from "@/ui/toast";
 import type { Capture, RequestRecord } from "./api";
 import { useCapture, useCaptureDays, useCopy } from "./api";
@@ -55,30 +56,12 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
   return (
     <Skeleton data={cap.data} sample={SAMPLE_CAPTURE} label="Loading the capture">
       {(c) => (
-    <div>
+    <Tabs value={side} onValueChange={(s) => s && setSide(s as Side)}>
       <div className="mb-5 flex items-center gap-3">
-        <div className="inline-flex rounded-lg bg-muted p-1" role="tablist">
-          {(
-            [
-              ["sent", "Caller sent"],
-              ["response", "Response"],
-            ] as const
-          ).map(([s, label]) => (
-            <button
-              key={s}
-              type="button"
-              role="tab"
-              aria-selected={side === s}
-              onClick={() => setSide(s)}
-              className={cn(
-                "h-8 rounded-md px-3.5 text-[14px] transition-colors",
-                side === s ? "bg-bg font-medium text-fg shadow-sm" : "text-fg-muted hover:text-fg",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <TabList label="Captured side" variant="segmented">
+          <Tab value="sent">Caller sent</Tab>
+          <Tab value="response">Response</Tab>
+        </TabList>
         <div className="flex-1" />
         <button
           type="button"
@@ -89,7 +72,12 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
           <Braces size={15} /> Raw JSON
         </button>
       </div>
-      {side === "sent" ? <SentSide c={c} r={r} raw={raw} /> : <ResponseSide c={c} r={r} raw={raw} />}
+      <TabPanel value="sent">
+        <SentSide c={c} r={r} raw={raw} />
+      </TabPanel>
+      <TabPanel value="response">
+        <ResponseSide c={c} r={r} raw={raw} />
+      </TabPanel>
       <div className="mt-8 flex flex-wrap items-center gap-2">
         <p className="mr-auto text-[14px] text-fg-muted">{days.data ? `Bodies are kept for ${days.data} day${days.data === 1 ? "" : "s"}.` : ""}</p>
         <Button icon={SquareTerminal} onClick={() => curl(c)}>
@@ -99,7 +87,7 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
           Replay in Chat
         </Button>
       </div>
-    </div>
+    </Tabs>
       )}
     </Skeleton>
   );
@@ -135,7 +123,7 @@ function SentSide({ c, r, raw }: { c: Capture; r: RequestRecord; raw: boolean })
         ]}
       />
       {c.request.truncated && <Truncated />}
-      {raw || !parsed ? <CodeBlock className="max-h-none">{JSON.stringify(c.request.body, null, 2)}</CodeBlock> : <Blocks blocks={parsed.blocks} tools={parsed.tools} />}
+      {raw || !parsed ? <CodeBlock maxHeight={false}>{JSON.stringify(c.request.body, null, 2)}</CodeBlock> : <Blocks blocks={parsed.blocks} tools={parsed.tools} />}
     </>
   );
 }
@@ -155,7 +143,7 @@ function ResponseSide({ c, r, raw }: { c: Capture; r: RequestRecord; raw: boolea
       {c.response.truncated && <Truncated />}
       {raw || !parsed ? (
         <>
-          <CodeBlock className="max-h-none">{JSON.stringify(c.response.body, null, 2)}</CodeBlock>
+          <CodeBlock maxHeight={false}>{JSON.stringify(c.response.body, null, 2)}</CodeBlock>
           {raw && c.response.stream && (
             <>
               <h4 className="mb-2 mt-5 text-[13px] text-fg-muted">As streamed</h4>

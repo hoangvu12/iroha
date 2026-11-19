@@ -9,8 +9,9 @@ import { copyText, shortDate, shortSecret } from "@/pages/settings/format";
 import { Button, IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Mono } from "@/ui/bits";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
+import { Tip } from "@/ui/Tooltip";
 import { Skeleton } from "@/ui/Skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { type GatewayKey, useGatewayKeys } from "./api";
@@ -109,9 +110,11 @@ function LastUsed({ k }: { k: GatewayKey }) {
 function Recent({ k }: { k: GatewayKey }) {
   if (k.recent_requests === 0) return <span className="text-fg-muted">0</span>;
   return (
-    <Link to={requestsHref(k)} onClick={(e) => e.stopPropagation()} className="hover:underline" title={`Open ${k.name}'s Requests of the last 24 hours`}>
-      {formatNumber(k.recent_requests)}
-    </Link>
+    <Tip label={`Open ${k.name}'s Requests of the last 24 hours`} type="description">
+      <Link to={requestsHref(k)} onClick={(e) => e.stopPropagation()} className="hover:underline">
+        {formatNumber(k.recent_requests)}
+      </Link>
+    </Tip>
   );
 }
 
@@ -120,9 +123,7 @@ function KeyMenu({ k, onRevoke, onDelete }: { k: GatewayKey } & Actions) {
   const chat = useChatPanel();
   return (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
       <MenuContent>
         <MenuItem icon={Settings2} onSelect={() => navigate(`/gateway-keys/${encodeURIComponent(k.id)}`)}>
           Open settings

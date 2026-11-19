@@ -105,6 +105,73 @@
   --shadow-elevated: var(--shadow);
 }
 
+/*
+ * Motion tokens (architecture.md "UI motion system"). Every transition in
+ * the UI takes its duration, curve, distance and scale from here; never type
+ * a number. A transition lists its properties (never `all`): movement
+ * (translate, scale, rotate, height, an indicator's width) and opacity.
+ * Under reduced motion the rule at the end of this file holds movement still
+ * and lets enter/exit, hover and arrival play as fades.
+ */
+:root {
+  /* Durations */
+  --duration-hover: 150ms;       /* colour and background on hover, selection */
+  --duration-press: 160ms;       /* :active scale on buttons */
+  --duration-tooltip: 125ms;     /* tooltip in (out is the same; instant after the first) */
+  --duration-popup-in: 180ms;    /* menu, select, combobox, popover in */
+  --duration-popup-out: 120ms;   /* ...and out: exits are faster than entrances */
+  --duration-dialog-in: 200ms;   /* dialog, alert dialog, their backdrop */
+  --duration-dialog-out: 150ms;
+  --duration-sheet-in: 300ms;    /* a sheet or the chat panel sliding in; older sheets moving aside */
+  --duration-sheet-out: 240ms;   /* the top sheet leaving; the one below sliding back */
+  --duration-indicator: 200ms;   /* tab and segmented indicator sliding */
+  --duration-collapse: 200ms;    /* a disclosure or expandable row opening/closing (height) */
+  --duration-move: 250ms;        /* something repositioning on screen: reorder settle, canvas pan to a card */
+  --duration-list-in: 200ms;     /* a row, bar or pill appearing */
+  --duration-list-out: 150ms;    /* ...and leaving */
+  --duration-toast: 400ms;       /* toasts stacking, entering, leaving (with ease, not ease-out) */
+  --duration-fade: 150ms;        /* a crossfade; what a moving entrance becomes under reduced motion */
+  --duration-flash: 1600ms;      /* the background of a row that just arrived, fading back */
+
+  /* Distances and scales: where an entrance starts and an exit ends */
+  --motion-scale-popup: 0.96;    /* popups and dialogs grow from this; never from 0 */
+  --motion-scale-press: 0.97;    /* a pressed button */
+  --motion-shift: 8px;           /* a bar or pill rising into place */
+  --motion-shift-sm: 4px;        /* a row arriving */
+  --motion-sheet-offset: 100%;   /* a sheet starts one own-width off the right edge */
+  --motion-toast-offset: 100%;   /* a toast starts one own-height below its place */
+}
+
+/* Curves, also as Tailwind utilities: ease-out, ease-in-out, ease-drawer.
+   ease-in is removed: nothing in the UI starts slow. Hover and toasts use
+   CSS `ease`; progress and loops `linear`. */
+@theme static {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);       /* entering, exiting, indicators: starts fast */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);   /* moving from one place on screen to another */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);    /* sheets and the chat panel */
+  --ease-in: initial;
+}
+
+/* Durations as Tailwind utilities: duration-popup-in, duration-sheet-out... */
+@theme inline {
+  --transition-duration-hover: var(--duration-hover);
+  --transition-duration-press: var(--duration-press);
+  --transition-duration-tooltip: var(--duration-tooltip);
+  --transition-duration-popup-in: var(--duration-popup-in);
+  --transition-duration-popup-out: var(--duration-popup-out);
+  --transition-duration-dialog-in: var(--duration-dialog-in);
+  --transition-duration-dialog-out: var(--duration-dialog-out);
+  --transition-duration-sheet-in: var(--duration-sheet-in);
+  --transition-duration-sheet-out: var(--duration-sheet-out);
+  --transition-duration-indicator: var(--duration-indicator);
+  --transition-duration-collapse: var(--duration-collapse);
+  --transition-duration-move: var(--duration-move);
+  --transition-duration-list-in: var(--duration-list-in);
+  --transition-duration-list-out: var(--duration-list-out);
+  --transition-duration-toast: var(--duration-toast);
+  --transition-duration-fade: var(--duration-fade);
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
@@ -115,6 +182,19 @@
     font-size: 14px;
     line-height: 1.45;
     font-feature-settings: "cv11", "ss01";
+  }
+  /* UI SDK popups render in place: a menu in a right-aligned cell or a bold
+     header would take on its text styles, so they start from the body's. */
+  :is([popover], dialog) {
+    font-size: 14px;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1.45;
+    letter-spacing: normal;
+    text-align: start;
+    text-transform: none;
+    white-space: normal;
+    cursor: auto;
   }
   :focus-visible {
     outline: 2px solid var(--info);
@@ -135,6 +215,79 @@
   .tabular {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Fallback for anything still scrolling natively (the page itself, a
+     textarea): a thin rounded thumb, no track and no arrow buttons. Scroll
+     regions use ui/ScrollArea instead. Chrome ignores these once an element
+     sets scrollbar-width or scrollbar-color, so neither is set here. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--fg) 20%, transparent) padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--fg) 35%, transparent);
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--fg) 20%, transparent) transparent;
+    }
+  }
+
+  /* ui/ScrollArea's edge fades: the viewport fades out at an edge while more
+     content lies past it (UI SDK's overflow variables, taken from the root). */
+  .scroll-fade-y {
+    --scroll-area-overflow-y-start: inherit;
+    --scroll-area-overflow-y-end: inherit;
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      #000 min(1.5rem, var(--scroll-area-overflow-y-start, 0px)),
+      #000 calc(100% - min(1.5rem, var(--scroll-area-overflow-y-end, 0px))),
+      transparent
+    );
+  }
+  .scroll-fade-x {
+    --scroll-area-overflow-x-start: inherit;
+    --scroll-area-overflow-x-end: inherit;
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 min(1.5rem, var(--scroll-area-overflow-x-start, 0px)),
+      #000 calc(100% - min(1.5rem, var(--scroll-area-overflow-x-end, 0px))),
+      transparent
+    );
+  }
+  .scroll-fade-both {
+    mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        #000 min(1.5rem, var(--scroll-area-overflow-y-start, 0px)),
+        #000 calc(100% - min(1.5rem, var(--scroll-area-overflow-y-end, 0px))),
+        transparent
+      ),
+      linear-gradient(
+        to right,
+        transparent,
+        #000 min(1.5rem, var(--scroll-area-overflow-x-start, 0px)),
+        #000 calc(100% - min(1.5rem, var(--scroll-area-overflow-x-end, 0px))),
+        transparent
+      );
+    mask-composite: intersect;
+  }
 }
 
 /* Skeletons are Skullet's (ui/Skeleton.tsx, app/skeletons.tsx), coloured from
@@ -146,4 +299,33 @@
   flex: 1 1 0%;
   flex-direction: column;
   min-height: 0;
+}
+
+/*
+ * Reduced motion: the one rule (architecture.md "UI motion system").
+ * Holds still: anything that moves or changes size (slides, scales, presses,
+ * indicators, height, reordering, sheets) and anything that loops (pulse,
+ * ping, bounce; Skullet stops its shimmer itself). May fade: enter/exit of popups, dialogs,
+ * sheets, rows and toasts, hover colours and a new row's flash keep their
+ * durations; with no distance or scale left, they play as plain fades.
+ * Unlayered, so it wins over Tailwind's theme layer.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-press: 0ms;
+    --duration-indicator: 0ms;
+    --duration-collapse: 0ms;
+    --duration-move: 0ms;
+    --duration-sheet-in: 0ms;
+    --duration-sheet-out: 0ms;
+    --motion-scale-popup: 1;
+    --motion-scale-press: 1;
+    --motion-shift: 0px;
+    --motion-shift-sm: 0px;
+    --motion-sheet-offset: 0%;
+    --motion-toast-offset: 0%;
+    --animate-pulse: none;
+    --animate-ping: none;
+    --animate-bounce: none;
+  }
 }

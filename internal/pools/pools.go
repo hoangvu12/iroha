@@ -20,7 +20,7 @@ import (
 type Pool struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name" doc:"The model name Callers send to the global routes (no slash). Unique across Pools, whatever the case; stays the same while members change."`
-	Maker        string    `json:"maker" doc:"Who makes the Pool's model (e.g. anthropic, openai, zhipuai), for its logo. The Owner's choice, else guessed from the model name; \"\" when no guess fits."`
+	Maker        string    `json:"maker" doc:"Where the Pool's logo comes from: who makes its model (e.g. anthropic, openai, zhipuai), or a website the Owner named (chatgpt.com; a value with a dot is a website). The Owner's choice, else the maker guessed from the model name; \"\" when no guess fits."`
 	MakerGuessed bool      `json:"maker_guessed" doc:"true when maker is a guess (the Owner set none)."`
 	Members      []Member  `json:"members" doc:"In try order: a Request is served by the first switched-on member with a usable key, then the next, within the Request's budget."`
 	Budget       Budget    `json:"budget"`

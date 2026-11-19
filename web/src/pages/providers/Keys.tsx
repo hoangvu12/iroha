@@ -28,9 +28,10 @@ import { copyText } from "@/pages/settings/format";
 import { Button, IconButton } from "@/ui/Button";
 import { Mono, StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
+import { ScrollArea } from "@/ui/ScrollArea";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState, NoResults } from "@/ui/States";
 import { Skeleton } from "@/ui/Skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
@@ -222,9 +223,7 @@ export function KeysTab({
           Disable
         </Button>
         <Menu>
-          <MenuTrigger asChild>
-            <IconButton icon={MoreHorizontal} label="More actions for the selected keys" bordered />
-          </MenuTrigger>
+          <MenuIconTrigger icon={MoreHorizontal} label="More actions for the selected keys" bordered />
           <MenuContent align="start">
             <MenuItem icon={CircleCheck} onSelect={() => void bulk("enable", names, "enabled")}>
               Enable
@@ -283,13 +282,13 @@ export function KeysTab({
           onChange={(e) => setParam("q", e.target.value)}
         />
         {phone ? (
-          <Select aria-label="Show keys" value={filter} onChange={(e) => setParam("state", e.target.value === "all" ? undefined : e.target.value)} className="w-28">
-            {(Object.keys(filterLabel) as StateFilter[]).map((f) => (
-              <option key={f} value={f}>
-                {f === "all" ? "All" : filterLabel[f]}
-              </option>
-            ))}
-          </Select>
+          <Select<StateFilter>
+            aria-label="Show keys"
+            value={filter}
+            onValueChange={(v) => setParam("state", v === "all" ? undefined : v)}
+            className="w-28"
+            items={(Object.keys(filterLabel) as StateFilter[]).map((f) => ({ value: f, label: f === "all" ? "All" : filterLabel[f] }))}
+          />
         ) : (
           <Segmented<StateFilter>
             label="Show keys"
@@ -594,9 +593,7 @@ type KeyActions = {
 function KeyMenu({ k, actions, multipleEndpoints }: { k: UpstreamKey; actions: KeyActions; multipleEndpoints: boolean }) {
   return (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
       <MenuContent>
         <MenuItem icon={Play} onSelect={() => actions.test(k)}>
           Test
@@ -749,15 +746,17 @@ function ResultsDialog({ results, onClose }: { results?: Results; onClose: () =>
         </Button>
       }
     >
-      <ul className="max-h-[50vh] divide-y divide-border overflow-y-auto rounded-lg border border-border">
-        {results?.rows.map((r, i) => (
-          <li key={i} className="flex items-start gap-3 px-4 py-2.5 text-[14px]">
-            <StatusDot tone={r.tone ?? (r.ok ? "green" : "red")} className="mt-1.5" />
-            <span className="w-28 shrink-0 truncate font-mono">{r.name}</span>
-            <span className={cn("min-w-0 flex-1", !r.ok && "text-danger-text")}>{r.text}</span>
-          </li>
-        ))}
-      </ul>
+      <ScrollArea className="rounded-lg border border-border" viewportClassName="max-h-[50vh]">
+        <ul className="divide-y divide-border">
+          {results?.rows.map((r, i) => (
+            <li key={i} className="flex items-start gap-3 px-4 py-2.5 text-[14px]">
+              <StatusDot tone={r.tone ?? (r.ok ? "green" : "red")} className="mt-1.5" />
+              <span className="w-28 shrink-0 truncate font-mono">{r.name}</span>
+              <span className={cn("min-w-0 flex-1", !r.ok && "text-danger-text")}>{r.text}</span>
+            </li>
+          ))}
+        </ul>
+      </ScrollArea>
     </Dialog>
   );
 }
@@ -907,20 +906,22 @@ function AddKeysDialog({
           </div>
           {current?.error && <p className="border-t border-border px-4 py-2.5 text-[14px] text-danger-text">{current.error}</p>}
           {rows && (
-            <ul className="max-h-[240px] divide-y divide-border overflow-y-auto border-t border-border">
-              {rows.map((r, i) => (
-                <li key={i} className="flex items-center gap-3 px-4 py-2 text-[14px]">
-                  <Mono className="w-20 shrink-0 text-fg-muted">{maskSecret(r.secret)}</Mono>
-                  <span className={cn("min-w-0 flex-1 truncate", r.kind === "existing" && "text-fg-muted", r.kind === "error" && "text-danger-text")}>
-                    {r.kind === "error" ? r.error : r.name}
-                  </span>
-                  <span className="inline-flex shrink-0 items-center gap-1.5 text-fg-muted">
-                    <StatusDot tone={r.kind === "new" ? "green" : r.kind === "error" ? "red" : "gray"} />
-                    {r.kind === "new" ? <span className="text-fg">New</span> : r.kind === "error" ? "Refused" : "Already added"}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <ScrollArea className="border-t border-border" viewportClassName="max-h-[240px]">
+              <ul className="divide-y divide-border">
+                {rows.map((r, i) => (
+                  <li key={i} className="flex items-center gap-3 px-4 py-2 text-[14px]">
+                    <Mono className="w-20 shrink-0 text-fg-muted">{maskSecret(r.secret)}</Mono>
+                    <span className={cn("min-w-0 flex-1 truncate", r.kind === "existing" && "text-fg-muted", r.kind === "error" && "text-danger-text")}>
+                      {r.kind === "error" ? r.error : r.name}
+                    </span>
+                    <span className="inline-flex shrink-0 items-center gap-1.5 text-fg-muted">
+                      <StatusDot tone={r.kind === "new" ? "green" : r.kind === "error" ? "red" : "gray"} />
+                      {r.kind === "new" ? <span className="text-fg">New</span> : r.kind === "error" ? "Refused" : "Already added"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </ScrollArea>
           )}
         </div>
       )}

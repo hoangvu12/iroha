@@ -1,4 +1,3 @@
-import * as DM from "@radix-ui/react-dropdown-menu";
 import type { ReactNode } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -6,11 +5,25 @@ import { Activity, ChevronDown, Columns3, ListFilter } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button, buttonClass, IconButton } from "@/ui/Button";
+import { Button, buttonClass } from "@/ui/Button";
 import { StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
-import { MenuContent, MenuLabel, MenuSeparator } from "@/ui/Menu";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuContent,
+  MenuGroup,
+  MenuIconTrigger,
+  MenuItem,
+  MenuLabel,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+  SubMenu,
+} from "@/ui/Menu";
+import { Tip } from "@/ui/Tooltip";
 import { Chip, EmptyState, ErrorState, NoResults } from "@/ui/States";
 import { Skeleton } from "@/ui/Skeleton";
 import { Table, TBody, TD, TH, THead } from "@/ui/Table";
@@ -19,7 +32,6 @@ import { useFilterOptions, useRequestFeed, useRequestStats } from "./api";
 import { SAMPLE_CALLERS, SAMPLE_REQUESTS, SAMPLE_STATS } from "./samples";
 import { clock, compactNumber, failed, PoolTag, ProviderLogo, secs, shapeInOut, StatusCell, statusTone } from "./bits";
 import { RequestDrawer } from "./Drawer";
-import { CheckItem, ChoiceItem, SubMenu } from "./menus";
 import { COLUMNS, type ColumnId, type FilterKey, RANGES, type RequestsUrl, STATUSES, useRequestsUrl } from "./url-state";
 
 /** Requests (C03, C04, C32): stats for the current filters, the live feed, and the drawer. */
@@ -109,19 +121,20 @@ export function RequestsFeed() {
 
 function LiveToggle({ live, onToggle, phone }: { live: boolean; onToggle: () => void; phone: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-pressed={live}
-      title={live ? "New Requests appear as they arrive. Click to pause." : "Paused. Click to follow new Requests again."}
-      className={cn(
-        "inline-flex h-8 items-center gap-2 rounded-full px-3 text-[14px] transition-colors",
-        phone ? (live ? "bg-success-tint font-medium text-success" : "bg-muted text-fg-muted") : "text-fg hover:bg-muted",
-      )}
-    >
-      <StatusDot tone={live ? "green" : "gray"} />
-      {live ? "Live" : "Paused"}
-    </button>
+    <Tip label={live ? "New Requests appear as they arrive. Click to pause." : "Paused. Click to follow new Requests again."} type="description">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-pressed={live}
+        className={cn(
+          "inline-flex h-8 items-center gap-2 rounded-full px-3 text-[14px] transition-colors",
+          phone ? (live ? "bg-success-tint font-medium text-success" : "bg-muted text-fg-muted") : "text-fg hover:bg-muted",
+        )}
+      >
+        <StatusDot tone={live ? "green" : "gray"} />
+        {live ? "Live" : "Paused"}
+      </button>
+    </Tip>
   );
 }
 
@@ -184,58 +197,57 @@ function Toolbar({ url, options, phone }: { url: RequestsUrl; options?: FilterOp
         onChange={(e) => setText(e.target.value)}
         className={phone ? "min-w-0 flex-1" : "w-[440px]"}
       />
-      <DM.Root>
-        <DM.Trigger asChild>
-          {phone ? (
-            <IconButton icon={ListFilter} label="Filter" bordered className="size-9" />
-          ) : (
-            <Button icon={ListFilter}>
-              Filter
-              {active > 0 && <span className="tabular text-fg-muted">{active}</span>}
-            </Button>
-          )}
-        </DM.Trigger>
+      <Menu>
+        {phone ? (
+          <MenuIconTrigger icon={ListFilter} label="Filter" bordered />
+        ) : (
+          <MenuTrigger className={buttonClass()}>
+            <ListFilter size={16} aria-hidden className="shrink-0" />
+            Filter
+            {active > 0 && <span className="tabular text-fg-muted">{active}</span>}
+          </MenuTrigger>
+        )}
         <FilterMenu url={url} options={options} phone={phone} />
-      </DM.Root>
+      </Menu>
       {!phone && (
         <>
-          <DM.Root>
-            <DM.Trigger asChild>
-              <Button icon={Columns3}>Columns</Button>
-            </DM.Trigger>
+          <Menu>
+            <MenuTrigger className={buttonClass()}>
+              <Columns3 size={16} aria-hidden className="shrink-0" />
+              Columns
+            </MenuTrigger>
             <MenuContent align="start">
-              <MenuLabel>Show columns</MenuLabel>
-              {COLUMNS.map((c) => (
-                <CheckItem key={c.id} checked={!url.hidden.has(c.id)} onChange={() => url.toggleColumn(c.id)}>
-                  {c.label}
-                </CheckItem>
-              ))}
+              <MenuGroup label="Show columns">
+                {COLUMNS.map((c) => (
+                  <MenuCheckboxItem key={c.id} value={c.id} checked={!url.hidden.has(c.id)} onCheckedChange={() => url.toggleColumn(c.id)}>
+                    {c.label}
+                  </MenuCheckboxItem>
+                ))}
+              </MenuGroup>
               {url.hidden.size > 0 && (
                 <>
                   <MenuSeparator />
-                  <ChoiceItem selected={false} onSelect={url.resetColumns}>
-                    Show all
-                  </ChoiceItem>
+                  <MenuItem onSelect={url.resetColumns}>Show all</MenuItem>
                 </>
               )}
             </MenuContent>
-          </DM.Root>
+          </Menu>
           <div className="flex-1" />
-          <DM.Root>
-            <DM.Trigger asChild>
-              <Button className="gap-1.5">
-                {url.rangeInfo.label}
-                <ChevronDown size={15} className="text-fg-muted" />
-              </Button>
-            </DM.Trigger>
+          <Menu>
+            <MenuTrigger className={buttonClass("secondary", "md", "gap-1.5")} aria-label={`Time: ${url.rangeInfo.label}`}>
+              {url.rangeInfo.label}
+              <ChevronDown size={15} aria-hidden className="text-fg-muted" />
+            </MenuTrigger>
             <MenuContent>
-              {RANGES.map((r) => (
-                <ChoiceItem key={r.id} selected={r.id === url.range} onSelect={() => url.setRange(r.id)}>
-                  {r.label}
-                </ChoiceItem>
-              ))}
+              <MenuRadioGroup value={url.range} onValueChange={(v) => url.setRange(v as typeof url.range)}>
+                {RANGES.map((r) => (
+                  <MenuRadioItem key={r.id} value={r.id}>
+                    {r.label}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
             </MenuContent>
-          </DM.Root>
+          </Menu>
         </>
       )}
     </div>
@@ -255,87 +267,90 @@ function FilterMenu({ url, options, phone }: { url: RequestsUrl; options?: Filte
   const set = (k: FilterKey, v: string | undefined) => url.setFilter(k, v);
   const any = Object.keys(f).length > 0;
 
+  const providerOrPool = f.provider ? "p:" + f.provider : f.pool ? "m:" + f.pool : "";
+  const pickProviderOrPool = (v: string) =>
+    url.setFilters(
+      v.startsWith("p:") ? { provider: v.slice(2), pool: undefined } : v.startsWith("m:") ? { pool: v.slice(2), provider: undefined } : { provider: undefined, pool: undefined },
+    );
+
   return (
     <MenuContent align={phone ? "end" : "start"} className="min-w-56">
       <SubMenu label="Caller" value={f.caller}>
-        <ChoiceItem selected={!f.caller} onSelect={() => set("caller", undefined)}>
-          Anyone
-        </ChoiceItem>
-        <Skeleton data={options && callers} sample={SAMPLE_CALLERS} label="Loading Callers">
-          {(callers) =>
-            callers.map((c) => (
-              <ChoiceItem key={c.name} selected={f.caller === c.name} onSelect={() => set("caller", c.name)} count={c.requests}>
-                {c.name}
-              </ChoiceItem>
-            ))
-          }
-        </Skeleton>
+        <MenuRadioGroup value={f.caller ?? ""} onValueChange={(v) => set("caller", v || undefined)}>
+          <MenuRadioItem value="">Anyone</MenuRadioItem>
+          {callers.map((c) => (
+            <MenuRadioItem key={c.name} value={c.name} count={c.requests}>
+              {c.name}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+        {!options && (
+          // Rows shaped like the Callers, outside the group so they never take focus.
+          <Skeleton data={undefined} sample={SAMPLE_CALLERS} label="Loading Callers">
+            {(callers) =>
+              callers.map((c) => (
+                <div key={c.name} className="flex h-8 items-center gap-2 rounded-md px-2 pl-8">
+                  <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                  <span className="tabular text-xs">{c.requests}</span>
+                </div>
+              ))
+            }
+          </Skeleton>
+        )}
       </SubMenu>
       <SubMenu label="Provider or Pool" value={f.provider ?? f.pool}>
-        <ChoiceItem selected={!f.provider && !f.pool} onSelect={() => url.setFilters({ provider: undefined, pool: undefined })}>
-          Any
-        </ChoiceItem>
-        {providers.length > 0 && <MenuLabel>Providers</MenuLabel>}
-        {providers.map((p) => (
-          <ChoiceItem
-            key={"p:" + p.name}
-            selected={f.provider === p.name}
-            onSelect={() => url.setFilters({ provider: p.name, pool: undefined })}
-            count={p.requests}
-          >
-            <span className="inline-flex items-center gap-2">
+        <MenuRadioGroup value={providerOrPool} onValueChange={pickProviderOrPool}>
+          <MenuRadioItem value="">Any</MenuRadioItem>
+          {providers.length > 0 && <MenuLabel>Providers</MenuLabel>}
+          {providers.map((p) => (
+            <MenuRadioItem key={"p:" + p.name} value={"p:" + p.name} count={p.requests}>
               <ProviderLogo handle={p.name} size={18} />
               {p.name}
-            </span>
-          </ChoiceItem>
-        ))}
-        {pools.length > 0 && <MenuLabel>Model Pools</MenuLabel>}
-        {pools.map((p) => (
-          <ChoiceItem
-            key={"m:" + p.name}
-            selected={f.pool === p.name}
-            onSelect={() => url.setFilters({ pool: p.name, provider: undefined })}
-            count={p.requests}
-          >
-            {p.name}
-          </ChoiceItem>
-        ))}
+            </MenuRadioItem>
+          ))}
+          {pools.length > 0 && <MenuLabel>Model Pools</MenuLabel>}
+          {pools.map((p) => (
+            <MenuRadioItem key={"m:" + p.name} value={"m:" + p.name} count={p.requests}>
+              {p.name}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
       </SubMenu>
       <SubMenu label="Model" value={f.model}>
-        <ChoiceItem selected={!f.model} onSelect={() => set("model", undefined)}>
-          Any model
-        </ChoiceItem>
-        {models.map((m) => (
-          <ChoiceItem key={m.name} selected={f.model === m.name} onSelect={() => set("model", m.name)} count={m.requests}>
-            {m.name}
-          </ChoiceItem>
-        ))}
+        <MenuRadioGroup value={f.model ?? ""} onValueChange={(v) => set("model", v || undefined)}>
+          <MenuRadioItem value="">Any model</MenuRadioItem>
+          {models.map((m) => (
+            <MenuRadioItem key={m.name} value={m.name} count={m.requests}>
+              {m.name}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
       </SubMenu>
       <SubMenu label="Status" value={STATUSES.find((s) => s.id === f.status)?.label ?? f.status}>
-        <ChoiceItem selected={!f.status} onSelect={() => set("status", undefined)}>
-          Any status
-        </ChoiceItem>
-        {STATUSES.map((s) => (
-          <ChoiceItem key={s.id} selected={f.status === s.id} onSelect={() => set("status", s.id)}>
-            {s.label}
-          </ChoiceItem>
-        ))}
+        <MenuRadioGroup value={f.status ?? ""} onValueChange={(v) => set("status", v || undefined)}>
+          <MenuRadioItem value="">Any status</MenuRadioItem>
+          {STATUSES.map((s) => (
+            <MenuRadioItem key={s.id} value={s.id}>
+              {s.label}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
       </SubMenu>
       {phone && (
         <SubMenu label="Time" value={url.rangeInfo.label}>
-          {RANGES.map((r) => (
-            <ChoiceItem key={r.id} selected={r.id === url.range} onSelect={() => url.setRange(r.id)}>
-              {r.label}
-            </ChoiceItem>
-          ))}
+          <MenuRadioGroup value={url.range} onValueChange={(v) => url.setRange(v as typeof url.range)}>
+            {RANGES.map((r) => (
+              <MenuRadioItem key={r.id} value={r.id}>
+                {r.label}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
         </SubMenu>
       )}
       {any && (
         <>
           <MenuSeparator />
-          <ChoiceItem selected={false} onSelect={url.clearFilters}>
-            Clear filters
-          </ChoiceItem>
+          <MenuItem onSelect={url.clearFilters}>Clear filters</MenuItem>
         </>
       )}
     </MenuContent>

@@ -1,14 +1,15 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ArrowDown, ArrowUp, ExternalLink, GripVertical, Layers, MoreHorizontal, Trash2 } from "lucide-react";
 import { seg } from "@/api/client";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button, IconButton } from "@/ui/Button";
+import { Autocomplete } from "@/ui/Autocomplete";
+import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
-import { Field, Input } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Field } from "@/ui/Input";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { Skeleton } from "@/ui/Skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
@@ -73,9 +74,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
 
   const menu = (m: Member, i: number) => (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for member ${i + 1}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for member ${i + 1}`} size="sm" />
       <MenuContent>
         <MenuItem icon={ArrowUp} disabled={i === 0} onSelect={() => move(i, i - 1)}>
           Move up
@@ -279,7 +278,6 @@ export function AddMemberDialog({ pool, open, onOpenChange }: { pool: Pool; open
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
   const ids = useModelIds(provider || undefined);
-  const listId = useId();
   const choices = (providers.data ?? []).filter((p) => !p.archived).sort((a, b) => natural(a.handle, b.handle));
 
   useEffect(() => {
@@ -338,28 +336,15 @@ export function AddMemberDialog({ pool, open, onOpenChange }: { pool: Pool; open
         }}
       >
         <Field label="Provider">
-          {(p) => (
-            <Select {...p} value={provider} onChange={(e) => setProvider(e.target.value)}>
-              {choices.map((c) => (
-                <option key={c.id} value={c.handle}>
-                  {c.handle}
-                </option>
-              ))}
-            </Select>
-          )}
+          {() => <Select value={provider} onValueChange={setProvider} items={choices.map((c) => ({ value: c.handle, label: c.handle }))} />}
         </Field>
         <Field
           label="Model"
           hint={offered ? "The model ID as this Provider names it." : `${provider}'s model list doesn't name it; it is still tried unless the Provider is strict.`}
           error={error}
         >
-          {(p) => <Input {...p} mono spellCheck={false} list={listId} value={model} onChange={(e) => setModel(e.target.value)} />}
+          {() => <Autocomplete mono value={model} onValueChange={setModel} items={known ?? []} />}
         </Field>
-        <datalist id={listId}>
-          {known?.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
       </form>
     </Dialog>
   );

@@ -6,11 +6,11 @@ import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import type { Actor, AuditEntry } from "@/api/types";
 import { useIsPhone } from "@/lib/media";
-import { Button, IconButton } from "@/ui/Button";
+import { Button, IconButton, buttonClass } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
 import { LogoTile, PoolTile, ProviderTile } from "@/ui/LogoTile";
-import { Menu, MenuContent, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { Chip, EmptyState, ErrorState, NoResults } from "@/ui/States";
 import { Skeleton } from "@/ui/Skeleton";
 import { notify, notifyChange } from "@/ui/toast";
@@ -69,15 +69,12 @@ export function AuditEntriesTab() {
           className="min-w-0 flex-1 md:w-[300px] md:flex-none"
         />
         <Menu>
-          <MenuTrigger asChild>
-            <Button className="gap-1.5">
-              {actor ? actorLabel : "Anyone"}
-              <ChevronDown size={15} className="text-fg-muted" />
-            </Button>
+          <MenuTrigger className={buttonClass("secondary", "md", "gap-1.5")}>
+            {actor ? actorLabel : "Anyone"}
+            <ChevronDown size={15} aria-hidden className="text-fg-muted" />
           </MenuTrigger>
-          <MenuContent align="start" className="max-h-[60vh] min-w-56 overflow-y-auto">
-            <MenuLabel>Changed by</MenuLabel>
-            <MenuRadioGroup value={actor} onValueChange={(v) => setParam("actor", v)}>
+          <MenuContent align="start" className="min-w-56" maxHeight="max-h-[min(60vh,calc(var(--available-height)-2px))]">
+            <MenuRadioGroup label="Changed by" value={actor} onValueChange={(v) => setParam("actor", v)}>
               <MenuRadioItem value="">Anyone</MenuRadioItem>
               {(filters.data?.actors ?? []).map((a) => (
                 <MenuRadioItem key={a.filter} value={a.filter}>
@@ -87,8 +84,7 @@ export function AuditEntriesTab() {
               ))}
             </MenuRadioGroup>
             <MenuSeparator />
-            <MenuLabel>Changed what</MenuLabel>
-            <MenuRadioGroup value={resource} onValueChange={(v) => setParam("resource", v)}>
+            <MenuRadioGroup label="Changed what" value={resource} onValueChange={(v) => setParam("resource", v)}>
               <MenuRadioItem value="">Everything</MenuRadioItem>
               {(filters.data?.resources ?? []).map((r) => (
                 <MenuRadioItem key={r.name} value={r.name}>

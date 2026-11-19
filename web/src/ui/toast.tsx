@@ -1,35 +1,58 @@
 import type { ReactNode } from "react";
-import { toast, Toaster as SonnerToaster } from "sonner";
+import { OverlayHost } from "@ui-sdk/react/overlays";
+import { Toast, ToastAction, ToastDescription, ToastTitle, toast } from "@ui-sdk/react/toast";
 import { CircleAlert, CircleCheck, Copy, RotateCcw } from "lucide-react";
 import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import type { AuditResult } from "@/api/types";
+import { cn } from "./cn";
 
 // Toasts: bottom right, 6 s (C25). Every change that can be put back gets
 // Undo, which reverts its Audit Entry through the same API agents use.
 
 export const TOAST_MS = 6000;
 
-export function Toaster({ theme }: { theme: "light" | "dark" }) {
+type Icon = "ok" | "bad" | "copy" | "undo";
+
+const icons: Record<Icon, ReactNode> = {
+  ok: <CircleCheck size={17} aria-hidden className="shrink-0 text-success" />,
+  bad: <CircleAlert size={17} aria-hidden className="shrink-0 text-danger-text" />,
+  copy: <Copy size={16} aria-hidden className="shrink-0 text-fg-muted" />,
+  undo: <RotateCcw size={16} aria-hidden className="shrink-0 text-fg-muted" />,
+};
+
+// Mounted once at the root: renders the toasts (and any confirm()).
+export function Toaster() {
   return (
-    <SonnerToaster
-      position="bottom-right"
-      duration={TOAST_MS}
-      theme={theme}
-      visibleToasts={5}
-      expand
-      gap={8}
-      toastOptions={{
-        unstyled: true,
-        classNames: {
-          toast:
-            "flex w-[min(380px,calc(100vw-32px))] items-center gap-2.5 rounded-xl border border-border bg-elevated px-4 py-3 text-sm text-fg shadow-elevated",
-          title: "flex-1 font-normal",
-          description: "text-[13px] text-fg-muted",
-          actionButton: "ml-auto shrink-0 font-medium text-info hover:underline",
-          cancelButton: "shrink-0 text-fg-muted",
-          icon: "shrink-0",
-        },
+    <OverlayHost
+      toast={{
+        side: "bottom",
+        align: "end",
+        maxVisible: 5,
+        expanded: true,
+        // Typed props leave out data attributes; the region passes them on.
+        ...({ "data-agent-hidden": true } as object),
+        className: cn(
+          "fixed bottom-4 right-4 w-[min(380px,calc(100vw-32px))]",
+          "h-[calc(var(--toast-stack-height)+(var(--toast-count)-1)*8px)] transition-[height] duration-300 motion-reduce:transition-none",
+        ),
+        children: (item) => (
+          <Toast
+            className={cn(
+              "absolute inset-x-0 bottom-0 flex h-(--toast-height) select-none items-center gap-2.5 rounded-xl border border-border bg-elevated px-4 py-3 text-sm text-fg shadow-elevated",
+              "translate-x-(--toast-swipe-x,0px) translate-y-[calc(-1*(var(--toast-offset)+var(--toast-index)*8px))]",
+              "transition-[translate,opacity,height] duration-300 ease-out data-swiping:transition-none",
+              "data-starting-style:translate-y-full data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-opacity",
+            )}
+          >
+            {icons[((item.data as { icon?: Icon } | undefined)?.icon ?? "ok") as Icon]}
+            <div className="min-w-0 flex-1">
+              <ToastTitle className="font-normal" />
+              <ToastDescription className="text-[13px] text-fg-muted" />
+            </div>
+            <ToastAction className="ml-auto shrink-0 font-medium text-info hover:underline data-pending:opacity-60" />
+          </Toast>
+        ),
       }}
     />
   );
@@ -37,31 +60,30 @@ export function Toaster({ theme }: { theme: "light" | "dark" }) {
 
 type Action = { label: string; onClick: () => void };
 
-function show(message: ReactNode, icon: ReactNode, action?: Action, description?: ReactNode) {
-  return toast(message, { icon, description, action: action ? { label: action.label, onClick: action.onClick } : undefined });
+function show(message: ReactNode, icon: Icon, action?: Action) {
+  return toast(message, {
+    type: icon === "bad" ? "error" : icon === "ok" ? "success" : "default",
+    duration: TOAST_MS,
+    data: { icon },
+    action: action ? { label: action.label, onAction: () => action.onClick() } : undefined,
+  });
 }
 
-const ok = <CircleCheck size={17} className="text-success" />;
-const bad = <CircleAlert size={17} className="text-danger-text" />;
-
 export const notify = {
-  /** "3 keys disabled  Undo" */
-  success: (message: ReactNode, action?: Action) => show(message, ok, action),
-  /** "Couldn't test team-5: 401 Invalid key  Open" */
-  error: (message: ReactNode, action?: Action) => show(message, bad, action),
-  /** "Base URL copied" */
-  copied: (what: string) => show(`${what} copied`, <Copy size={16} className="text-fg-muted" />),
-  /** A failed call, worded from its error. */
-  failure: (what: string, e: unknown) =>
-    show(`${what}: ${isApiError(e) ? e.message : e instanceof Error ? e.message : String(e)}`, bad),
+  // "3 keys disabled  Undo"
+  success: (message: ReactNode, action?: Action) => show(message, "ok", action),
+  // "Couldn't test team-5: 401 Invalid key  Open"
+  error: (message: ReactNode, action?: Action) => show(message, "bad", action),
+  // "Base URL copied"
+  copied: (what: string) => show(`${what} copied`, "copy"),
+  // A failed call, worded from its error.
+  failure: (what: string, e: unknown) => show(`${what}: ${isApiError(e) ? e.message : e instanceof Error ? e.message : String(e)}`, "bad"),
 };
 
-/**
- * Toast a change from any mutation response. When it wrote a revertible
- * Audit Entry, the toast offers Undo; undoing toasts "Change reverted" with
- * its own Undo (reverting the revert redoes the change). onUndone runs
- * after each revert so the page can refetch.
- */
+// Toast a change from any mutation response. When it wrote a revertible
+// Audit Entry, the toast offers Undo; undoing toasts "Change reverted" with
+// its own Undo (reverting the revert redoes the change). onUndone runs after
+// each revert so the page can refetch.
 export function notifyChange(
   message: ReactNode,
   result: Pick<AuditResult, "audit_entry">,
@@ -78,14 +100,8 @@ async function undo(entry: string, message: string, onUndone?: () => void) {
     const res = await revertEntry(entry);
     onUndone?.();
     const again = res.audit_entry;
-    show(
-      message,
-      <RotateCcw size={16} className="text-fg-muted" />,
-      again ? { label: "Undo", onClick: () => void undo(again, "Change restored", onUndone) } : undefined,
-    );
+    show(message, "undo", again ? { label: "Undo", onClick: () => void undo(again, "Change restored", onUndone) } : undefined);
   } catch (e) {
     notify.failure("Couldn't undo", e);
   }
 }
-
-export { toast };

@@ -1,5 +1,6 @@
 import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from "react";
 import { cn } from "./cn";
+import { ScrollArea } from "./ScrollArea";
 
 // Table primitives in the calm style of the design: one fact per cell,
 // hairline row borders, grey header labels, no zebra stripes. Pages build
@@ -7,9 +8,9 @@ import { cn } from "./cn";
 
 export function Table({ className, ...rest }: HTMLAttributes<HTMLTableElement>) {
   return (
-    <div className="w-full overflow-x-auto">
+    <ScrollArea axis="x" className="w-full" contentClassName="min-w-full">
       <table className={cn("w-full border-collapse text-left text-sm", className)} {...rest} />
-    </div>
+    </ScrollArea>
   );
 }
 

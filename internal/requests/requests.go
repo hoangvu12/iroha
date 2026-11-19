@@ -93,6 +93,7 @@ type Attempt struct {
 	UpstreamKeyID string       `json:"upstream_key_id"`
 	UpstreamKey   string       `json:"upstream_key" doc:"Upstream Key name."`
 	WireModel     string       `json:"wire_model"`
+	ReportedModel string       `json:"reported_model,omitempty" doc:"The model the Provider's answer said served it (a dated snapshot, the model a router chose); absent when the answer named none. The Caller was answered with the model it asked for."`
 	Shape         shape.Shape  `json:"shape" doc:"The Shape sent upstream."`
 	Status        int          `json:"status" doc:"Upstream HTTP status; 0 when no response arrived."`
 	Error         string       `json:"error,omitempty" doc:"What went wrong when there was no usable response."`
@@ -149,11 +150,11 @@ func (rc *Recorder) Attempt(ctx context.Context, id string, a Attempt) error {
 	return rc.db.Tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO attempts (request_id, seq, started_at, provider_id, provider_handle, endpoint_id, endpoint_name, endpoint_url,
 			upstream_key_id, upstream_key_name, wire_model, shape, status, error, first_byte_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens,
-			rule, outcome, reason, action, failure_headers, failure_body)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			rule, outcome, reason, action, failure_headers, failure_body, reported_model)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, a.Seq, store.Millis(a.StartedAt), a.ProviderID, a.Provider, a.EndpointID, a.Endpoint, a.EndpointURL,
 			a.UpstreamKeyID, a.UpstreamKey, a.WireModel, string(a.Shape), a.Status, a.Error, a.FirstByteMs, a.DurationMs, in, out, cache, reasoning,
-			a.Rule, a.Outcome, a.Reason, a.Action, headers, body); err != nil {
+			a.Rule, a.Outcome, a.Reason, a.Action, headers, body, a.ReportedModel); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE requests SET attempt_count = attempt_count + 1 WHERE id = ?`, id)

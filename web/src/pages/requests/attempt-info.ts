@@ -74,6 +74,14 @@ export function explain(a: Attempt): Explanation {
   return e;
 }
 
+/**
+ * The model the Provider said served attempt `a` (a dated snapshot, a router's
+ * pick), when it differs from the model sent; the Caller saw its own name.
+ */
+export function servedModel(a: Attempt): string | undefined {
+  return a.reported_model && a.reported_model !== a.wire_model ? a.reported_model : undefined;
+}
+
 /** What Iroha did next after attempt `a`: "Tried the next key", "Tried openrouter", "Returned the error to the Caller". */
 export function thenText(a: Attempt, next: Attempt | undefined): string {
   if (!attemptFailed(a)) return "Returned the answer to the Caller";

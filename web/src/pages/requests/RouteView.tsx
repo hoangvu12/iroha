@@ -14,7 +14,7 @@ import { ErrorState } from "@/ui/States";
 import { notify } from "@/ui/toast";
 import type { Attempt, RequestRecord } from "./api";
 import { useCopy, useRequest } from "./api";
-import { attemptFailed, explain, jumpLabel, thenText } from "./attempt-info";
+import { attemptFailed, explain, jumpLabel, servedModel, thenText } from "./attempt-info";
 import { Headers, keyStateClass } from "./Attempts";
 import { Badge, clockMs, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, StatusPill, statusText, statusTone, Summary } from "./bits";
 import { CapturedView } from "./Captured";
@@ -462,6 +462,11 @@ function AttemptPanel({ a, next, onClose }: { a: Attempt; next?: Attempt; onClos
         <Row label="Model sent" mono>
           {a.wire_model}
         </Row>
+        {servedModel(a) && (
+          <Row label="Model served" mono>
+            {servedModel(a)}
+          </Row>
+        )}
         {!e.failed && <Row label="First token">{secs(a.first_byte_ms)}</Row>}
       </PanelSection>
       {e.body && (

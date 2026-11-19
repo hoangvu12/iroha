@@ -4,7 +4,7 @@ import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { EmptyState } from "@/ui/States";
 import type { Attempt, RequestRecord } from "./api";
-import { attemptFailed, explain, thenText } from "./attempt-info";
+import { attemptFailed, explain, servedModel, thenText } from "./attempt-info";
 import { Badge, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, statusText, Summary } from "./bits";
 
 /** The drawer's Attempts tab: the Request's summary, then each Attempt and what Iroha made of it. */
@@ -82,6 +82,7 @@ function AttemptCard({ a, next, defaultOpen }: { a: Attempt; next?: Attempt; def
 /** What happened at one Attempt, as label/value rows (drawer and Route view). */
 export function AttemptFacts({ a, next, withSentTo = true }: { a: Attempt; next?: Attempt; withSentTo?: boolean }) {
   const e = explain(a);
+  const served = servedModel(a);
   return (
     <dl>
       {e.failed && (
@@ -108,6 +109,11 @@ export function AttemptFacts({ a, next, withSentTo = true }: { a: Attempt; next?
           <Row label="Model sent" mono>
             {a.wire_model}
           </Row>
+          {served && (
+            <Row label="Model served" mono>
+              {served}
+            </Row>
+          )}
           {!e.failed && <Row label="First token">{secs(a.first_byte_ms)}</Row>}
         </>
       )}

@@ -10,7 +10,7 @@ import (
 )
 
 // Shape-aware Responders. Each writes the realistic body of the fake's
-// Shape, echoing the model the request named.
+// Shape, echoing the model the request named (or SetServedModel's).
 
 // Text replies with a complete answer. If the request asked for a stream,
 // the text is streamed in that Shape's stream format (one chunk per word).
@@ -61,27 +61,27 @@ func splitWords(text string) []string {
 }
 
 func (u *Upstream) completeReply(r *Received, text string) Reply {
-	us := u.currentUsage()
+	us, model := u.currentUsage(), u.servedModel(r)
 	id := fmt.Sprintf("fake-%d", r.Seq)
 	var body any
 	switch u.Shape {
 	case shape.OpenAIChat:
 		body = map[string]any{
-			"id": "chatcmpl-" + id, "object": "chat.completion", "created": 1767225600, "model": r.Model,
+			"id": "chatcmpl-" + id, "object": "chat.completion", "created": 1767225600, "model": model,
 			"choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": text}, "finish_reason": "stop"}},
 			"usage":   map[string]any{"prompt_tokens": us.Input, "completion_tokens": us.Output, "total_tokens": us.Input + us.Output},
 		}
 	case shape.OpenAIResponses:
-		body = responsesObject(id, r.Model, "completed", text, us)
+		body = responsesObject(id, model, "completed", text, us)
 	case shape.AnthropicMessages:
 		body = map[string]any{
-			"id": "msg_" + id, "type": "message", "role": "assistant", "model": r.Model,
+			"id": "msg_" + id, "type": "message", "role": "assistant", "model": model,
 			"content":     []any{map[string]any{"type": "text", "text": text}},
 			"stop_reason": "end_turn", "stop_sequence": nil,
 			"usage": map[string]any{"input_tokens": us.Input, "output_tokens": us.Output},
 		}
 	case shape.Gemini:
-		body = geminiChunk(r.Model, text, "STOP", &us)
+		body = geminiChunk(model, text, "STOP", &us)
 	}
 	return Reply{Status: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: []byte(compactJSON(body))}
 }
@@ -127,13 +127,13 @@ func sse(event string, data any) string {
 }
 
 func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
-	us := u.currentUsage()
+	us, model := u.currentUsage(), u.servedModel(r)
 	id := fmt.Sprintf("fake-%d", r.Seq)
 	var events []string
 	switch u.Shape {
 	case shape.OpenAIChat:
 		chunk := func(delta map[string]any, finish any) map[string]any {
-			return map[string]any{"id": "chatcmpl-" + id, "object": "chat.completion.chunk", "created": 1767225600, "model": r.Model,
+			return map[string]any{"id": "chatcmpl-" + id, "object": "chat.completion.chunk", "created": 1767225600, "model": model,
 				"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}}
 		}
 		events = append(events, sse("", chunk(map[string]any{"role": "assistant", "content": ""}, nil)))
@@ -148,7 +148,7 @@ func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
 		}
 		_ = json.Unmarshal(r.Body, &req)
 		if req.StreamOptions.IncludeUsage { // like OpenAI, usage only when asked for
-			events = append(events, sse("", map[string]any{"id": "chatcmpl-" + id, "object": "chat.completion.chunk", "created": 1767225600, "model": r.Model,
+			events = append(events, sse("", map[string]any{"id": "chatcmpl-" + id, "object": "chat.completion.chunk", "created": 1767225600, "model": model,
 				"choices": []any{}, "usage": map[string]any{"prompt_tokens": us.Input, "completion_tokens": us.Output, "total_tokens": us.Input + us.Output}}))
 		}
 		events = append(events, sse("", "[DONE]"))
@@ -169,8 +169,8 @@ func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
 			return map[string]any{"type": "output_text", "text": text, "annotations": []any{}}
 		}
 		events = append(events,
-			ev("response.created", map[string]any{"response": responsesObject(id, r.Model, "in_progress", "", us)}),
-			ev("response.in_progress", map[string]any{"response": responsesObject(id, r.Model, "in_progress", "", us)}),
+			ev("response.created", map[string]any{"response": responsesObject(id, model, "in_progress", "", us)}),
+			ev("response.in_progress", map[string]any{"response": responsesObject(id, model, "in_progress", "", us)}),
 			ev("response.output_item.added", map[string]any{"output_index": 0, "item": item("in_progress", []any{})}),
 			ev("response.content_part.added", map[string]any{"item_id": "msg_" + id, "output_index": 0, "content_index": 0, "part": part("")}))
 		for _, p := range pieces {
@@ -180,11 +180,11 @@ func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
 			ev("response.output_text.done", map[string]any{"item_id": "msg_" + id, "output_index": 0, "content_index": 0, "text": full}),
 			ev("response.content_part.done", map[string]any{"item_id": "msg_" + id, "output_index": 0, "content_index": 0, "part": part(full)}),
 			ev("response.output_item.done", map[string]any{"output_index": 0, "item": item("completed", []any{part(full)})}),
-			ev("response.completed", map[string]any{"response": responsesObject(id, r.Model, "completed", full, us)}))
+			ev("response.completed", map[string]any{"response": responsesObject(id, model, "completed", full, us)}))
 	case shape.AnthropicMessages:
 		events = append(events,
 			sse("message_start", map[string]any{"type": "message_start", "message": map[string]any{
-				"id": "msg_" + id, "type": "message", "role": "assistant", "model": r.Model, "content": []any{},
+				"id": "msg_" + id, "type": "message", "role": "assistant", "model": model, "content": []any{},
 				"stop_reason": nil, "stop_sequence": nil, "usage": map[string]any{"input_tokens": us.Input, "output_tokens": 1}}}),
 			sse("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}),
 		)
@@ -202,9 +202,9 @@ func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
 		for i, p := range pieces {
 			var c map[string]any
 			if i == len(pieces)-1 {
-				c = geminiChunk(r.Model, p, "STOP", &us)
+				c = geminiChunk(model, p, "STOP", &us)
 			} else {
-				c = geminiChunk(r.Model, p, "", nil)
+				c = geminiChunk(model, p, "", nil)
 			}
 			if sseMode {
 				parts = append(parts, sse("", c))

@@ -40,7 +40,6 @@ Tests written for this checklist found these behaviours wrong; each is fixed and
 | 29 | PRV-03, PRV-08 | Spread Requests across a Provider's same-Shape Endpoints, or record that they are a preference order (needs decision) |
 | 30 | REQ-45, REQ-59, REQ-57 | Structured output across Chat ↔ Anthropic; `search_result` blocks refuse the Request instead of being dropped |
 | 31 | REQ-18, FAIL-94, FAIL-83, TIME-09 | Mint an `Idempotency-Key` per Request; pause before a same-key 5xx replay (needs decision) |
-| 32 | MOD-06 | Record the model the upstream says it served on each Attempt |
 | 33 | MOD-67 | Model display names on the model lists (needs decision) |
 | 35 | PRV-86 | Mask static header values in Endpoint Audit Entries (needs decision) |
 | 36 | REQ-105, RUN-08 | Response compression, or record that Cloudflare compresses (needs decision) |
@@ -71,7 +70,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 - REQ-66, REQ-73, REQ-76: a Chat stream the Provider ends cleanly without any `finish_reason` is closed with one (ticket 16); a stream that breaks off still ends with an error event, never an invented finish. Catalog: "don't invent an end".
 - REQ-72, FAIL-90, TIME-06: a failure after the first byte ends with the Shape's error event, not a silent close.
 - TIME-03, PRV-55: no idle limit once bytes flow; a stalled but open upstream is kept until the Caller leaves (ticket 17: long thinking pauses must survive).
-- REQ-04, MOD-06…08: every answer names the model the Caller asked for (qualified on global routes), never the upstream's (ticket 32 records the upstream's).
+- REQ-04, MOD-06…08: every answer names the model the Caller asked for (qualified on global routes), never the upstream's (ticket 32 records the upstream's on the Attempt as `reported_model`).
 - REQ-85, REQ-88: `<think>` text is lifted only when it opens the answer; text after echoed reasoning is kept (ticket 16).
 - REQ-17: `Accept: text/event-stream` is sent upstream on stream requests (v1 sent `application/json`).
 
@@ -277,7 +276,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | MOD-02 | a | covered | `gateway TestGlobalRoutesRefuseUnqualifiedNamesWithAHint` | `gpt-x`, `/gpt-x`, `acme/` → 400 `invalid_model_id` with hint; deviation: uppercase handle is 403 `provider_not_allowed` (TestGlobalRoutesRefuseEveryProviderOutOfReachAlike "ACME") |
 | MOD-03 | a | covered | `gateway TestGlobalRoutesRefuseEveryProviderOutOfReachAlike`; `gateway TestUnknownOrOutOfScopeProvidersGetTheUniformRefusal` | unknown, out of scope, disabled, archived: same 403 message |
 | MOD-05 | a | covered | `gateway TestGlobalChatNamesTheProviderInTheModelAndEchoesIt` | upstream body = Caller bytes with only the model replaced |
-| MOD-06 | a | partial (#32) | `gateway TestGlobalChatNamesTheProviderInTheModelAndEchoesIt`; `gateway TestGlobalResponsesEchoTheQualifiedName`; `gateway TestGlobalMessagesPassThroughAndTranslateEchoingTheQualifiedName` | JSON, SSE chunks, `response.model`, `message_start` asserted; deviation: echoes the requested name, not `<handle>/<upstream-reported model>`; the upstream-reported model is not recorded anywhere |
+| MOD-06 | a | covered | `gateway TestGlobalChatNamesTheProviderInTheModelAndEchoesIt`; `gateway TestGlobalResponsesEchoTheQualifiedName`; `gateway TestGlobalMessagesPassThroughAndTranslateEchoingTheQualifiedName`; `gateway TestTheAttemptRecordsTheModelTheUpstreamSaysServedIt` | JSON, SSE chunks, `response.model`, `message_start` asserted; deviation: echoes the requested name, not `<handle>/<upstream-reported model>`; the upstream-reported model is recorded on the Attempt as `reported_model` (every Endpoint Shape, passthrough and translated, buffered and streamed) and shown as "Model served" on the Requests page (ticket 32) |
 | MOD-07 | a | covered | `gateway TestGlobalChatNamesTheProviderInTheModelAndEchoesIt` | qualified with handle (`acme/gpt-x`) |
 | MOD-08 | a | covered | `gateway TestNonStreamedChatPassesThroughWithTheRequestedModelAndIsRecorded`; `gateway TestPassthroughStaysByteForByteWhenNoNormaliserActs` | body byte-for-byte; deviation: answer's `model` is the requested name, not upstream's |
 | MOD-10 | a | covered | `gateway TestRenamesApplyPerAttemptSoFailoverSendsTheRightWireModel` | per-Endpoint renames (Caller name → wire name) |

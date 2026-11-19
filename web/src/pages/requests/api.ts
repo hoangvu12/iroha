@@ -21,6 +21,8 @@ export type Attempt = {
   upstream_key_id: string;
   upstream_key: string;
   wire_model: string;
+  /** The model the Provider's answer said served it (ticket 32); read through attempt-info.ts. */
+  reported_model?: string;
   shape: Shape;
   status: number;
   error?: string;

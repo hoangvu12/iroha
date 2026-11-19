@@ -340,22 +340,25 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 		}
 	}
 
-	// Usage is read from the Provider's own answer, before any translation.
+	// Usage and the model that served are read from the Provider's own
+	// answer, before any echo or translation.
 	ur := usage.NewReader(c.Endpoint.Shape)
+	rm := &reportedModel{shape: c.Endpoint.Shape}
 	var res relayResult
 	switch {
 	case call.tr == nil && stream:
-		call.pass.usage = ur
+		call.pass.usage, call.pass.reported = ur, rm
 		res = x.relayStream(resp, call.pass.data, call.norm.Stream())
 	case call.tr == nil:
-		call.pass.usage = ur
+		call.pass.usage, call.pass.reported = ur, rm
 		res = x.relayBuffered(resp, call.pass.body)
 	case stream:
-		res = x.relayTranslatedStream(resp, call.tr, cr, ur, call.norm.Stream())
+		res = x.relayTranslatedStream(resp, call.tr, cr, ur, rm, call.norm.Stream())
 	default:
-		res = x.relayBuffered(resp, translatedBody(x, call.tr, ur))
+		res = x.relayBuffered(resp, translatedBody(x, call.tr, ur, rm))
 	}
 	a.Error = res.err
+	a.ReportedModel = rm.Model()
 	a.Usage, x.rec.Usage = ur.Usage(), ur.Usage()
 	if !res.firstByte.IsZero() {
 		a.FirstByteMs = ms(res.firstByte.Sub(started))
@@ -396,6 +399,9 @@ func (x *exchange) recordAttempt(a requests.Attempt) {
 		"seq", a.Seq, "endpoint", a.Endpoint, "upstream_key", a.UpstreamKey, "wire_model", a.WireModel, "status", a.Status, "duration_ms", *a.DurationMs}
 	if a.Error != "" {
 		attrs = append(attrs, "error", a.Error)
+	}
+	if a.ReportedModel != "" && a.ReportedModel != a.WireModel {
+		attrs = append(attrs, "reported_model", a.ReportedModel)
 	}
 	if a.Outcome != "" {
 		attrs = append(attrs, "rule", a.Rule, "outcome", a.Outcome, "reason", a.Reason, "action", a.Action)
@@ -692,6 +698,7 @@ type passRelay struct {
 	model          string
 	dropUsageChunk bool
 	usage          *usage.Reader
+	reported       *reportedModel
 }
 
 func (c *passRelay) body(status int, b []byte) ([]byte, *api.Error) {
@@ -699,6 +706,7 @@ func (c *passRelay) body(status int, b []byte) ([]byte, *api.Error) {
 		return b, nil
 	}
 	c.usage.Body(b)
+	c.reported.read(b)
 	if c.shape == shape.Gemini {
 		return echoModelVersion(b, c.model), nil
 	}
@@ -710,6 +718,7 @@ func (c *passRelay) data(p []byte) ([]byte, bool) {
 		return p, false
 	}
 	c.usage.Event(p)
+	c.reported.read(p)
 	switch c.shape {
 	case shape.OpenAIChat:
 		if c.dropUsageChunk && bytes.Contains(p, []byte(`"usage"`)) && noChoices(p) {
@@ -734,9 +743,10 @@ func (c *passRelay) data(p []byte) ([]byte, bool) {
 }
 
 // translatedBody converts a whole translated answer for the Caller.
-func translatedBody(x *exchange, tr *translate.Translation, ur *usage.Reader) func(int, []byte) ([]byte, *api.Error) {
+func translatedBody(x *exchange, tr *translate.Translation, ur *usage.Reader, rm *reportedModel) func(int, []byte) ([]byte, *api.Error) {
 	return func(status int, b []byte) ([]byte, *api.Error) {
 		ur.Body(b)
+		rm.read(b)
 		out, err := tr.Response(x.ctx, b)
 		if err != nil {
 			return nil, api.Errorf(http.StatusBadGateway, "translation_failed",
@@ -751,7 +761,7 @@ func translatedBody(x *exchange, tr *translate.Translation, ur *usage.Reader) fu
 // Caller's Shape and sends each result as it is ready. An error event from
 // the Provider, or a stream that ends before its answer did, ends the
 // Caller's stream with the Shape's error event.
-func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Translation, cr callerRequest, ur *usage.Reader, ns *normalise.Stream) relayResult {
+func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Translation, cr callerRequest, ur *usage.Reader, rm *reportedModel, ns *normalise.Stream) relayResult {
 	var res relayResult
 	defer x.end()
 	x.writeHead(resp, "text/event-stream", true)
@@ -770,6 +780,7 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 	// when the stream is over.
 	feed := func(data []byte) bool {
 		ur.Event(data)
+		rm.read(data)
 		out, terr := st.Event(x.ctx, data)
 		var ue *translate.UpstreamError
 		switch {

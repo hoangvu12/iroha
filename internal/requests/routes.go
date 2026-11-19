@@ -60,7 +60,7 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 func attempts(ctx context.Context, db *store.DB, id string) ([]Attempt, error) {
 	rows, err := db.QueryContext(ctx, `SELECT seq, started_at, provider_id, provider_handle, endpoint_id, endpoint_name, endpoint_url,
 		upstream_key_id, upstream_key_name, wire_model, shape, status, error, first_byte_ms, duration_ms,
-		input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, rule, outcome, reason, action, failure_headers, failure_body
+		input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, rule, outcome, reason, action, failure_headers, failure_body, reported_model
 		FROM attempts WHERE request_id = ? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
@@ -75,7 +75,7 @@ func attempts(ctx context.Context, db *store.DB, id string) ([]Attempt, error) {
 		var headers string
 		if err := rows.Scan(&a.Seq, &started, &a.ProviderID, &a.Provider, &a.EndpointID, &a.Endpoint, &a.EndpointURL,
 			&a.UpstreamKeyID, &a.UpstreamKey, &a.WireModel, &sh, &a.Status, &a.Error, &firstByte, &duration,
-			&in, &outT, &cache, &reasoning, &a.Rule, &a.Outcome, &a.Reason, &a.Action, &headers, &a.FailureBody); err != nil {
+			&in, &outT, &cache, &reasoning, &a.Rule, &a.Outcome, &a.Reason, &a.Action, &headers, &a.FailureBody, &a.ReportedModel); err != nil {
 			return nil, err
 		}
 		if headers != "" {

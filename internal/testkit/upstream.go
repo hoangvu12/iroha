@@ -36,6 +36,7 @@ type Upstream struct {
 	custom   map[string]Responder // "METHOD /path"
 	models   []string
 	usage    Usage
+	served   string // the model answers name; empty: the one requested
 	received []*Received
 	arrived  chan struct{} // closed and replaced on every request
 	seq      int
@@ -261,6 +262,25 @@ func (u *Upstream) SetModels(ids ...string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.models = append([]string(nil), ids...)
+}
+
+// SetServedModel makes Text and Stream replies name model as the one that
+// served them (a dated snapshot, a router's choice) instead of echoing the
+// model the request named. Empty restores the echo.
+func (u *Upstream) SetServedModel(model string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.served = model
+}
+
+// servedModel is the model a reply to r names.
+func (u *Upstream) servedModel(r *Received) string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.served != "" {
+		return u.served
+	}
+	return r.Model
 }
 
 // SetUsage sets the token usage reported by Text and Stream replies.

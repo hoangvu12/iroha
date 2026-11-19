@@ -94,7 +94,7 @@ func OpenAPI(routes []Route, version string) map[string]any {
 		"info": map[string]any{
 			"title":       "Iroha",
 			"version":     version,
-			"description": "Iroha's HTTP API. Admin routes live under /api/ and take an Admin Token; GET /skill.md explains how to use them.",
+			"description": openAPIIntro,
 		},
 		"paths": paths,
 		"components": map[string]any{
@@ -106,6 +106,19 @@ func OpenAPI(routes []Route, version string) map[string]any {
 		},
 	}
 }
+
+// openAPIIntro states the admin API conventions once for every resource;
+// the skill's "Conventions of every admin resource" section says the same
+// at length.
+const openAPIIntro = `Iroha's HTTP API. Admin routes live under /api/ and take an Admin Token (or the Owner's session); GET /skill.md explains how to use them.
+
+Conventions shared by every admin resource:
+- Addressing: a {path} parameter naming a record accepts its name (or handle) or its ID.
+- Dry run: every mutating route (POST, PUT, PATCH, DELETE) accepts ?dry_run=true. It runs the change, reports exactly what would change in "changes", and writes nothing.
+- Create-or-update: POST /api/<resource> with the name of an existing record updates it instead of making a duplicate; "outcome" says created (201), updated or unchanged (200).
+- Bulk: POST /api/<resource>/bulk (and /bulk/<action>) takes {"items": [...]}, applies every item that succeeds and reports each one in "items" (ok, outcome, result or error). One failing item does not stop the others.
+- Audit: every mutation that changes something writes one Audit Entry (actor, before, after), returned as "audit_entry"; POST /api/audit-entries/{entry}/revert restores the before-state and is itself audited.
+- Errors: {"error": {"code", "message", "hint", "details"}}. The hint always names the next action.`
 
 // OperationID derives a stable operation id, e.g. GET /api/logs -> getLogs,
 // POST /api/admin-tokens/{name}/revoke -> postAdminTokensNameRevoke.

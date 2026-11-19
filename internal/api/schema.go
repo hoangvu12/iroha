@@ -27,6 +27,7 @@ var (
 	timeType       = reflect.TypeFor[time.Time]()
 	rawMessageType = reflect.TypeFor[json.RawMessage]()
 	nonNameChars   = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
+	typeArgPath    = regexp.MustCompile(`[A-Za-z0-9_./-]*[./]`)
 )
 
 func (g *schemaGen) schemaOf(v any) map[string]any {
@@ -77,7 +78,9 @@ func (g *schemaGen) component(t reflect.Type) string {
 	if name, ok := g.names[t]; ok {
 		return name
 	}
-	name := nonNameChars.ReplaceAllString(t.Name(), "_")
+	// Generic instances are named after their arguments without package
+	// paths: BulkResult[github.com/x/admintokens.Token] -> BulkResult_Token.
+	name := strings.TrimRight(nonNameChars.ReplaceAllString(typeArgPath.ReplaceAllString(t.Name(), ""), "_"), "_")
 	if other, ok := g.taken[name]; ok && other != t {
 		pkg := t.PkgPath()
 		name = nonNameChars.ReplaceAllString(pkg[strings.LastIndex(pkg, "/")+1:]+"."+t.Name(), "_")

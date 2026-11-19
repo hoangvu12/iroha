@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -48,9 +47,8 @@ func TestFirstStartPrintsBootstrapAdminTokenOnce(t *testing.T) {
 
 func TestBootstrapTokenIsNotReissuedAfterRevocation(t *testing.T) {
 	srv := testkit.Start(t)
-	if err := admintokens.New(srv.App.DB()).Revoke(context.Background(), "bootstrap"); err != nil {
-		t.Fatal(err)
-	}
+	other := srv.NewAdminToken("other")
+	other.Post("/api/admin-tokens/bootstrap/revoke", nil).Expect(200)
 	srv.Restart()
 	if srv.App.BootstrapToken().Secret != "" {
 		t.Fatal("a revoked bootstrap token was replaced on restart")
@@ -97,15 +95,9 @@ func TestLivenessAndReadiness(t *testing.T) {
 
 func TestAdminRoutesRefuseMissingUnknownAndRevokedTokens(t *testing.T) {
 	srv := testkit.Start(t)
-	tokens := admintokens.New(srv.App.DB())
-	agent, err := tokens.Create(context.Background(), "agent-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv.Client(agent.Secret).Get("/api/logs").Expect(200)
-	if err := tokens.Revoke(context.Background(), "agent-1"); err != nil {
-		t.Fatal(err)
-	}
+	agent := srv.NewAdminToken("agent-1")
+	agent.Get("/api/logs").Expect(200)
+	srv.Admin.Post("/api/admin-tokens/agent-1/revoke", nil).Expect(200)
 
 	cases := []struct {
 		name   string
@@ -114,7 +106,7 @@ func TestAdminRoutesRefuseMissingUnknownAndRevokedTokens(t *testing.T) {
 	}{
 		{"missing", srv.Anon, "admin_token_missing"},
 		{"unknown", srv.Client("iroha_admin_not-a-real-token"), "admin_token_invalid"},
-		{"revoked", srv.Client(agent.Secret), "admin_token_revoked"},
+		{"revoked", agent, "admin_token_revoked"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -58,7 +58,7 @@ type Request struct {
 	UpstreamKey   string `json:"upstream_key,omitempty" doc:"Name of the Upstream Key of the last Attempt."`
 	WireModel     string `json:"wire_model,omitempty" doc:"The model name sent upstream."`
 
-	FirstByteMs  *int64       `json:"first_byte_ms,omitempty" doc:"Time from arrival to the first byte of the answer (first token, for streams)."`
+	FirstByteMs  *int64       `json:"first_byte_ms,omitempty" doc:"Time from arrival to the first token: for streams, the first upstream event carrying text, reasoning or a tool call (not comments, pings or a role-only chunk; the first event when none does); for whole answers, when the body began arriving."`
 	DurationMs   *int64       `json:"duration_ms,omitempty" doc:"Time from arrival to the end of the answer."`
 	Usage        *usage.Usage `json:"usage,omitempty" doc:"Token usage, streamed answers included; absent when the Provider reported none."`
 	AttemptCount int          `json:"attempt_count"`

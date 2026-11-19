@@ -372,7 +372,7 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 	switch {
 	case call.tr == nil && stream:
 		call.pass.usage, call.pass.reported = ur, rm
-		res = x.relayStream(resp, call.pass.data, call.norm.Stream())
+		res = x.relayStream(resp, c.Endpoint.Shape, call.pass.data, call.norm.Stream())
 	case call.tr == nil:
 		call.pass.usage, call.pass.reported = ur, rm
 		res = x.relayBuffered(resp, call.pass.body)
@@ -384,9 +384,9 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 	a.Error = res.err
 	a.ReportedModel = rm.Model()
 	a.Usage, x.rec.Usage = ur.Usage(), ur.Usage()
-	if !res.firstByte.IsZero() {
-		a.FirstByteMs = ms(res.firstByte.Sub(started))
-		x.rec.FirstByteMs = ms(res.firstByte.Sub(x.start))
+	if t := res.ttft(); !t.IsZero() {
+		a.FirstByteMs = ms(t.Sub(started))
+		x.rec.FirstByteMs = ms(t.Sub(x.start))
 	}
 	return a, nil
 }
@@ -471,8 +471,30 @@ func isEventStream(h http.Header) bool {
 
 // relayResult is how relaying an answer went.
 type relayResult struct {
-	firstByte time.Time // when the first byte of the answer arrived
-	err       string    // what broke, when the answer did not end cleanly
+	firstByte  time.Time // when the answer began arriving (a whole body: when Iroha began reading it)
+	firstToken time.Time // streams: the first event carrying content (firsttoken.go)
+	err        string    // what broke, when the answer did not end cleanly
+}
+
+// sawEvent notes one upstream event ev of a stream in Shape sh.
+func (r *relayResult) sawEvent(sh shape.Shape, ev []byte, now time.Time) {
+	if r.firstByte.IsZero() {
+		r.firstByte = now
+	}
+	if r.firstToken.IsZero() {
+		if data, ok := eventData(ev); ok && tokenEvent(sh, data) {
+			r.firstToken = now
+		}
+	}
+}
+
+// ttft is the answer's time to first token: its first content event, else
+// its first byte.
+func (r relayResult) ttft() time.Time {
+	if !r.firstToken.IsZero() {
+		return r.firstToken
+	}
+	return r.firstByte
 }
 
 // writeHead sends the status line: the upstream status and content type
@@ -543,7 +565,7 @@ func (x *exchange) relayBuffered(resp *http.Response, transform func(status int,
 // each as it arrives. The normaliser ns (nil when none applies) sees each
 // event's data first; transform then sees each data payload and may change
 // or drop its event. A stream that breaks off ends with an error event.
-func (x *exchange) relayStream(resp *http.Response, transform func(payload []byte) ([]byte, bool), ns *normalise.Stream) relayResult {
+func (x *exchange) relayStream(resp *http.Response, sh shape.Shape, transform func(payload []byte) ([]byte, bool), ns *normalise.Stream) relayResult {
 	var res relayResult
 	defer x.end()
 	x.writeHead(resp, "text/event-stream", true)
@@ -562,9 +584,7 @@ func (x *exchange) relayStream(resp *http.Response, transform func(payload []byt
 	for {
 		ev, err := readEvent(br)
 		if len(ev) > 0 {
-			if res.firstByte.IsZero() {
-				res.firstByte = x.g.clock.Now()
-			}
+			res.sawEvent(sh, ev, x.g.clock.Now())
 			out, nerr := normaliseEvent(ev, ns, transform)
 			if nerr != nil {
 				res.err = "the Provider reported a failure mid-stream: " + nerr.Error()
@@ -830,9 +850,7 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 	for {
 		ev, rerr := readEvent(br)
 		if data, ok := eventData(ev); ok {
-			if res.firstByte.IsZero() {
-				res.firstByte = x.g.clock.Now()
-			}
+			res.sawEvent(rm.shape, ev, x.g.clock.Now()) // rm reads the Endpoint's Shape
 			payloads := [][]byte{data}
 			if ns != nil {
 				var nerr error

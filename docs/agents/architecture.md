@@ -173,6 +173,10 @@ Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `ech
 - **Padding** (`gateway/pad.go`): for a non-stream Request, `attempt` calls `answerBegan` when a 2xx answer's headers arrive (after `disarm`) and `answerEnded` when that Attempt ends. While an answer is being read, the padder commits at max(arrival + `AnswerCommitAfter` (10 s), headers + `AnswerGrace` (5 s)), capped at arrival + 95 s: `200` + `application/json`, no body, `exchange.padded`. Then a newline every `KeepAliveEvery` of silence. `writeHead` lets the body follow the padding; `writeError` writes the Shape's JSON envelope as the body (status stays 200, the record keeps the error code). Nothing is committed while waiting for an answer to begin, so pre-answer failures keep their status. `relayBuffered` now writes through `x.send` and `x.end`, since the padder may write beside it.
 - Decided over a total deadline (fails long generations that would otherwise finish) and over committing on arrival (turns 429/5xx into 200s). Skill: `20_gateway_late_answers.md`; conformance: TIME-02.
 
+### Review fixes: time to first token (story 75)
+
+- `first_byte_ms` is the time to first token: `relayResult.sawEvent` notes each upstream event, and `tokenEvent(endpoint Shape, payload)` (`gateway/firsttoken.go`) says whether it carries content (Chat delta content, reasoning, refusal or tool calls; Anthropic `content_block_delta` or a tool-use block start; Responses `response.*.delta`; Gemini a non-empty text or function-call part). `ttft()` falls back to the first event. The first-byte budget (`deadlineContext`, `disarm`) is unchanged.
+
 Nested admin resources (Endpoints and Upstream Keys under a Provider) resolve their parent with the Provider resource and themselves by name or ID *within* that Provider (`resolveChild` in `internal/providers`); their audit names are `<handle>/<name>`, so `GET /api/audit-entries?record=acme/key-1` works.
 
 ## Rules everyone follows

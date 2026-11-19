@@ -198,7 +198,9 @@ func TestFailuresAfterANonStreamCommitMoveOnThenArriveAsAJSONErrorBody(t *testin
 	b := answerHeaders(t, ch)
 	close(release)
 	got := b.rest()
-	var out struct{ Choices []struct{ Message struct{ Content string } } }
+	var out struct {
+		Choices []struct{ Message struct{ Content string } }
+	}
 	if err := json.Unmarshal(got, &out); err != nil || len(out.Choices) == 0 || out.Choices[0].Message.Content != "from b" {
 		t.Fatalf("answer %q: %v", got, err)
 	}

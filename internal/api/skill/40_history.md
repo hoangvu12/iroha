@@ -15,3 +15,5 @@ A Request that was still running when Iroha stopped hard (crash, forced restart)
 - `retention.captures_days` (default 3): captured prompts and responses.
 
 The `retention` job applies them every hour. `GET /api/jobs` shows each background job's schedule, next run and last result; `POST /api/jobs/retention/run?dry_run=true` reports what it would delete now, and without `dry_run` runs it. No job ever changes or deletes Upstream Keys.
+
+**Time to first token.** `first_byte_ms` on a Request and its Attempts is the time to first token. On a stream it is when the first upstream event carrying generated content (text, reasoning or a tool call) arrived; comments, pings, a role-only chunk or `message_start` before it do not count, and a stream with none falls back to its first event. On a whole (non-stream) answer it is when the body began arriving. It is not the first-byte budget, which ends when the upstream answer begins.

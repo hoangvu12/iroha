@@ -89,7 +89,7 @@ export function RequestsFeed({ paging: forced }: { paging?: FeedPaging }) {
   // The Request sheet (the first of the sheet stack) seeds from these rows and steps through them.
   useLendRequestRows(rows);
 
-  const chips = filterChips(url);
+  const chips = filterChips(url, options.data);
   const columns = useMemo(() => feedColumns(url.hidden), [url.hidden]);
   const columnVisibility = useMemo(() => Object.fromEntries([...url.hidden].map((id) => [id, false])), [url.hidden]);
   const loadOlder = () => void pages.fetchNextPage();
@@ -154,7 +154,7 @@ export function RequestsFeed({ paging: forced }: { paging?: FeedPaging }) {
           manualSorting
           filterChips={chips}
           onClearFilters={url.clearFilters}
-          noResults={<NoResults title="No Requests match these filters" description={noResultsLine(url)} onClear={url.clearFilters} />}
+          noResults={<NoResults title="No Requests match these filters" description={noResultsLine(url, options.data)}onClear={url.clearFilters} />}
           empty={<Empty url={url} />}
           error={pages.isError ? pages.error : undefined}
           errorTitle="Couldn't load Requests"
@@ -392,7 +392,8 @@ function FilterMenu({
     const l: { name: string; requests?: number }[] = list ?? [];
     return current && !l.some((o) => o.name === current) ? [{ name: current }, ...l] : l;
   };
-  const callers = withCurrent(options?.callers, f.caller);
+  const caller = callerName(f.caller, options);
+  const callers = withCurrent(options?.callers, caller);
   const providers = withCurrent(options?.providers, f.provider);
   const pools = withCurrent(options?.pools, f.pool);
   const models = withCurrent(options?.models, f.model);
@@ -407,8 +408,8 @@ function FilterMenu({
 
   return (
     <MenuContent align={phone ? "end" : "start"} className="min-w-56">
-      <SubMenu label="Caller" value={f.caller}>
-        <MenuRadioGroup value={f.caller ?? ""} onValueChange={(v) => set("caller", v || undefined)}>
+      <SubMenu label="Caller" value={caller}>
+        <MenuRadioGroup value={caller ?? ""}onValueChange={(v) => set("caller", v || undefined)}>
           <MenuRadioItem value="">Anyone</MenuRadioItem>
           {callers.map((c) => (
             <MenuRadioItem key={c.name} value={c.name} count={c.requests}>
@@ -495,8 +496,18 @@ function FilterMenu({
   );
 }
 
-function filterChips(url: RequestsUrl) {
-  const f = url.filters;
+/**
+ * The Caller filter as the Owner reads it. `caller=` also takes a Gateway
+ * Key's ID (a key's Requests count links so, to keep Requests sent under an
+ * earlier name): that shows as the key's name from the filter options.
+ */
+function callerName(caller: string | undefined, options?: FilterOptions): string | undefined {
+  if (!caller || !options) return caller;
+  return (options.callers.find((c) => c.name === caller) ?? options.callers.find((c) => c.gateway_key_id === caller))?.name ?? caller;
+}
+
+function filterChips(url: RequestsUrl, options?: FilterOptions) {
+  const f = { ...url.filters, caller: callerName(url.filters.caller, options) };
   const status = STATUSES.find((s) => s.id === f.status)?.label ?? f.status;
   const chips: { label: string; onRemove: () => void }[] = [];
   const add = (k: FilterKey, label: string) => chips.push({ label, onRemove: () => url.setFilter(k, undefined) });
@@ -510,8 +521,8 @@ function filterChips(url: RequestsUrl) {
 }
 
 /** "Nothing from Test (as zeron-fleet) failed in the last 24 hours." */
-function noResultsLine(url: RequestsUrl): string {
-  const f = url.filters;
+function noResultsLine(url: RequestsUrl, options?: FilterOptions): string {
+  const f = { ...url.filters, caller: callerName(url.filters.caller, options) };
   const parts = ["Nothing"];
   if (f.caller) parts.push(`from ${f.caller}`);
   if (f.model) parts.push(`for ${f.model}`);

@@ -104,6 +104,7 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
           className="[&_input]:border-transparent [&_input]:bg-transparent [&_input]:focus:ring-0"
         />
       </div>
+      {/* A picker list under its search field: keeps its own scroll while the dialog scrolls as a page (UI ticket 28). */}
       <ScrollArea label="Providers and Pools" viewportClassName="max-h-[min(380px,45dvh)]">
         {failed ? (
           <p className="p-4 text-sm text-danger-text">Couldn't load the Providers and Pools. Close this and try again.</p>

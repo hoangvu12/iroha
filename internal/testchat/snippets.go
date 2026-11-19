@@ -19,7 +19,6 @@ type Snippets struct {
 	Python     string `json:"python" doc:"Uses the openai or anthropic package (pip install openai / anthropic); Gemini uses the standard library."`
 	TypeScript string `json:"typescript" doc:"Uses the openai or @anthropic-ai/sdk package; Gemini uses fetch. Runs on Node 18+ as an ES module."`
 	KeyEnv     bool   `json:"key_env" doc:"true: no Gateway Key was named (as), so the snippets read one from the IROHA_KEY environment variable."`
-	Note       string `json:"note,omitempty" doc:"What the snippets do not carry, e.g. a pinned Upstream Key or Endpoint (test-only settings)."`
 }
 
 // KeyEnv is the environment variable snippets read the Gateway Key from
@@ -28,6 +27,7 @@ const KeyEnv = "IROHA_KEY"
 
 // MakeSnippets writes the snippets for b against the Gateway at base (no
 // trailing slash). secret is the Gateway Key to embed; "" reads IROHA_KEY.
+// Pins (Upstream Key, Endpoint) are test-only and not carried.
 func MakeSnippets(s Send, b Built, base, secret string) Snippets {
 	base = strings.TrimRight(base, "/")
 	url := base + b.Path
@@ -38,16 +38,6 @@ func MakeSnippets(s Send, b Built, base, secret string) Snippets {
 	out.Curl = curlSnippet(b, url, secret)
 	out.Python = pythonSnippet(b, base, url, secret)
 	out.TypeScript = tsSnippet(b, base, url, secret)
-	var pinned []string
-	if s.UpstreamKey != "" {
-		pinned = append(pinned, "Upstream Key "+s.UpstreamKey)
-	}
-	if s.Endpoint != "" {
-		pinned = append(pinned, "Endpoint "+s.Endpoint)
-	}
-	if len(pinned) > 0 {
-		out.Note = "Pinning to " + strings.Join(pinned, " and ") + " is a test-only setting: these snippets are routed like any Caller's Request."
-	}
 	return out
 }
 

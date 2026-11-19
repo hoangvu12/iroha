@@ -5,7 +5,6 @@ import { rec, RecordLink } from "@/sheets/RecordLink";
 import { ArrowUpRight, KeyRound, MessageCircle, Pencil } from "lucide-react";
 import { errorText, isApiError } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
-import { PageBody } from "@/app/PageBody";
 import { PageHeader } from "@/app/PageHeader";
 import { formatDate, formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
@@ -21,9 +20,8 @@ import { EmptyState, ErrorState } from "@/ui/States";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import { type GatewayKey, useCaptureDays, useGatewayKey, useInvalidateKeys, useUpdateKey } from "./api";
-import { baseUrls } from "./bits";
+import { baseUrls, requestsHref } from "./bits";
 import { DeleteDialog, RevokeDialog } from "./confirm";
-import { requestsHref } from "./List";
 import { SAMPLE_GATEWAY_KEY } from "./samples";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { type Draft, modelsLabel, sameScope, scopeSummary, toDraft, toScope } from "./scope";
@@ -103,7 +101,7 @@ export function KeyPage() {
         }
       />
 
-      <PageBody width="readable" className="flex flex-col gap-9 pb-10">
+      <div className="flex flex-col gap-9 pb-10">
         <General k={g} />
         <Access k={g} />
         <Capture k={g} />
@@ -136,7 +134,7 @@ export function KeyPage() {
             </Row>
           </div>
         </section>
-      </PageBody>
+      </div>
 
       <RevokeDialog k={revoking ? g : undefined} onClose={() => setRevoking(false)} />
       <DeleteDialog k={deleting ? g : undefined} onClose={() => setDeleting(false)} onDone={() => navigate("/gateway-keys")} />
@@ -155,7 +153,11 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** One setting: label and one line on the left, its control on the right (stacked on phones); `below` (an error) under the control. */
+/**
+ * One setting across the page's wide frame, as Provider Settings' `SettingsRow`:
+ * label and a line kept readable on the left, its control on the right in a
+ * column of at most 420 px (stacked on phones); `below` (an error) under the control.
+ */
 function Row({
   title,
   description,
@@ -173,11 +175,11 @@ function Row({
     <div className={cn("flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:gap-6", className)}>
       <div className="min-w-0 flex-1">
         <p className="text-[15px] font-medium text-fg">{title}</p>
-        {description && <p className="mt-0.5 text-sm text-fg-muted">{description}</p>}
+        {description && <p className="mt-0.5 max-w-prose text-sm text-fg-muted">{description}</p>}
       </div>
       {children && (
-        <div className="flex min-w-0 shrink-0 flex-col gap-1.5 md:items-end">
-          <div className="flex min-w-0 items-center gap-3">{children}</div>
+        <div className="flex min-w-0 shrink-0 flex-col gap-1.5 md:w-[min(420px,45%)] md:items-end">
+          <div className="flex w-full min-w-0 items-center gap-3 md:justify-end">{children}</div>
           {below}
         </div>
       )}
@@ -188,7 +190,7 @@ function Row({
 function CopyValue({ value, what }: { value: string; what: string }) {
   return (
     <>
-      <span className="min-w-0 truncate font-mono text-[13px] text-fg md:max-w-[300px]" title={value}>
+      <span className="min-w-0 truncate font-mono text-[13px] text-fg" title={value}>
         {value}
       </span>
       <CopyButton value={value} what={what} />
@@ -228,7 +230,7 @@ function General({ k }: { k: GatewayKey }) {
       >
         <Input
           aria-label="Name"
-          className="md:w-[300px]"
+          className="min-w-0 flex-1"
           value={name}
           aria-invalid={!!saving.error}
           aria-busy={saving.pending || undefined}

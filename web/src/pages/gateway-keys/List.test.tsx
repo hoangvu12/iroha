@@ -173,6 +173,26 @@ test("a row's copy button, shown on hover, is always shown where nothing hovers 
   expect(c).toContain("row-reveal");
 });
 
+test("a Requests, 24 h count opens Requests from that key in the last 24 hours, by the key's ID; a count of 0 stays plain", async () => {
+  const user = userEvent.setup();
+  renderList([gk(0), gk(2)]);
+  await screen.findByRole("table", { name: "Gateway Keys" });
+  expect(screen.queryByRole("link", { name: "Requests of caller-0, last 24 h" })).toBeNull();
+  const count = screen.getByRole("link", { name: "Requests of caller-2, last 24 h" });
+  expect(count.textContent).toBe("20");
+  await user.click(count);
+  // By ID, so Requests sent before a rename still count, as recent_requests does.
+  expect(where()).toBe("/requests?caller=gk_2&range=24h");
+});
+
+test("an agent opens a key's Requests from its count", async () => {
+  renderList([gk(1), gk(2)]);
+  await screen.findByRole("table", { name: "Gateway Keys" });
+  const run = await agent.act({ steps: [{ ref: "Requests of caller-2, last 24 h", action: "press" }] });
+  expect(run.ok, run.error?.message).toBe(true);
+  expect(where()).toBe("/requests?caller=gk_2&range=24h");
+});
+
 test("no keys at all: the empty state offers New key", async () => {
   renderList([]);
   expect(await screen.findByText("No Gateway Keys yet")).toBeTruthy();

@@ -3,6 +3,8 @@ import { Check, RotateCcw } from "lucide-react";
 import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import { Button } from "@/ui/Button";
+import { cn } from "@/ui/cn";
+import { riseIn } from "@/ui/Reveal";
 import { Dialog } from "@/ui/Dialog";
 import { Disclosure } from "@/ui/Disclosure";
 import { Field, Input } from "@/ui/Input";
@@ -75,15 +77,19 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
         onOpenChange={close}
         width={560}
         closeButton={false}
+        // Shown once, in place of the form: title, text and key rise into place on one frame and the badge grows in with them (UI ticket 20).
         title={
-          <span className="flex flex-col items-start gap-4">
-            <span className="inline-flex size-11 items-center justify-center rounded-full bg-success-tint text-success">
+          <span className={cn("flex flex-col items-start gap-4", riseIn)}>
+            <span
+              data-badge=""
+              className="inline-flex size-11 items-center justify-center rounded-full bg-success-tint text-success transition-[opacity,scale] duration-dialog-in ease-out starting:scale-(--motion-scale-popup) starting:opacity-0"
+            >
               <Check size={20} aria-hidden />
             </span>
             Gateway Key created
           </span>
         }
-        description="Copy it now and give it to the Caller. You can copy it again later from the key's page."
+        description={<span className={cn("block", riseIn)}>Copy it now and give it to the Caller. You can copy it again later from the key's page.</span>}
         footer={
           <>
             {entry && (
@@ -97,7 +103,8 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
           </>
         }
       >
-        <div className="flex flex-col gap-4">
+        {/* Keyed: a new element, not the form's body reused, so its starting style applies. */}
+        <div key="created" className={cn("flex flex-col gap-4", riseIn)}>
           <div>
             <p className="mb-2 text-sm font-medium text-fg">Key for {key.name}</p>
             <CopyBox value={key.secret} what="Gateway Key" />

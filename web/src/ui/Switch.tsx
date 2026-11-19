@@ -36,8 +36,8 @@ export function Switch({
       }}
       onClick={(e) => e.stopPropagation()}
       className={
-        // Motion: the track's colour fades (duration-hover, also under reduced motion); the thumb
-        // slides on duration-press, which reduced motion turns to 0, so it jumps.
+        // Motion tokens (UI ticket 20): the track's colour on the hover timing (it still fades under reduced motion),
+        // the thumb's slide on the press timing (0 under reduced motion, so it jumps).
         "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full bg-border-strong transition-colors duration-hover ease-[ease] " +
         "data-checked:bg-primary data-disabled:cursor-not-allowed data-disabled:opacity-50 aria-busy:cursor-progress"
       }

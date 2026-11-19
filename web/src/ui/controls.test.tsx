@@ -97,6 +97,17 @@ test("a press on Switch or Checkbox does not reach a clickable row around it", a
   expect(row).not.toHaveBeenCalled();
 });
 
+test("Switch moves on the motion tokens: the thumb slides on press timing, the track colours on hover timing (UI ticket 20)", () => {
+  render(<Switch label="Capture prompts" checked={false} onChange={() => {}} />);
+  const track = screen.getByRole("switch", { name: "Capture prompts" });
+  const thumb = track.querySelector("[data-slot=switch-thumb]")!;
+  const classes = (el: Element) => el.getAttribute("class")!.split(/\s+/);
+  for (const k of ["transition-[translate]", "duration-press", "ease-out"]) expect(classes(thumb)).toContain(k);
+  for (const k of ["transition-colors", "duration-hover", "ease-[ease]"]) expect(classes(track)).toContain(k);
+  // The tokens hold the thumb still under reduced motion (press is 0) and keep the colour fade.
+  for (const el of [track, thumb]) expect(classes(el).filter((c) => c === "transition-transform" || c === "motion-reduce:transition-none" || /^duration-\d/.test(c))).toEqual([]);
+});
+
 test("Segmented is a radio group: arrows move the choice", async () => {
   const user = userEvent.setup();
   render(<Controlled />);
@@ -176,17 +187,4 @@ test("Autocomplete takes its Field's label, suggests as you type and keeps text 
   await user.clear(input);
   await user.type(input, "glm-5{Escape}");
   expect(document.querySelector("output")!.textContent).toBe("glm-5");
-});
-
-// Motion (UI ticket 17): the thumb slides on the press token (0 under reduced
-// motion, so it jumps) and the track's colour fades on the hover token.
-test("a Switch's thumb slides on duration-press, its track fades on duration-hover; no typed values", () => {
-  render(<Switch label="Motion" checked={false} onChange={() => {}} />);
-  const track = screen.getByRole("switch", { name: "Motion" });
-  const thumb = track.querySelector('[data-slot="switch-thumb"]')!;
-  expect(thumb.className.split(" ")).toEqual(expect.arrayContaining(["transition-[translate]", "duration-press", "ease-out"]));
-  expect(track.className.split(" ")).toEqual(expect.arrayContaining(["transition-colors", "duration-hover", "ease-[ease]"]));
-  for (const el of [track, thumb]) {
-    expect(el.className).not.toMatch(/motion-reduce:transition-none|transition-transform|duration-\d/);
-  }
 });

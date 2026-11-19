@@ -40,6 +40,7 @@ import { Button as SdkButton } from "@ui-sdk/react/button";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "./Button";
 import { Checkbox } from "./Checkbox";
+import { useHoldView } from "./hold-view";
 import { cn } from "./cn";
 import type { CopyState } from "./CopyButton";
 import { Menu, MenuContent, MenuIconTrigger } from "./Menu";
@@ -142,8 +143,12 @@ export type DataTablePaging =
   | { mode: "pages"; sizes?: number[] }
   /** Numbered pages the server cuts: `data` is the current page, `rowCount` all rows the filters match. */
   | { mode: "server"; pagination: PaginationState; onPaginationChange: (u: Updater<PaginationState>) => void; rowCount: number; sizes?: number[] }
-  /** One growing list: `onLoadMore` runs when its end scrolls into view (or "Load more" is pressed). */
-  | { mode: "infinite"; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void; moreLabel?: string }
+  /**
+   * One growing list: `onLoadMore` runs when its end scrolls into view (or "Load more" is pressed).
+   * `newRowsLabel` makes it live: rows arriving on top don't move the view while the reader is
+   * scrolled down or pointing at a row, and a pill with this text ("3 new") goes back to the top.
+   */
+  | { mode: "infinite"; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void; moreLabel?: string; newRowsLabel?: (count: number) => string }
   /** Every row at once (short, fixed lists). */
   | { mode: "none" };
 
@@ -225,6 +230,8 @@ export type DataTableProps<T extends RowData> = {
   /** Clicking a row (not one of its controls) opens it. Mark the name column `meta: { opens: true }` for the keyboard. */
   onRowClick?: (row: T) => void;
   rowTone?: (row: T) => "danger" | undefined;
+  /** The row open beside the table (its sheet): highlighted, `aria-current`, and scrolled into view when it changes. */
+  activeRowId?: string;
   /** Expandable rows: what shows under a row once its chevron is pressed. */
   renderExpanded?: (row: T) => ReactNode;
 
@@ -421,9 +428,36 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const toggleRow = (row: DataRow<T>, on: boolean, event?: Event) =>
     row.getToggleSelectedHandler()({ target: { checked: on }, shiftKey: (event as MouseEvent | undefined)?.shiftKey ?? false });
 
+  // ---- Live rows (infinite with newRowsLabel) and the open row ----
+  const tableRef = useRef<HTMLTableElement>(null);
+  const bodyRef = useRef<HTMLTableSectionElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const newRowsLabel = paging.mode === "infinite" ? paging.newRowsLabel : undefined;
+  const hold = useHoldView({
+    enabled: !!newRowsLabel && !loading && state === undefined,
+    ids: pageRows.map((r) => r.id),
+    rows: useCallback(() => (phone ? listRef.current : bodyRef.current), [phone]),
+    scroller: useCallback(() => (phone ? null : (tableRef.current?.closest<HTMLElement>("[role=region]") ?? null)), [phone]),
+    inset: useCallback(() => tableRef.current?.tHead?.getBoundingClientRect().height ?? 0, []),
+  });
+  const pill =
+    newRowsLabel && hold.newAbove > 0 ? (
+      <Button size="sm" className="pointer-events-auto rounded-full bg-elevated shadow-md" onClick={hold.toTop}>
+        <ArrowUp size={14} aria-hidden />
+        {newRowsLabel(hold.newAbove)}
+      </Button>
+    ) : null;
+  // Stepping through rows from the sheet (↑/↓) keeps the open row in view.
+  const active = props.activeRowId;
+  useEffect(() => {
+    if (!active || loading) return;
+    const el = (phone ? listRef.current : bodyRef.current)?.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(active)}"]`);
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [active, loading, phone]);
+
   const desktop = (
     <ScrollArea axis="both" label={label} className="w-full" viewportClassName={props.maxHeight ?? "max-h-[calc(100dvh-4rem)]"} contentClassName="min-w-full">
-      <table aria-label={label} className={cn("w-full border-collapse text-left text-sm", props.dimmed && "opacity-60")}>
+      <table ref={tableRef} aria-label={label} className={cn("w-full border-collapse text-left text-sm", props.dimmed && "opacity-60")}>
         <thead className="sticky top-0 z-[1] bg-bg shadow-[inset_0_-1px_0_var(--border)]">
           {table.getHeaderGroups().map((group) => (
             <tr key={group.id}>
@@ -452,15 +486,19 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
             </tr>
           ))}
         </thead>
-        <tbody>
+        <tbody ref={bodyRef}>
           {pageRows.map((row) => {
             const r = row.original;
             const name = rowName(r);
             const selected = row.getIsSelected();
             const open = row.getIsExpanded();
+            const current = active !== undefined && row.id === active;
             return [
               <tr
                 key={row.id}
+                data-row-id={row.id}
+                aria-current={current ? "true" : undefined}
+                data-active={current || undefined}
                 data-selected={selected || undefined}
                 data-tone={props.rowTone?.(r)}
                 onClick={
@@ -475,6 +513,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
                   onRowClick && "cursor-pointer hover:bg-subtle",
                   "data-[tone=danger]:bg-danger-tint/50",
                   "data-selected:bg-selected data-selected:hover:bg-selected",
+                  "scroll-mt-10 data-active:bg-selected data-active:hover:bg-selected",
                   open && "border-b-0",
                 )}
               >
@@ -518,14 +557,25 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const showChecks = !!bulk && (selecting || selectedCount > 0);
   const list = phoneRow && (
     <>
-      <ul aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && "opacity-60")}>
+      {/* Sticks to the top of the page while the list scrolls under it. */}
+      {pill && <div className="pointer-events-none sticky top-3 z-[2] flex h-0 justify-center">{pill}</div>}
+      <ul ref={listRef} aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && "opacity-60")}>
         {pageRows.map((row) => {
           const r = row.original;
           const name = rowName(r);
           const selected = row.getIsSelected();
           const content = phoneRow(r);
+          const current = active !== undefined && row.id === active;
           return (
-            <li key={row.id} data-selected={selected || undefined} data-tone={props.rowTone?.(r)} className="flex items-center gap-3 py-3 data-selected:bg-selected data-[tone=danger]:bg-danger-tint/50">
+            <li
+              key={row.id}
+              data-row-id={row.id}
+              aria-current={current ? "true" : undefined}
+              data-active={current || undefined}
+              data-selected={selected || undefined}
+              data-tone={props.rowTone?.(r)}
+              className="flex items-center gap-3 py-3 data-active:bg-selected data-selected:bg-selected data-[tone=danger]:bg-danger-tint/50"
+            >
               {showChecks && <Checkbox label={`Select ${name}`} checked={selected} onChange={(on, ev) => toggleRow(row, on, ev)} className="ml-1" />}
               {showChecks ? (
                 // The checkbox is the control; a tap anywhere on the row toggles it too.
@@ -563,7 +613,21 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
         state
       ) : (
         <Skeleton data={data} sample={sample} id={phone ? `table:${id}:phone` : `table:${id}`} label={`Loading ${label}`}>
-          {() => (phone ? list : desktop)}
+          {() =>
+            phone ? (
+              list
+            ) : (
+              <>
+                {/* The "N new" pill floats over the table's first rows, under its header. */}
+                {pill && (
+                  <div className="relative z-[2] h-0">
+                    <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">{pill}</div>
+                  </div>
+                )}
+                {desktop}
+              </>
+            )
+          }
         </Skeleton>
       )}
       {data && state === undefined && (props.footer || pages) && (
@@ -643,19 +707,22 @@ function LoadMore({ paging }: { paging: Extract<DataTablePaging, { mode: "infini
   const ref = useRef<HTMLDivElement>(null);
   const latest = useRef(paging);
   latest.current = paging;
+  // Observed again after each load: an observer reports only changes, and a load
+  // that leaves the end in view (short pages, a tall screen) changes nothing.
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
+    if (!el || paging.loadingMore || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(
       ([e]) => {
         const p = latest.current;
         if (e.isIntersecting && p.hasMore && !p.loadingMore) p.onLoadMore();
       },
-      { rootMargin: "240px 0px" },
+      // The table's own scroller, so the margin counts there (null: the page).
+      { root: el.closest("[role=region]"), rootMargin: "240px 0px" },
     );
     io.observe(el);
     return () => io.disconnect();
-  }, []);
+  }, [paging.loadingMore, paging.hasMore]);
   if (!paging.hasMore) return null;
   return (
     <div ref={ref} className="flex justify-center py-4">

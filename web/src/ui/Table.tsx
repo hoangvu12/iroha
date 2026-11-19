@@ -67,30 +67,3 @@ export function TD({ className, align, mono, ...rest }: TdHTMLAttributes<HTMLTab
     />
   );
 }
-
-/** Loading: grey bars in the shape of the rows, no spinner (C25). */
-export function TableSkeleton({ columns, rows = 5 }: { columns: string[]; rows?: number }) {
-  const widths = ["w-16", "w-24", "w-20", "w-28", "w-14", "w-24"];
-  return (
-    <Table aria-busy="true" aria-label="Loading">
-      <THead>
-        <tr>
-          {columns.map((c) => (
-            <TH key={c}>{c}</TH>
-          ))}
-        </tr>
-      </THead>
-      <TBody>
-        {Array.from({ length: rows }, (_, r) => (
-          <tr key={r}>
-            {columns.map((c, i) => (
-              <td key={c} className="h-12 px-1.5">
-                <div className={cn("skeleton h-2.5 rounded-full bg-muted", widths[(r + i * 2) % widths.length])} />
-              </td>
-            ))}
-          </tr>
-        ))}
-      </TBody>
-    </Table>
-  );
-}

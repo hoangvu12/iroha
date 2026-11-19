@@ -2,23 +2,25 @@ import { useState } from "react";
 import { ChevronDown, Route as RouteIcon, Send } from "lucide-react";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState } from "@/ui/States";
 import type { Attempt, RequestRecord } from "./api";
+import { SAMPLE_ATTEMPTS } from "./samples";
 import { attemptFailed, explain, servedModel, thenText } from "./attempt-info";
 import { Badge, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, statusText, Summary } from "./bits";
 
 /** The drawer's Attempts tab: the Request's summary, then each Attempt and what Iroha made of it. */
 export function AttemptList({ r, loading, onOpenRoute }: { r: RequestRecord; loading: boolean; onOpenRoute: () => void }) {
-  const attempts = r.attempts;
-  if (!attempts && loading)
-    return (
-      <div className="space-y-3" aria-busy="true">
-        {[0, 1].map((i) => (
-          <div key={i} className="skeleton h-16 rounded-xl bg-muted" />
-        ))}
-      </div>
-    );
-  if (!attempts || attempts.length === 0)
+  // A row from the feed carries no Attempts: they are measured from a sample until the Request's own answer lands.
+  return (
+    <Skeleton data={r.attempts ?? (loading ? undefined : [])} sample={SAMPLE_ATTEMPTS} label="Loading Attempts">
+      {(attempts) => <Attempts r={r} attempts={attempts} onOpenRoute={onOpenRoute} />}
+    </Skeleton>
+  );
+}
+
+function Attempts({ r, attempts, onOpenRoute }: { r: RequestRecord; attempts: Attempt[]; onOpenRoute: () => void }) {
+  if (attempts.length === 0)
     return (
       <EmptyState
         icon={Send}

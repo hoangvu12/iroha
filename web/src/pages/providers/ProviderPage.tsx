@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { Navigate, useParams } from "react-router";
 import { MessageCircle, Plus, RefreshCw } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { seg } from "@/api/client";
 import { formatNumber } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
 import { RouteTabs } from "@/ui/Tabs";
+import { Skeleton } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
 import { SaveStatus, useSave } from "@/ui/SaveStatus";
 import { calls, errorText, useChange, useProvider } from "./api";
@@ -17,6 +18,7 @@ import { KeysTab } from "./Keys";
 import { ModelsTab } from "./Models";
 import { ProviderSettingsTab } from "./ProviderSettings";
 import { RulesTab } from "./Rules";
+import { SAMPLE_PROVIDER } from "./samples";
 
 const TABS = ["keys", "endpoints", "models", "rules", "settings"] as const;
 type Tab = (typeof TABS)[number];
@@ -32,7 +34,7 @@ export function ProviderPage() {
   const { handle = "", tab: raw } = useParams();
   const tab = TABS.find((t) => t === raw);
   const provider = useProvider(handle);
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const phone = useIsPhone();
   const [adding, setAdding] = useState(false);
   const refreshList = useChange(() => calls.refreshModels(handle));
@@ -90,7 +92,11 @@ export function ProviderPage() {
             {p?.archived ? <Pill>Archived</Pill> : p && !p.enabled ? <Pill>Off</Pill> : null}
           </span>
         }
-        description={p ? `${formatNumber(p.upstream_key_count)} Upstream Key${p.upstream_key_count === 1 ? "" : "s"}` : " "}
+        description={
+          <Skeleton data={p} sample={SAMPLE_PROVIDER} label={`Loading ${handle}`}>
+            {(p) => `${formatNumber(p.upstream_key_count)} Upstream Key${p.upstream_key_count === 1 ? "" : "s"}`}
+          </Skeleton>
+        }
         actions={actions}
       />
       {provider.isError && !p ? (
@@ -106,7 +112,11 @@ export function ProviderPage() {
           {tab === "endpoints" && <EndpointsTab handle={handle} provider={p} adding={adding} setAdding={setAdding} />}
           {tab === "models" && <ModelsTab handle={handle} />}
           {tab === "rules" && <RulesTab handle={handle} adding={adding} setAdding={setAdding} />}
-          {tab === "settings" && p && <ProviderSettingsTab provider={p} />}
+          {tab === "settings" && (
+            <Skeleton data={p} sample={SAMPLE_PROVIDER} id="provider-settings" label="Loading settings">
+              {(p) => <ProviderSettingsTab provider={p} />}
+            </Skeleton>
+          )}
         </RouteTabs>
       )}
     </>

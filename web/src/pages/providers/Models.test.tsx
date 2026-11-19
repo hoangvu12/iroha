@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAgent } from "@ui-sdk/react/agent";
 import { afterEach, expect, test, vi } from "vitest";
+import { Toaster } from "@/ui/toast";
 import { ModelsTab } from "./Models";
 
 const agent = createAgent();
@@ -47,6 +48,7 @@ function renderTab() {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <ModelsTab handle="acme" />
+      <Toaster />
     </QueryClientProvider>,
   );
   return fetch;

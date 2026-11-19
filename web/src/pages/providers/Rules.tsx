@@ -9,12 +9,14 @@ import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { SaveError, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import type { Outcome, Replay, Rule, RuleFields } from "./api";
 import { calls, errorText, OUTCOMES, useRefresh, useRules } from "./api";
 import { Checkbox, Pill, Select, Switch } from "./controls";
+import { SAMPLE_RULES } from "./samples";
 
 /** The Rules tab (C09): which Failure Rules decide this Provider's failures, in order, and how often each did today. */
 export function RulesTab({ handle, adding, setAdding }: { handle: string; adding: boolean; setAdding: (o: boolean) => void }) {
@@ -41,17 +43,16 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
     </Menu>
   );
 
-  const list = rules.data ?? [];
   return (
     <section aria-label="Failure Rules">
       <p className="mb-4 text-[15px] text-fg-muted">
         When {handle} fails, the first matching rule decides what happens to the Upstream Key and the Request. Your rules run before built-in ones.
       </p>
-      {rules.isPending ? (
-        <TableSkeleton columns={["Name", "Status", "Body contains", "Upstream Key", "Request", "Hits today"]} rows={6} />
-      ) : rules.isError ? (
+      {rules.isError ? (
         <ErrorState title="Couldn't load the rules" error={rules.error} onRetry={() => void rules.refetch()} />
-      ) : list.length === 0 ? (
+      ) : (
+      <Skeleton data={rules.data} sample={SAMPLE_RULES} id={phone ? "provider-rules:phone" : "provider-rules"} label="Loading Failure Rules">
+      {(list) => list.length === 0 ? (
         <EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />
       ) : phone ? (
         <ul className="divide-y divide-border border-y border-border">
@@ -113,6 +114,8 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
             ))}
           </TBody>
         </Table>
+      )}
+      </Skeleton>
       )}
 
       <RuleDialog handle={handle} open={adding} onOpenChange={setAdding} />

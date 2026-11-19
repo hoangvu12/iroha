@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { forgetShapes } from "skullet";
 import { onSignedOut } from "@/api/client";
 import { type SessionStatus, sessionKey, useSession } from "@/api/session";
 import { ErrorState } from "@/ui/States";
@@ -28,6 +29,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }),
     [qc],
   );
+
+  // Signed out: forget the skeleton shapes remembered from this session's pages. After the
+  // commit that unmounts them, because Skullet saves a skeleton's shape as it unmounts.
+  const signedOut = session.data?.signed_in === false;
+  useEffect(() => {
+    if (signedOut) forgetShapes();
+  }, [signedOut]);
 
   if (session.isPending) return <div className="min-h-dvh bg-bg" aria-busy="true" />;
   if (session.isError) {

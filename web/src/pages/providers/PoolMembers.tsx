@@ -12,12 +12,14 @@ import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { type Save, SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import type { Member, MemberInput, Pool } from "./api";
 import { calls, errorText, natural, successRate, useGatewayKeys, useModelIds, useOverview, useProviders, useRefresh } from "./api";
 import { ProviderTile, Select, Switch } from "./controls";
+import { SAMPLE_GATEWAY_KEYS_LITE, SAMPLE_OVERVIEW, SAMPLE_POOL } from "./samples";
 
 const inputs = (ms: Member[]): MemberInput[] => ms.map(({ provider, model, enabled }) => ({ provider, model, enabled }));
 
@@ -74,9 +76,6 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
     saveMembers(next, `${order[i].provider} switched ${on ? "on" : "off"}`);
   };
 
-  const keysWith = (gks.data ?? []).filter((k) => !k.scope.all && k.scope.pools?.includes(name));
-  const anyAll = (gks.data ?? []).some((k) => k.scope.all);
-
   const menu = (m: Member, i: number) => (
     <Menu>
       <MenuIconTrigger icon={MoreHorizontal} label={`More for member ${i + 1}`} size="sm" />
@@ -103,12 +102,17 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
 
   return (
     <section aria-label="Members">
+      {/* The numbers come from the overview: measured from the grid itself until it lands (labels stay). */}
+      <Skeleton data={overview.data} sample={SAMPLE_OVERVIEW} label="Loading today's numbers">
+        {() => (
       <div className="mb-9 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-4">
         <Stat label="Requests today" value={stats ? formatNumber(stats.requests) : "–"} />
         <Stat label="Served by first member" value={byFirst !== undefined ? formatPercent(byFirst) : "–"} />
         <Stat label="Moved past the first" value={movedOn !== undefined ? formatNumber(Math.max(0, movedOn)) : "–"} />
         <Stat label="Failed" value={stats ? formatNumber(stats.failed) : "–"} />
       </div>
+        )}
+      </Skeleton>
 
       <div className="flex min-h-7 flex-wrap items-center gap-x-4 gap-y-1">
         <h2 className="text-[17px] font-semibold">Members</h2>
@@ -119,9 +123,14 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
         Callers ask for {name}. Iroha tries the members top to bottom and moves on when one can't serve. {phone ? "" : "Drag to reorder."}
       </p>
 
-      {!pool ? (
-        <TableSkeleton columns={["Order", "Provider", "Model", "Active keys"]} rows={3} />
-      ) : order.length === 0 ? (
+      {/* Waits for the overview too, so Active keys and Requests today arrive filled in. */}
+      <Skeleton
+        data={pool && !overview.isPending ? (order.length ? order : pool.members) : undefined}
+        sample={SAMPLE_POOL.members}
+        id={phone ? "pool-members:phone" : "pool-members"}
+        label="Loading members"
+      >
+      {(rows) => rows.length === 0 ? (
         <EmptyState
           icon={Layers}
           title="No members yet"
@@ -134,7 +143,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
         />
       ) : phone ? (
         <ul className="divide-y divide-border border-y border-border">
-          {order.map((m, i) => (
+          {rows.map((m, i) => (
             <li key={`${m.provider}/${m.model}`} className={cn("flex items-center gap-3 py-3", !m.enabled && "opacity-60")}>
               <span className="w-4 text-center tabular text-fg-muted">{i + 1}</span>
               <ProviderTile handle={m.provider} size={32} />
@@ -167,7 +176,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
             </tr>
           </THead>
           <TBody>
-            {order.map((m, i) => {
+            {rows.map((m, i) => {
               const s = served.get(m.provider);
               const k = keys.get(m.provider);
               const r = s ? successRate({ succeeded: s.succeeded, failed: s.requests - s.succeeded }) : undefined;
@@ -192,7 +201,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
                   }}
                   onDragEnd={() => {
                     setDragging(undefined);
-                    const before = pool.members.map((x) => `${x.provider}/${x.model}`).join();
+                    const before = (pool?.members ?? []).map((x) => `${x.provider}/${x.model}`).join();
                     if (order.map((x) => `${x.provider}/${x.model}`).join() !== before) saveMembers(order, "Members reordered");
                   }}
                   className={cn("group", dragging === i && "bg-subtle", !m.enabled && "text-fg-muted")}
@@ -221,8 +230,14 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
           </TBody>
         </Table>
       )}
+      </Skeleton>
 
       <h2 className="mb-3 mt-10 text-[17px] font-semibold">Gateway Keys that can use this Pool</h2>
+      <Skeleton data={gks.data} sample={SAMPLE_GATEWAY_KEYS_LITE} id={phone ? "pool-gateway-keys:phone" : "pool-gateway-keys"} label="Loading Gateway Keys">
+        {(list) => {
+          const keysWith = list.filter((k) => !k.scope.all && k.scope.pools?.includes(name));
+          const anyAll = list.some((k) => k.scope.all);
+          return (
       <div className="flex flex-wrap items-center gap-2">
         {keysWith.sort((a, b) => natural(a.name, b.name)).map((k) => (
           <Link key={k.id} to={`/gateway-keys/${seg(k.id)}`} className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-[15px] hover:bg-muted">
@@ -233,6 +248,9 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
           {anyAll ? (keysWith.length ? "and every key with access to everything" : "Every key with access to everything") : keysWith.length ? "" : "None yet. Give a Gateway Key this Pool in its scope."}
         </span>
       </div>
+          );
+        }}
+      </Skeleton>
 
       <ConfirmDialog
         open={!!removing}
@@ -256,7 +274,9 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-bg px-5 py-4">
-      <p className="text-[14px] text-fg-muted">{label}</p>
+      <p className="text-[14px] text-fg-muted">
+        {label}
+      </p>
       <p className="mt-1 text-[26px] font-semibold tabular leading-tight">{value}</p>
     </div>
   );

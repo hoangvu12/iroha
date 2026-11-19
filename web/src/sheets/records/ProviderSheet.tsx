@@ -16,6 +16,7 @@ import {
   Fact,
   Facts,
   LinkList,
+  LinkListLoading,
   LinkRow,
   none,
   SheetActions,
@@ -136,7 +137,7 @@ export default function ProviderSheet({ record }: SheetBodyProps<"provider">) {
         </SheetSection>
         <SheetSection title="Upstream Keys">
           {keys.isPending ? (
-            <div aria-busy="true" className="skeleton h-4 w-40 rounded-full bg-muted" />
+            <LinkListLoading label="Loading Upstream Keys" />
           ) : listed.length === 0 ? (
             <p className="text-[14.5px] text-fg-muted">No Upstream Keys yet.</p>
           ) : (

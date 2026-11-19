@@ -9,6 +9,7 @@ import { buttonClass, iconButtonClass } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { CopyButton } from "@/ui/CopyButton";
 import { ScrollArea } from "@/ui/ScrollArea";
+import { Skeleton, useIsSample } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
 import { Tip } from "@/ui/Tooltip";
 
@@ -64,13 +65,15 @@ export function SheetTitle({
   subtitle?: ReactNode;
   state?: ReactNode;
 }) {
+  // A skeleton's sample must not name the sheet (UI ticket 02).
+  const Title = useIsSample() ? "h2" : DialogTitle;
   return (
     <header className="flex items-start gap-3.5 pb-5 pt-6">
       {logo}
       <div className="min-w-0 flex-1">
-        <DialogTitle className={cn("break-words text-[20px] font-semibold leading-tight", mono && "font-mono text-[18px]")}>
+        <Title className={cn("break-words text-[20px] font-semibold leading-tight", mono && "font-mono text-[18px]")}>
           <span className="sr-only">{kind}</span> {title}
-        </DialogTitle>
+        </Title>
         {subtitle && <div className="mt-1 text-[14.5px] text-fg-muted">{subtitle}</div>}
       </div>
       {state && <div className="shrink-0 pt-0.5 text-[14px]">{state}</div>}
@@ -148,14 +151,69 @@ export const none = <span className="text-fg-subtle">–</span>;
 
 /** Loading, missing (404) and failed bodies, inside the sheet. */
 export function SheetLoading({ name }: { name: string }) {
+  // A record sheet's title, actions and facts, drawn by Skullet (UI ticket 02).
   return (
-    <div className="space-y-3 p-6" aria-busy="true">
+    <SheetBody>
       <DialogTitle className="sr-only">{name}</DialogTitle>
-      <div className="skeleton h-5 w-48 rounded-full bg-muted" />
-      <div className="skeleton h-3 w-32 rounded-full bg-muted" />
-    </div>
+      <Skeleton data={undefined} sample={SAMPLE_SHEET} label={`Loading ${name}`}>
+        {(s) => (
+          <>
+            <header className="flex items-start gap-3.5 pb-5 pt-6">
+              <div className="size-11 shrink-0 rounded-xl bg-muted" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[20px] font-semibold leading-tight">{s.title}</div>
+                <div className="mt-1 text-[14.5px] text-fg-muted">{s.subtitle}</div>
+              </div>
+            </header>
+            <div className="pb-5">
+              <span className={buttonClass("secondary")}>{s.action}</span>
+            </div>
+            <SheetSection title="Facts">
+              <Facts>
+                {s.facts.map(([label, value]) => (
+                  <Fact key={label} label={label}>
+                    {value}
+                  </Fact>
+                ))}
+              </Facts>
+            </SheetSection>
+          </>
+        )}
+      </Skeleton>
+    </SheetBody>
   );
 }
+
+const SAMPLE_SHEET = {
+  title: "openrouter-main",
+  subtitle: "OpenRouter",
+  action: "Test in Chat",
+  facts: [
+    ["Caller path", "/openrouter-main/v1"],
+    ["Upstream Keys", "24, 21 active"],
+    ["Attempts, last hour", "312"],
+    ["Added", "Mar 4, 2026"],
+  ],
+};
+
+/** A section's list of linked records while it loads. */
+export function LinkListLoading({ label }: { label: string }) {
+  return (
+    <Skeleton data={undefined} sample={SAMPLE_LINK_ROWS} label={label}>
+      {(rows) => (
+        <LinkList>
+          {rows.map((name) => (
+            <LinkRow key={name} aside="Active">
+              <span className="font-mono text-[14px]">{name}</span>
+            </LinkRow>
+          ))}
+        </LinkList>
+      )}
+    </Skeleton>
+  );
+}
+
+const SAMPLE_LINK_ROWS = ["team-1", "team-2", "team-3", "team-4"];
 
 export function SheetProblem({ kind, name, error, onRetry }: { kind: string; name: string; error: unknown; onRetry: () => void }) {
   const gone = isApiError(error) && error.status === 404;

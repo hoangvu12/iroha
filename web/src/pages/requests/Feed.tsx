@@ -25,9 +25,11 @@ import {
 } from "@/ui/Menu";
 import { Tip } from "@/ui/Tooltip";
 import { Chip, EmptyState, ErrorState, NoResults } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead } from "@/ui/Table";
 import type { FilterOptions, RequestRecord, Stats } from "./api";
 import { useFilterOptions, useRequestFeed, useRequestStats } from "./api";
+import { SAMPLE_CALLERS, SAMPLE_REQUESTS, SAMPLE_STATS } from "./samples";
 import { clock, compactNumber, failed, PoolTag, ProviderLogo, secs, shapeInOut, StatusCell, statusTone } from "./bits";
 import { useLendRequestRows } from "@/sheets/stack";
 import { COLUMNS, type ColumnId, type FilterKey, RANGES, type RequestsUrl, STATUSES, useRequestsUrl } from "./url-state";
@@ -54,7 +56,9 @@ export function RequestsFeed() {
         description={phone ? undefined : "Every call through Iroha, newest first"}
         actions={<LiveToggle live={live} onToggle={() => setLive((l) => !l)} phone={phone} />}
       />
-      <StatsRow stats={stats.data} loading={stats.isPending} phone={phone} />
+      <Skeleton data={stats.data} sample={SAMPLE_STATS} id={phone ? "requests-stats:phone" : "requests-stats"} label="Loading totals">
+        {(s) => <StatsRow stats={s} phone={phone} />}
+      </Skeleton>
 
       <Toolbar url={url} options={options.data} phone={phone} />
       {chips.length > 0 && (
@@ -68,32 +72,40 @@ export function RequestsFeed() {
         </div>
       )}
 
-      {feed.pages.isPending ? (
-        <TableSkeleton columns={phone ? ["Request", "Time"] : visible.map((c) => c.label)} rows={8} />
-      ) : feed.pages.isError ? (
-        <ErrorState title="Couldn't load Requests" error={feed.pages.error} onRetry={() => void feed.pages.refetch()} />
-      ) : rows.length === 0 ? (
-        chips.length > 0 ? (
-          <NoResults title="No requests match these filters" description={noResultsLine(url)} onClear={url.clearFilters} />
-        ) : (
-          <Empty url={url} />
-        )
-      ) : (
-        <>
-          {phone ? (
-            <PhoneList rows={rows} added={feed.added} onOpen={url.select} selected={url.selected} />
+      {/* A filter change keeps the rows shown (dimmed) until the new ones arrive: no skeleton over data. */}
+      <Skeleton
+        data={feed.pages.data ? rows : undefined}
+        sample={SAMPLE_REQUESTS}
+        id={phone ? "requests-feed:phone" : "requests-feed"}
+        label="Loading Requests"
+        className={cn("transition-opacity", feed.pages.isPlaceholderData && "opacity-60")}
+        error={feed.pages.isError && <ErrorState title="Couldn't load Requests" error={feed.pages.error} onRetry={() => void feed.pages.refetch()} />}
+      >
+        {(rows) =>
+          rows.length === 0 ? (
+            chips.length > 0 ? (
+              <NoResults title="No requests match these filters" description={noResultsLine(url)} onClear={url.clearFilters} />
+            ) : (
+              <Empty url={url} />
+            )
           ) : (
-            <FeedTable rows={rows} added={feed.added} columns={visible.map((c) => c.id)} onOpen={url.select} selected={url.selected} />
-          )}
-          {feed.pages.hasNextPage && (
-            <div className="mt-6 flex justify-center">
-              <Button loading={feed.pages.isFetchingNextPage} onClick={() => void feed.pages.fetchNextPage()}>
-                Show older Requests
-              </Button>
-            </div>
-          )}
-        </>
-      )}
+            <>
+              {phone ? (
+                <PhoneList rows={rows} added={feed.added} onOpen={url.select} selected={url.selected} />
+              ) : (
+                <FeedTable rows={rows} added={feed.added} columns={visible.map((c) => c.id)} onOpen={url.select} selected={url.selected} />
+              )}
+              {feed.pages.hasNextPage && (
+                <div className="mt-6 flex justify-center">
+                  <Button loading={feed.pages.isFetchingNextPage} onClick={() => void feed.pages.fetchNextPage()}>
+                    Show older Requests
+                  </Button>
+                </div>
+              )}
+            </>
+          )
+        }
+      </Skeleton>
     </>
   );
 }
@@ -117,31 +129,28 @@ function LiveToggle({ live, onToggle, phone }: { live: boolean; onToggle: () => 
   );
 }
 
-function StatsRow({ stats, loading, phone }: { stats?: Stats; loading: boolean; phone: boolean }) {
-  const finished = stats ? stats.succeeded + stats.failed : 0;
-  const cells: { label: string; value: string | undefined }[] = [
-    { label: "Requests", value: stats && formatNumber(stats.requests) },
-    { label: "Succeeded", value: stats && (finished > 0 ? formatPercent(stats.succeeded / finished) : "–") },
+function StatsRow({ stats, phone }: { stats: Stats; phone: boolean }) {
+  const finished = stats.succeeded + stats.failed;
+  const cells: { label: string; value: string }[] = [
+    { label: "Requests", value: formatNumber(stats.requests) },
+    { label: "Succeeded", value: finished > 0 ? formatPercent(stats.succeeded / finished) : "–" },
     ...(phone
-      ? [{ label: "Median", value: stats && secs(stats.median_duration_ms) }]
+      ? [{ label: "Median", value: secs(stats.median_duration_ms) }]
       : [
-          { label: "Retried", value: stats && formatNumber(stats.retried) },
-          { label: "Median duration", value: stats && secs(stats.median_duration_ms) },
-          { label: "Median first token", value: stats && secs(stats.median_first_byte_ms) },
-          { label: "Tokens", value: stats && (stats.tokens.total > 0 ? compactNumber(stats.tokens.total) : "0") },
+          { label: "Retried", value: formatNumber(stats.retried) },
+          { label: "Median duration", value: secs(stats.median_duration_ms) },
+          { label: "Median first token", value: secs(stats.median_first_byte_ms) },
+          { label: "Tokens", value: stats.tokens.total > 0 ? compactNumber(stats.tokens.total) : "0" },
         ]),
   ];
   return (
-    <dl
-      aria-busy={loading || undefined}
-      className={cn("mb-6 grid divide-x divide-border rounded-xl border border-border", phone ? "-mt-3 grid-cols-3" : "-mt-2 grid-cols-6")}
-    >
+    <dl className={cn("mb-6 grid divide-x divide-border rounded-xl border border-border", phone ? "-mt-3 grid-cols-3" : "-mt-2 grid-cols-6")}>
       {cells.map((c) => (
         <div key={c.label} className={cn("min-w-0", phone ? "px-4 py-3" : "px-5 py-4")}>
-          <dt className="truncate text-[14px] text-fg-muted">{c.label}</dt>
-          <dd className={cn("mt-1 truncate font-semibold tabular tracking-tight", phone ? "text-[22px]" : "text-[26px]")}>
-            {c.value ?? <span className="skeleton my-2 block h-4 w-14 rounded-full bg-muted" />}
-          </dd>
+          <dt className="truncate text-[14px] text-fg-muted">
+            {c.label}
+          </dt>
+          <dd className={cn("mt-1 truncate font-semibold tabular tracking-tight", phone ? "text-[22px]" : "text-[26px]")}>{c.value}</dd>
         </div>
       ))}
     </dl>
@@ -266,7 +275,19 @@ function FilterMenu({ url, options, phone }: { url: RequestsUrl; options?: Filte
             </MenuRadioItem>
           ))}
         </MenuRadioGroup>
-        {!options && <MenuLabel>Loading…</MenuLabel>}
+        {!options && (
+          // Rows shaped like the Callers, outside the group so they never take focus.
+          <Skeleton data={undefined} sample={SAMPLE_CALLERS} label="Loading Callers">
+            {(callers) =>
+              callers.map((c) => (
+                <div key={c.name} className="flex h-8 items-center gap-2 rounded-md px-2 pl-8">
+                  <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                  <span className="tabular text-xs">{c.requests}</span>
+                </div>
+              ))
+            }
+          </Skeleton>
+        )}
       </SubMenu>
       <SubMenu label="Provider or Pool" value={f.provider ?? f.pool}>
         <MenuRadioGroup value={providerOrPool} onValueChange={pickProviderOrPool}>

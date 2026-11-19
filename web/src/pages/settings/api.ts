@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, seg } from "@/api/client";
 import type { OwnerSession } from "@/api/session";
 import type { AuditEntryPage, AuditResult, BulkResult } from "@/api/types";
@@ -91,6 +91,8 @@ export function useAuditEntries(f: EntryFilter) {
         query: { q: f.q, actor: f.actor, resource: f.resource, before: pageParam, limit: PAGE },
       }),
     getNextPageParam: (last) => last.next_before ?? undefined,
+    // A filter change is a new query: keep the shown entries until the new ones land, so no skeleton flashes.
+    placeholderData: keepPreviousData,
   });
 }
 

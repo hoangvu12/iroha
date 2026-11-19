@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ChevronRight, Layers, MessageCircle, Plus, Server } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { api, isApiError, seg } from "@/api/client";
 import { formatNumber, formatPercent, timeAgo } from "@/lib/format";
@@ -11,11 +11,13 @@ import { cn } from "@/ui/cn";
 import { Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
 import { EmptyState, ErrorState } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notifyChange } from "@/ui/toast";
 import type { Pool, PoolOverview, Provider, ProviderOverview, Shape } from "./api";
 import { calls, errorText, natural, SHAPES, successRate, useOverview, usePools, useProviders, useRefresh } from "./api";
 import { Pill, PoolTile, ProviderTile, Select, Switch } from "./controls";
+import { SAMPLE_POOLS, SAMPLE_PROVIDERS } from "./samples";
 
 /** /providers: every Provider, then every Model Pool (C05; phones C30). */
 export function ProvidersList() {
@@ -51,11 +53,9 @@ export function ProvidersList() {
         }
       />
 
-      {providers.isPending ? (
-        <TableSkeleton columns={["Name", "Keys", "Active keys", "Models", "Requests today", "Success"]} rows={5} />
-      ) : providers.isError ? (
+      {providers.isError ? (
         <ErrorState title="Couldn't load Providers" error={providers.error} onRetry={() => void providers.refetch()} />
-      ) : list.length === 0 ? (
+      ) : providers.data && list.length === 0 ? (
         <EmptyState
           icon={Server}
           title="No Providers yet"
@@ -70,7 +70,15 @@ export function ProvidersList() {
         <>
           <section aria-label="Providers">
             <h2 className="mb-2 text-[17px] font-semibold">Providers</h2>
-            {phone ? <ProviderCards list={list} stats={stats} /> : <ProviderTable list={list} stats={stats} />}
+            {/* Waits for the overview too, so the counts arrive filled in; its 15 s refetch keeps what is shown. */}
+            <Skeleton
+              data={providers.data && !overview.isPending ? list : undefined}
+              sample={SAMPLE_PROVIDERS}
+              id={phone ? "providers-list:phone" : "providers-list"}
+              label="Loading Providers"
+            >
+              {(list) => (phone ? <ProviderCards list={list} stats={stats} /> : <ProviderTable list={list} stats={stats} />)}
+            </Skeleton>
           </section>
           <section aria-label="Model Pools" className="mt-12">
             <div className="mb-2 flex items-center justify-between">
@@ -83,9 +91,14 @@ export function ProvidersList() {
             </div>
             {pools.isError ? (
               <ErrorState title="Couldn't load Model Pools" error={pools.error} onRetry={() => void pools.refetch()} />
-            ) : !pools.data ? (
-              <TableSkeleton columns={["Name", "Served by", "Requests today", "Success"]} rows={2} />
-            ) : pools.data.length === 0 ? (
+            ) : (
+              <Skeleton
+                data={overview.isPending ? undefined : pools.data}
+                sample={SAMPLE_POOLS}
+                id={phone ? "pools-list:phone" : "pools-list"}
+                label="Loading Model Pools"
+              >
+            {(pools) => pools.length === 0 ? (
               <p className="border-t border-border py-6 text-[15px] text-fg-muted">
                 No Model Pools. A Pool is one model name that Iroha serves from several Providers, trying the next one when a Provider can't serve.{" "}
                 <button type="button" className="text-info hover:underline" onClick={() => setPooling(true)}>
@@ -93,9 +106,11 @@ export function ProvidersList() {
                 </button>
               </p>
             ) : phone ? (
-              <PoolCards pools={pools.data} stats={poolStats} />
+              <PoolCards pools={pools} stats={poolStats} />
             ) : (
-              <PoolTable pools={pools.data} stats={poolStats} />
+              <PoolTable pools={pools} stats={poolStats} />
+            )}
+              </Skeleton>
             )}
           </section>
         </>
@@ -125,7 +140,7 @@ function ProviderName({ p }: { p: Provider }) {
 
 function ProviderTable({ list, stats }: { list: Provider[]; stats: Map<string, ProviderOverview> }) {
   const navigate = useNavigate();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   return (
     <Table>
       <THead>
@@ -246,7 +261,7 @@ function ServedBy({ pool }: { pool: Pool }) {
 
 function PoolTable({ pools, stats }: { pools: Pool[]; stats: Map<string, PoolOverview> }) {
   const navigate = useNavigate();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   return (
     <Table>
       <THead>

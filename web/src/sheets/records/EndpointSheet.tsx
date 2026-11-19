@@ -13,6 +13,7 @@ import {
   Fact,
   Facts,
   LinkList,
+  LinkListLoading,
   LinkRow,
   none,
   SheetActions,
@@ -103,7 +104,7 @@ export default function EndpointSheet({ record }: SheetBodyProps<"endpoint">) {
         </SheetSection>
         <SheetSection title="Upstream Keys sent here">
           {keys.isPending ? (
-            <div aria-busy="true" className="skeleton h-4 w-40 rounded-full bg-muted" />
+            <LinkListLoading label="Loading Upstream Keys" />
           ) : using.length === 0 ? (
             <p className="text-[14.5px] text-fg-muted">No key is sent to this Endpoint.</p>
           ) : (

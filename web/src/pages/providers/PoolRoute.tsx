@@ -10,10 +10,12 @@ import { StatusDot } from "@/ui/bits";
 import { Canvas } from "@/ui/Canvas";
 import { cn } from "@/ui/cn";
 import { ScrollArea } from "@/ui/ScrollArea";
+import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/ui/States";
 import type { Pool, PreviewMember, RoutePreview, Shape } from "./api";
 import { shapeLabel, SHAPES, useRoutePreview } from "./api";
 import { PoolTile, ProviderTile, Select, skipText, toneText } from "./controls";
+import { SAMPLE_PREVIEW } from "./samples";
 
 // The Pool's Route tab (C19): GET /api/route-preview drawn as a chain of
 // cards on a dotted canvas, refreshed every few seconds: where a Request for
@@ -39,6 +41,12 @@ export function readiness(m: PreviewMember): { text: string; tone: Tone } {
   return { text: m.keys ? "None ready" : "No keys", tone: "red" };
 }
 
+/** The card selected when the Owner picked none: the first member tried, else the End. */
+function firstNode(pv: RoutePreview): Node {
+  const first = pv.members.find((m) => m.planned);
+  return first ? { kind: "member", position: first.position } : { kind: "end" };
+}
+
 export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool; onAdd: () => void }) {
   const [shape, setShape] = useState<Shape>("openai-chat");
   const preview = useRoutePreview(name, shape);
@@ -61,13 +69,14 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
     );
   if (preview.isError && !pv) return <ErrorState title="Couldn't preview the route" error={preview.error} onRetry={() => void preview.refetch()} />;
 
-  const planned = pv?.members.filter((m) => m.planned) ?? [];
-  const off = pv?.members.filter((m) => !m.planned) ?? [];
-  const current: Node | undefined = selected ?? (planned[0] ? { kind: "member", position: planned[0].position } : pv ? { kind: "end" } : undefined);
+  const current: Node | undefined = selected ?? (pv && firstNode(pv));
   const is = (n: Node) => !!current && current.kind === n.kind && (n.kind !== "member" || (current.kind === "member" && current.position === n.position));
 
-  const chain: ReactNode[] = [];
-  if (pv) {
+  // The chain of cards for a preview: the live one, or the sample its skeleton is measured from.
+  const chainOf = (pv: RoutePreview) => {
+    const planned = pv.members.filter((m) => m.planned);
+    const off = pv.members.filter((m) => !m.planned);
+    const chain: ReactNode[] = [];
     chain.push(
       <Card key="start" selected={is({ kind: "start" })} onSelect={() => setSelected({ kind: "start" })} label="Start">
         <PoolTile name={name} version={pool?.maker} size={36} />
@@ -113,9 +122,19 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
           </div>,
         );
     }
-  }
+    return chain;
+  };
+  const chain = (
+    <Skeleton data={pv} sample={SAMPLE_PREVIEW} id={phone ? "pool-route:phone" : "pool-route"} label="Loading the route">
+      {(pv) => <div className="flex flex-col items-center">{chainOf(pv)}</div>}
+    </Skeleton>
+  );
 
-  const panel = pv && current && <SidePanel pv={pv} pool={pool} node={current} onClose={() => setSelected(undefined)} />;
+  const panel = (
+    <Skeleton data={pv} sample={SAMPLE_PREVIEW} label="Loading the route's details" className="skeleton-fill">
+      {(pv) => <SidePanel pv={pv} pool={pool} node={current ?? firstNode(pv)} onClose={() => setSelected(undefined)} />}
+    </Skeleton>
+  );
   const dots = { backgroundImage: "radial-gradient(var(--border-strong) 1px, transparent 1px)", backgroundSize: "20px 20px" };
 
   const live = (
@@ -139,15 +158,15 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
     return (
       <div>
         {live}
-        <div className="-mx-4 mt-4 flex flex-col items-center bg-subtle px-4 py-8" style={dots} aria-busy={!pv}>
+        <div className="-mx-4 mt-4 bg-subtle px-4 py-8" style={dots}>
           {chain}
         </div>
-        {panel && <div className="-mx-4 border-t border-border">{panel}</div>}
+        <div className="-mx-4 border-t border-border">{panel}</div>
       </div>
     );
 
   return (
-    <div className="flex h-[max(560px,calc(100dvh-300px))] overflow-hidden rounded-xl border border-border" aria-busy={!pv}>
+    <div className="flex h-[max(560px,calc(100dvh-300px))] overflow-hidden rounded-xl border border-border">
       <Canvas
         label={`Route of ${name}`}
         className="min-w-0 flex-1"
@@ -156,11 +175,9 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
       >
         {chain}
       </Canvas>
-      {panel && (
-        <ScrollArea label="Selected step" className="w-[380px] shrink-0 border-l border-border bg-bg" contentClassName="flex min-h-full flex-col *:grow">
-          {panel}
-        </ScrollArea>
-      )}
+      <ScrollArea label="Selected step" className="w-[380px] shrink-0 border-l border-border bg-bg" contentClassName="flex min-h-full flex-col *:grow">
+        {panel}
+      </ScrollArea>
     </div>
   );
 }

@@ -42,7 +42,8 @@ afterEach(() => {
   openChat.mockClear();
 });
 
-function renderTab() {
+/** Renders the tab and waits for the members, shown once the overview has loaded too (UI ticket 02). */
+async function renderTab() {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter>
@@ -50,18 +51,19 @@ function renderTab() {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  await screen.findByRole("button", { name: "More for member 1" });
 }
 
 test("Test in Chat on a member opens the chat on its Provider and model", async () => {
   const user = userEvent.setup();
-  renderTab();
+  await renderTab();
   await user.click(screen.getByRole("button", { name: "More for member 2" }));
   await user.click(await screen.findByRole("menuitem", { name: "Test in Chat" }));
   expect(openChat).toHaveBeenCalledExactlyOnceWith({ kind: "model", provider: "zeta", model: "qwen/m-2" });
 });
 
 test("an agent tests a member from its row menu", async () => {
-  renderTab();
+  await renderTab();
   const run = await agent.act({ steps: [{ ref: "More for member 1", action: "press", args: ["Test in Chat"] }] });
   expect(run.ok, run.error?.message).toBe(true);
   expect(openChat).toHaveBeenCalledExactlyOnceWith({ kind: "model", provider: "acme", model: "m-1" });

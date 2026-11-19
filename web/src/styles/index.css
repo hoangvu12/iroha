@@ -20,6 +20,7 @@
   --bg: #ffffff;              /* page */
   --bg-subtle: #fafafa;       /* sidebar, canvas, panels */
   --bg-muted: #f2f2f3;        /* hover, selected nav, skeleton bars, chips */
+  --skeleton-highlight: rgb(255 255 255 / 0.6); /* the shimmer crossing skeleton bars */
   --bg-elevated: #ffffff;     /* dialogs, menus, toasts */
   --fg: #171717;
   --fg-muted: #6b6b6f;
@@ -48,6 +49,7 @@
   --bg: #0e0e10;
   --bg-subtle: #151517;
   --bg-muted: #232326;
+  --skeleton-highlight: rgb(255 255 255 / 0.06);
   --bg-elevated: #1a1a1d;
   --fg: #ededee;
   --fg-muted: #a1a1a8;
@@ -115,6 +117,7 @@
   /* Durations */
   --duration-hover: 150ms;       /* colour and background on hover, selection */
   --duration-press: 160ms;       /* :active scale on buttons */
+  --duration-release: 100ms;     /* ...and back when let go: the response snaps */
   --duration-tooltip: 125ms;     /* tooltip in (out is the same; instant after the first) */
   --duration-popup-in: 180ms;    /* menu, select, combobox, popover in */
   --duration-popup-out: 120ms;   /* ...and out: exits are faster than entrances */
@@ -181,6 +184,19 @@
   from {
     opacity: 0;
     translate: 0 var(--motion-shift);
+  }
+}
+
+/* press: every Button and icon button (ui/Button.tsx). Held, it scales down
+   on --duration-press; let go, it snaps back on --duration-release. Not for a
+   key (Space on a focused button is :active too, and a key never animates),
+   nor while disabled or pending. Hover colours keep their own duration and
+   `ease`. Under reduced motion press and release are 0 and the scale is 1. */
+@utility press {
+  transition: scale var(--duration-release) var(--ease-out), background-color var(--duration-hover) ease, color var(--duration-hover) ease;
+  &:active:not(:focus-visible):not([data-disabled]):not([data-pending]) {
+    scale: var(--motion-scale-press);
+    transition-duration: var(--duration-press), var(--duration-hover), var(--duration-hover);
   }
 }
 
@@ -304,12 +320,26 @@
   }
 }
 
-@keyframes shimmer {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+/* Skeletons are Skullet's (ui/Skeleton.tsx, app/skeletons.tsx), coloured from
+   --bg-muted with this highlight. .skeleton-fill passes a flex parent's height
+   through Skullet's wrappers, for content that fills it (the route canvases). */
+/* Skullet's React Skeleton paints a skeleton from the first frame when it
+   mounts loading; this holds it unseen (still taking its space) for 150 ms,
+   so a fast load shows the content straight away and never a skeleton. */
+.skeleton-hold[aria-busy="true"] {
+  animation: skeleton-hold 150ms step-end both;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .skeleton { animation: shimmer 1.6s ease-in-out infinite; }
+@keyframes skeleton-hold {
+  from {
+    visibility: hidden;
+  }
+}
+.skeleton-fill,
+.skeleton-fill :is([skullet-pane], [skullet-loading], [skullet-ghost]) {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* The theme flips in one step: app/theme.tsx sets this on <html> while .dark
@@ -325,7 +355,7 @@
  * Reduced motion: the one rule (architecture.md "UI motion system").
  * Holds still: anything that moves or changes size (slides, scales, presses,
  * indicators, height, reordering, sheets) and anything that loops (pulse,
- * ping, bounce, the shimmer above). May fade: enter/exit of popups, dialogs,
+ * ping, bounce; Skullet stops its shimmer itself). May fade: enter/exit of popups, dialogs,
  * sheets, rows and toasts, hover colours and a new row's flash keep their
  * durations; with no distance or scale left, they play as plain fades.
  * Unlayered, so it wins over Tailwind's theme layer.
@@ -333,6 +363,7 @@
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-press: 0ms;
+    --duration-release: 0ms;
     --duration-indicator: 0ms;
     --duration-collapse: 0ms;
     --duration-move: 0ms;

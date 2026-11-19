@@ -22,43 +22,96 @@ export type ChatTarget =
 /** One "open the chat" call. `seq` changes on every call, so the content can start a new chat even for the same target. */
 export type ChatRequest = { seq: number; target?: ChatTarget };
 
-type Ctx = {
-  isOpen: boolean;
-  request: ChatRequest;
-  /** Open the sheet (or the /chat page on phones), optionally set up for a target. Each call with a target starts a new chat. */
-  open: (target?: ChatTarget) => void;
-  close: () => void;
-  toggle: () => void;
-};
+/**
+ * How the sheet comes and goes. It slides for a pointer; `instant` is for
+ * the C key and for swapping with the /chat page (Full page, Back to the
+ * side panel), which never animate (architecture.md "UI motion system").
+ */
+export type SheetMotion = { instant?: boolean };
 
-const ChatPanelContext = createContext<Ctx | null>(null);
+type Actions = {
+  /** Open the sheet (or the /chat page on phones), optionally set up for a target. Each call with a target starts a new chat. */
+  open: (target?: ChatTarget, how?: SheetMotion) => void;
+  close: (how?: SheetMotion) => void;
+  toggle: (how?: SheetMotion) => void;
+};
+type State = {
+  isOpen: boolean;
+  /** The last open or close asked not to animate. */
+  instant: boolean;
+};
+type Ctx = State & Actions & { request: ChatRequest };
+
+// Three contexts, so opening and closing the sheet re-renders only what shows
+// whether it is open (the slot, the sidebar button, what sits beside it),
+// not every table of Test buttons (useChatActions) or the chat itself.
+const ActionsContext = createContext<Actions | null>(null);
+const StateContext = createContext<State | null>(null);
+const RequestContext = createContext<ChatRequest | null>(null);
 
 export function ChatPanelProvider({ children }: { children: ReactNode }) {
   const [isOpen, setOpen] = useState(false);
+  const [instant, setInstant] = useState(false);
   const [request, setRequest] = useState<ChatRequest>({ seq: 0 });
   const phone = useIsPhone();
   const navigate = useNavigate();
 
   const open = useCallback(
-    (target?: ChatTarget) => {
+    (target?: ChatTarget, how?: SheetMotion) => {
       if (target) setRequest((r) => ({ seq: r.seq + 1, target }));
       if (phone) navigate("/chat");
-      else setOpen(true);
+      else {
+        setInstant(!!how?.instant);
+        setOpen(true);
+      }
     },
     [phone, navigate],
   );
-  const close = useCallback(() => setOpen(false), []);
-  const toggle = useCallback(() => {
-    if (phone) navigate("/chat");
-    else setOpen((o) => !o);
-  }, [phone, navigate]);
+  const close = useCallback((how?: SheetMotion) => {
+    setInstant(!!how?.instant);
+    setOpen(false);
+  }, []);
+  const toggle = useCallback(
+    (how?: SheetMotion) => {
+      if (phone) navigate("/chat");
+      else {
+        setInstant(!!how?.instant);
+        setOpen((o) => !o);
+      }
+    },
+    [phone, navigate],
+  );
 
-  const value = useMemo(() => ({ isOpen: isOpen && !phone, request, open, close, toggle }), [isOpen, phone, request, open, close, toggle]);
-  return <ChatPanelContext.Provider value={value}>{children}</ChatPanelContext.Provider>;
+  const actions = useMemo(() => ({ open, close, toggle }), [open, close, toggle]);
+  const state = useMemo(() => ({ isOpen: isOpen && !phone, instant }), [isOpen, phone, instant]);
+  return (
+    <ActionsContext.Provider value={actions}>
+      <StateContext.Provider value={state}>
+        <RequestContext.Provider value={request}>{children}</RequestContext.Provider>
+      </StateContext.Provider>
+    </ActionsContext.Provider>
+  );
 }
 
+function need<T>(v: T | null): T {
+  if (v === null) throw new Error("chat panel hook outside ChatPanelProvider");
+  return v;
+}
+
+/** Open, close and toggle only: a Test button needs nothing else, and doesn't re-render as the sheet comes and goes. */
+export function useChatActions(): Actions {
+  return need(useContext(ActionsContext));
+}
+
+/** The last "open the chat" call, for the chat content. */
+export function useChatRequest(): ChatRequest {
+  return need(useContext(RequestContext));
+}
+
+/** Everything, including whether the sheet is open (re-renders on every open and close). */
 export function useChatPanel(): Ctx {
-  const ctx = useContext(ChatPanelContext);
-  if (!ctx) throw new Error("useChatPanel outside ChatPanelProvider");
-  return ctx;
+  const actions = useChatActions();
+  const state = need(useContext(StateContext));
+  const request = useChatRequest();
+  return useMemo(() => ({ ...state, ...actions, request }), [state, actions, request]);
 }

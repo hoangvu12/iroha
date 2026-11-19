@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router";
 import { MessageCircle, Plus } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
 import { RouteTabs } from "@/ui/Tabs";
+import { Skeleton } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
 import { usePool } from "./api";
 import { PoolTile } from "./controls";
 import { AddMemberDialog, PoolMembersTab } from "./PoolMembers";
 import { PoolRouteTab } from "./PoolRoute";
 import { PoolSettingsTab } from "./PoolSettings";
+import { SAMPLE_POOL } from "./samples";
 
 const TABS = ["route", "members", "settings"] as const;
 
@@ -21,7 +23,7 @@ export function PoolPage() {
   const { name = "", tab: raw } = useParams();
   const tab = TABS.find((t) => t === raw);
   const pool = usePool(name);
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const phone = useIsPhone();
   const [params, setParams] = useSearchParams();
   const [adding, setAdding] = useState(false);
@@ -90,7 +92,11 @@ export function PoolPage() {
           >
             {tab === "route" && <PoolRouteTab name={name} pool={p} onAdd={() => setAdding(true)} />}
             {tab === "members" && <PoolMembersTab name={name} pool={p} onAdd={() => setAdding(true)} />}
-            {tab === "settings" && p && <PoolSettingsTab pool={p} />}
+            {tab === "settings" && (
+              <Skeleton data={p} sample={SAMPLE_POOL} id="pool-settings" label="Loading settings">
+                {(p) => <PoolSettingsTab pool={p} />}
+              </Skeleton>
+            )}
           </RouteTabs>
           {p && <AddMemberDialog pool={p} open={adding} onOpenChange={setAdding} />}
         </>

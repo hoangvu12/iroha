@@ -12,6 +12,7 @@ import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { ScrollArea } from "@/ui/ScrollArea";
+import { Skeleton } from "@/ui/Skeleton";
 import type { ModelChoice, Reasoning, Settings, Shape } from "./api";
 import { bareModel, preferOf, providerOf, SHAPES, shapeLabel, useModelChoices } from "./api";
 import { recentModels } from "./store";
@@ -71,8 +72,10 @@ export function PickerPopover({
         initialFocus="[data-autofocus]"
         className={cn(
           "flex w-(--anchor-width) max-h-[min(640px,calc(100dvh-160px),var(--available-height))] flex-col overflow-hidden rounded-xl border border-border bg-elevated text-fg shadow-elevated outline-none",
-          "origin-(--transform-origin) transition-[opacity,scale] duration-150 ease-out data-starting-style:scale-96 data-starting-style:opacity-0",
-          "data-ending-style:opacity-0 motion-reduce:transition-none",
+          // The popup recipe (architecture.md "UI motion system"): grows from the composer, leaves faster; fades only under reduced motion.
+          "origin-(--transform-origin) transition-[opacity,scale] duration-popup-in ease-out",
+          "data-starting-style:scale-(--motion-scale-popup) data-starting-style:opacity-0",
+          "data-ending-style:scale-(--motion-scale-popup) data-ending-style:opacity-0 data-ending-style:duration-popup-out",
         )}
       >
         {(state) => (
@@ -304,10 +307,31 @@ function Choices({
             </ListboxItem>
           ))}
         </Listbox>
-        {loading && <p className="px-4 pb-2 text-[14px] text-fg-muted">{loading}</p>}
+        {loading && <LoadingRows label={loading} />}
       </ScrollArea>
       {note && <p className={noteClass}>{note}</p>}
     </>
+  );
+}
+
+const SAMPLE_ROWS = ["team-1", "team-2", "team-3", "team-4"];
+
+// While a list's options load: rows shaped like them, drawn as a skeleton
+// under the list (outside it, so they never join its keyboard navigation).
+function LoadingRows({ label }: { label: string }) {
+  return (
+    <Skeleton data={undefined} sample={SAMPLE_ROWS} label={label}>
+      {(rows) => (
+        <div className="-mt-1.5 px-1.5 pb-1.5">
+          {rows.map((r) => (
+            <div key={r} className={optionClass}>
+              <span className="min-w-0 flex-1 truncate font-mono text-[13.5px]">{r}</span>
+              <span className="shrink-0 text-[13px]">Active</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Skeleton>
   );
 }
 
@@ -332,7 +356,7 @@ function KeyList({ handle, value, onPick, onBack }: { handle: string; value?: st
             </CommandItem>
           ))}
         </CommandList>
-        {keys.isPending && <p className="px-4 pb-2 text-[14px] text-fg-muted">Loading keys…</p>}
+        {keys.isPending && <LoadingRows label={`Loading the keys of ${handle}`} />}
         <CommandEmpty className="px-4 py-4 text-[14px] text-fg-muted">No key matches.</CommandEmpty>
       </ScrollArea>
       <p className={noteClass}>A picked key gets every Attempt, whatever its state.</p>
@@ -348,7 +372,7 @@ function EndpointList({ handle, value, onPick, onBack }: { handle: string; value
       value={value}
       onBack={onBack}
       onPick={onPick}
-      loading={p.isPending ? "Loading endpoints…" : undefined}
+      loading={p.isPending ? "Loading endpoints" : undefined}
       items={[
         { value: ANY, label: "Any" },
         ...(p.data?.endpoints ?? []).map((e) => ({
@@ -373,7 +397,7 @@ function AsList({ value, onPick, onBack }: { value?: string; onPick: (k?: string
       value={value}
       onBack={onBack}
       onPick={onPick}
-      loading={keys.isPending ? "Loading Gateway Keys…" : undefined}
+      loading={keys.isPending ? "Loading Gateway Keys" : undefined}
       note="Uses that key's access. Shows in Requests as Test (as name), never as its traffic."
       items={[
         {

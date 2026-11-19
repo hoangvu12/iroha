@@ -12,13 +12,13 @@ import { Dialog, TypeToConfirmDialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { SaveError, useSave } from "@/ui/SaveStatus";
 import { notify, notifyChange } from "@/ui/toast";
 import { type AdminToken, useAdminTokens, useCreateAdminToken, useInvalidateAll, useRevokeAdminToken } from "./api";
 import { lastUsed, shortDate, shortSecret } from "./format";
-
-const COLUMNS = ["Name", "Token", "Created", "Last used"];
+import { SAMPLE_ADMIN_TOKENS } from "./samples";
 
 /** Settings → Admin Tokens (C28). */
 export function AdminTokensTab() {
@@ -38,11 +38,11 @@ export function AdminTokensTab() {
         </Button>
       </div>
 
-      {tokens.isPending ? (
-        <TableSkeleton columns={COLUMNS} rows={4} />
-      ) : tokens.isError ? (
+      {tokens.isError ? (
         <ErrorState title="Couldn't load Admin Tokens" error={tokens.error} onRetry={() => void tokens.refetch()} />
-      ) : tokens.data.length === 0 ? (
+      ) : (
+      <Skeleton data={tokens.data} sample={SAMPLE_ADMIN_TOKENS} id={phone ? "admin-tokens:phone" : "admin-tokens"} label="Loading Admin Tokens">
+      {(list) => list.length === 0 ? (
         <EmptyState
           icon={KeyRound}
           title="No Admin Tokens"
@@ -51,14 +51,16 @@ export function AdminTokensTab() {
       ) : (
         <>
           {phone ? (
-            <TokenList tokens={tokens.data} onRevoke={setRevoking} />
+            <TokenList tokens={list} onRevoke={setRevoking} />
           ) : (
-            <TokenTable tokens={tokens.data} onRevoke={setRevoking} />
+            <TokenTable tokens={list} onRevoke={setRevoking} />
           )}
           <p className="mt-5 text-[13px] text-fg-muted">
             Copy a token whenever a script needs it. Revoke one from its ⋯ menu.
           </p>
         </>
+      )}
+      </Skeleton>
       )}
 
       <CreateDialog open={creating} onOpenChange={setCreating} existing={tokens.data ?? []} />

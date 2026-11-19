@@ -14,7 +14,8 @@ import { LogoTile } from "@/ui/LogoTile";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { Status } from "@/ui/bits";
 import { EmptyState, ErrorState, NoResults } from "@/ui/States";
-import { TBody, TD, TH, THead, TR, Table, TableSkeleton } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { TBody, TD, TH, THead, TR, Table } from "@/ui/Table";
 import { notify } from "@/ui/toast";
 
 // /states: the shared components in every state (design C25), for anyone
@@ -49,8 +50,11 @@ export default function StatesPage() {
         description="How a page looks while it loads, when it has nothing to show, when something fails, and when it asks before acting."
       />
       <div className="grid gap-8 lg:grid-cols-2">
-        <Panel title="Loading" note="Rows hold their place. No spinners.">
-          <TableSkeleton columns={["Name", "Key", "State", "Last used"]} rows={4} />
+        <Panel title="Loading" note="Measured from the real rows, so nothing moves when they land. No spinners.">
+          {/* Never loads: the skeleton of the table below, drawn from its rows. */}
+          <Skeleton data={null} sample={KEY_ROWS} label="Loading keys">
+            {(rows) => <KeyTable rows={rows} />}
+          </Skeleton>
         </Panel>
         <Panel title="Empty" note="One sentence and the one action that fills it.">
           <EmptyState
@@ -155,48 +159,56 @@ export default function StatesPage() {
             <Button variant="ghost">Clear selection</Button>
             <Button danger>Delete…</Button>
           </div>
-          <Table>
-            <THead>
-              <tr>
-                <TH>Name</TH>
-                <TH>Key</TH>
-                <TH>State</TH>
-                <TH />
-              </tr>
-            </THead>
-            <TBody>
-              {[
-                ["team-1", "sk-…a91f", "green", "Active"],
-                ["team-3", "sk-…0be4", "amber", "Cooling"],
-                ["team-5", "sk-…c3a8", "red", "Invalid"],
-                ["team-7", "sk-…f02b", "gray", "Disabled"],
-              ].map(([n, k, tone, s], i) => (
-                <TR key={n} selected={i === 1}>
-                  <TD className="font-medium">{n}</TD>
-                  <TD mono>{k}</TD>
-                  <TD>
-                    <Status tone={tone as "green"}>{s}</Status>
-                  </TD>
-                  <TD align="right">
-                    <Menu>
-                      <MenuIconTrigger icon={Ellipsis} label={`Actions for ${n}`} size="sm" />
-                      <MenuContent>
-                        <MenuItem>Test</MenuItem>
-                        <MenuItem>Disable</MenuItem>
-                        <MenuSeparator />
-                        <MenuItem icon={Trash2} danger>
-                          Delete
-                        </MenuItem>
-                      </MenuContent>
-                    </Menu>
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+          <KeyTable rows={KEY_ROWS} />
         </Panel>
       </div>
     </>
+  );
+}
+
+const KEY_ROWS = [
+  ["team-1", "sk-…a91f", "green", "Active"],
+  ["team-3", "sk-…0be4", "amber", "Cooling"],
+  ["team-5", "sk-…c3a8", "red", "Invalid"],
+  ["team-7", "sk-…f02b", "gray", "Disabled"],
+];
+
+function KeyTable({ rows }: { rows: string[][] }) {
+  return (
+    <Table>
+      <THead>
+        <tr>
+          <TH>Name</TH>
+          <TH>Key</TH>
+          <TH>State</TH>
+          <TH />
+        </tr>
+      </THead>
+      <TBody>
+        {rows.map(([n, k, tone, s], i) => (
+          <TR key={n} selected={i === 1}>
+            <TD className="font-medium">{n}</TD>
+            <TD mono>{k}</TD>
+            <TD>
+              <Status tone={tone as "green"}>{s}</Status>
+            </TD>
+            <TD align="right">
+              <Menu>
+                <MenuIconTrigger icon={Ellipsis} label={`Actions for ${n}`} size="sm" />
+                <MenuContent>
+                  <MenuItem>Test</MenuItem>
+                  <MenuItem>Disable</MenuItem>
+                  <MenuSeparator />
+                  <MenuItem icon={Trash2} danger>
+                    Delete
+                  </MenuItem>
+                </MenuContent>
+              </Menu>
+            </TD>
+          </TR>
+        ))}
+      </TBody>
+    </Table>
   );
 }
 

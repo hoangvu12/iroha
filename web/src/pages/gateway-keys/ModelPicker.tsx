@@ -9,6 +9,8 @@ import { SearchInput } from "@/ui/Input";
 import { ProviderTile } from "@/ui/LogoTile";
 import { RadioCards } from "@/ui/Radio";
 import { useProviderModels } from "./api";
+import { Skeleton } from "@/ui/Skeleton";
+import { SAMPLE_MODEL_IDS } from "./samples";
 
 // The model picker behind a checked Provider's "All models" (C02): every
 // model, or only some. Search runs on the server and the list draws only
@@ -166,29 +168,26 @@ function ModelList({
           className="[&_input]:border-transparent [&_input]:bg-transparent [&_input]:focus:ring-0"
         />
       </div>
-      {models.isPending ? (
-        <div className="flex flex-col gap-3 p-4" aria-busy="true">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="skeleton h-2.5 w-40 rounded-full bg-muted" />
-          ))}
-        </div>
-      ) : models.isError ? (
+      {models.isError ? (
         <p className="p-4 text-sm text-danger-text">Couldn't load the models of {provider}. Type a model ID to allow it anyway.</p>
-      ) : items.length === 0 ? (
+      ) : (
+      // A new search keeps the rows shown (dimmed) until its page lands.
+      <Skeleton data={models.isPending ? undefined : items} sample={SAMPLE_MODEL_IDS} label={`Loading the models of ${provider}`}>
+      {(items) => items.length === 0 ? (
         <p className="p-4 text-sm text-fg-muted">
           {q ? `No model of ${provider} matches “${q}”.` : `${provider} lists no models yet. Type a model ID to allow it.`}
         </p>
-      ) : null}
-      {items.length > 0 && (
+      ) : (
         <div
-          ref={box}
+          ref={items === SAMPLE_MODEL_IDS ? undefined : box}
           aria-label={`Models of ${provider}`}
           onScroll={(e) => setTop(e.currentTarget.scrollTop)}
           className={cn("relative overflow-y-auto", models.isPlaceholderData && "opacity-60")}
           style={{ height: Math.min(VIEW, items.length * ROW) }}
         >
           <div style={{ height: items.length * ROW }} className="relative">
-            {items.slice(first, last).map((m, i) => {
+            {/* `last` of these items: the sample has its own length. */}
+            {items.slice(first, Math.min(items.length, Math.ceil((top + VIEW) / ROW) + OVERSCAN)).map((m, i) => {
               const at = first + i;
               const isExtra = extra !== undefined && at === items.length - 1;
               const on = pickedSet.has(m);
@@ -206,6 +205,8 @@ function ModelList({
             })}
           </div>
         </div>
+      )}
+      </Skeleton>
       )}
     </div>
   );

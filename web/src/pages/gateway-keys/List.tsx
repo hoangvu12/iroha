@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ChevronRight, Copy, KeyRound, MessageCircle, MoreHorizontal, Plus, Settings2, Trash2, Ban } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
@@ -12,14 +12,14 @@ import { CopyButton, useCopy } from "@/ui/CopyButton";
 import { Mono } from "@/ui/bits";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { Tip } from "@/ui/Tooltip";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { type GatewayKey, useGatewayKeys } from "./api";
+import { SAMPLE_GATEWAY_KEYS } from "./samples";
 import { DeleteDialog, RevokeDialog } from "./confirm";
 import { CreateDialog } from "./CreateDialog";
 import { scopeDetail, scopeSummary } from "./scope";
-
-const COLUMNS = ["Name", "Key", "Access", "Last used", "Requests, 24 h"];
 
 /** Where a key's Requests of the last 24 hours are listed. */
 export const requestsHref = (k: GatewayKey) => `/requests?caller=${encodeURIComponent(k.name)}&range=24h`;
@@ -33,8 +33,6 @@ export function KeysList() {
   const [deleting, setDeleting] = useState<GatewayKey>();
   const [showRevoked, setShowRevoked] = useState(false);
 
-  const active = list.data?.filter((k) => !k.revoked) ?? [];
-  const revoked = list.data?.filter((k) => k.revoked) ?? [];
   const act = { onRevoke: setRevoking, onDelete: setDeleting };
 
   return (
@@ -49,11 +47,14 @@ export function KeysList() {
         }
       />
 
-      {list.isPending ? (
-        <TableSkeleton columns={COLUMNS} rows={5} />
-      ) : list.isError ? (
+      {list.isError ? (
         <ErrorState title="Couldn't load Gateway Keys" error={list.error} onRetry={() => void list.refetch()} />
-      ) : active.length === 0 && revoked.length === 0 ? (
+      ) : (
+      <Skeleton data={list.data} sample={SAMPLE_GATEWAY_KEYS} id={phone ? "gateway-keys:phone" : "gateway-keys"} label="Loading Gateway Keys">
+      {(keys) => {
+        const active = keys.filter((k) => !k.revoked);
+        const revoked = keys.filter((k) => k.revoked);
+        return active.length === 0 && revoked.length === 0 ? (
         <EmptyState
           icon={KeyRound}
           title="No Gateway Keys yet"
@@ -89,6 +90,9 @@ export function KeysList() {
             </div>
           )}
         </>
+      );
+      }}
+      </Skeleton>
       )}
 
       <CreateDialog open={creating} onOpenChange={setCreating} existing={list.data ?? []} />
@@ -117,7 +121,7 @@ function Recent({ k }: { k: GatewayKey }) {
 
 function KeyMenu({ k, onRevoke, onDelete }: { k: GatewayKey } & Actions) {
   const navigate = useNavigate();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   // "Copy key" closes the menu, so the trigger it closes back to shows the result.
   const copied = useCopy();
   return (

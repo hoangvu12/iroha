@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowUp, ChevronDown, Code2, KeyRound, Link2, Maximize2, MessageCircle, Minimize2, Square, SquarePen, Trash2, Wrench, X } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions, useChatRequest } from "@/app/chat-panel";
 import { timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button as SdkButton } from "@ui-sdk/react/button";
@@ -28,11 +28,21 @@ import { startFor } from "./targets";
 // composer's model button. The shell renders <ChatPanel mode="sheet" /> on
 // the right and /chat renders <ChatPanel mode="page" /> (phones, Expand).
 
+// The press (`@utility press`, styles/index.css) for the panel's own buttons,
+// which aren't ui/Button: Tools and the starter chips.
+const pressClass = "press";
+// Send/Stop: the same press on the scale only (down on duration-press, back on
+// duration-release, never for a key). Its colour flips as the Owner types the
+// first letter or clears the box (a keyboard action), so that stays instant.
+const sendPressClass =
+  "transition-[scale] duration-release ease-out active:not-focus-visible:not-data-disabled:scale-(--motion-scale-press) active:not-focus-visible:not-data-disabled:duration-press";
+
 /** The last Test button handled, so remounting the panel does not start its chat again. */
 let handledSeq = 0;
 
 export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
-  const panel = useChatPanel();
+  // Not useChatPanel: the chat needn't re-render as its sheet opens and closes.
+  const panel = { ...useChatActions(), request: useChatRequest() };
   const navigate = useNavigate();
   const phone = useIsPhone();
   const state = useChatState();
@@ -107,11 +117,12 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
               label="Full page"
               size="sm"
               onClick={() => {
-                panel.close();
+                // A route change: the page takes the panel's place at once.
+                panel.close({ instant: true });
                 navigate("/chat");
               }}
             />
-            <IconButton icon={X} label="Close" size="sm" onClick={panel.close} />
+            <IconButton icon={X} label="Close" size="sm" onClick={() => panel.close()} />
           </>
         ) : (
           !phone && (
@@ -121,7 +132,7 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
               size="sm"
               onClick={() => {
                 navigate(-1);
-                panel.open();
+                panel.open(undefined, { instant: true });
               }}
             />
           )
@@ -247,6 +258,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
                   onClick={() => change({ toolCheck: !s.toolCheck })}
                   className={cn(
                     "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[14px]",
+                    pressClass,
                     s.toolCheck ? "border-info/40 bg-info/10 text-info" : "border-border text-fg hover:bg-muted",
                   )}
                 >
@@ -257,7 +269,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
               <div className="flex-1" />
               {running ? (
                 <Tip label="Stop" type="label">
-                  <SdkButton onClick={() => stop(chat.id)} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg">
+                  <SdkButton onClick={() => stop(chat.id)} className={cn("inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg", sendPressClass)}>
                     <Square size={13} fill="currentColor" aria-hidden />
                   </SdkButton>
                 </Tip>
@@ -266,7 +278,10 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
                   <SdkButton
                     onClick={() => submit()}
                     disabled={!text.trim()}
-                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg data-disabled:bg-muted data-disabled:text-fg-subtle"
+                    className={cn(
+                      "inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg data-disabled:bg-muted data-disabled:text-fg-subtle",
+                      sendPressClass,
+                    )}
                   >
                     <ArrowUp size={18} aria-hidden />
                   </SdkButton>
@@ -310,7 +325,7 @@ function Empty({ chat, onPrompt }: { chat: Chat; onPrompt: (prompt: string, patc
 
 function Chip({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="h-9 rounded-full border border-border-strong bg-bg px-4 text-[14.5px] hover:bg-muted">
+    <button type="button" onClick={onClick} className={cn("h-9 rounded-full border border-border-strong bg-bg px-4 text-[14.5px] hover:bg-muted", pressClass)}>
       {children}
     </button>
   );

@@ -1,20 +1,23 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { DialogTitle } from "@ui-sdk/react/dialog";
 import { useChatPanel } from "@/app/chat-panel";
 import { seg } from "@/api/client";
 import type { RequestTab } from "@/sheets/records";
-import { CopyIconButton, SheetBar, SheetBody, SheetLoading, SheetProblem, SheetTitle } from "@/sheets/Sheet";
+import { CopyIconButton, SheetBar, SheetBody, SheetProblem, SheetTitle } from "@/sheets/Sheet";
 import type { SheetBodyProps } from "@/sheets/SheetStack";
 import { useSheets } from "@/sheets/stack";
 import { IconButton } from "@/ui/Button";
 import { popupOpen } from "@/ui/popup";
+import { Skeleton } from "@/ui/Skeleton";
 import { Tab as UITab, TabList, TabPanel, Tabs } from "@/ui/Tabs";
 import { useRequest } from "./api";
 import { AttemptList } from "./Attempts";
 import { ProviderLogo, StatusPill, when } from "./bits";
 import { CapturedView } from "./Captured";
 import { RequestDetails } from "./Details";
+import { SAMPLE_REQUEST } from "./samples";
 
 /** True when a key press belongs to a text field or a menu, list or dialog. */
 function busyTarget(e: KeyboardEvent): boolean {
@@ -75,15 +78,11 @@ export function RequestSheet({ record, index, top }: SheetBodyProps<"request">) 
     </SheetBar>
   );
 
-  if (!r)
+  if (!r && req.isError)
     return (
       <>
         {bar}
-        {req.isError ? (
-          <SheetProblem kind="Request" name={id} error={req.error} onRetry={() => void req.refetch()} />
-        ) : (
-          <SheetLoading name={`Request ${id}`} />
-        )}
+        <SheetProblem kind="Request" name={id} error={req.error} onRetry={() => void req.refetch()} />
       </>
     );
 
@@ -91,38 +90,46 @@ export function RequestSheet({ record, index, top }: SheetBodyProps<"request">) 
     <>
       {bar}
       <SheetBody>
-        <SheetTitle
-          kind="Request"
-          logo={r.provider ? <ProviderLogo handle={r.provider} size={44} /> : undefined}
-          title={r.model || "No model"}
-          subtitle={when(r.started_at)}
-          state={<StatusPill r={r} />}
-        />
-        <Tabs value={tab} onValueChange={(t) => t && setTab(t as RequestTab)}>
-          <TabList label="Request tabs" className="mb-6">
-            {(
-              [
-                ["details", "Details"],
-                ["attempts", "Attempts"],
-                ["captured", "Captured"],
-              ] as const
-            ).map(([t, label]) => (
-              <UITab key={t} value={t}>
-                {label}
-                {t === "attempts" && <span className="ml-2 tabular text-fg-muted">{r.attempt_count}</span>}
-              </UITab>
-            ))}
-          </TabList>
-          <TabPanel value="details">
-            <RequestDetails r={r} onShowCaptured={() => setTab("captured")} />
-          </TabPanel>
-          <TabPanel value="attempts">
-            <AttemptList r={r} loading={!r.attempts && req.isFetching} onOpenRoute={() => navigate(page)} />
-          </TabPanel>
-          <TabPanel value="captured">
-            <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />
-          </TabPanel>
-        </Tabs>
+        {/* Opened from the feed, the row seeds it and no skeleton shows; from a link, the Details tab is measured. */}
+        {!r && <DialogTitle className="sr-only">{`Request ${id}`}</DialogTitle>}
+        <Skeleton data={r} sample={SAMPLE_REQUEST} id="request-drawer" label="Loading Request">
+          {(r) => (
+            <>
+              <SheetTitle
+                kind="Request"
+                logo={r.provider ? <ProviderLogo handle={r.provider} size={44} /> : undefined}
+                title={r.model || "No model"}
+                subtitle={when(r.started_at)}
+                state={<StatusPill r={r} />}
+              />
+              <Tabs value={tab} onValueChange={(t) => t && setTab(t as RequestTab)}>
+                <TabList label="Request tabs" className="mb-6">
+                  {(
+                    [
+                      ["details", "Details"],
+                      ["attempts", "Attempts"],
+                      ["captured", "Captured"],
+                    ] as const
+                  ).map(([t, label]) => (
+                    <UITab key={t} value={t}>
+                      {label}
+                      {t === "attempts" && <span className="ml-2 tabular text-fg-muted">{r.attempt_count}</span>}
+                    </UITab>
+                  ))}
+                </TabList>
+                <TabPanel value="details">
+                  <RequestDetails r={r} onShowCaptured={() => setTab("captured")} />
+                </TabPanel>
+                <TabPanel value="attempts">
+                  <AttemptList r={r} loading={!r.attempts && req.isFetching} onOpenRoute={() => navigate(page)} />
+                </TabPanel>
+                <TabPanel value="captured">
+                  <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />
+                </TabPanel>
+              </Tabs>
+            </>
+          )}
+        </Skeleton>
       </SheetBody>
     </>
   );

@@ -2,7 +2,9 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAgent } from "@ui-sdk/react/agent";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { SheetStackProvider } from "@/sheets/stack";
 import { Toaster } from "@/ui/toast";
 import type { Endpoint, Provider } from "./api";
 import { EndpointsTab } from "./Endpoints";
@@ -31,6 +33,12 @@ const provider: Provider = {
   endpoints: [ep("intl", "https://intl.acme.test/v1"), ep("cn", "https://cn.acme.test/v1", { shape: "anthropic-messages" })],
 };
 
+function Where() {
+  const l = useLocation();
+  return <output aria-label="Where">{decodeURIComponent(l.search)}</output>;
+}
+const where = () => screen.getByLabelText("Where").textContent;
+
 function renderTab() {
   const fetch = vi.fn<typeof globalThis.fetch>(async (u) => {
     if (String(u).startsWith("/api/providers/acme/keys")) return answer({ upstream_keys: [] });
@@ -39,7 +47,12 @@ function renderTab() {
   vi.stubGlobal("fetch", fetch);
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <EndpointsTab handle="acme" provider={provider} adding={false} setAdding={() => {}} />
+      <MemoryRouter initialEntries={["/providers/acme/endpoints"]}>
+        <SheetStackProvider>
+          <EndpointsTab handle="acme" provider={provider} adding={false} setAdding={() => {}} />
+          <Where />
+        </SheetStackProvider>
+      </MemoryRouter>
       <Toaster />
     </QueryClientProvider>,
   );
@@ -62,11 +75,12 @@ test("endpoints sit in the shared table, sortable by name", async () => {
   expect(screen.getByText("2 Endpoints")).toBeTruthy();
 });
 
-test("clicking a row, or its name, opens the edit dialog", async () => {
+test("clicking a row, or its name, opens the Endpoint's sheet (UI ticket 27: it was an edit dialog)", async () => {
   const user = userEvent.setup();
   renderTab();
   await user.click(await screen.findByRole("button", { name: "Open cn" }));
-  expect(await screen.findByRole("dialog", { name: "Edit cn" })).toBeTruthy();
+  await waitFor(() => expect(where()).toBe("?sheet=endpoint:acme/cn"));
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 test("Delete… in a row's menu is red and asks, naming the Endpoint; confirming deletes it", async () => {
@@ -80,25 +94,11 @@ test("Delete… in a row's menu is red and asks, naming the Endpoint; confirming
   expect(deletes(fetch)).toHaveLength(0);
   await user.click(screen.getByRole("button", { name: "Delete endpoint" }));
   await waitFor(() => expect(deletes(fetch)).toEqual(["/api/providers/acme/endpoints/cn"]));
-  // The dialog never opened the row's edit dialog under it.
-  expect(screen.queryByRole("dialog", { name: "Edit cn" })).toBeNull();
+  // The menu's click never opened the row's sheet under it.
+  expect(where()).toBe("");
 });
 
-test("picking a header you name opens its name field under the choice, folding as it opens (UI ticket 17)", async () => {
-  const user = userEvent.setup();
-  renderTab();
-  await user.click(await screen.findByRole("button", { name: "Open cn" }));
-  const dialog = await screen.findByRole("dialog", { name: "Edit cn" });
-  expect(within(dialog).queryByRole("textbox", { name: "Header name" })).toBeNull();
-  await user.click(within(dialog).getByRole("combobox", { name: "Key sent as" }));
-  await user.click(await screen.findByRole("option", { name: "A header you name" }));
-  const name = await within(dialog).findByRole("textbox", { name: "Header name" });
-  const panel = name.closest("[data-slot=collapsible-panel]")!;
-  for (const c of ["transition-[height]", "duration-collapse", "data-starting-style:h-0", "data-ending-style:h-0", "overflow-hidden"])
-    expect(panel.className.split(/\s+/)).toContain(c);
-  // The input's focus ring has room inside the clipping panel.
-  for (const c of ["-mx-1", "px-1", "-mb-1", "pb-1"]) expect(panel.className.split(/\s+/)).toContain(c);
-});
+// The fields' own tests (the header name folding open) are in sheets/EndpointSheet.test.tsx: an Endpoint is edited in its sheet.
 
 test("an agent finds every endpoint control by name and opens one", async () => {
   renderTab();
@@ -109,5 +109,5 @@ test("an agent finds every endpoint control by name and opens one", async () => 
   for (const l of ["Sort by Name", "Open intl", "More for intl", "Open cn", "More for cn"]) expect(labels, `${l} is missing`).toContain(l);
   const run = await agent.act({ steps: [{ ref: "Open intl", action: "press" }] });
   expect(run.ok, run.error?.message).toBe(true);
-  expect(await screen.findByRole("dialog", { name: "Edit intl" })).toBeTruthy();
+  await waitFor(() => expect(where()).toBe("?sheet=endpoint:acme/intl"));
 });

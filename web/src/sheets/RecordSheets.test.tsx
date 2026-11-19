@@ -88,7 +88,7 @@ test("the Upstream Key sheet copies the key's name and its key, as the Keys tab 
   const key = await loadedSheet("Upstream Key team-6");
   await user.click(within(key).getByRole("button", { name: "Copy key name" }));
   await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("team-6"));
-  await user.click(within(key).getByRole("button", { name: "Copy Upstream Key" }));
+  await user.click(within(key).getByRole("button", { name: "Copy the key" }));
   await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("sk-abcdefteam-6"));
   // The key itself stays masked on screen.
   expect(key.textContent).not.toContain("sk-abcdefteam-6");
@@ -118,5 +118,5 @@ test("enable/disable and Test act on the record and show the result in the sheet
   expect(JSON.parse(String(patch[1]!.body))).toEqual({ enabled: false });
 
   await user.click(within(key).getByRole("button", { name: "Test team-6" }));
-  expect((await within(key).findByRole("status")).textContent).toMatch(/^Passed: 200/);
+  expect(await within(key).findByText(/^team-6 passed: 200/, { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
 });

@@ -574,7 +574,8 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
           {/* Wraps onto its own line before it gets narrower than this. */}
           <div className="min-w-[min(100%,18rem)] flex-1">{props.footer?.(counts)}</div>
           {pages && (
-            <div className="flex shrink-0 items-center gap-3">
+            // Many pages on a phone: the pager wraps under the size box rather than pushing the page sideways.
+            <div className="flex max-w-full flex-wrap items-center gap-3">
               {/* The Select is w-full; its box sets the width (cn has no tailwind-merge). */}
               <div className="w-[150px] md:w-[128px]">
                 <Select

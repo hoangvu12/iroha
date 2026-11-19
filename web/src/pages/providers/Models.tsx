@@ -194,6 +194,8 @@ export function ModelsTab({ handle }: { handle: string }) {
 
   const toolbar = (
     <>
+      {/* Phones: search and filter have the first line to themselves (C31); the rest wraps under them. */}
+      <div className={phone ? "flex w-full items-center gap-2" : "contents"}>
       <SearchInput
         className="min-w-0 flex-1 md:max-w-[300px] md:flex-none"
         placeholder={data ? `Search ${formatNumber(data.counts.all)} models` : "Search models"}
@@ -201,12 +203,14 @@ export function ModelsTab({ handle }: { handle: string }) {
         value={q}
         onChange={(e) => setParam("q", e.target.value)}
       />
-      {phone ? (
-        // The Select is w-full: its box sets the width, so search and filter share a line (C31).
+      {phone && (
+        // The Select is w-full: its box sets the width.
         <div className="w-32 shrink-0">
           <Select<ModelFilter> aria-label="Show models" value={filter} onValueChange={setFilter} items={MODEL_FILTERS.map((f) => ({ value: f, label: f === "gaps" ? "Gaps" : filterLabel[f] }))} />
         </div>
-      ) : (
+      )}
+      </div>
+      {!phone && (
         <Segmented<ModelFilter>
           label="Show models"
           value={filter}

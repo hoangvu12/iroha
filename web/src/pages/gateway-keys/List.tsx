@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ChevronRight, Copy, KeyRound, MessageCircle, MoreHorizontal, Plus, Settings2, Trash2, Ban } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
@@ -121,7 +121,7 @@ function Recent({ k }: { k: GatewayKey }) {
 
 function KeyMenu({ k, onRevoke, onDelete }: { k: GatewayKey } & Actions) {
   const navigate = useNavigate();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   // "Copy key" closes the menu, so the trigger it closes back to shows the result.
   const copied = useCopy();
   return (

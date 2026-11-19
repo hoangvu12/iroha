@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ChevronRight, Layers, MessageCircle, Plus, Server } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { api, isApiError, seg } from "@/api/client";
 import { formatNumber, formatPercent, timeAgo } from "@/lib/format";
@@ -140,7 +140,7 @@ function ProviderName({ p }: { p: Provider }) {
 
 function ProviderTable({ list, stats }: { list: Provider[]; stats: Map<string, ProviderOverview> }) {
   const navigate = useNavigate();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   return (
     <Table>
       <THead>
@@ -261,7 +261,7 @@ function ServedBy({ pool }: { pool: Pool }) {
 
 function PoolTable({ pools, stats }: { pools: Pool[]; stats: Map<string, PoolOverview> }) {
   const navigate = useNavigate();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   return (
     <Table>
       <THead>

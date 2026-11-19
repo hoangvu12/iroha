@@ -13,6 +13,7 @@ import { SheetStack } from "@/sheets/SheetStack";
 import { SheetStackProvider } from "@/sheets/stack";
 import { Avatar, BANNER_SRC } from "./brand";
 import { useChatPanel } from "./chat-panel";
+import { CHAT_WIDTH, ChatSheet } from "./ChatSheet";
 import type { HealthState } from "./health";
 import { healthLabel, useHealth } from "./health";
 import { NAV, type NavItem } from "./nav";
@@ -21,7 +22,7 @@ import { useNavShortcuts } from "./shortcuts";
 import { type ThemePref, useTheme } from "./theme";
 
 export const SIDEBAR_WIDTH = 224;
-export const CHAT_WIDTH = 460;
+export { CHAT_WIDTH } from "./ChatSheet";
 
 /**
  * The signed-in app: sidebar (desktop) or bottom tab bar (phone), the page
@@ -38,7 +39,6 @@ export function Shell() {
 function ShellFrame() {
   useNavShortcuts();
   const phone = useIsPhone();
-  const chat = useChatPanel();
   const { pathname } = useLocation();
   const chatPage = pathname === "/chat" || pathname.startsWith("/chat/");
 
@@ -59,20 +59,23 @@ function ShellFrame() {
           </div>
         )}
       </main>
-      {chat.isOpen && !chatPage && (
-        <aside
-          aria-label="Chat"
-          style={{ width: CHAT_WIDTH }}
-          className="fixed inset-y-0 right-0 z-30 flex max-w-full flex-col border-l border-border bg-subtle shadow-elevated"
-        >
-          <ChatPanel mode="sheet" />
-        </aside>
-      )}
+      <ChatSheet hidden={chatPage}>
+        <ChatPanel mode="sheet" />
+      </ChatSheet>
       {phone && <TabBar />}
-      {/* Record sheets open beside the page, left of the chat panel (UI ticket 10). */}
-      <SheetStack right={chat.isOpen && !chatPage ? CHAT_WIDTH : 0} />
+      <SheetsBesideChat chatPage={chatPage} />
     </div>
   );
+}
+
+/**
+ * Record sheets open beside the page, left of the chat panel (UI ticket 10).
+ * Its own component, so the chat opening and closing re-renders the sheets
+ * and not the whole frame and page.
+ */
+function SheetsBesideChat({ chatPage }: { chatPage: boolean }) {
+  const chat = useChatPanel();
+  return <SheetStack right={chat.isOpen && !chatPage ? CHAT_WIDTH : 0} />;
 }
 
 // No transition: P, G, R and C move the highlight, and a key never animates
@@ -97,7 +100,7 @@ function SidebarItem({ item }: { item: NavItem }) {
     return (
       <button
         type="button"
-        onClick={chat.toggle}
+        onClick={() => chat.toggle()}
         aria-pressed={chat.isOpen}
         aria-keyshortcuts={item.key}
         className={cn(navItemClass(chat.isOpen), "w-full text-left")}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Navigate, useParams } from "react-router";
 import { MessageCircle, Plus, RefreshCw } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { seg } from "@/api/client";
 import { formatNumber } from "@/lib/format";
@@ -34,7 +34,7 @@ export function ProviderPage() {
   const { handle = "", tab: raw } = useParams();
   const tab = TABS.find((t) => t === raw);
   const provider = useProvider(handle);
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const phone = useIsPhone();
   const [adding, setAdding] = useState(false);
   const refreshList = useChange(() => calls.refreshModels(handle));

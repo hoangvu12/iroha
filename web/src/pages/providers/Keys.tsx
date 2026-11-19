@@ -19,7 +19,7 @@ import {
   Trash2,
   Waypoints,
 } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { seg } from "@/api/client";
 import type { BulkResult } from "@/api/types";
 import { formatDate, formatDuration, timeAgo } from "@/lib/format";
@@ -69,7 +69,7 @@ export function KeysTab({
   const keys = useKeys(handle);
   const refresh = useRefresh();
   const phone = useIsPhone();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
   const filter = (params.get("state") as StateFilter) || "all";

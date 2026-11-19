@@ -1,10 +1,11 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { Checkbox } from "@/ui/Checkbox";
 import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
+import { RadioCards } from "@/ui/Radio";
 import { usePoolOptions, useProviderOptions } from "./api";
-import { Checkbox, RadioOption } from "./bits";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { ModelPicker } from "./ModelPicker";
 import { type Draft, modelsLabel } from "./scope";
@@ -19,20 +20,16 @@ export function ScopeEditor({ draft, onChange }: { draft: Draft; onChange: SetDr
   return (
     <div>
       <p className="text-sm font-medium text-fg">Access</p>
-      <div role="radiogroup" aria-label="Access" className="mt-2 flex flex-col gap-1.5">
-        <RadioOption
-          checked={draft.all}
-          onSelect={() => onChange((d) => ({ ...d, all: true }))}
-          title="Everything"
-          description="Every Provider and Model Pool, including ones you add later"
-        />
-        <RadioOption
-          checked={!draft.all}
-          onSelect={() => onChange((d) => ({ ...d, all: false }))}
-          title="Only some"
-          description="Pick the Providers and Model Pools this key can use"
-        />
-      </div>
+      <RadioCards
+        label="Access"
+        value={draft.all ? "all" : "some"}
+        onValueChange={(v) => onChange((d) => ({ ...d, all: v === "all" }))}
+        className="mt-2 flex flex-col gap-1.5"
+        options={[
+          { value: "all", title: "Everything", description: "Every Provider and Model Pool, including ones you add later" },
+          { value: "some", title: "Only some", description: "Pick the Providers and Model Pools this key can use" },
+        ]}
+      />
       {!draft.all && <Checklist draft={draft} onChange={onChange} />}
     </div>
   );
@@ -116,26 +113,21 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
               const models = draft.providers.get(p.handle) ?? null;
               return (
                 <div key={p.handle} className="flex h-12 items-center gap-3 px-4 hover:bg-subtle">
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={on}
-                    onClick={() => toggleProvider(p.handle)}
-                    className="flex min-w-0 flex-1 items-center gap-3 self-stretch text-left"
-                  >
-                    <Checkbox checked={on} />
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 self-stretch">
+                    <Checkbox label={p.handle} checked={on} onChange={() => toggleProvider(p.handle)} />
                     <ProviderTile handle={p.handle} />
                     <span className={cn("truncate text-[15px]", p.gone ? "text-fg-muted line-through" : "text-fg")}>{p.handle}</span>
                     {!p.enabled && !p.gone && <span className="shrink-0 text-[13px] text-fg-muted">Disabled</span>}
-                  </button>
+                  </label>
                   {on && !p.gone && (
                     <button
                       type="button"
+                      aria-label={`Models of ${p.handle}: ${modelsLabel(models)}`}
                       onClick={() => setPicking(p.handle)}
                       className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm text-fg-muted hover:bg-muted hover:text-fg"
                     >
                       {modelsLabel(models)}
-                      <ChevronDown size={15} />
+                      <ChevronDown size={15} aria-hidden />
                     </button>
                   )}
                 </div>
@@ -147,18 +139,11 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
                 {shownPools.map((n) => {
                   const on = draft.pools.has(n);
                   return (
-                    <button
-                      key={n}
-                      type="button"
-                      role="checkbox"
-                      aria-checked={on}
-                      onClick={() => togglePool(n)}
-                      className="flex h-12 w-full items-center gap-3 px-4 text-left hover:bg-subtle"
-                    >
-                      <Checkbox checked={on} />
+                    <label key={n} className="flex h-12 w-full cursor-pointer items-center gap-3 px-4 hover:bg-subtle">
+                      <Checkbox label={n} checked={on} onChange={() => togglePool(n)} />
                       <PoolTile name={n} />
                       <span className="truncate text-[15px] text-fg">{n}</span>
-                    </button>
+                    </label>
                   );
                 })}
               </div>

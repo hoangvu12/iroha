@@ -12,6 +12,8 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   size?: Size;
   icon?: ComponentType<{ size?: number; className?: string }>;
   loading?: boolean;
+  // Keeps a disabled button focusable, so a tooltip can say why.
+  focusableWhenDisabled?: boolean;
   children?: ReactNode;
 };
 

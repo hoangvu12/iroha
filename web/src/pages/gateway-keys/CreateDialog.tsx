@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { isApiError } from "@/api/client";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
+import { Disclosure } from "@/ui/Disclosure";
 import { Field, Input } from "@/ui/Input";
 import { notifyChange } from "@/ui/toast";
 import { type GatewayKey, useCreateKey, useInvalidateKeys } from "./api";
@@ -70,7 +71,7 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
         title={
           <span className="flex flex-col items-start gap-4">
             <span className="inline-flex size-11 items-center justify-center rounded-full bg-success-tint text-success">
-              <Check size={20} />
+              <Check size={20} aria-hidden />
             </span>
             Gateway Key created
           </span>
@@ -92,9 +93,8 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
             <CopyBox value={urls.openai} what="Base URL" />
             <p className="mt-2 text-[13px] text-fg-muted">For OpenAI clients. Models are named provider/model, or a Model Pool's name.</p>
           </div>
-          <details className="group text-[13px] text-fg-muted">
-            <summary className="cursor-pointer select-none hover:text-fg">Anthropic and Gemini clients</summary>
-            <div className="mt-3 flex flex-col gap-3">
+          <Disclosure summary="Anthropic and Gemini clients" className="text-[13px] text-fg-muted">
+            <div className="flex flex-col gap-3 pt-3">
               <div>
                 <p className="mb-1.5 text-fg">Anthropic</p>
                 <CopyBox value={urls.anthropic} what="Anthropic base URL" />
@@ -104,7 +104,7 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
                 <CopyBox value={urls.gemini} what="Gemini base URL" />
               </div>
             </div>
-          </details>
+          </Disclosure>
         </div>
       </Dialog>
     );
@@ -125,19 +125,20 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
         </>
       }
     >
-      <form
-        id="new-gateway-key"
-        className="flex flex-col gap-6"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <Field label="Name" error={error}>
-          {(p) => (
-            <Input {...p} autoFocus autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} placeholder="linh" />
-          )}
-        </Field>
+      <div className="flex flex-col gap-6">
+        <form
+          id="new-gateway-key"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          <Field label="Name" error={error}>
+            {(p) => (
+              <Input {...p} autoFocus autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} placeholder="linh" />
+            )}
+          </Field>
+        </form>
         <div>
           <ScopeEditor
             draft={draft}
@@ -152,7 +153,7 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
             </p>
           )}
         </div>
-      </form>
+      </div>
     </Dialog>
   );
 }

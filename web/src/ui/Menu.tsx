@@ -136,13 +136,14 @@ export function MenuRadioGroup({
 }
 
 // Radio items close the menu: each is a choice, not a setting to toggle along.
-export function MenuRadioItem({ value, children, label }: { value: string; children: ReactNode; label?: string }) {
+export function MenuRadioItem({ value, children, label, count }: { value: string; children: ReactNode; label?: string; count?: number }) {
   return (
     <SdkMenuRadioItem value={value} label={label} closeOnSelect className={cn(itemClass, "relative pl-8")}>
       <MenuItemIndicator className="absolute left-2 inline-flex">
         <Check size={15} aria-hidden />
       </MenuItemIndicator>
-      {children}
+      <span className="flex min-w-0 flex-1 items-center gap-2 truncate">{children}</span>
+      {count !== undefined && <span className="tabular text-xs text-fg-subtle">{count}</span>}
     </SdkMenuRadioItem>
   );
 }

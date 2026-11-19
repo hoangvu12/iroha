@@ -420,6 +420,22 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
 
   const toggleRow = (row: DataRow<T>, on: boolean, event?: Event) =>
     row.getToggleSelectedHandler()({ target: { checked: on }, shiftKey: (event as MouseEvent | undefined)?.shiftKey ?? false });
+  // A click on a row opens it; a table of expandable rows that open nothing shows the row's details instead.
+  const rowClick = (row: DataRow<T>): (() => void) | undefined =>
+    onRowClick ? () => onRowClick(row.original) : renderExpanded ? () => row.toggleExpanded() : undefined;
+  const expandButton = (row: DataRow<T>, name: string) => {
+    const open = row.getIsExpanded();
+    return (
+      <IconButton
+        icon={ChevronRight}
+        size="sm"
+        label={open ? `Hide details of ${name}` : `Show details of ${name}`}
+        aria-expanded={open}
+        className={cn("[&_svg]:transition-[rotate] [&_svg]:duration-collapse [&_svg]:ease-out", open && "[&_svg]:rotate-90")}
+        onClick={() => row.toggleExpanded()}
+      />
+    );
+  };
 
   const desktop = (
     <ScrollArea axis="both" label={label} className="w-full" viewportClassName={props.maxHeight ?? "max-h-[calc(100dvh-4rem)]"} contentClassName="min-w-full">
@@ -458,21 +474,22 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
             const name = rowName(r);
             const selected = row.getIsSelected();
             const open = row.getIsExpanded();
+            const click = rowClick(row);
             return [
               <tr
                 key={row.id}
                 data-selected={selected || undefined}
                 data-tone={props.rowTone?.(r)}
                 onClick={
-                  onRowClick &&
+                  click &&
                   ((e) => {
                     const own = (e.target as Element).closest(OWN_TARGET);
-                    if (!own || !e.currentTarget.contains(own)) onRowClick(r);
+                    if (!own || !e.currentTarget.contains(own)) click();
                   })
                 }
                 className={cn(
                   "group border-b border-border last:border-b-0",
-                  onRowClick && "cursor-pointer hover:bg-subtle",
+                  click && "cursor-pointer hover:bg-subtle",
                   "data-[tone=danger]:bg-danger-tint/50",
                   "data-selected:bg-selected data-selected:hover:bg-selected",
                   open && "border-b-0",
@@ -483,18 +500,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
                     <Checkbox label={`Select ${name}`} checked={selected} onChange={(on, ev) => toggleRow(row, on, ev)} />
                   </td>
                 )}
-                {renderExpanded && (
-                  <td className={cn(tdClass, "w-9")}>
-                    <IconButton
-                      icon={ChevronRight}
-                      size="sm"
-                      label={open ? `Hide details of ${name}` : `Show details of ${name}`}
-                      aria-expanded={open}
-                      className={cn("[&_svg]:transition-[rotate] [&_svg]:duration-collapse [&_svg]:ease-out", open && "[&_svg]:rotate-90")}
-                      onClick={() => row.toggleExpanded()}
-                    />
-                  </td>
-                )}
+                {renderExpanded && <td className={cn(tdClass, "w-9")}>{expandButton(row, name)}</td>}
                 {row.getVisibleCells().map((cell) => (
                   <BodyCell key={cell.id} cell={cell} name={name} onOpen={onRowClick && (() => onRowClick(r))} render={<table.FlexRender cell={cell} />} />
                 ))}
@@ -525,7 +531,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
           const selected = row.getIsSelected();
           const content = phoneRow(r);
           return (
-            <li key={row.id} data-selected={selected || undefined} data-tone={props.rowTone?.(r)} className="flex items-center gap-3 py-3 data-selected:bg-selected data-[tone=danger]:bg-danger-tint/50">
+            <li key={row.id} data-selected={selected || undefined} data-tone={props.rowTone?.(r)} className="flex flex-wrap items-center gap-3 py-3 data-selected:bg-selected data-[tone=danger]:bg-danger-tint/50">
               {showChecks && <Checkbox label={`Select ${name}`} checked={selected} onChange={(on, ev) => toggleRow(row, on, ev)} className="ml-1" />}
               {showChecks ? (
                 // The checkbox is the control; a tap anywhere on the row toggles it too.
@@ -536,10 +542,23 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
                 <SdkButton aria-label={`Open ${name}`} className="flex min-w-0 flex-1 items-center gap-3 text-left outline-none focus-visible:bg-subtle" onClick={() => onRowClick(r)}>
                   {content}
                 </SdkButton>
+              ) : renderExpanded ? (
+                // The chevron is the control; a tap on the row shows its details too.
+                <div
+                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                  onClick={(e) => {
+                    const own = (e.target as Element).closest(OWN_TARGET);
+                    if (!own || !e.currentTarget.contains(own)) row.toggleExpanded();
+                  }}
+                >
+                  {content}
+                </div>
               ) : (
                 <div className="flex min-w-0 flex-1 items-center gap-3">{content}</div>
               )}
               {!onRowClick && !showChecks && rowActions?.(r)}
+              {renderExpanded && !onRowClick && !showChecks && expandButton(row, name)}
+              {renderExpanded && row.getIsExpanded() && <div className="min-w-0 basis-full">{renderExpanded(r)}</div>}
             </li>
           );
         })}

@@ -290,6 +290,33 @@ test("expandable rows: the chevron shows the details under the row", async () =>
   expect(screen.queryByText("apple weighs 180 g")).toBeNull();
 });
 
+test("expandable rows without onRowClick: a click on the row shows its details, a click on its own controls doesn't", async () => {
+  const user = userEvent.setup();
+  const ate = vi.fn();
+  render(<Fruits renderExpanded={(f) => <p>{f.name} weighs {f.weight} g</p>} rowActions={(f) => <Button onClick={() => ate(f.name)}>Eat {f.name}</Button>} />);
+  await user.click(screen.getByRole("button", { name: "Eat apple" }));
+  expect(ate).toHaveBeenCalledWith("apple");
+  expect(screen.queryByText("apple weighs 180 g")).toBeNull();
+  await user.click(within(bodyRows()[0]).getByText("red"));
+  expect(screen.getByText("apple weighs 180 g")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Hide details of apple" }).getAttribute("aria-expanded")).toBe("true");
+  await user.click(within(bodyRows()[0]).getByText("red"));
+  expect(screen.queryByText("apple weighs 180 g")).toBeNull();
+});
+
+test("phones: an expandable row has its chevron at the end and shows its details under it", async () => {
+  vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("max-width"), media: q, addEventListener() {}, removeEventListener() {} }));
+  const user = userEvent.setup();
+  render(<Fruits renderExpanded={(f) => <p>{f.name} weighs {f.weight} g</p>} phoneRow={(f) => <span>{f.name}</span>} />);
+  const list = screen.getByRole("list", { name: "Fruit" });
+  const show = within(list).getByRole("button", { name: "Show details of apple" });
+  expect(show.getAttribute("aria-expanded")).toBe("false");
+  await user.click(show);
+  expect(within(list).getAllByRole("listitem")[0].textContent).toContain("apple weighs 180 g");
+  await user.click(within(list).getByText("apple"));
+  expect(screen.queryByText("apple weighs 180 g")).toBeNull();
+});
+
 test("phones get two-line rows: tap opens, Select shows checkboxes", async () => {
   vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("max-width"), media: q, addEventListener() {}, removeEventListener() {} }));
   const user = userEvent.setup();

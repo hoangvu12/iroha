@@ -1,0 +1,201 @@
+== request sent upstream ==
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "List the files, then read a.txt. What is in this image?"
+        },
+        {
+          "fileData": {
+            "fileUri": "https://example.com/cat.png",
+            "mimeType": "image/png"
+          }
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "functionCall": {
+            "args": {
+              "cmd": "ls"
+            },
+            "id": "call_1",
+            "name": "shell_exec"
+          },
+          "thoughtSignature": "context_engineering_is_the_way_to_go"
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "call_1",
+            "name": "shell_exec",
+            "response": {
+              "content": "a.txt\nb.txt"
+            }
+          }
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 2048,
+    "thinkingConfig": {
+      "includeThoughts": true,
+      "thinkingBudget": 1024
+    }
+  },
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "You are a coding agent."
+      }
+    ]
+  },
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "AUTO"
+    }
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "description": "Run a command",
+          "name": "shell_exec",
+          "parameters": {
+            "properties": {
+              "cmd": {
+                "type": "STRING"
+              }
+            },
+            "required": [
+              "cmd"
+            ],
+            "type": "OBJECT"
+          }
+        }
+      ]
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "created_at": 1767225600,
+  "error": null,
+  "id": "resp_req_golden",
+  "incomplete_details": null,
+  "model": "gemini-2.5-flash",
+  "object": "response",
+  "output": [
+    {
+      "id": "chatcmpl-<uuid>_reasoning_0",
+      "status": "completed",
+      "summary": [
+        {
+          "text": "The user wants a.txt read.",
+          "type": "summary_text"
+        }
+      ],
+      "type": "reasoning"
+    },
+    {
+      "content": [
+        {
+          "annotations": [],
+          "text": "Reading it.",
+          "type": "output_text"
+        }
+      ],
+      "id": "chatcmpl-<uuid>_msg_0",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    },
+    {
+      "arguments": "{\"cmd\":\"cat a.txt\"}",
+      "call_id": "call_<uuid>",
+      "id": "call_<uuid>",
+      "name": "shell.exec",
+      "status": "completed",
+      "type": "function_call"
+    }
+  ],
+  "status": "completed",
+  "usage": {
+    "input_tokens": 120,
+    "input_tokens_details": {
+      "cached_tokens": 64
+    },
+    "output_tokens": 80,
+    "output_tokens_details": {
+      "reasoning_tokens": 32
+    },
+    "total_tokens": 200
+  }
+}
+== stream to the Caller ==
+event: response.created
+data: {"response":{"created_at":1767225600,"error":null,"id":"resp_req_golden","incomplete_details":null,"model":"gemini-2.5-flash","object":"response","output":[],"status":"in_progress","usage":null},"sequence_number":0,"type":"response.created"}
+
+event: response.output_item.added
+data: {"item":{"id":"resp_req_golden_reasoning_0","status":"in_progress","summary":[],"type":"reasoning"},"output_index":0,"sequence_number":1,"type":"response.output_item.added"}
+
+event: response.reasoning_summary_part.added
+data: {"item_id":"resp_req_golden_reasoning_0","output_index":0,"part":{"text":"","type":"summary_text"},"sequence_number":2,"summary_index":0,"type":"response.reasoning_summary_part.added"}
+
+event: response.reasoning_summary_text.delta
+data: {"delta":"The user wants a.txt read.","item_id":"resp_req_golden_reasoning_0","output_index":0,"sequence_number":3,"summary_index":0,"type":"response.reasoning_summary_text.delta"}
+
+event: response.output_item.added
+data: {"item":{"content":[],"id":"resp_req_golden_msg_0","role":"assistant","status":"in_progress","type":"message"},"output_index":1,"sequence_number":4,"type":"response.output_item.added"}
+
+event: response.content_part.added
+data: {"content_index":0,"item_id":"resp_req_golden_msg_0","output_index":1,"part":{"annotations":[],"text":"","type":"output_text"},"sequence_number":5,"type":"response.content_part.added"}
+
+event: response.output_text.delta
+data: {"content_index":0,"delta":"Reading ","item_id":"resp_req_golden_msg_0","output_index":1,"sequence_number":6,"type":"response.output_text.delta"}
+
+event: response.output_text.delta
+data: {"content_index":0,"delta":"it.","item_id":"resp_req_golden_msg_0","output_index":1,"sequence_number":7,"type":"response.output_text.delta"}
+
+event: response.output_item.added
+data: {"item":{"arguments":"","call_id":"call_<uuid>","id":"call_<uuid>","name":"shell.exec","status":"in_progress","type":"function_call"},"item_id":"call_<uuid>","output_index":2,"sequence_number":8,"type":"response.output_item.added"}
+
+event: response.function_call_arguments.delta
+data: {"delta":"{\"cmd\":\"cat a.txt\"}","item_id":"call_<uuid>","output_index":2,"sequence_number":9,"type":"response.function_call_arguments.delta"}
+
+event: response.output_text.done
+data: {"content_index":0,"item_id":"resp_req_golden_msg_0","output_index":1,"sequence_number":10,"text":"Reading it.","type":"response.output_text.done"}
+
+event: response.content_part.done
+data: {"content_index":0,"item_id":"resp_req_golden_msg_0","output_index":1,"part":{"annotations":[],"text":"Reading it.","type":"output_text"},"sequence_number":11,"type":"response.content_part.done"}
+
+event: response.output_item.done
+data: {"item":{"content":[{"annotations":[],"text":"Reading it.","type":"output_text"}],"id":"resp_req_golden_msg_0","role":"assistant","status":"completed","type":"message"},"output_index":1,"sequence_number":12,"type":"response.output_item.done"}
+
+event: response.reasoning_summary_text.done
+data: {"item_id":"resp_req_golden_reasoning_0","output_index":0,"sequence_number":13,"summary_index":0,"text":"The user wants a.txt read.","type":"response.reasoning_summary_text.done"}
+
+event: response.reasoning_summary_part.done
+data: {"item_id":"resp_req_golden_reasoning_0","output_index":0,"part":{"text":"The user wants a.txt read.","type":"summary_text"},"sequence_number":14,"summary_index":0,"type":"response.reasoning_summary_part.done"}
+
+event: response.output_item.done
+data: {"item":{"id":"resp_req_golden_reasoning_0","status":"completed","summary":[{"text":"The user wants a.txt read.","type":"summary_text"}],"type":"reasoning"},"output_index":0,"sequence_number":15,"type":"response.output_item.done"}
+
+event: response.function_call_arguments.done
+data: {"arguments":"{\"cmd\":\"cat a.txt\"}","item_id":"call_<uuid>","name":"shell.exec","output_index":2,"sequence_number":16,"type":"response.function_call_arguments.done"}
+
+event: response.output_item.done
+data: {"item":{"arguments":"{\"cmd\":\"cat a.txt\"}","call_id":"call_<uuid>","id":"call_<uuid>","name":"shell.exec","status":"completed","type":"function_call"},"output_index":2,"sequence_number":17,"type":"response.output_item.done"}
+
+event: response.completed
+data: {"response":{"created_at":1767225600,"error":null,"id":"resp_req_golden","incomplete_details":null,"model":"gemini-2.5-flash","object":"response","output":[{"id":"resp_req_golden_reasoning_0","status":"completed","summary":[{"text":"The user wants a.txt read.","type":"summary_text"}],"type":"reasoning"},{"content":[{"annotations":[],"text":"Reading it.","type":"output_text"}],"id":"resp_req_golden_msg_0","role":"assistant","status":"completed","type":"message"},{"arguments":"{\"cmd\":\"cat a.txt\"}","call_id":"call_<uuid>","id":"call_<uuid>","name":"shell.exec","status":"completed","type":"function_call"}],"status":"completed","usage":{"input_tokens":120,"input_tokens_details":{"cached_tokens":64},"output_tokens":80,"output_tokens_details":{"reasoning_tokens":32},"total_tokens":200}},"sequence_number":18,"type":"response.completed"}
+

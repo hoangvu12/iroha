@@ -13,7 +13,7 @@ import (
 // Caller's behalf (no SSRF exposure, no memory spent on other people's
 // files): a data URL is decoded in place, and a URL is carried through as a
 // marker that the target codec turns back into the Shape's own URL source
-// (Anthropic's {"type":"url"} image source).
+// (Anthropic's {"type":"url"} image source, Gemini's fileData).
 
 // urlMarker prefixes a URL in RelayKit's base64 slot.
 const urlMarker = "iroha-url:"
@@ -25,7 +25,8 @@ func resolveMedia(_ context.Context, src types.FileSource, _ ...string) (string,
 		return "", "", errors.New("no media source")
 	}
 	if src.IsURL() {
-		return urlMarker + src.GetRawData(), "", nil
+		// Gemini's converter needs a media type; Gemini's fileData does too.
+		return urlMarker + src.GetRawData(), guessMIME(src.GetRawData()), nil
 	}
 	raw := src.GetRawData()
 	if strings.HasPrefix(raw, "data:") {

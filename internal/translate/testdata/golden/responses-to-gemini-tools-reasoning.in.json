@@ -1,0 +1,49 @@
+{
+  "from": "openai-responses",
+  "to": "gemini",
+  "model": "gemini-2.5-flash",
+  "wire_model": "gemini-2.5-flash",
+  "request": {
+    "model": "gemini-2.5-flash",
+    "instructions": "You are a coding agent.",
+    "stream": true,
+    "store": false,
+    "reasoning": {"effort": "low", "summary": "auto"},
+    "max_output_tokens": 2048,
+    "input": [
+      {"type": "message", "role": "user", "content": [
+        {"type": "input_text", "text": "List the files, then read a.txt. What is in this image?"},
+        {"type": "input_image", "image_url": "https://example.com/cat.png"}
+      ]},
+      {"type": "function_call", "call_id": "call_1", "name": "shell.exec", "arguments": "{\"cmd\":\"ls\"}"},
+      {"type": "function_call_output", "call_id": "call_1", "output": "a.txt\nb.txt"},
+      {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "A cat. Reading a.txt next."}]}
+    ],
+    "tools": [
+      {"type": "function", "name": "shell.exec", "description": "Run a command", "strict": false,
+        "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}
+    ],
+    "tool_choice": "auto"
+  },
+  "answer": {
+    "candidates": [{
+      "content": {"role": "model", "parts": [
+        {"text": "The user wants a.txt read.", "thought": true},
+        {"text": "Reading it."},
+        {"functionCall": {"name": "shell_exec", "args": {"cmd": "cat a.txt"}}, "thoughtSignature": "c2lnNDU2"}
+      ]},
+      "finishReason": "STOP",
+      "index": 0
+    }],
+    "usageMetadata": {"promptTokenCount": 120, "candidatesTokenCount": 48, "totalTokenCount": 200, "thoughtsTokenCount": 32, "cachedContentTokenCount": 64},
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "resp-g1"
+  },
+  "stream": [
+    {"candidates": [{"content": {"role": "model", "parts": [{"text": "The user wants a.txt read.", "thought": true}]}, "index": 0}], "usageMetadata": {"promptTokenCount": 120, "totalTokenCount": 120}, "modelVersion": "gemini-2.5-flash", "responseId": "resp-g2"},
+    {"candidates": [{"content": {"role": "model", "parts": [{"text": "Reading "}]}, "index": 0}], "modelVersion": "gemini-2.5-flash", "responseId": "resp-g2"},
+    {"candidates": [{"content": {"role": "model", "parts": [{"text": "it."}]}, "index": 0}], "modelVersion": "gemini-2.5-flash", "responseId": "resp-g2"},
+    {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "shell_exec", "args": {"cmd": "cat a.txt"}}, "thoughtSignature": "c2lnNDU2"}]}, "finishReason": "STOP", "index": 0}],
+      "usageMetadata": {"promptTokenCount": 120, "candidatesTokenCount": 48, "totalTokenCount": 200, "thoughtsTokenCount": 32, "cachedContentTokenCount": 64}, "modelVersion": "gemini-2.5-flash", "responseId": "resp-g2"}
+  ]
+}

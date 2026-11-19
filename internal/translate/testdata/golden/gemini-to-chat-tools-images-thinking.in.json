@@ -1,0 +1,70 @@
+{
+  "from": "gemini",
+  "to": "openai-chat",
+  "model": "glm-4.6",
+  "wire_model": "glm-4.6",
+  "caller_stream": true,
+  "request": {
+    "systemInstruction": {"parts": [{"text": "You are terse."}]},
+    "contents": [
+      {"role": "user", "parts": [
+        {"text": "Weather in Hanoi? Also what is in these images?"},
+        {"inlineData": {"mimeType": "image/png", "data": "iVBORw0KGgo="}},
+        {"fileData": {"mimeType": "image/jpeg", "fileUri": "https://example.com/cat.jpg"}}
+      ]},
+      {"role": "model", "parts": [
+        {"functionCall": {"name": "fs.read", "args": {"path": "/tmp/a"}}}
+      ]},
+      {"role": "user", "parts": [
+        {"functionResponse": {"name": "fs.read", "response": {"content": "file a"}}}
+      ]},
+      {"role": "user", "parts": [{"text": "Now the weather."}]}
+    ],
+    "tools": [{"functionDeclarations": [
+      {"name": "get_weather", "description": "Get weather",
+        "parameters": {"type": "OBJECT", "properties": {"city": {"type": "STRING"}}, "required": ["city"]}},
+      {"name": "fs.read", "description": "Read a file",
+        "parameters": {"type": "OBJECT", "properties": {"path": {"type": "STRING"}}}}
+    ]}],
+    "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
+    "generationConfig": {
+      "temperature": 0.2,
+      "maxOutputTokens": 2048,
+      "stopSequences": ["END"],
+      "thinkingConfig": {"thinkingBudget": 1024, "includeThoughts": true}
+    }
+  },
+  "answer": {
+    "id": "chatcmpl-tools",
+    "object": "chat.completion",
+    "created": 1767225600,
+    "model": "glm-4.6",
+    "choices": [{
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Checking.",
+        "reasoning_content": "User wants weather.",
+        "tool_calls": [
+          {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"Hanoi\"}"}},
+          {"id": "call_2", "type": "function", "function": {"name": "fs_read", "arguments": "{\"path\":\"/tmp/b\"}"}}
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }],
+    "usage": {"prompt_tokens": 40, "completion_tokens": 30, "total_tokens": 70,
+      "prompt_tokens_details": {"cached_tokens": 8}, "completion_tokens_details": {"reasoning_tokens": 12}}
+  },
+  "stream": [
+    {"id": "chatcmpl-s", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]},
+    {"id": "chatcmpl-s", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6", "choices": [{"index": 0, "delta": {"reasoning_content": "User wants weather."}, "finish_reason": null}]},
+    {"id": "chatcmpl-s", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6", "choices": [{"index": 0, "delta": {"content": "Checking."}, "finish_reason": null}]},
+    {"id": "chatcmpl-s", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": ""}}]}, "finish_reason": null}]},
+    {"id": "chatcmpl-s", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{\"city\":"}}]}, "finish_reason": null}]},
+    {"id": "chatcmpl-s", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "\"Hanoi\"}"}}]}, "finish_reason": null}]},
+    {"id": "chatcmpl-s", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 1, "id": "call_2", "type": "function", "function": {"name": "fs_read", "arguments": "{\"path\":\"/tmp/b\"}"}}]}, "finish_reason": null}]},
+    {"id": "chatcmpl-s", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+    {"id": "chatcmpl-s", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6", "choices": [], "usage": {"prompt_tokens": 40, "completion_tokens": 30, "total_tokens": 70, "prompt_tokens_details": {"cached_tokens": 8}, "completion_tokens_details": {"reasoning_tokens": 12}}},
+    "[DONE]"
+  ]
+}

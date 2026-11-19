@@ -146,6 +146,7 @@ var reassemblers = map[shape.Shape]func(payloads [][]byte) (b []byte, ok bool){
 	shape.OpenAIChat:        reassembleChat,
 	shape.AnthropicMessages: reassembleAnthropic,
 	shape.OpenAIResponses:   reassembleResponses, // capture_responses.go
+	shape.Gemini:            reassembleGemini,    // capture_gemini.go
 }
 
 // reassemble turns a streamed answer into one answer in the Shape's own

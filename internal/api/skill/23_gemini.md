@@ -1,0 +1,11 @@
+## Gemini
+
+Gemini Callers (the Google GenAI SDKs, Gemini CLI) use `POST /providers/<handle>/v1beta/models/<model>:generateContent`, or `:streamGenerateContent` for a stream: set the SDK's base URL to `<iroha>/providers/<handle>`. The model is the URL path between `models/` and the colon, slashes included (`.../models/google/gemini-2.5-flash:generateContent` asks for `google/gemini-2.5-flash`). Other methods (`countTokens`, `embedContent`) get `404 operation_not_supported`. The global route `POST /v1beta/models/<handle>/<model>:generateContent` (base URL `<iroha>`) takes the qualified name the same way: everything before the first slash is the Provider handle, the rest is its model ID (`.../models/acme/google/gemini-2.5-flash:generateContent`).
+
+- **Gateway Key**: send it as `x-goog-api-key` (what the SDKs do), as `?key=<Gateway Key>`, or as `Authorization: Bearer`. None of them, the `key` parameter included, is ever forwarded to a Provider.
+- **Gemini Endpoints**: the body passes through unchanged and the wire model (after renames) goes in the upstream URL. Answers keep everything the Provider sent, with `modelVersion` set to the model you asked for.
+- **Other Endpoints**: contents, system instructions, tools and function calls, images, thinking (`thinkingConfig` <-> reasoning; thought parts come back when `includeThoughts` is true) and usage are translated both ways. OpenAI Chat, OpenAI Responses and Anthropic Callers can be served by Gemini Endpoints the same way. Iroha downloads nothing: image URLs become Gemini `fileData`.
+- **Streams** are always server-sent events (as with `?alt=sse`). While Iroha waits on the Provider it sends chunks with one empty text part, which the SDKs read as no new text.
+- **Usage** is recorded as: input = `promptTokenCount` + `toolUsePromptTokenCount`, output = `candidatesTokenCount` + `thoughtsTokenCount`, reasoning = thoughts, cache read = `cachedContentTokenCount`.
+
+Errors use Google's envelope, `{"error": {"code": 429, "message", "status": "RESOURCE_EXHAUSTED", "reason": "<Iroha code>", "hint", "request_id", "details"}}`: `code` is the HTTP status and `status` its Google name, as the SDKs expect. A committed stream that fails ends with one `data:` event holding that envelope.

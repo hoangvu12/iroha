@@ -141,10 +141,13 @@ func (x *exchange) writeError(e *api.Error) int {
 }
 
 // errorEnvelope is e in the error envelope of Shape sh: Anthropic's for
-// Anthropic Messages, OpenAI's otherwise.
+// Anthropic Messages, Google's for Gemini, OpenAI's otherwise.
 func errorEnvelope(sh shape.Shape, e *api.Error, requestID string) map[string]any {
-	if sh == shape.AnthropicMessages {
+	switch sh {
+	case shape.AnthropicMessages:
 		return anthropicError(e, requestID)
+	case shape.Gemini:
+		return geminiError(e, requestID)
 	}
 	return openAIError(e, requestID)
 }

@@ -40,6 +40,13 @@ type codec struct {
 	// streamID, if set, names a stream converted to this Shape (and the
 	// items the converter derives from it); otherwise the converter does.
 	streamID func(t *Translation) string
+	// noteRequest, when set, reads what the Caller's decoded request asks
+	// of the answer (Gemini: whether thoughts are wanted).
+	noteRequest func(req any, t *Translation)
+	// chatHop: answers are converted to this Shape through OpenAI Chat,
+	// whose form tidyAnswer (Translation.chat) and the writer (chatReader)
+	// see (hop.go).
+	chatHop bool
 }
 
 // codecs are the translatable Shapes. Tickets 14 (OpenAI Responses) and 15
@@ -48,6 +55,7 @@ var codecs = map[shape.Shape]*codec{
 	shape.OpenAIChat:        chatCodec,
 	shape.AnthropicMessages: anthropicCodec,
 	shape.OpenAIResponses:   responsesCodec,
+	shape.Gemini:            geminiCodec,
 }
 
 func (c *codec) fixUpstream(v any) {

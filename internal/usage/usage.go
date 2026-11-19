@@ -11,7 +11,8 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Usage is the token count of one answer.
+// Usage is the token count of one answer (OpenAI Chat, OpenAI Responses,
+// Anthropic Messages, Gemini).
 type Usage struct {
 	Input     int64 `json:"input" doc:"Prompt tokens, cached ones included."`
 	Output    int64 `json:"output" doc:"Completion tokens, reasoning included."`
@@ -44,6 +45,8 @@ func (r *Reader) Body(b []byte) {
 			r.ant.merge(*v.Usage)
 			r.u = r.ant.usage()
 		}
+	case shape.Gemini:
+		r.gemini(b)
 	}
 }
 
@@ -52,7 +55,7 @@ func (r *Reader) Event(data []byte) {
 	if len(data) == 0 || data[0] != '{' {
 		return
 	}
-	if !bytes.Contains(data, []byte(`"usage"`)) {
+	if !bytes.Contains(data, []byte(`"usage`)) { // "usage" or Gemini's "usageMetadata"
 		return // most events carry none; skip decoding them
 	}
 	switch r.sh {
@@ -60,6 +63,8 @@ func (r *Reader) Event(data []byte) {
 		r.chat(data)
 	case shape.OpenAIResponses:
 		r.responses(data)
+	case shape.Gemini:
+		r.gemini(data) // each chunk's counts are the stream's so far
 	case shape.AnthropicMessages:
 		var v struct {
 			Type    string `json:"type"`
@@ -81,6 +86,26 @@ func (r *Reader) Event(data []byte) {
 		}
 		r.u = r.ant.usage()
 	}
+}
+
+// gemini reads a Gemini usageMetadata. Gemini counts thoughts and tool-use
+// prompts apart: thoughts are output (and reasoning), tool-use prompt tokens
+// input; cached content is part of the prompt count.
+func (r *Reader) gemini(b []byte) {
+	var v struct {
+		Usage *struct {
+			Prompt     int64 `json:"promptTokenCount"`
+			ToolPrompt int64 `json:"toolUsePromptTokenCount"`
+			Candidates int64 `json:"candidatesTokenCount"`
+			Thoughts   int64 `json:"thoughtsTokenCount"`
+			Cached     int64 `json:"cachedContentTokenCount"`
+		} `json:"usageMetadata"`
+	}
+	if json.Unmarshal(b, &v) != nil || v.Usage == nil {
+		return
+	}
+	u := v.Usage
+	r.u = &Usage{Input: u.Prompt + u.ToolPrompt, Output: u.Candidates + u.Thoughts, CacheRead: u.Cached, Reasoning: u.Thoughts}
 }
 
 // Usage is what was read, or nil when the answer carried none.

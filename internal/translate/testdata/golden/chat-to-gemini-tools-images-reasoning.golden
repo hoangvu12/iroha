@@ -1,0 +1,167 @@
+== request sent upstream ==
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Weather in Hanoi? Also what is in these images?"
+        },
+        {
+          "inlineData": {
+            "data": "iVBORw0KGgo=",
+            "mimeType": "image/png"
+          }
+        },
+        {
+          "fileData": {
+            "fileUri": "https://example.com/cat.webp?size=large",
+            "mimeType": "image/webp"
+          }
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "functionCall": {
+            "args": {},
+            "id": "call_0",
+            "name": "mcp_git_status"
+          },
+          "thoughtSignature": "context_engineering_is_the_way_to_go"
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "call_0",
+            "name": "mcp_git_status",
+            "response": {
+              "content": "clean"
+            }
+          }
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "Now the weather."
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 2048,
+    "thinkingConfig": {
+      "thinkingBudget": 1024
+    }
+  },
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "You are terse."
+      }
+    ]
+  },
+  "toolConfig": {
+    "functionCallingConfig": {
+      "allowedFunctionNames": [
+        "mcp_git_status"
+      ],
+      "mode": "ANY"
+    }
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "description": "Get weather",
+          "name": "get_weather",
+          "parameters": {
+            "properties": {
+              "city": {
+                "type": "STRING"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "type": "OBJECT"
+          }
+        },
+        {
+          "name": "mcp_git_status"
+        }
+      ]
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "message": {
+        "content": "Checking.",
+        "reasoning_content": "User wants weather and git status.",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"city\":\"Hanoi\"}",
+              "name": "get_weather"
+            },
+            "id": "call_<uuid>",
+            "type": "function"
+          },
+          {
+            "function": {
+              "arguments": "{}",
+              "name": "mcp:git status"
+            },
+            "id": "call_<uuid>",
+            "type": "function"
+          }
+        ]
+      }
+    }
+  ],
+  "created": 1767225600,
+  "id": "chatcmpl-<uuid>",
+  "model": "smart",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 38,
+    "completion_tokens_details": {
+      "reasoning_tokens": 18
+    },
+    "prompt_tokens": 52,
+    "prompt_tokens_details": {
+      "cached_tokens": 16
+    },
+    "total_tokens": 90
+  }
+}
+== stream to the Caller ==
+data: {"choices":[{"delta":{"reasoning_content":"User wants weather."},"finish_reason":null,"index":0}],"created":1767225600,"id":"chatcmpl-<uuid>","model":"smart","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"Check"},"finish_reason":null,"index":0}],"created":1767225600,"id":"chatcmpl-<uuid>","model":"smart","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"ing."},"finish_reason":null,"index":0}],"created":1767225600,"id":"chatcmpl-<uuid>","model":"smart","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{"content":"","tool_calls":[{"function":{"arguments":"{\"city\":\"Hanoi\"}","name":"get_weather"},"id":"call_<uuid>","index":0,"type":"function"},{"function":{"arguments":"{}","name":"mcp:git status"},"id":"call_<uuid>","index":1,"type":"function"}]},"finish_reason":null,"index":0}],"created":1767225600,"id":"chatcmpl-<uuid>","model":"smart","object":"chat.completion.chunk"}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls","index":0}],"created":1767225600,"id":"chatcmpl-<uuid>","model":"smart","object":"chat.completion.chunk"}
+
+data: {"choices":[],"created":1767225600,"id":"chatcmpl-<uuid>","model":"smart","object":"chat.completion.chunk","usage":{"completion_tokens":38,"completion_tokens_details":{"reasoning_tokens":18},"prompt_tokens":52,"prompt_tokens_details":{"cached_tokens":16},"total_tokens":90}}
+
+data: [DONE]
+

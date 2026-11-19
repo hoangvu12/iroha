@@ -7,7 +7,7 @@ import { seg } from "@/api/client";
 import { formatNumber } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
-import { Tabs } from "@/ui/bits";
+import { RouteTabs } from "@/ui/Tabs";
 import { ErrorState } from "@/ui/States";
 import { notify } from "@/ui/toast";
 import { calls, useChange, useProvider } from "./api";
@@ -93,18 +93,18 @@ export function ProviderPage() {
       {provider.isError && !p ? (
         <ErrorState title={`Couldn't load ${handle}`} error={provider.error} onRetry={() => void provider.refetch()} />
       ) : (
-        <>
-          <Tabs
-            items={TABS.map((t) => ({ to: `/providers/${seg(handle)}/${t}`, label: t[0].toUpperCase() + t.slice(1) }))}
-          />
-          <div className="pt-6">
-            {tab === "keys" && <KeysTab handle={handle} provider={p} adding={adding} setAdding={setAdding} />}
-            {tab === "endpoints" && <EndpointsTab handle={handle} provider={p} adding={adding} setAdding={setAdding} />}
-            {tab === "models" && <ModelsTab handle={handle} />}
-            {tab === "rules" && <RulesTab handle={handle} adding={adding} setAdding={setAdding} />}
-            {tab === "settings" && p && <ProviderSettingsTab provider={p} />}
-          </div>
-        </>
+        <RouteTabs
+          label={`${handle} sections`}
+          value={tab}
+          items={TABS.map((t) => ({ value: t, to: `/providers/${seg(handle)}/${t}`, label: t[0].toUpperCase() + t.slice(1) }))}
+          panelClassName="pt-6"
+        >
+          {tab === "keys" && <KeysTab handle={handle} provider={p} adding={adding} setAdding={setAdding} />}
+          {tab === "endpoints" && <EndpointsTab handle={handle} provider={p} adding={adding} setAdding={setAdding} />}
+          {tab === "models" && <ModelsTab handle={handle} />}
+          {tab === "rules" && <RulesTab handle={handle} adding={adding} setAdding={setAdding} />}
+          {tab === "settings" && p && <ProviderSettingsTab provider={p} />}
+        </RouteTabs>
       )}
     </>
   );

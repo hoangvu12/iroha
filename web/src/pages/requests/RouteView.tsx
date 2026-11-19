@@ -1,7 +1,7 @@
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, useParams } from "react-router";
-import { ArrowLeft, ArrowUpRight, Copy, CornerDownLeft, Maximize, MessageCircle, Minus, Plus, User, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { useMemo, useState } from "react";
+import { Link, useParams } from "react-router";
+import { ArrowLeft, ArrowUpRight, Copy, CornerDownLeft, MessageCircle, User, X } from "lucide-react";
 import { useChatPanel } from "@/app/chat-panel";
 import { PageBody } from "@/app/PageBody";
 import { CHAT_WIDTH, SIDEBAR_WIDTH } from "@/app/Shell";
@@ -10,8 +10,11 @@ import { formatNumber } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button, buttonClass, IconButton } from "@/ui/Button";
 import type { Tone } from "@/ui/bits";
+import { Canvas } from "@/ui/Canvas";
 import { cn } from "@/ui/cn";
+import { ScrollArea } from "@/ui/ScrollArea";
 import { ErrorState } from "@/ui/States";
+import { Tab as UITab, TabList, TabPanel, Tabs } from "@/ui/Tabs";
 import { notify } from "@/ui/toast";
 import type { Attempt, RequestRecord } from "./api";
 import { useCopy, useRequest } from "./api";
@@ -49,26 +52,28 @@ export function RouteViewPage() {
       }}
     >
       <PageBody width="wide" className="flex min-h-0 flex-1 flex-col">
-        <TopBar id={id} r={r} tab={tab} phone={phone} onReplay={() => chat.open({ kind: "request", request: id })} />
-        {req.isError && !r ? (
-          <ErrorState title="Couldn't load this Request" error={req.error} onRetry={() => void req.refetch()} />
-        ) : !r ? (
-          <div className="flex-1 bg-subtle" aria-busy="true" />
-        ) : tab === "route" ? (
-          <RouteCanvas r={r} phone={phone} />
-        ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-[640px] px-4 py-8 md:px-6">
-              {tab === "details" ? <RequestDetails r={r} /> : <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />}
-            </div>
-          </div>
-        )}
+        <Tabs value={tab} className="flex min-h-0 flex-1 flex-col">
+          <TopBar id={id} r={r} phone={phone} onReplay={() => chat.open({ kind: "request", request: id })} />
+          <TabPanel value={tab} className="flex min-h-0 flex-1 flex-col">
+            {req.isError && !r ? (
+              <ErrorState title="Couldn't load this Request" error={req.error} onRetry={() => void req.refetch()} />
+            ) : !r ? (
+              <div className="flex-1 bg-subtle" aria-busy="true" />
+            ) : tab === "route" ? (
+              <RouteCanvas r={r} phone={phone} />
+            ) : (
+              <ScrollArea className="flex-1" contentClassName="mx-auto max-w-[640px] px-4 py-8 md:px-6">
+                {tab === "details" ? <RequestDetails r={r} /> : <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />}
+              </ScrollArea>
+            )}
+          </TabPanel>
+        </Tabs>
       </PageBody>
     </div>
   );
 }
 
-function TopBar({ id, r, tab, phone, onReplay }: { id: string; r?: RequestRecord; tab: Tab; phone: boolean; onReplay: () => void }) {
+function TopBar({ id, r, phone, onReplay }: { id: string; r?: RequestRecord; phone: boolean; onReplay: () => void }) {
   const copy = useCopy();
   const base = `/requests/${seg(id)}`;
   return (
@@ -87,7 +92,7 @@ function TopBar({ id, r, tab, phone, onReplay }: { id: string; r?: RequestRecord
       <span className="min-w-0 truncate font-mono text-[14.5px]">{id}</span>
       {r && <Badge tone={statusTone(r.status, r.state)}>{r.state === "in_progress" ? "In progress" : r.state === "interrupted" ? "Interrupted" : `${r.status} ${statusText(r.status)}`.trim()}</Badge>}
       <div className="hidden flex-1 md:block" />
-      <nav className={cn("inline-flex rounded-lg bg-muted p-1", phone ? "order-last w-full" : "")} aria-label="Request views">
+      <TabList label="Request views" variant="segmented" className={phone ? "order-last w-full" : undefined}>
         {(
           [
             ["route", "Route"],
@@ -95,19 +100,11 @@ function TopBar({ id, r, tab, phone, onReplay }: { id: string; r?: RequestRecord
             ["captured", "Captured"],
           ] as const
         ).map(([t, label]) => (
-          <NavLink
-            key={t}
-            to={`${base}/${t}`}
-            replace
-            className={cn(
-              "flex h-8 flex-1 items-center justify-center rounded-md px-4 text-[14.5px] transition-colors",
-              tab === t ? "bg-bg font-medium text-fg shadow-sm" : "text-fg-muted hover:text-fg",
-            )}
-          >
+          <UITab key={t} value={t} render={<Link to={`${base}/${t}`} replace />}>
             {label}
-          </NavLink>
+          </UITab>
         ))}
-      </nav>
+      </TabList>
       <div className="flex-1" />
       {r?.captured &&
         (phone ? (
@@ -143,33 +140,6 @@ const same = (a: Node | undefined, b: Node) => !!a && a.kind === b.kind && (a.ki
 function RouteCanvas({ r, phone }: { r: RequestRecord; phone: boolean }) {
   const attempts = useMemo(() => r.attempts ?? [], [r.attempts]);
   const [selected, setSelected] = useState<Node | undefined>(() => defaultNode(r));
-  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
-  const canvas = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
-
-  // Ctrl/Cmd + wheel zooms, wheel pans (non-passive, so the page does not scroll).
-  useEffect(() => {
-    const el = canvas.current;
-    if (!el || phone) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      if (e.ctrlKey || e.metaKey) setView((v) => ({ ...v, scale: clampScale(v.scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)) }));
-      else setView((v) => ({ ...v, x: v.x - (e.shiftKey ? e.deltaY : e.deltaX), y: v.y - (e.shiftKey ? 0 : e.deltaY) }));
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [phone]);
-
-  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (phone || e.button !== 0 || (e.target as HTMLElement).closest("button, a")) return;
-    drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    if (d) setView((v) => ({ ...v, x: d.vx + e.clientX - d.x, y: d.vy + e.clientY - d.y }));
-  };
-  const endDrag = () => (drag.current = null);
 
   const chain: ReactNode[] = [];
   const select = (n: Node) => setSelected(n);
@@ -195,52 +165,24 @@ function RouteCanvas({ r, phone }: { r: RequestRecord; phone: boolean }) {
 
   if (phone)
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <ScrollArea className="flex-1">
         <div className="flex flex-col items-center bg-subtle px-4 py-8" style={dots}>
           {chain}
         </div>
         {panel && <div className="border-t border-border">{panel}</div>}
-      </div>
+      </ScrollArea>
     );
 
   return (
     <div className="flex min-h-0 flex-1 border-t border-border">
-      <div
-        ref={canvas}
-        className="relative min-w-0 flex-1 cursor-grab touch-none select-none overflow-hidden bg-subtle active:cursor-grabbing"
-        style={dots}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-      >
-        <div
-          className="flex flex-col items-center pb-40 pt-[clamp(32px,12vh,160px)]"
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, transformOrigin: "50% 0" }}
-        >
-          {chain}
-        </div>
-        <ZoomControls
-          scale={view.scale}
-          onZoom={(f) => setView((v) => ({ ...v, scale: clampScale(v.scale * f) }))}
-          onFit={() => setView({ scale: 1, x: 0, y: 0 })}
-        />
-      </div>
-      {panel && <aside className="w-[420px] shrink-0 overflow-y-auto border-l border-border bg-bg">{panel}</aside>}
-    </div>
-  );
-}
-
-const clampScale = (s: number) => Math.min(2, Math.max(0.4, Math.round(s * 100) / 100));
-
-function ZoomControls({ scale, onZoom, onFit }: { scale: number; onZoom: (f: number) => void; onFit: () => void }) {
-  return (
-    <div className="absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-border bg-elevated px-1.5 py-1 shadow-elevated">
-      <IconButton icon={Minus} label="Zoom out" size="sm" onClick={() => onZoom(1 / 1.2)} />
-      <span className="w-12 text-center text-[13.5px] tabular">{Math.round(scale * 100)}%</span>
-      <IconButton icon={Plus} label="Zoom in" size="sm" onClick={() => onZoom(1.2)} />
-      <span className="mx-1 h-5 w-px bg-border" />
-      <IconButton icon={Maximize} label="Reset the view" size="sm" onClick={onFit} />
+      <Canvas label={`Route of ${r.id}`} className="min-w-0 flex-1" worldClassName="flex flex-col items-center pb-40 pt-[clamp(32px,12vh,160px)]">
+        {chain}
+      </Canvas>
+      {panel && (
+        <ScrollArea label="Selected step" className="w-[420px] shrink-0 border-l border-border bg-bg" contentClassName="flex min-h-full flex-col *:grow">
+          {panel}
+        </ScrollArea>
+      )}
     </div>
   );
 }

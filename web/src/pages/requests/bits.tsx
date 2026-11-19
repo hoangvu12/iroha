@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ProviderTile } from "@/ui/LogoTile";
 import { StatusDot, type Tone } from "@/ui/bits";
 import { cn } from "@/ui/cn";
+import { ScrollArea } from "@/ui/ScrollArea";
 import type { RequestRecord, Shape } from "./api";
 
 // Small pieces every view of a Request shares: status words and colours,
@@ -220,15 +221,23 @@ export function pretty(text: string): string {
   }
 }
 
-export function CodeBlock({ children, className }: { children: ReactNode; className?: string }) {
+/** Code and JSON in a Scroll Area: wraps by default, `nowrap` scrolls sideways too; `maxHeight={false}` shows it all. `className` places the block. */
+export function CodeBlock({
+  children,
+  className,
+  maxHeight = "max-h-[420px]",
+  nowrap,
+}: {
+  children: ReactNode;
+  className?: string;
+  maxHeight?: string | false;
+  nowrap?: boolean;
+}) {
   return (
-    <pre
-      className={cn(
-        "max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-subtle px-4 py-3 font-mono text-[12.5px] leading-relaxed text-fg",
-        className,
-      )}
-    >
-      {children}
-    </pre>
+    <ScrollArea axis={nowrap ? "both" : "y"} className={cn("rounded-lg border border-border bg-subtle", className)} viewportClassName={maxHeight || undefined}>
+      <pre className={cn("px-4 py-3 font-mono text-[12.5px] leading-relaxed text-fg", nowrap ? "whitespace-pre" : "whitespace-pre-wrap break-words")}>
+        {children}
+      </pre>
+    </ScrollArea>
   );
 }

@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import type { AuditEntry, Change } from "@/api/types";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/ui/cn";
+import { ScrollArea } from "@/ui/ScrollArea";
 import type { ResourceOption } from "./api";
 import { shortDate, clockTime } from "./format";
 
@@ -111,9 +112,9 @@ function Scalar({ v }: { v: unknown }): ReactNode {
     return <span className="break-words">{v}</span>;
   }
   return (
-    <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted px-2 py-1 font-mono text-[12px] text-fg">
-      {JSON.stringify(v, null, 2)}
-    </pre>
+    <ScrollArea className="rounded-md bg-muted" viewportClassName="max-h-40">
+      <pre className="whitespace-pre-wrap break-all px-2 py-1 font-mono text-[12px] text-fg">{JSON.stringify(v, null, 2)}</pre>
+    </ScrollArea>
   );
 }
 

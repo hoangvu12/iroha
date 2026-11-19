@@ -6,6 +6,7 @@ import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Kbd } from "@/ui/bits";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { ScrollArea } from "@/ui/ScrollArea";
 import { notify } from "@/ui/toast";
 import { ChatPanel } from "@/pages/chat/ChatPanel";
 import { Avatar, BANNER_SRC } from "./brand";
@@ -105,13 +106,15 @@ function Sidebar() {
       style={{ width: SIDEBAR_WIDTH }}
       className="fixed inset-y-0 left-0 z-20 flex flex-col border-r border-border bg-subtle px-3 pb-3 pt-3"
     >
-      <img src={BANNER_SRC} alt="Iroha" className="h-[84px] w-full rounded-lg object-cover" draggable={false} />
-      <nav aria-label="Main" className="mt-4 flex flex-col gap-1">
-        {NAV.map((item) => (
-          <SidebarItem key={item.label} item={item} />
-        ))}
-      </nav>
-      <div className="flex-1" />
+      {/* Short windows: the banner and nav scroll; health, Settings and the Owner stay. */}
+      <ScrollArea className="-mx-3 mb-2 flex-1" contentClassName="px-3">
+        <img src={BANNER_SRC} alt="Iroha" className="h-[84px] w-full rounded-lg object-cover" draggable={false} />
+        <nav aria-label="Main" className="mt-4 flex flex-col gap-1">
+          {NAV.map((item) => (
+            <SidebarItem key={item.label} item={item} />
+          ))}
+        </nav>
+      </ScrollArea>
       <HealthNotice health={health} />
       <NavLink to="/settings" className={({ isActive }) => navItemClass(isActive)}>
         <Settings size={18} strokeWidth={1.75} className="text-fg-muted" />

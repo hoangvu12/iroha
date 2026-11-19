@@ -1,13 +1,15 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link } from "react-router";
-import { ArrowUpRight, CircleX, Layers, Maximize, Minus, Plus, X } from "lucide-react";
+import { ArrowUpRight, CircleX, Layers, X } from "lucide-react";
 import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
 import { Button, buttonClass, IconButton } from "@/ui/Button";
 import type { Tone } from "@/ui/bits";
 import { StatusDot } from "@/ui/bits";
+import { Canvas } from "@/ui/Canvas";
 import { cn } from "@/ui/cn";
+import { ScrollArea } from "@/ui/ScrollArea";
 import { EmptyState, ErrorState } from "@/ui/States";
 import type { Pool, PreviewMember, RoutePreview, Shape } from "./api";
 import { shapeLabel, SHAPES, useRoutePreview } from "./api";
@@ -42,7 +44,6 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
   const preview = useRoutePreview(name, shape);
   const phone = useIsPhone();
   const [selected, setSelected] = useState<Node>();
-  const [scale, setScale] = useState(1);
   const pv = preview.data;
 
   if (pool && pool.members.length === 0)
@@ -146,23 +147,20 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
     );
 
   return (
-    <div className="flex h-[max(560px,calc(100dvh-300px))] overflow-hidden rounded-xl border border-border">
-      <div className="relative min-w-0 flex-1 overflow-auto bg-subtle" style={dots} aria-busy={!pv}>
-        <div className="sticky left-0 top-0 z-10 p-4">{live}</div>
-        <div className="flex flex-col items-center pb-24 pt-2" style={{ transform: `scale(${scale})`, transformOrigin: "50% 0" }}>
-          {chain}
-        </div>
-        <div className="sticky bottom-4 left-0 flex justify-center">
-          <div className="flex items-center gap-1 rounded-xl border border-border bg-elevated px-1.5 py-1 shadow-elevated">
-            <IconButton icon={Minus} label="Zoom out" size="sm" onClick={() => setScale((s) => Math.max(0.5, Math.round((s / 1.2) * 100) / 100))} />
-            <span className="w-12 text-center text-[13.5px] tabular">{Math.round(scale * 100)}%</span>
-            <IconButton icon={Plus} label="Zoom in" size="sm" onClick={() => setScale((s) => Math.min(1.6, Math.round(s * 1.2 * 100) / 100))} />
-            <span className="mx-1 h-5 w-px bg-border" />
-            <IconButton icon={Maximize} label="Reset the zoom" size="sm" onClick={() => setScale(1)} />
-          </div>
-        </div>
-      </div>
-      {panel && <aside className="w-[380px] shrink-0 overflow-y-auto border-l border-border bg-bg">{panel}</aside>}
+    <div className="flex h-[max(560px,calc(100dvh-300px))] overflow-hidden rounded-xl border border-border" aria-busy={!pv}>
+      <Canvas
+        label={`Route of ${name}`}
+        className="min-w-0 flex-1"
+        worldClassName="flex flex-col items-center pb-28 pt-20"
+        overlay={<div className="absolute left-0 top-0 p-4">{live}</div>}
+      >
+        {chain}
+      </Canvas>
+      {panel && (
+        <ScrollArea label="Selected step" className="w-[380px] shrink-0 border-l border-border bg-bg" contentClassName="flex min-h-full flex-col *:grow">
+          {panel}
+        </ScrollArea>
+      )}
     </div>
   );
 }

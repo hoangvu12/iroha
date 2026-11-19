@@ -372,13 +372,15 @@ test("infinite: no pages; the end of the list loads more (Load more for the keyb
   expect(screen.queryByRole("button", { name: "Show older" })).toBeNull();
 });
 
-test("infinite: the end coming into view loads more", () => {
+test("infinite: the end coming into the window loads more (the page scrolls the rows, not the table)", () => {
   let fire: (e: { isIntersecting: boolean }[]) => void = () => {};
+  let root: unknown = "unset";
   vi.stubGlobal(
     "IntersectionObserver",
     class {
-      constructor(cb: typeof fire) {
+      constructor(cb: typeof fire, opts?: IntersectionObserverInit) {
         fire = cb;
+        root = opts?.root;
       }
       observe() {}
       disconnect() {}
@@ -386,8 +388,28 @@ test("infinite: the end coming into view loads more", () => {
   );
   const onLoadMore = vi.fn();
   render(<Fruits paging={{ mode: "infinite", hasMore: true, loadingMore: false, onLoadMore }} />);
+  expect(root).toBeNull();
   fire([{ isIntersecting: true }]);
   expect(onLoadMore).toHaveBeenCalledTimes(1);
+});
+
+test("a long table is as tall as its rows: its scroller only scrolls sideways, and the header moves with the page", () => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+    return this.tagName === "TABLE" ? 100 * 48 + 40 : this.tagName === "THEAD" ? 40 : 0;
+  });
+  render(<Fruits data={many(100)} paging={{ mode: "none" }} />);
+  expect(bodyRows()).toHaveLength(100);
+  const region = screen.getByRole("region", { name: "Fruit" });
+  // Nothing caps its height, and its header travels the table's height less its own while the page passes it.
+  expect(region.className).not.toMatch(/max-h-/);
+  expect(region.style.getPropertyValue("--table-stick-end")).toBe(`${100 * 48}px`);
 });
 
 test("loading shows the skeleton, an error shows Try again, no rows shows the empty state", async () => {
@@ -530,21 +552,31 @@ test("an agent sorts, selects, opens a row's menu and pages", async () => {
 
 // ---- Live rows (ticket 09) ----
 
-/** Lays rows out as a browser would: a 40 px header, 48 px rows, a 400 px scroller whose scrollTop moves them. */
+/**
+ * Lays rows out as a browser would on a page that scrolls (UI ticket 25): the table starts 100 px
+ * down the page, its header (40 px) sticks to the top of the window, rows are 48 px, and the
+ * page's scrollTop moves them.
+ */
 function layOut() {
   const box = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 800, width: 800, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const scroller = this.closest("[role=region]") as HTMLElement | null;
-    if (this.hasAttribute("data-row-id") && scroller) {
+    const y = page().scrollTop;
+    if (this.hasAttribute("data-row-id")) {
       const i = [...this.parentElement!.children].indexOf(this);
-      return box(40 + i * 48 - scroller.scrollTop, 48);
+      return box(140 + i * 48 - y, 48);
     }
-    if (this.getAttribute("role") === "region") return box(0, 400);
-    if (this.tagName === "THEAD") return box(0, 40);
+    if (this.tagName === "THEAD") return box(Math.max(0, 100 - y), 40);
     return box(0, 0);
   });
 }
-const scroller = () => screen.getByRole("region", { name: "Fruit" });
+const page = () => document.documentElement;
+function scrollPage(top: number) {
+  page().scrollTop = top;
+  fireEvent.scroll(document);
+}
+afterEach(() => {
+  page().scrollTop = 0;
+});
 const live = (data: Fruit[]) => (
   <Fruits data={data} defaultSorting={[]} paging={{ mode: "infinite", hasMore: false, loadingMore: false, onLoadMore: () => {}, newRowsLabel: (n) => `${n} new` }} />
 );
@@ -558,20 +590,20 @@ test("the open row is marked current", () => {
   expect(within(current[0]).getByText("apple")).toBeTruthy();
 });
 
-test("live rows: scrolled down, rows arriving on top keep the view still, and a pill counts them and goes back to the top", async () => {
+test("live rows: the page scrolled down, rows arriving on top keep the view still, and a pill counts them and goes back to the top", async () => {
   layOut();
   const user = userEvent.setup();
   const rows = many(40);
   const { rerender } = render(live(rows));
-  scroller().scrollTop = 480; // fruit-011 at the top of the view
-  fireEvent.scroll(scroller());
+  scrollPage(580); // fruit-011 just under the header stuck at the top of the window
   rerender(live([...arrived(2), ...rows]));
-  expect(scroller().scrollTop).toBe(480 + 2 * 48);
+  expect(page().scrollTop).toBe(580 + 2 * 48);
   expect(screen.getByRole("button", { name: "2 new" })).toBeTruthy();
   rerender(live([...arrived(3), ...rows]));
-  expect(scroller().scrollTop).toBe(480 + 3 * 48);
+  expect(page().scrollTop).toBe(580 + 3 * 48);
+  // Back to the first row: the table's top at the top of the window, its first row under the header.
   await user.click(screen.getByRole("button", { name: "3 new" }));
-  expect(scroller().scrollTop).toBe(0);
+  expect(page().scrollTop).toBe(100);
   expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
 });
 
@@ -590,18 +622,18 @@ test("live rows: at the top they come in on top; with the pointer over the rows 
   const user = userEvent.setup();
   const rows = many(40);
   const { rerender } = render(live(rows));
+  scrollPage(100); // the table's top at the window's top, its first row in view under the header
   rerender(live([...arrived(1), ...rows]));
-  expect(scroller().scrollTop).toBe(0);
+  expect(page().scrollTop).toBe(100);
   expect(names()[0]).toBe("new-0");
   expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
 
   await user.hover(screen.getByText("fruit-003"));
   rerender(live([...arrived(2), ...rows]));
-  expect(scroller().scrollTop).toBe(48);
+  expect(page().scrollTop).toBe(148);
   expect(screen.getByRole("button", { name: "1 new" })).toBeTruthy();
-  // Scrolling back to the top shows them: the pill goes.
-  scroller().scrollTop = 0;
-  fireEvent.scroll(scroller());
+  // Scrolling back to the first row shows them: the pill goes.
+  scrollPage(100);
   await waitFor(() => expect(screen.queryByRole("button", { name: "1 new" })).toBeNull());
 });
 

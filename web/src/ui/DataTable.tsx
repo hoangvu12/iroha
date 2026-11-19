@@ -222,7 +222,7 @@ export type DataTableProps<T extends RowData> = {
   /** Hidden columns by ID (`{ key: false }`). */
   columnVisibility?: ColumnVisibilityState;
 
-  /** Row selection with a bulk-action bar: what the bar shows besides "N selected" and Clear selection. */
+  /** Row selection with a bulk-action bar: what the bar shows besides "N selected" and Clear selection. While anything is selected, a row click selects (UI ticket 25). */
   bulk?: (sel: BulkSelection<T>) => ReactNode;
   /** Selection, if the page must own it; otherwise the table does. */
   selection?: RowSelectionState;
@@ -230,7 +230,7 @@ export type DataTableProps<T extends RowData> = {
 
   /** The last cell of each row: usually `<RowMenu>`; may hold a Switch beside it. */
   rowActions?: (row: T) => ReactNode;
-  /** Clicking a row (not one of its controls) opens it. Mark the name column `meta: { opens: true }` for the keyboard. */
+  /** Clicking a row (not one of its controls) opens it; in select mode (rows selected) it toggles the row instead. Mark the name column `meta: { opens: true }` for the keyboard, and the way in while selecting. */
   onRowClick?: (row: T) => void;
   rowTone?: (row: T) => "danger" | undefined;
   /** The row open beside the table (its sheet): highlighted, `aria-current`, and scrolled into view when it changes. */
@@ -248,8 +248,6 @@ export type DataTableProps<T extends RowData> = {
   footer?: (counts: DataTableCounts) => ReactNode;
   /** The rows are the previous query's while the next loads (`isPlaceholderData`): dimmed, no skeleton. */
   dimmed?: boolean;
-  /** Max height of the scroller, so the header sticks inside it. */
-  maxHeight?: string;
 };
 
 const EMPTY_FILTERS: ColumnFiltersState = [];
@@ -495,9 +493,9 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     loading || layout !== (phone ? "list" : "table") ? node : rowMotion.record(rowId, index, node, layout);
 
   const desktop = (
-    <ScrollArea axis="both" label={label} className="w-full" viewportClassName={cn(props.maxHeight ?? "max-h-[calc(100dvh-4rem)]", newRowsLabel && "[overflow-anchor:none]")} contentClassName="min-w-full">
+    <TableScroller label={label}>
       <table aria-label={label} className={cn("w-full border-collapse text-left text-sm", props.dimmed && dimClass)}>
-        <thead className="sticky top-0 z-[1] bg-bg shadow-[inset_0_-1px_0_var(--border)]">
+        <thead className="table-head relative z-[1] bg-bg shadow-[inset_0_-1px_0_var(--border)]">
           {table.getHeaderGroups().map((group) => (
             <tr key={group.id}>
               {bulk && (
@@ -578,8 +576,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
           }), "table")}
         </tbody>
       </table>
-      {paging.mode === "infinite" && !loading && <LoadMore paging={paging} />}
-    </ScrollArea>
+    </TableScroller>
   );
 
   const showChecks = !!bulk && (selecting || selectedCount > 0);
@@ -660,13 +657,14 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
               list
             ) : (
               <>
-                {/* The "N new" pill floats over the table's first rows, under its header. */}
+                {/* The "N new" pill floats over the rows in view, under the header stuck to the top of the page. */}
                 {pill && (
-                  <div className="relative z-[2] h-0">
+                  <div className="sticky top-0 z-[2] h-0">
                     <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">{pill}</div>
                   </div>
                 )}
                 {desktop}
+                {paging.mode === "infinite" && !loading && <LoadMore paging={paging} />}
               </>
             )
           }
@@ -705,6 +703,36 @@ const rowClass =
 const dimClass = "opacity-60 transition-opacity duration-fade ease-out delay-(--duration-fade)";
 const thClass = "h-10 px-1.5 text-[13px] font-normal text-fg-muted";
 const tdClass = "h-12 px-1.5 align-middle";
+
+/**
+ * The table's scroller (UI ticket 25). The page scrolls the rows: the table is as
+ * tall as its rows (numbered pages keep it bounded) and this only scrolls sideways,
+ * for tables wider than the page. A sideways scroller would make a sticky header
+ * stick to it rather than to the page, so the header (`.table-head`) follows the
+ * page with a scroll-driven animation instead (`styles/index.css`, "Table header"):
+ * from where the table's top passes the window's top, it moves down with the
+ * scroll, at most `--table-stick-end` (the table's height less the header's, kept
+ * here). Its own component, so its ref holds inside the Skeleton.
+ */
+function TableScroller({ label, children }: { label: string; children: ReactNode }) {
+  const viewport = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = viewport.current;
+    const table = el?.querySelector("table");
+    if (!el || !table) return;
+    const measure = () => el.style.setProperty("--table-stick-end", `${Math.max(0, table.offsetHeight - (table.tHead?.offsetHeight ?? 0))}px`);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(table);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <ScrollArea axis="x" label={label} className="w-full" viewportRef={viewport} viewportClassName="table-scroller" contentClassName="min-w-full">
+      {children}
+    </ScrollArea>
+  );
+}
 
 /**
  * The toolbar, or the bulk bar in its place while rows are selected. The bar
@@ -842,8 +870,8 @@ function LoadMore({ paging }: { paging: Extract<DataTablePaging, { mode: "infini
         const p = latest.current;
         if (e.isIntersecting && p.hasMore && !p.loadingMore) p.onLoadMore();
       },
-      // The table's own scroller, so the margin counts there (null: the page).
-      { root: el.closest("[role=region]"), rootMargin: "240px 0px" },
+      // The page scrolls the rows (UI ticket 25): watched against the window.
+      { root: null, rootMargin: "240px 0px" },
     );
     io.observe(el);
     return () => io.disconnect();

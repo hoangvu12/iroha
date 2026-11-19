@@ -36,7 +36,8 @@ export function SnippetDialog({ open, onOpenChange, settings, prompt }: { open: 
       {sn.isError ? (
         <ErrorState title="Couldn't write the snippet" error={sn.error} onRetry={() => void sn.refetch()} />
       ) : (
-        <CodeBlock maxHeight="max-h-[50dvh]" nowrap lang={code ? LEXER[lang] : "text"}>
+        // All of it: the dialog scrolls as a page (UI ticket 28); long lines still scroll sideways.
+        <CodeBlock maxHeight={false} nowrap lang={code ? LEXER[lang] : "text"}>
           {code ?? "…"}
         </CodeBlock>
       )}

@@ -30,10 +30,34 @@ export type Settings = {
   /** Gateway Key name to send as. */
   as?: string;
   reasoning: Reasoning;
-  toolCheck: boolean;
+  /** Test tools offered (GET /api/test/tools names), in the list's order; [] offers none. */
+  tools: string[];
 };
 
-export const DEFAULT_SETTINGS: Settings = { model: "", shape: "openai-chat", reasoning: "off", toolCheck: false };
+export const DEFAULT_SETTINGS: Settings = { model: "", shape: "openai-chat", reasoning: "off", tools: [] };
+
+/** The tool tool_check used to offer on its own. */
+export const WEATHER_TOOL = "get_weather";
+
+/** Settings as saved by any version: chats from before ticket 29 had `toolCheck` (get_weather alone). */
+export function normalizeSettings(s: Settings & { toolCheck?: boolean }): Settings {
+  const { toolCheck, ...rest } = s;
+  return { ...rest, tools: Array.isArray(s.tools) ? s.tools : toolCheck ? [WEATHER_TOOL] : [] };
+}
+
+/** One test tool (GET /api/test/tools). */
+export type TestTool = { name: string; description: string; parameters: unknown };
+
+/** The test tools a send can offer; they never change while Iroha runs. */
+export function useTestTools(enabled = true) {
+  return useQuery({
+    queryKey: ["test-tools"],
+    enabled,
+    queryFn: ({ signal }) => api.get<{ tools: TestTool[] }>("/api/test/tools", { signal }),
+    select: (r) => r.tools,
+    staleTime: Infinity,
+  });
+}
 
 /** The Provider handle of a model, or undefined for a Pool. */
 export function providerOf(model: string): string | undefined {
@@ -49,7 +73,7 @@ export function bareModel(model: string): string {
 
 export type ToolCall = { id?: string; name: string; arguments: string };
 export type Message = { role: "user" | "assistant"; content: string; tool_calls?: ToolCall[] };
-export type ToolCheck = { passed: boolean; reason: string; name?: string; arguments?: string; id?: string };
+export type ToolCheck = { passed: boolean; reason: string; name?: string; arguments?: string; id?: string; calls?: number };
 
 export type ModelChoice = { id: string; model: string; context_length?: number; reasoning?: boolean; reasoning_levels?: string[]; maker?: string };
 export type ModelChoices = {
@@ -87,7 +111,7 @@ export function useSnippets(s: Settings, prompt: string, enabled: boolean) {
           shape: s.shape,
           as: s.as,
           reasoning: s.reasoning,
-          tool_check: s.toolCheck,
+          tools: s.tools.length ? s.tools.join(",") : undefined,
           prompt: prompt || undefined,
           upstream_key: s.upstreamKey,
           endpoint: s.endpoint,
@@ -136,7 +160,7 @@ export function sendBody(s: Settings, system: string | undefined, messages: Mess
     system: system || undefined,
     messages,
     reasoning: s.reasoning,
-    tool_check: s.toolCheck,
+    tools: s.tools.length ? s.tools : undefined,
     upstream_key: s.upstreamKey || undefined,
     endpoint: s.endpoint || undefined,
     as: s.as || undefined,

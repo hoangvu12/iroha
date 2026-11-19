@@ -18,11 +18,11 @@ const snippets = {
   key_env: true,
 };
 
-function open(shape: "openai-chat" | "anthropic-messages" | "gemini" = "openai-chat") {
-  const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify(snippets), { status: 200, headers: { "Content-Type": "application/json" } }));
+function open(shape: "openai-chat" | "anthropic-messages" | "gemini" = "openai-chat", answer: object = snippets) {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify(answer), { status: 200, headers: { "Content-Type": "application/json" } }));
   vi.stubGlobal("fetch", fetch);
   render(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <SnippetDialog open onOpenChange={() => {}} settings={{ ...DEFAULT_SETTINGS, model: "acme/m", shape, upstreamKey: "key-1" }} prompt="hi" />
     </QueryClientProvider>,
   );
@@ -31,6 +31,7 @@ function open(shape: "openai-chat" | "anthropic-messages" | "gemini" = "openai-c
 
 const code = () => document.querySelector("[role=dialog] pre") as HTMLElement;
 
+// UI ticket 23: highlighted, and only the code.
 test("the snippet is highlighted, with no install or pinning notes under it", async () => {
   const user = userEvent.setup();
   open();
@@ -62,4 +63,15 @@ test("an agent switches the language and copies the snippet", async () => {
   });
   expect(result.ok, result.error?.message).toBe(true);
   await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(snippets.python));
+});
+
+// UI ticket 28: a long snippet makes the dialog taller than the window, and the
+// dialog scrolls as a page; the code only scrolls sideways (long lines).
+test("a long snippet flows in the dialog: no height limit, only a sideways scroll", async () => {
+  const curl = Array.from({ length: 80 }, (_, i) => `  -H "X-Line-${i}: ${i}" \\`).join("\n");
+  open("openai-chat", { curl, python: "print()", typescript: "console.log()" });
+  const dialog = await screen.findByRole("dialog", { name: "Use this from code" });
+  await screen.findByText(/X-Line-79/);
+  const viewport = dialog.querySelector("[data-slot=scroll-area-viewport]")!;
+  expect(viewport.className, "no height limit").not.toMatch(/max-h-/);
 });

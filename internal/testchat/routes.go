@@ -93,6 +93,15 @@ func Routes(ms *models.Store, keys *gatewaykeys.Store, db *store.DB) []api.Route
 			},
 		},
 		{
+			Method: http.MethodGet, Path: "/api/test/tools", Tag: tag,
+			Summary: "List the test tools a test can offer the model",
+			Description: "Made-up tools for testing tool calling. Name them in POST /api/test tools (or snippets' tools); when the model calls one, " +
+				"send the call back in the assistant turn's tool_calls and Iroha answers it: get_time with the real current time, calculate by really computing, " +
+				"the others with plausible made-up results (nothing is searched, fetched or looked up).",
+			Response: ToolList{},
+			Handle:   func(c *api.Call) (any, error) { return Tools(), nil },
+		},
+		{
 			Method: http.MethodGet, Path: "/api/test/snippets", Tag: tag,
 			Summary: "Write curl, Python and TypeScript snippets sending a test's request to the Gateway",
 			Description: "The snippets send what POST /api/test would send for these settings, but as a Caller: to the global route of the Shape, " +
@@ -104,7 +113,8 @@ func Routes(ms *models.Store, keys *gatewaykeys.Store, db *store.DB) []api.Route
 				{Name: "prompt", Description: "The user message. Default: a request for a short reply."},
 				{Name: "system", Description: "A system prompt."},
 				{Name: "reasoning", Enum: []string{"off", "low", "medium", "high"}},
-				{Name: "tool_check", Type: "boolean", Description: "Offer the test tool get_weather."},
+				{Name: "tools", Description: "Test tools to offer, comma-separated names (GET /api/test/tools), e.g. get_weather,calculate."},
+				{Name: "tool_check", Type: "boolean", Description: "The older form of tools=get_weather; ignored when tools names any."},
 				{Name: "stream", Type: "boolean", Description: "Default true."},
 				{Name: "as", Description: "A Gateway Key (name or ID) whose secret the snippets use."},
 				{Name: "upstream_key", Description: "A pinned Upstream Key; accepted and ignored (a Caller cannot pin)."},
@@ -118,6 +128,11 @@ func Routes(ms *models.Store, keys *gatewaykeys.Store, db *store.DB) []api.Route
 				if p := c.Query("prompt"); p != "" {
 					s.Messages = []Message{{Role: "user", Content: p}}
 				}
+				for _, name := range strings.Split(c.Query("tools"), ",") {
+					if name = strings.TrimSpace(name); name != "" {
+						s.Tools = append(s.Tools, name)
+					}
+				}
 				var err error
 				if s.ToolCheck, err = boolParam(c, "tool_check", false); err != nil {
 					return nil, err
@@ -130,7 +145,7 @@ func Routes(ms *models.Store, keys *gatewaykeys.Store, db *store.DB) []api.Route
 				if err := s.Check(); err != nil {
 					return nil, err
 				}
-				b, err := Build(s)
+				b, err := Build(s, db.Clock().Now())
 				if err != nil {
 					return nil, err
 				}

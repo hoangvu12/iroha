@@ -155,14 +155,10 @@ test("an agent reads the picker by names and changes its settings", async () => 
   const components = agent.snapshot().filter((e) => !e.offPage && e.component !== "more" && e.component !== "scroll-area");
   for (const entry of components) expect(entry.label, `${entry.component} ${entry.ref} has no name`).toBeTruthy();
   const run = await agent.act({
-    steps: [
-      { ref: "Reasoning", action: "setValue", args: ["high"] },
-      { ref: "Check tool calls", action: "setChecked", args: [true] },
-    ],
+    steps: [{ ref: "Reasoning", action: "setValue", args: ["high"] }],
   });
   expect(run.ok, run.error?.message).toBe(true);
   expect(latest.reasoning).toBe("high");
-  expect(latest.toolCheck).toBe(true);
 });
 
 test("an agent opens a settings row by its name: the rows and the model are UI SDK buttons", async () => {

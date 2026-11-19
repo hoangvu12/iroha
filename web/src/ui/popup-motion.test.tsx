@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { Autocomplete } from "./Autocomplete";
 import { Button } from "./Button";
 import { ConfirmDialog, Dialog } from "./Dialog";
+import { Field } from "./Input";
 import { Menu, MenuContent, MenuIconTrigger, MenuItem, SubMenu } from "./Menu";
 import { Select } from "./Select";
 import { notify, Toaster } from "./toast";
@@ -86,7 +87,7 @@ describe("popups from a trigger", () => {
               { value: "anthropic", label: "Anthropic Messages" },
             ]}
           />
-          <Autocomplete value={model} onValueChange={setModel} items={["gpt-4o", "gpt-4o-mini"]} />
+          <Field label="Model">{() => <Autocomplete value={model} onValueChange={setModel} items={["gpt-4o", "gpt-4o-mini"]} />}</Field>
         </>
       );
     }
@@ -97,8 +98,7 @@ describe("popups from a trigger", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
 
-    const input = screen.getAllByRole("combobox").find((el) => el.tagName === "INPUT")!;
-    await user.type(input, "gpt");
+    await user.type(screen.getByRole("combobox", { name: "Model" }), "gpt");
     const option = await screen.findByRole("option", { name: "gpt-4o" });
     expectPopupFromTrigger(option.closest("[data-slot=autocomplete-content]")!, "popup-in", "popup-out");
   });
@@ -173,6 +173,7 @@ describe("dialogs", () => {
 
 describe("toasts", () => {
   test("a toast rises from the bottom edge over 400 ms with ease, the stack moving with it; a swiped one leaves the way it was thrown", async () => {
+    // (toast.tsx's height transition is UI SDK's toast recipe: --toast-height on an absolutely placed toast, layout stays inside it.)
     render(<Toaster />);
     act(() => void notify.success("3 keys disabled"));
     const el = (await screen.findByText("3 keys disabled")).closest("[data-slot=toast]")!;
@@ -196,8 +197,8 @@ describe("toasts", () => {
     expect(c.some((k) => k.startsWith("motion-safe:data-[swipe-direction=down]:translate-y-["))).toBe(true);
     expectOnlyTokens(el);
 
+    // The region is transparent and doesn't clip: its height follows the stack at once, no wasted layout per frame.
     const region = el.closest("[data-slot=toast-region]")!;
-    expect(classesOf(region)).toEqual(expect.arrayContaining(["transition-[height]", "duration-toast", "ease-[ease]"]));
-    expect(classesOf(region).filter((k) => /(^|:)duration-\d/.test(k))).toEqual([]);
+    expect(classesOf(region).filter((k) => /transition|duration/.test(k))).toEqual([]);
   });
 });

@@ -36,7 +36,9 @@ export function Toaster() {
         ...({ "data-agent-hidden": true } as object),
         className: cn(
           "fixed bottom-4 right-4 w-[min(380px,calc(100vw-32px))]",
-          "h-[calc(var(--toast-stack-height)+(var(--toast-count)-1)*8px)] transition-[height] duration-toast ease-[ease] motion-reduce:transition-none",
+          // No transition: the region is transparent and doesn't clip, so its
+          // height (the hover area) just follows the stack while the toasts move.
+          "h-[calc(var(--toast-stack-height)+(var(--toast-count)-1)*8px)]",
         ),
         // Motion ("Toast" recipe, architecture.md "UI motion system"): a new
         // toast rises one own height from the bottom edge while the older ones

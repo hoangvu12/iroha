@@ -29,6 +29,16 @@ Callers send the Gateway Key as `Authorization: Bearer <key>`, `x-api-key: <key>
 - `503 keys_cooling`: every usable key is cooling; `Retry-After` and `details.until` say when the first is back. No Attempt was made.
 - `404 model_unavailable`: the Provider refused this model to every usable key (`details.reason` `model_gap`; `details.until` is when the first gap expires). Use another model.
 - When every Attempt failed, the error lists them in `details.attempts` (key, status, rule, outcome, reason, action) and `details.summary` (one line): `400`-class `upstream_rejected` (the Provider refused the request itself, with its status and message; no other key is tried), `504 upstream_timeout` (no first byte within the time budget), `503 upstream_unavailable` with `Retry-After` (the keys tried are cooling), otherwise `502 upstream_failed`.
+- `503 shutting_down`: Iroha restarted while the Request was in flight and it outlived the drain limit; retry.
+
+### Streams
+
+A streaming Caller (`"stream": true`) never waits in silence, so proxies in between (Cloudflare's 100 s limit, idle timeouts) do not close it:
+
+- If no upstream answer has arrived 10 s after the Request, Iroha commits the response: `200`, `text/event-stream` and a keep-alive comment (`: keep-alive`). Iroha keeps trying keys within the budget meanwhile.
+- Whenever the stream is silent for 15 s (waiting for the first byte, or a model pausing mid-answer) another keep-alive goes out. Streams have no overall time limit.
+- Before commitment, failures get the HTTP statuses above. After it, the failure is the stream's last event, in the Caller's Shape, with the same `code`, `hint`, `request_id` and `details` (for OpenAI Chat: `data: {"error": {...}}`, with no `[DONE]` after it). Besides the codes above: `upstream_stream_broken` (the Provider's stream broke off mid-answer) and `upstream_not_streamed` (the Provider answered with a single body after the stream had begun).
+- The Request records `status` 200 (what the Caller received) with `error.code` saying why it failed.
 
 ## Reading Requests
 

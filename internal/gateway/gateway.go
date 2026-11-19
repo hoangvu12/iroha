@@ -67,6 +67,7 @@ type Gateway struct {
 	states    *keystate.Store
 	rules     func() *rules.Set
 	rotation  *planner.Counter
+	live      inflight // Requests being served (shutdown.go)
 }
 
 // New returns a Gateway. Upstream redirects are never followed, so an
@@ -95,7 +96,8 @@ const chatDescription = "OpenAI Chat Completions passthrough. Authenticate with 
 	"Caller credentials are never forwarded. The body reaches the Provider unchanged except the model (Endpoint renames) and, on streams, " +
 	"stream_options.include_usage (so token usage is recorded; the extra usage chunk is not shown to Callers who did not ask for it). " +
 	"The answer passes through with its status, its model field set to the model you asked for, and an x-request-id header naming the Request in GET /api/requests/{request}. " +
-	"A Provider that does not exist, is disabled or archived, or is outside the Gateway Key's scope gets the same 403 provider_not_allowed."
+	"A Provider that does not exist, is disabled or archived, or is outside the Gateway Key's scope gets the same 403 provider_not_allowed. " +
+	"A stream with no upstream byte after 10 s is committed (200, keep-alive comments every 15 s of silence); failures after that arrive as a final data: {\"error\": ...} event."
 
 // Routes returns the inference routes.
 func (g *Gateway) Routes() []api.Route {
@@ -111,6 +113,7 @@ func (g *Gateway) Routes() []api.Route {
 // serveProviderChat is POST /providers/{handle}/v1/chat/completions.
 func (g *Gateway) serveProviderChat(w http.ResponseWriter, r *http.Request) {
 	x := g.newExchange(w, r, shape.OpenAIChat)
+	defer g.track(x)()
 	caller, aerr := g.keys.Authenticate(r)
 	if aerr != nil {
 		x.refuseUnrecorded(aerr)
@@ -141,6 +144,9 @@ func (g *Gateway) serveProviderChat(w http.ResponseWriter, r *http.Request) {
 		}
 		x.fail(e)
 		return
+	}
+	if cr.stream {
+		defer x.keepAlive()() // stream.go: commit early, keep-alives, error events
 	}
 	x.serve(plan.Candidates, body, cr)
 }

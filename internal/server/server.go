@@ -168,14 +168,14 @@ func (s *Server) Logger() *slog.Logger { return s.log }
 // Token when this was not the first start.
 func (s *Server) BootstrapToken() admintokens.Token { return s.bootstrap }
 
+// abortGrace is how long, once the drain limit ran out, in-flight Requests
+// get to send their shutting_down answer and be recorded before their
+// connections are closed. The systemd unit's stop timeout leaves room for it.
+const abortGrace = 2 * time.Second
+
 // Serve answers HTTP on ln until Shutdown. It returns nil after a Shutdown.
 func (s *Server) Serve(ln net.Listener) error {
-	s.httpSrv = &http.Server{
-		Handler:           s.router,
-		ReadHeaderTimeout: 30 * time.Second,
-		// No ReadTimeout or WriteTimeout: long streams must not be cut.
-		ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
-	}
+	s.httpSrv = s.newHTTPServer()
 	s.started = s.clock.Now()
 	if err := s.jobs.Start(context.Background()); err != nil {
 		return err
@@ -191,6 +191,18 @@ func (s *Server) Serve(ln net.Listener) error {
 	return err
 }
 
+// newHTTPServer is the HTTP server: only the request headers have a time
+// limit. No ReadTimeout, WriteTimeout or IdleTimeout: a server-wide limit
+// would cut long streams (the Gateway keeps them alive and bounds the wait
+// for the first byte itself).
+func (s *Server) newHTTPServer() *http.Server {
+	return &http.Server{
+		Handler:           s.router,
+		ReadHeaderTimeout: 30 * time.Second,
+		ErrorLog:          slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
+	}
+}
+
 // Shutdown stops accepting requests, waits for in-flight ones until ctx
 // ends, logs the shutdown and closes the store. Safe to call more than once.
 func (s *Server) Shutdown(ctx context.Context, reason string) error {
@@ -198,15 +210,27 @@ func (s *Server) Shutdown(ctx context.Context, reason string) error {
 		s.ready.Store(false)
 		begin := s.clock.Now()
 		var drainErr error
+		ended := 0
 		if s.httpSrv != nil {
 			drainErr = s.httpSrv.Shutdown(ctx)
 			if drainErr != nil {
+				// The drain limit ran out: in-flight Requests get an answer
+				// saying so (an error event on streams) and are recorded,
+				// then the remaining connections are closed.
+				if s.gw != nil {
+					actx, cancel := context.WithTimeout(context.Background(), abortGrace)
+					ended = s.gw.Abort(actx)
+					cancel()
+				}
 				_ = s.httpSrv.Close()
 			}
 		}
 		s.jobs.Stop() // after the drain: a job run by hand through the API has finished
 		attrs := []any{logs.Kind(logs.KindShutdown), "reason", reason,
 			"drain_ms", s.clock.Now().Sub(begin).Milliseconds(), "drained", drainErr == nil}
+		if ended > 0 {
+			attrs = append(attrs, "requests_ended", ended)
+		}
 		if !s.started.IsZero() {
 			attrs = append(attrs, "uptime_ms", s.clock.Now().Sub(s.started).Milliseconds())
 		}

@@ -27,6 +27,10 @@ import { startFor } from "./targets";
 // composer's model button. The shell renders <ChatPanel mode="sheet" /> on
 // the right and /chat renders <ChatPanel mode="page" /> (phones, Expand).
 
+// The press recipe (architecture.md "UI motion system") for the panel's own
+// buttons, which aren't ui/Button: Send/Stop, Tools and the starter chips.
+const pressClass = "transition-[scale,background-color,color] duration-press ease-out not-data-disabled:active:scale-(--motion-scale-press)";
+
 /** The last Test button handled, so remounting the panel does not start its chat again. */
 let handledSeq = 0;
 
@@ -90,11 +94,12 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
               label="Full page"
               size="sm"
               onClick={() => {
-                panel.close();
+                // A route change: the page takes the panel's place at once.
+                panel.close({ instant: true });
                 navigate("/chat");
               }}
             />
-            <IconButton icon={X} label="Close" size="sm" onClick={panel.close} />
+            <IconButton icon={X} label="Close" size="sm" onClick={() => panel.close()} />
           </>
         ) : (
           !phone && (
@@ -104,7 +109,7 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
               size="sm"
               onClick={() => {
                 navigate(-1);
-                panel.open();
+                panel.open(undefined, { instant: true });
               }}
             />
           )
@@ -224,6 +229,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
                   onClick={() => change({ toolCheck: !s.toolCheck })}
                   className={cn(
                     "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[14px]",
+                    pressClass,
                     s.toolCheck ? "border-info/40 bg-info/10 text-info" : "border-border text-fg hover:bg-muted",
                   )}
                 >
@@ -234,7 +240,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
               <div className="flex-1" />
               {running ? (
                 <Tip label="Stop" type="label">
-                  <SdkButton onClick={() => stop(chat.id)} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg">
+                  <SdkButton onClick={() => stop(chat.id)} className={cn("inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg", pressClass)}>
                     <Square size={13} fill="currentColor" aria-hidden />
                   </SdkButton>
                 </Tip>
@@ -243,7 +249,10 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
                   <SdkButton
                     onClick={() => submit()}
                     disabled={!text.trim()}
-                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg data-disabled:bg-muted data-disabled:text-fg-subtle"
+                    className={cn(
+                      "inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg data-disabled:bg-muted data-disabled:text-fg-subtle",
+                      pressClass,
+                    )}
                   >
                     <ArrowUp size={18} aria-hidden />
                   </SdkButton>
@@ -287,7 +296,7 @@ function Empty({ chat, onPrompt }: { chat: Chat; onPrompt: (prompt: string, patc
 
 function Chip({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="h-9 rounded-full border border-border-strong bg-bg px-4 text-[14.5px] hover:bg-muted">
+    <button type="button" onClick={onClick} className={cn("h-9 rounded-full border border-border-strong bg-bg px-4 text-[14.5px] hover:bg-muted", pressClass)}>
       {children}
     </button>
   );

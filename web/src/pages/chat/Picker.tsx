@@ -70,8 +70,10 @@ export function PickerPopover({
         initialFocus="[data-autofocus]"
         className={cn(
           "flex w-(--anchor-width) max-h-[min(640px,calc(100dvh-160px),var(--available-height))] flex-col overflow-hidden rounded-xl border border-border bg-elevated text-fg shadow-elevated outline-none",
-          "origin-(--transform-origin) transition-[opacity,scale] duration-150 ease-out data-starting-style:scale-96 data-starting-style:opacity-0",
-          "data-ending-style:opacity-0 motion-reduce:transition-none",
+          // The popup recipe (architecture.md "UI motion system"): grows from the composer, leaves faster; fades only under reduced motion.
+          "origin-(--transform-origin) transition-[opacity,scale] duration-popup-in ease-out",
+          "data-starting-style:scale-(--motion-scale-popup) data-starting-style:opacity-0",
+          "data-ending-style:scale-(--motion-scale-popup) data-ending-style:opacity-0 data-ending-style:duration-popup-out",
         )}
       >
         {(state) => (

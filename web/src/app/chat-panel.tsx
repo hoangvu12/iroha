@@ -20,38 +20,63 @@ export type ChatTarget =
 /** One "open the chat" call. `seq` changes on every call, so the content can start a new chat even for the same target. */
 export type ChatRequest = { seq: number; target?: ChatTarget };
 
+/**
+ * How the sheet comes and goes. It slides for a pointer; `instant` is for
+ * the C key and for swapping with the /chat page (Full page, Back to the
+ * side panel), which never animate (architecture.md "UI motion system").
+ */
+export type SheetMotion = { instant?: boolean };
+
 type Ctx = {
   isOpen: boolean;
+  /** The last open or close asked not to animate. */
+  instant: boolean;
   request: ChatRequest;
   /** Open the sheet (or the /chat page on phones), optionally set up for a target. Each call with a target starts a new chat. */
-  open: (target?: ChatTarget) => void;
-  close: () => void;
-  toggle: () => void;
+  open: (target?: ChatTarget, how?: SheetMotion) => void;
+  close: (how?: SheetMotion) => void;
+  toggle: (how?: SheetMotion) => void;
 };
 
 const ChatPanelContext = createContext<Ctx | null>(null);
 
 export function ChatPanelProvider({ children }: { children: ReactNode }) {
   const [isOpen, setOpen] = useState(false);
+  const [instant, setInstant] = useState(false);
   const [request, setRequest] = useState<ChatRequest>({ seq: 0 });
   const phone = useIsPhone();
   const navigate = useNavigate();
 
   const open = useCallback(
-    (target?: ChatTarget) => {
+    (target?: ChatTarget, how?: SheetMotion) => {
       if (target) setRequest((r) => ({ seq: r.seq + 1, target }));
       if (phone) navigate("/chat");
-      else setOpen(true);
+      else {
+        setInstant(!!how?.instant);
+        setOpen(true);
+      }
     },
     [phone, navigate],
   );
-  const close = useCallback(() => setOpen(false), []);
-  const toggle = useCallback(() => {
-    if (phone) navigate("/chat");
-    else setOpen((o) => !o);
-  }, [phone, navigate]);
+  const close = useCallback((how?: SheetMotion) => {
+    setInstant(!!how?.instant);
+    setOpen(false);
+  }, []);
+  const toggle = useCallback(
+    (how?: SheetMotion) => {
+      if (phone) navigate("/chat");
+      else {
+        setInstant(!!how?.instant);
+        setOpen((o) => !o);
+      }
+    },
+    [phone, navigate],
+  );
 
-  const value = useMemo(() => ({ isOpen: isOpen && !phone, request, open, close, toggle }), [isOpen, phone, request, open, close, toggle]);
+  const value = useMemo(
+    () => ({ isOpen: isOpen && !phone, instant, request, open, close, toggle }),
+    [isOpen, phone, instant, request, open, close, toggle],
+  );
   return <ChatPanelContext.Provider value={value}>{children}</ChatPanelContext.Provider>;
 }
 

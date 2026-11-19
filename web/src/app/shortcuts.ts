@@ -33,7 +33,7 @@ export function useNavShortcuts() {
       const item = NAV.find((n) => n.key.toLowerCase() === e.key.toLowerCase());
       if (!item) return;
       e.preventDefault();
-      if (item.action === "chat") chat.toggle();
+      if (item.action === "chat") chat.toggle({ instant: true }); // a key: no slide
       else navigate(item.to);
     };
     window.addEventListener("keydown", onKey);

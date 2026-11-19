@@ -11,6 +11,7 @@ import { notify } from "@/ui/toast";
 import { ChatPanel } from "@/pages/chat/ChatPanel";
 import { Avatar, BANNER_SRC } from "./brand";
 import { useChatPanel } from "./chat-panel";
+import { ChatSheet } from "./ChatSheet";
 import type { HealthState } from "./health";
 import { healthLabel, useHealth } from "./health";
 import { NAV, type NavItem } from "./nav";
@@ -19,7 +20,7 @@ import { useNavShortcuts } from "./shortcuts";
 import { type ThemePref, useTheme } from "./theme";
 
 export const SIDEBAR_WIDTH = 224;
-export const CHAT_WIDTH = 460;
+export { CHAT_WIDTH } from "./ChatSheet";
 
 /**
  * The signed-in app: sidebar (desktop) or bottom tab bar (phone), the page
@@ -28,7 +29,6 @@ export const CHAT_WIDTH = 460;
 export function Shell() {
   useNavShortcuts();
   const phone = useIsPhone();
-  const chat = useChatPanel();
   const { pathname } = useLocation();
   const chatPage = pathname === "/chat" || pathname.startsWith("/chat/");
 
@@ -49,15 +49,9 @@ export function Shell() {
           </div>
         )}
       </main>
-      {chat.isOpen && !chatPage && (
-        <aside
-          aria-label="Chat"
-          style={{ width: CHAT_WIDTH }}
-          className="fixed inset-y-0 right-0 z-30 flex max-w-full flex-col border-l border-border bg-subtle shadow-elevated"
-        >
-          <ChatPanel mode="sheet" />
-        </aside>
-      )}
+      <ChatSheet hidden={chatPage}>
+        <ChatPanel mode="sheet" />
+      </ChatSheet>
       {phone && <TabBar />}
     </div>
   );
@@ -83,7 +77,7 @@ function SidebarItem({ item }: { item: NavItem }) {
     return (
       <button
         type="button"
-        onClick={chat.toggle}
+        onClick={() => chat.toggle()}
         aria-pressed={chat.isOpen}
         aria-keyshortcuts={item.key}
         className={cn(navItemClass(chat.isOpen), "w-full text-left")}

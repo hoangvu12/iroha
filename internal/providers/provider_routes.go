@@ -27,6 +27,10 @@ type providerSnapshot struct {
 	// Budget overrides; 0 is the default.
 	MaxAttempts      int `json:"max_attempts,omitempty"`
 	FirstByteSeconds int `json:"first_byte_seconds,omitempty"`
+	// Model list configuration (ticket 10); zero values are the defaults
+	// (not strict, discovery per Provider).
+	Strict    bool   `json:"strict,omitempty"`
+	Discovery string `json:"discovery,omitempty"`
 }
 
 // Resource is the Provider resource of the audit machinery.
@@ -37,8 +41,11 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 	Load: func(ctx context.Context, q audit.Querier, id string) (*providerSnapshot, error) {
 		var s providerSnapshot
 		var created int64
-		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds FROM providers WHERE id = ?`, id).
-			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created, &s.MaxAttempts, &s.FirstByteSeconds)
+		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery FROM providers WHERE id = ?`, id).
+			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created, &s.MaxAttempts, &s.FirstByteSeconds, &s.Strict, &s.Discovery)
+		if s.Discovery == DiscoveryProvider {
+			s.Discovery = "" // the default, as entries written before ticket 10 have it
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -68,10 +75,14 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		discovery := s.Discovery
+		if discovery == "" {
+			discovery = DiscoveryProvider
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET name = excluded.name, enabled = excluded.enabled, archived = excluded.archived,
-			max_attempts = excluded.max_attempts, first_byte_seconds = excluded.first_byte_seconds`,
-			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt), s.MaxAttempts, s.FirstByteSeconds)
+			max_attempts = excluded.max_attempts, first_byte_seconds = excluded.first_byte_seconds, strict = excluded.strict, discovery = excluded.discovery`,
+			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt), s.MaxAttempts, s.FirstByteSeconds, s.Strict, discovery)
 		return err
 	},
 })
@@ -82,6 +93,24 @@ type CreateProvider struct {
 	Name    *string `json:"name,omitempty" doc:"Display name; defaults to the handle for a new Provider."`
 	Enabled *bool   `json:"enabled,omitempty" doc:"Default true for a new Provider."`
 	BudgetOverrides
+	ModelListSettings
+}
+
+// ModelListSettings change how a Provider's model list is kept and used.
+type ModelListSettings struct {
+	Strict    *bool   `json:"strict,omitempty" doc:"true: refuse models missing from the model list before any Attempt (404 model_not_found). Default false: unlisted models are forwarded."`
+	Discovery *string `json:"discovery,omitempty" enum:"none,provider,key" doc:"provider (default): read each Endpoint's model list with one key. key: read it with every key, so keys whose list names a model are tried first for it; use it when keys see different models. none: never discover."`
+}
+
+func (s ModelListSettings) check() error {
+	if s.Discovery != nil {
+		switch *s.Discovery {
+		case DiscoveryNone, DiscoveryProvider, DiscoveryKey:
+		default:
+			return api.BadRequest("Use discovery provider, key or none.", "discovery %q is not a discovery mode.", *s.Discovery)
+		}
+	}
+	return nil
 }
 
 // BudgetOverrides change a Provider's Request budget.
@@ -109,6 +138,7 @@ type UpdateProvider struct {
 	Enabled  *bool   `json:"enabled,omitempty"`
 	Archived *bool   `json:"archived,omitempty" doc:"Archive to retire the Provider: Callers are refused and the handle stays reserved."`
 	BudgetOverrides
+	ModelListSettings
 }
 
 // ProviderResult is the response of a single Provider change.
@@ -195,7 +225,7 @@ func (h handlers) providerRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodPatch, Path: "/api/providers/{provider}", Tag: tag,
-			Summary: "Rename, enable, disable, archive or unarchive a Provider, or change its Request budget",
+			Summary: "Rename, enable, disable, archive or unarchive a Provider, or change its Request budget or model list settings",
 			Query:   []api.Param{audit.DryRun},
 			Request: UpdateProvider{}, Response: ProviderResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -264,7 +294,7 @@ func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider
 	var id string
 	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM providers WHERE handle = ?`, in.Handle).Scan(&id)
 	if err == nil {
-		return h.updateProvider(m, id, UpdateProvider{Name: in.Name, Enabled: in.Enabled, BudgetOverrides: in.BudgetOverrides})
+		return h.updateProvider(m, id, UpdateProvider{Name: in.Name, Enabled: in.Enabled, BudgetOverrides: in.BudgetOverrides, ModelListSettings: in.ModelListSettings})
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Provider{}, err
@@ -282,12 +312,22 @@ func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider
 	if err := in.BudgetOverrides.check(); err != nil {
 		return Provider{}, err
 	}
+	if err := in.ModelListSettings.check(); err != nil {
+		return Provider{}, err
+	}
+	strict, discovery := false, DiscoveryProvider
+	if in.Strict != nil {
+		strict = *in.Strict
+	}
+	if in.Discovery != nil {
+		discovery = *in.Discovery
+	}
 	id = ids.New("pr")
 	if err := m.Track(Resource, id); err != nil {
 		return Provider{}, err
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO providers (id, handle, name, enabled, created_at, max_attempts, first_byte_seconds) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, in.Handle, name, enabled, store.Millis(m.Now), zeroIfNil(in.MaxAttempts), zeroIfNil(in.FirstByteSeconds)); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO providers (id, handle, name, enabled, created_at, max_attempts, first_byte_seconds, strict, discovery) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, in.Handle, name, enabled, store.Millis(m.Now), zeroIfNil(in.MaxAttempts), zeroIfNil(in.FirstByteSeconds), strict, discovery); err != nil {
 		return Provider{}, err
 	}
 	return readProvider(m.Ctx, m.Tx, id)
@@ -314,9 +354,13 @@ func (h handlers) updateProvider(m *audit.Mutation, id string, in UpdateProvider
 	if err := in.BudgetOverrides.check(); err != nil {
 		return cur, err
 	}
+	if err := in.ModelListSettings.check(); err != nil {
+		return cur, err
+	}
 	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE providers SET name = coalesce(?, name), enabled = coalesce(?, enabled), archived = coalesce(?, archived),
-		max_attempts = coalesce(?, max_attempts), first_byte_seconds = coalesce(?, first_byte_seconds) WHERE id = ?`,
-		in.Name, in.Enabled, in.Archived, in.MaxAttempts, in.FirstByteSeconds, id); err != nil {
+		max_attempts = coalesce(?, max_attempts), first_byte_seconds = coalesce(?, first_byte_seconds),
+		strict = coalesce(?, strict), discovery = coalesce(?, discovery) WHERE id = ?`,
+		in.Name, in.Enabled, in.Archived, in.MaxAttempts, in.FirstByteSeconds, in.Strict, in.Discovery, id); err != nil {
 		return cur, err
 	}
 	return readProvider(m.Ctx, m.Tx, id)

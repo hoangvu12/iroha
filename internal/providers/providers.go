@@ -33,6 +33,8 @@ type Provider struct {
 	CallerPath       string     `json:"caller_path" doc:"Base path Callers use for this Provider, e.g. /providers/acme/v1."`
 	CreatedAt        time.Time  `json:"created_at"`
 	Budget           Budget     `json:"budget" doc:"The Request budget for this Provider."`
+	Strict           bool       `json:"strict" doc:"true: a model missing from the Provider's model list (GET /api/providers/{provider}/models) is refused before any Attempt. false: it is forwarded anyway."`
+	Discovery        string     `json:"discovery" enum:"none,provider,key" doc:"How the model list is discovered: provider (once per Endpoint, with one key), key (per key and Endpoint; keys whose list names a model are tried first for it) or none."`
 	Endpoints        []Endpoint `json:"endpoints"`
 	UpstreamKeyCount int        `json:"upstream_key_count"`
 }
@@ -76,8 +78,19 @@ type Endpoint struct {
 	AuthParam     string            `json:"auth_param,omitempty" doc:"Header name (auth_style header) or query parameter name (auth_style query)."`
 	StaticHeaders map[string]string `json:"static_headers" doc:"Headers sent on every Attempt to this Endpoint; they replace a Caller header of the same name."`
 	Renames       map[string]string `json:"renames" doc:"Model renames: the model a Caller names -> the model this URL is sent. Applied per Attempt, after the Endpoint is chosen."`
+	DiscoveryURL  string            `json:"discovery_url" doc:"Where this Endpoint's model list is read: empty for <url>/models, \"none\" to never ask it, or a URL."`
 	CreatedAt     time.Time         `json:"created_at"`
 }
+
+// Discovery modes of a Provider.
+const (
+	DiscoveryNone     = "none"
+	DiscoveryProvider = "provider"
+	DiscoveryKey      = "key"
+)
+
+// NoDiscovery is the discovery_url of an Endpoint that is never asked for models.
+const NoDiscovery = "none"
 
 // UpstreamKey is an Upstream Key as the API returns it, secret included.
 type UpstreamKey struct {
@@ -144,10 +157,10 @@ func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	var p Provider
 	var created int64
 	var maxAttempts, firstByte int
-	err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds,
+	err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery,
 		(SELECT count(*) FROM upstream_keys k WHERE k.provider_id = providers.id)
 		FROM providers WHERE id = ?`, id).
-		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &maxAttempts, &firstByte, &p.UpstreamKeyCount)
+		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &maxAttempts, &firstByte, &p.Strict, &p.Discovery, &p.UpstreamKeyCount)
 	if err != nil {
 		return p, err
 	}
@@ -159,13 +172,13 @@ func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	return p, err
 }
 
-const endpointColumns = `e.id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.created_at`
+const endpointColumns = `e.id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.discovery_url, e.created_at`
 
 func scanEndpoint(row interface{ Scan(...any) error }) (Endpoint, error) {
 	var e Endpoint
 	var created int64
 	var headers, renames string
-	if err := row.Scan(&e.ID, &e.Provider, &e.Name, &e.URL, &e.Shape, &e.AuthStyle, &e.AuthParam, &headers, &renames, &created); err != nil {
+	if err := row.Scan(&e.ID, &e.Provider, &e.Name, &e.URL, &e.Shape, &e.AuthStyle, &e.AuthParam, &headers, &renames, &e.DiscoveryURL, &created); err != nil {
 		return e, err
 	}
 	e.CreatedAt = store.FromMillis(created)
@@ -354,6 +367,12 @@ type Routing struct {
 	planner.Provider
 	Enabled  bool
 	Archived bool
+	// Model list configuration (ticket 10): Strict refuses unlisted models,
+	// Discovery is the mode, DiscoveryURLs maps Endpoint IDs to their
+	// discovery_url as configured ("" default, NoDiscovery, or a URL).
+	Strict        bool
+	Discovery     string
+	DiscoveryURLs map[string]string
 }
 
 // Routing reads the Provider with this handle for planning. ok is false
@@ -363,8 +382,8 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 		return r, false, nil
 	}
 	var firstByte int
-	err = s.db.QueryRowContext(ctx, `SELECT id, handle, enabled, archived, max_attempts, first_byte_seconds FROM providers WHERE handle = ?`, handle).
-		Scan(&r.ID, &r.Handle, &r.Enabled, &r.Archived, &r.MaxAttempts, &firstByte)
+	err = s.db.QueryRowContext(ctx, `SELECT id, handle, enabled, archived, max_attempts, first_byte_seconds, strict, discovery FROM providers WHERE handle = ?`, handle).
+		Scan(&r.ID, &r.Handle, &r.Enabled, &r.Archived, &r.MaxAttempts, &firstByte, &r.Strict, &r.Discovery)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, false, nil
 	}
@@ -372,18 +391,20 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 		return r, false, err
 	}
 	r.FirstByte = time.Duration(firstByte) * time.Second
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, url, shape, auth_style, auth_param, static_headers, renames
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url
 		FROM endpoints WHERE provider_id = ? ORDER BY created_at, rowid`, r.ID)
 	if err != nil {
 		return r, false, err
 	}
+	r.DiscoveryURLs = map[string]string{}
 	for rows.Next() {
 		var e planner.Endpoint
-		var sh, headers, renames string
-		if err := rows.Scan(&e.ID, &e.Name, &e.URL, &sh, &e.AuthStyle, &e.AuthParam, &headers, &renames); err != nil {
+		var sh, headers, renames, discovery string
+		if err := rows.Scan(&e.ID, &e.Name, &e.URL, &sh, &e.AuthStyle, &e.AuthParam, &headers, &renames, &discovery); err != nil {
 			rows.Close()
 			return r, false, err
 		}
+		r.DiscoveryURLs[e.ID] = discovery
 		e.Shape = shape.Shape(sh)
 		var err error
 		if e.StaticHeaders, err = decodeMap(headers); err != nil {

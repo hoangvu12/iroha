@@ -15,6 +15,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/models"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/session"
@@ -39,6 +40,7 @@ func (s *Server) routes() []api.Route {
 		settings.Routes(s.audit, s.db),
 		jobs.Routes(s.jobs),
 		failurerules.Routes(s.audit, s.db),
+		models.Routes(s.audit, s.models()),
 		s.gateway().Routes(),
 		s.gateway().AdminRoutes(),
 	)
@@ -94,7 +96,16 @@ func (s *Server) coreRoutes() []api.Route {
 func (s *Server) gateway() *gateway.Gateway {
 	if s.gw == nil {
 		s.gw = gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db),
-			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log), Rules: s.rules.Set})
+			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log), Models: s.models(), Rules: s.rules.Set})
 	}
 	return s.gw
+}
+
+// models builds the model list store once (routes, Gateway, later the
+// daily refresh job of ticket 20).
+func (s *Server) models() *models.Store {
+	if s.modelStore == nil {
+		s.modelStore = models.New(models.Options{DB: s.db, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db)})
+	}
+	return s.modelStore
 }

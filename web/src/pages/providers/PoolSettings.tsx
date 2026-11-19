@@ -124,7 +124,7 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
 
       <SettingsCard title="Danger zone" danger>
         <SettingsRow title="Delete Model Pool" hint={`Callers asking for ${pool.name} are refused. Its Providers and keys are not touched.`}>
-          <Button variant="secondary" className="border-danger text-danger-text" onClick={() => setDeleting(true)}>
+          <Button danger onClick={() => setDeleting(true)}>
             Delete
           </Button>
         </SettingsRow>

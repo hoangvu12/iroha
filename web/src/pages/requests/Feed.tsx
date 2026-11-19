@@ -29,10 +29,10 @@ import { Table, TableSkeleton, TBody, TD, TH, THead } from "@/ui/Table";
 import type { FilterOptions, RequestRecord, Stats } from "./api";
 import { useFilterOptions, useRequestFeed, useRequestStats } from "./api";
 import { clock, compactNumber, failed, PoolTag, ProviderLogo, secs, shapeInOut, StatusCell, statusTone } from "./bits";
-import { RequestDrawer } from "./Drawer";
+import { useLendRequestRows } from "@/sheets/stack";
 import { COLUMNS, type ColumnId, type FilterKey, RANGES, type RequestsUrl, STATUSES, useRequestsUrl } from "./url-state";
 
-/** Requests (C03, C04, C32): stats for the current filters, the live feed, and the drawer. */
+/** Requests (C03, C04, C32): stats for the current filters and the live feed; a row opens the Request sheet. */
 export function RequestsFeed() {
   const url = useRequestsUrl();
   const phone = useIsPhone();
@@ -41,7 +41,8 @@ export function RequestsFeed() {
   const stats = useRequestStats(url.query, live);
   const options = useFilterOptions(url.rangeInfo.since);
   const rows = feed.rows;
-  const selectedRow = rows.find((r) => r.id === url.selected);
+  // The Request sheet (the first of the sheet stack) seeds from these rows and steps through them.
+  useLendRequestRows(rows);
 
   const chips = filterChips(url);
   const visible = COLUMNS.filter((c) => !url.hidden.has(c.id));
@@ -92,16 +93,6 @@ export function RequestsFeed() {
             </div>
           )}
         </>
-      )}
-
-      {url.selected && (
-        <RequestDrawer
-          id={url.selected}
-          seed={selectedRow}
-          rows={rows}
-          onSelect={(id) => url.select(id)}
-          onClose={() => url.select(undefined)}
-        />
       )}
     </>
   );

@@ -263,7 +263,7 @@ function RevokedTable({ keys, onDelete }: { keys: GatewayKey[]; onDelete: (k: Ga
                 <LastUsed k={k} />
               </TD>
               <TD align="right">
-                <IconButton icon={Trash2} label={`Delete ${k.name}`} size="sm" onClick={() => onDelete(k)} />
+                <IconButton icon={Trash2} label={`Delete ${k.name}`} size="sm" danger onClick={() => onDelete(k)} />
               </TD>
             </TR>
           ))}

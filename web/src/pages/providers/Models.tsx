@@ -4,6 +4,7 @@ import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { useConfirm } from "@/ui/Confirm";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
@@ -30,6 +31,7 @@ export function ModelsTab({ handle }: { handle: string }) {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Model>();
   const [resetting, setResetting] = useState(false);
+  const confirm = useConfirm();
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -77,9 +79,28 @@ export function ModelsTab({ handle }: { handle: string }) {
             Hide from Callers
           </MenuItem>
         )}
-        {m.added ? (
-          <MenuItem icon={ListX} onSelect={() => void change(m, { added: false }, m.discovered ? `${m.model} no longer pinned` : `${m.model} removed`)}>
-            {m.discovered ? "Unpin" : "Remove from the list"}
+        {m.added && m.discovered ? (
+          <MenuItem icon={ListX} onSelect={() => void change(m, { added: false }, `${m.model} no longer pinned`)}>
+            Unpin
+          </MenuItem>
+        ) : m.added ? (
+          <MenuItem
+            icon={ListX}
+            danger
+            onSelect={() =>
+              confirm.ask({
+                title: `Remove ${m.model} from ${handle}?`,
+                body: `Callers stop seeing ${m.model} in ${handle}'s model list. Undo brings it back.`,
+                confirmLabel: "Remove model",
+                onConfirm: async () => {
+                  const res = await calls.saveModel(handle, { model: m.model, added: false });
+                  refresh();
+                  notifyChange(`${m.model} removed`, res, { onUndone: refresh });
+                },
+              })
+            }
+          >
+            Remove from the list…
           </MenuItem>
         ) : (
           <MenuItem icon={ListPlus} onSelect={() => void change(m, { added: true }, `${m.model} pinned to the list`)}>
@@ -267,6 +288,7 @@ export function ModelsTab({ handle }: { handle: string }) {
         </div>
       )}
 
+      {confirm.dialog}
       <AddModelDialog handle={handle} open={adding} onOpenChange={setAdding} />
       <ModelDialog handle={handle} model={editing} onClose={() => setEditing(undefined)} />
       <ConfirmDialog

@@ -86,7 +86,7 @@ export function MenuContent({
 
 const itemClass =
   "flex h-8 select-none items-center gap-2 rounded-md px-2 text-fg outline-none " +
-  "data-highlighted:bg-muted data-open:bg-muted data-disabled:opacity-50 data-destructive:text-danger-text";
+  "data-highlighted:bg-muted data-open:bg-muted data-disabled:opacity-50 data-destructive:text-danger-text data-destructive:data-highlighted:bg-danger-tint";
 
 export function MenuItem({
   children,

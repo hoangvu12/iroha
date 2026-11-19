@@ -316,13 +316,15 @@ export function KeysTab({
         onChange={(e) => setParam("q", e.target.value)}
       />
       {phone ? (
-        <Select<StateFilter>
-          aria-label="Show keys"
-          value={filter}
-          onValueChange={(v) => setParam("state", v === "all" ? undefined : v)}
-          className="w-28"
-          items={(Object.keys(filterLabel) as StateFilter[]).map((f) => ({ value: f, label: f === "all" ? "All" : filterLabel[f] }))}
-        />
+        // The Select is w-full: its box sets the width, so search and filter share a line (C31).
+        <div className="w-28 shrink-0">
+          <Select<StateFilter>
+            aria-label="Show keys"
+            value={filter}
+            onValueChange={(v) => setParam("state", v === "all" ? undefined : v)}
+            items={(Object.keys(filterLabel) as StateFilter[]).map((f) => ({ value: f, label: f === "all" ? "All" : filterLabel[f] }))}
+          />
+        </div>
       ) : (
         <Segmented<StateFilter>
           label="Show keys"
@@ -359,6 +361,7 @@ export function KeysTab({
         searchFn={searchKeys}
         columnFilters={columnFilters}
         filterChips={filters}
+        noResultsTitle="No keys match"
         onClearFilters={() =>
           setParams(
             (p) => {

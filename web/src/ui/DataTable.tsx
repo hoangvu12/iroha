@@ -189,6 +189,8 @@ export type DataTableProps<T extends RowData> = {
   /** Filters in force, as chips over "No <label> match"; `onClearFilters` is its Clear filters. */
   filterChips?: FilterChip[];
   onClearFilters?: () => void;
+  /** Title of the default NoResults: "No keys match". */
+  noResultsTitle?: string;
   /** Replaces the default NoResults. */
   noResults?: ReactNode;
 
@@ -377,7 +379,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   if (props.error && !data) state = <ErrorState title={props.errorTitle ?? `Couldn't load ${label}`} error={props.error} onRetry={props.onRetry} />;
   else if (data && data.length === 0 && !filtered) state = props.empty ?? null;
   else if (data && (serverFiltered ? data.length === 0 : filteredRows.length === 0))
-    state = props.noResults ?? (props.onClearFilters ? <NoResults title={`No ${label.toLowerCase()} match`} filters={props.filterChips} onClear={props.onClearFilters} /> : null);
+    state = props.noResults ?? (props.onClearFilters ? <NoResults title={props.noResultsTitle ?? "Nothing matches"} filters={props.filterChips} onClear={props.onClearFilters} /> : null);
   const showToolbar = loading || (data && data.length > 0) || filtered;
 
   // ---- Toolbar or bulk bar ----
@@ -566,16 +568,20 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
       )}
       {data && state === undefined && (props.footer || pages) && (
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3 text-[13px] text-fg-muted">
-          <div className="min-w-0 flex-1">{props.footer?.(counts)}</div>
+          {/* Wraps onto its own line before it gets narrower than this. */}
+          <div className="min-w-[min(100%,18rem)] flex-1">{props.footer?.(counts)}</div>
           {pages && (
-            <div className="flex flex-wrap items-center gap-3">
-              <Select
-                aria-label="Rows per page"
-                className="h-8 w-[118px]"
-                value={String(pagination.pageSize)}
-                onValueChange={(v) => setPagination({ pageIndex: 0, pageSize: Number(v) })}
-                items={sizes.map((s) => ({ value: String(s), label: `${s} per page` }))}
-              />
+            <div className="flex shrink-0 items-center gap-3">
+              {/* The Select is w-full; its box sets the width (cn has no tailwind-merge). */}
+              <div className="w-[150px] md:w-[128px]">
+                <Select
+                  aria-label="Rows per page"
+                  className="h-8"
+                  value={String(pagination.pageSize)}
+                  onValueChange={(v) => setPagination({ pageIndex: 0, pageSize: Number(v) })}
+                  items={sizes.map((s) => ({ value: String(s), label: `${s} per page` }))}
+                />
+              </div>
               <Pager label={`Pages of ${label}`} page={pagination.pageIndex + 1} pageCount={pageCount} onPageChange={(p) => setPagination((s) => ({ ...s, pageIndex: p - 1 }))} />
             </div>
           )}

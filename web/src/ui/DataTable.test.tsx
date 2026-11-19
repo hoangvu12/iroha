@@ -197,7 +197,7 @@ test("a new search starts again on page 1, and a search that matches nothing sho
       <>
         <Button onClick={() => setQ("fruit-05")}>Find</Button>
         <Button onClick={() => setQ("kiwi")}>Find kiwi</Button>
-        <Fruits data={many(60)} search={q} filterChips={q ? [{ label: `Search: ${q}`, onRemove: () => setQ("") }] : []} onClearFilters={cleared} />
+        <Fruits data={many(60)} search={q} filterChips={q ? [{ label: `Search: ${q}`, onRemove: () => setQ("") }] : []} noResultsTitle="No fruit match" onClearFilters={cleared} />
       </>
     );
   };

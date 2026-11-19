@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
+import { rec, RecordLink } from "@/sheets/RecordLink";
 import { ArrowDown, ArrowUp, ExternalLink, Layers, MessageCircle, Trash2 } from "lucide-react";
 import { seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
@@ -197,9 +198,9 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
           return (
             <div className="flex flex-wrap items-center gap-2">
               {keysWith.sort((a, b) => natural(a.name, b.name)).map((k) => (
-                <Link key={k.id} to={`/gateway-keys/${seg(k.id)}`} className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-[15px] hover:bg-muted">
-                  {k.name}
-                </Link>
+                <span key={k.id} className="inline-flex h-9 max-w-full items-center rounded-lg border border-border px-3 text-[15px]">
+                  <RecordLink record={rec.gatewayKey(k.id)}>{k.name}</RecordLink>
+                </span>
               ))}
               <span className="text-[15px] text-fg-muted">
                 {anyAll ? (keysWith.length ? "and every key with access to everything" : "Every key with access to everything") : keysWith.length ? "" : "None yet. Give a Gateway Key this Pool in its scope."}
@@ -245,10 +246,10 @@ function memberColumns({ pending, flip }: { pending: boolean; flip: (m: Member, 
       id: "provider",
       header: "Provider",
       cell: ({ row }) => (
-        <Link to={`/providers/${seg(row.original.provider)}/keys`} className={cn("inline-flex items-center gap-2.5 text-[15px] font-medium text-fg hover:underline", !row.original.enabled && "text-fg-muted")}>
+        <span className={cn("inline-flex min-w-0 items-center gap-2.5 text-[15px] font-medium", !row.original.enabled && "opacity-60")}>
           <ProviderTile handle={row.original.provider} size={26} />
-          {row.original.provider}
-        </Link>
+          <RecordLink record={rec.provider(row.original.provider)}>{row.original.provider}</RecordLink>
+        </span>
       ),
     }),
     col.display({ id: "model", header: "Model", meta: { className: "font-mono text-[13px]" }, cell: ({ row }) => row.original.model }),
@@ -276,7 +277,9 @@ function MemberLine({ r }: { r: MemberRow }) {
       <span className="w-4 text-center tabular text-fg-muted">{r.index + 1}</span>
       <ProviderTile handle={r.provider} size={32} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[16px] font-medium">{r.provider}</span>
+        <span className="flex min-w-0 text-[16px] font-medium">
+          <RecordLink record={rec.provider(r.provider)}>{r.provider}</RecordLink>
+        </span>
         <span className="block truncate font-mono text-[13px] text-fg-muted">{r.model}</span>
       </span>
     </span>

@@ -20,7 +20,8 @@ import { CopyButton } from "@/ui/CopyButton";
 import type { Attempt, RequestRecord } from "./api";
 import { useRequest } from "./api";
 import { attemptFailed, explain, jumpLabel, servedModel, thenText } from "./attempt-info";
-import { Headers, keyStateClass } from "./Attempts";
+import { rec, RecordLink } from "@/sheets/RecordLink";
+import { AttemptTarget, Headers, keyStateClass } from "./Attempts";
 import { Badge, clockMs, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, StatusPill, statusText, statusTone, Summary } from "./bits";
 import { CapturedView } from "./Captured";
 import { RequestDetails } from "./Details";
@@ -192,28 +193,34 @@ function RouteCanvas({ r, phone }: { r: RequestRecord; phone: boolean }) {
   );
 }
 
+/** A step on the canvas: the whole card is the button that selects it; a record's name on it is a link of its own, above it. */
 function Card({ selected, onSelect, children, label }: { selected: boolean; onSelect: () => void; children: ReactNode; label: string }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      aria-label={label}
+    <div
       className={cn(
-        "flex w-[min(360px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-shadow",
+        "relative flex w-[min(360px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-shadow",
         selected ? "border-info ring-2 ring-info/30" : "border-border hover:border-border-strong",
       )}
     >
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={selected}
+        aria-label={label}
+        className="absolute inset-0 rounded-xl outline-none focus-visible:outline-2 focus-visible:outline-info"
+      />
       {children}
-    </button>
+    </div>
   );
 }
 
-function CardText({ small, big, mono }: { small: string; big: string; mono?: boolean }) {
+function CardText({ small, big, mono }: { small: string; big: ReactNode; mono?: boolean }) {
   return (
     <span className="min-w-0 flex-1">
       <span className="block truncate text-[13px] text-fg-muted">{small}</span>
-      <span className={cn("block truncate font-semibold", mono ? "font-mono text-[15px]" : "text-[16px]")}>{big}</span>
+      <span className={cn("flex min-w-0 font-semibold", mono ? "font-mono text-[15px]" : "text-[16px]")}>
+        {typeof big === "string" ? <span className="truncate">{big}</span> : big}
+      </span>
     </span>
   );
 }
@@ -228,7 +235,18 @@ function StartCard({ r, selected, onSelect }: { r: RequestRecord; selected: bool
       <IconTile>
         <User size={17} />
       </IconTile>
-      <CardText small={`${r.caller.name} asked for`} big={r.model || "no model"} />
+      <CardText
+        small={`${r.caller.name} asked for`}
+        big={
+          r.pool ? (
+            <RecordLink record={rec.pool(r.pool)} className="relative">
+              {r.model}
+            </RecordLink>
+          ) : (
+            r.model || "no model"
+          )
+        }
+      />
       <Badge>Start</Badge>
     </Card>
   );
@@ -238,7 +256,19 @@ function AttemptCard({ a, selected, onSelect }: { a: Attempt; selected: boolean;
   return (
     <Card selected={selected} onSelect={onSelect} label={`Attempt ${a.seq}`}>
       <ProviderLogo handle={a.provider} size={36} />
-      <CardText small={`Attempt ${a.seq}`} big={a.upstream_key} mono />
+      <CardText
+        small={`Attempt ${a.seq}`}
+        big={
+          a.upstream_key ? (
+            <RecordLink record={rec.key(a.provider, a.upstream_key)} className="relative">
+              {a.upstream_key}
+            </RecordLink>
+          ) : (
+            "–"
+          )
+        }
+        mono
+      />
       <span className="shrink-0 text-[13.5px] text-fg-muted tabular">{secs(a.duration_ms)}</span>
       <Badge tone={a.status ? statusBadgeTone(a.status) : "red"}>{a.status || "–"}</Badge>
     </Card>
@@ -323,11 +353,15 @@ function SidePanel({ r, node, attempts, onClose }: { r: RequestRecord; node: Nod
         />
         <PanelSection title="Asked">
           <Row label="Caller">{r.caller.name}</Row>
-          <Row label="Gateway Key" mono>
-            {r.caller.gateway_key_id || none}
+          <Row label="Gateway Key">
+            {r.caller.gateway_key_id ? <RecordLink record={rec.gatewayKey(r.caller.gateway_key_id)}>{r.caller.name}</RecordLink> : none}
           </Row>
           <Row label="Model">{r.model || none}</Row>
-          {r.pool && <Row label="Model Pool">{r.pool}</Row>}
+          {r.pool && (
+            <Row label="Model Pool">
+              <RecordLink record={rec.pool(r.pool)}>{r.pool}</RecordLink>
+            </Row>
+          )}
           <Row label="Path" mono>
             {r.route}
           </Row>
@@ -403,11 +437,7 @@ function AttemptPanel({ a, next, onClose }: { a: Attempt; next?: Attempt; onClos
         </PanelSection>
       )}
       <PanelSection title="Sent to">
-        <Row label="Provider">{a.provider}</Row>
-        <Row label="Endpoint">{a.endpoint}</Row>
-        <Row label="Upstream Key" mono>
-          {a.upstream_key}
-        </Row>
+        <AttemptTarget a={a} />
         <Row label="Shape">{longShape(a.shape)}</Row>
         <Row label="Model sent" mono>
           {a.wire_model}

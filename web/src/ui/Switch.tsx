@@ -36,11 +36,12 @@ export function Switch({
       }}
       onClick={(e) => e.stopPropagation()}
       className={
+        // Motion tokens (UI ticket 20): the track's colour on the hover timing (it still fades under reduced motion),
+        // the thumb's slide on the press timing (0 under reduced motion, so it jumps).
         "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full bg-border-strong transition-colors duration-hover ease-[ease] " +
         "data-checked:bg-primary data-disabled:cursor-not-allowed data-disabled:opacity-50 aria-busy:cursor-progress"
       }
     >
-      {/* The thumb moves on the press token (still under reduced motion); the track's colour may fade. */}
       <SwitchThumb className="inline-block size-[18px] translate-x-[3px] rounded-full bg-bg shadow-sm transition-[translate] duration-press ease-out data-checked:translate-x-[19px]" />
     </SdkSwitch>
   );

@@ -5,6 +5,7 @@ import { Checkbox } from "@/ui/Checkbox";
 import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
 import { RadioCards } from "@/ui/Radio";
+import { Reveal } from "@/ui/Reveal";
 import { ScrollArea } from "@/ui/ScrollArea";
 import { Skeleton } from "@/ui/Skeleton";
 import { usePoolOptions, useProviderOptions } from "./api";
@@ -33,7 +34,12 @@ export function ScopeEditor({ draft, onChange }: { draft: Draft; onChange: SetDr
           { value: "some", title: "Only some", description: "Pick the Providers and Model Pools this key can use" },
         ]}
       />
-      {!draft.all && <Checklist draft={draft} onChange={onChange} />}
+      {/* Grows open under the choice and folds back (collapse recipe); open when the editor opens, it is just there. */}
+      <Reveal open={!draft.all} label="Providers and Pools to allow">
+        <div className="pt-4">
+          <Checklist draft={draft} onChange={onChange} />
+        </div>
+      </Reveal>
     </div>
   );
 }
@@ -87,7 +93,7 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
   const failed = providers.isError || pools.isError;
 
   return (
-    <div className="mt-4 overflow-hidden rounded-xl border border-border">
+    <div className="overflow-hidden rounded-xl border border-border">
       <div className="border-b border-border p-2">
         <SearchInput
           value={q}
@@ -122,7 +128,7 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
                       type="button"
                       aria-label={`Models of ${p.handle}: ${modelsLabel(models)}`}
                       onClick={() => setPicking(p.handle)}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm text-fg-muted hover:bg-muted hover:text-fg"
+                      className="press inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm text-fg-muted hover:bg-muted hover:text-fg"
                     >
                       {modelsLabel(models)}
                       <ChevronDown size={15} aria-hidden />

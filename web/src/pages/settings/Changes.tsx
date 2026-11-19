@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import type { AuditEntry, Change } from "@/api/types";
 import { formatNumber } from "@/lib/format";
+import { rec, RecordLink, type SheetRecord } from "@/sheets/RecordLink";
 import { cn } from "@/ui/cn";
 import { ScrollArea } from "@/ui/ScrollArea";
 import type { ResourceOption } from "./api";
@@ -28,7 +29,7 @@ export function EntryChanges({ entry, labels }: { entry: AuditEntry; labels: Lab
         <div key={`${c.resource}/${c.id}`} className="min-w-0">
           {many && (
             <p className="mb-2 text-[13px] text-fg-muted">
-              {labels.get(c.resource)?.label ?? c.resource} <span className="font-medium text-fg">{c.name}</span> {opWord(c.op)}
+              {labels.get(c.resource)?.label ?? c.resource} <ChangedName resource={c.resource} id={c.id} name={c.name} className="font-medium text-fg" /> {opWord(c.op)}
             </p>
           )}
           <ChangeRows change={c} />
@@ -38,6 +39,50 @@ export function EntryChanges({ entry, labels }: { entry: AuditEntry; labels: Lab
         <p className="text-[13px] text-fg-muted">And {more} more records.</p>
       )}
     </div>
+  );
+}
+
+/**
+ * The sheet of the record a change names (UI ticket 11), from its resource and
+ * name: "acme/team-5" is acme's Upstream Key team-5; a Model Gap
+ * ("acme/team-5/gpt-x") or Endpoint Gap ("acme/team-5@main") is its key's.
+ * Records with no sheet (Admin Tokens, Failure Rules, settings...) give none.
+ */
+export function changedRecord(resource: string, id: string, name: string): SheetRecord | undefined {
+  const slash = name.indexOf("/");
+  const provider = slash > 0 ? name.slice(0, slash) : "";
+  const rest = slash > 0 ? name.slice(slash + 1) : "";
+  switch (resource) {
+    case "provider":
+      return rec.provider(name);
+    case "pool":
+      return rec.pool(name);
+    case "gateway_key":
+      return rec.gatewayKey(id || name);
+    case "upstream_key":
+      return provider && rest ? rec.key(provider, rest) : undefined;
+    case "endpoint":
+      return provider && rest ? rec.endpoint(provider, rest) : undefined;
+    case "model_gap": {
+      const key = rest.slice(0, rest.indexOf("/"));
+      return provider && key ? rec.key(provider, key) : undefined;
+    }
+    case "endpoint_gap": {
+      const key = rest.slice(0, rest.lastIndexOf("@"));
+      return provider && key ? rec.key(provider, key) : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** A changed record's name: a link to its sheet when it has one. */
+export function ChangedName({ resource, id, name, className }: { resource: string; id: string; name: string; className?: string }) {
+  const r = changedRecord(resource, id, name);
+  if (!r) return <span className={cn("truncate", className)}>{name}</span>;
+  return (
+    <RecordLink record={r} className={cn("align-bottom", className)}>
+      {name}
+    </RecordLink>
   );
 }
 

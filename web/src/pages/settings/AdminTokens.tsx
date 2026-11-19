@@ -9,6 +9,7 @@ import { useConfirm } from "@/ui/Confirm";
 import { CopyButton, useCopy } from "@/ui/CopyButton";
 import { type SortingState, DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
 import { Mono } from "@/ui/bits";
+import { riseIn } from "@/ui/Reveal";
 import { Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
 import { MenuItem, MenuSeparator } from "@/ui/Menu";
@@ -142,6 +143,7 @@ function SecretCell({ t }: { t: AdminToken }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{shortSecret(t.secret)}</Mono>
+      {/* Shown on the row's hover, at once (row hover is instant); where nothing hovers (a tablet's table), always (row-reveal). */}
       <CopyButton icon value={t.secret} what="Admin Token" label={`Copy ${t.name}`} className="row-reveal" />
     </span>
   );
@@ -208,8 +210,9 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
       <Dialog
         open={open}
         onOpenChange={close}
-        title="Admin Token created"
-        description={`Give it to ${token.name}. It works on every admin route, sent as a Bearer token.`}
+        // Shown once, in place of the form: title, text and token rise into place on one frame (UI ticket 20).
+        title={<span className={cn("block", riseIn)}>Admin Token created</span>}
+        description={<span className={cn("block", riseIn)}>Give it to {token.name}. It works on every admin route, sent as a Bearer token.</span>}
         footer={
           <>
             {entry && (
@@ -223,11 +226,13 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
           </>
         }
       >
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-subtle p-1.5 pl-3">
-          <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{token.secret}</Mono>
-          <CopyButton value={token.secret} what="Admin Token" />
+        <div className={riseIn}>
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-subtle p-1.5 pl-3">
+            <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{token.secret}</Mono>
+            <CopyButton value={token.secret} what="Admin Token" />
+          </div>
+          <p className="mt-3 text-[13px] text-fg-muted">You can copy it again later from its row.</p>
         </div>
-        <p className="mt-3 text-[13px] text-fg-muted">You can copy it again later from its row.</p>
         <SaveError save={undo} className="mt-3" />
       </Dialog>
     );

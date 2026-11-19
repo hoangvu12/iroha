@@ -300,6 +300,7 @@ function SecretCell({ k }: { k: GatewayKey }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{shortSecret(k.secret)}</Mono>
+      {/* Shown on the row's hover, at once (row hover is instant); where nothing hovers (a tablet's table), always (row-reveal). */}
       <CopyButton icon value={k.secret} what="Gateway Key" label={`Copy ${k.name}'s key`} className="row-reveal" />
     </span>
   );

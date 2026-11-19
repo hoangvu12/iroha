@@ -10,19 +10,22 @@ import { readStack, recordKey, type SheetRecord, writeStack } from "./records";
 
 export type SheetEntry = { id: number; record: SheetRecord };
 
-/** History state on an entry pushed by opening a sheet: the search it was opened from. */
-type Pushed = { sheetBack?: string };
+/** History state on an entry pushed by opening a sheet: the search it was opened from, and the params the link dropped. */
+type Pushed = { sheetBack?: string; dropped?: string[] };
 
 type Stack = {
   stack: SheetEntry[];
-  /** Open a record from `from` (a sheet's index, -1 for the page): closes the sheets above `from`, or focuses the record if it is open already. */
-  open: (record: SheetRecord, from?: number) => void;
+  /**
+   * Open a record from `from` (a sheet's index, -1 for the page): closes the sheets above `from`, or focuses the record if it is open already.
+   * `drop` names search params to remove on the way (a dialog the URL holds, which the sheet replaces; Back brings it back).
+   */
+  open: (record: SheetRecord, from?: number, drop?: string[]) => void;
   /** Close the sheet at `index` and every sheet above it (default: the top one). */
   close: (index?: number) => void;
   /** Show another record (or tab) in the sheet at `index`, without a history entry. */
   replace: (index: number, record: SheetRecord) => void;
-  /** The URL that shows the stack after `open(record, from)`, for links' href. */
-  hrefFor: (record: SheetRecord, from?: number) => string;
+  /** The URL that shows the stack after `open(record, from, drop)`, for links' href. */
+  hrefFor: (record: SheetRecord, from?: number, drop?: string[]) => string;
   /** The element focused when the sheet with this id was opened, for focus on close. */
   opener: (id: number) => Element | null;
   requestRows: RequestRecord[];
@@ -39,6 +42,15 @@ function toEntries(records: SheetRecord[], prev: SheetEntry[]): SheetEntry[] {
     const same = prev.find((e) => recordKey(e.record) === recordKey(record));
     return { id: same?.id ?? nextId++, record };
   });
+}
+
+/** `search` without the params in `drop`. */
+function without(search: string, drop?: string[]): string {
+  if (!drop?.length) return search;
+  const p = new URLSearchParams(search);
+  for (const k of drop) p.delete(k);
+  const s = p.toString();
+  return s ? `?${s}` : "";
 }
 
 const sameStack = (a: SheetEntry[], b: SheetEntry[]) =>
@@ -70,16 +82,17 @@ export function SheetStackProvider({ children }: { children: ReactNode }) {
   const openers = useRef(new Map<number, Element | null>());
 
   const write = useCallback(
-    (next: SheetEntry[], how: "push" | "close" | "replace") => {
+    (next: SheetEntry[], how: "push" | "close" | "replace", drop?: string[]) => {
       const { location: loc } = latest.current;
       setState((s) => ({ ...s, stack: next }));
       latest.current = { ...latest.current, stack: next };
-      const search = writeStack(loc.search, next.map((e) => e.record));
+      const search = writeStack(without(loc.search, drop), next.map((e) => e.record));
       const to = { pathname: loc.pathname, search, hash: loc.hash };
-      const pushedFrom = (loc.state as Pushed | null)?.sheetBack;
-      if (how === "push") navigate(to, { state: { sheetBack: loc.search } satisfies Pushed });
-      // Closing what this entry opened is going back, so Back never reopens it.
-      else if (how === "close" && pushedFrom !== undefined && pushedFrom === search) navigate(-1);
+      const pushed = loc.state as Pushed | null;
+      const pushedFrom = pushed?.sheetBack;
+      if (how === "push") navigate(to, { state: { sheetBack: loc.search, dropped: drop } satisfies Pushed });
+      // Closing what this entry opened is going back, so Back never reopens it (and a dialog the link left comes back).
+      else if (how === "close" && pushedFrom !== undefined && without(pushedFrom, pushed?.dropped) === search) navigate(-1);
       else navigate(to, { replace: true, state: loc.state });
     },
     [navigate],
@@ -97,14 +110,16 @@ export function SheetStackProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Stack>(
     () => ({
       stack,
-      open: (record, from = -1) => {
+      open: (record, from = -1, drop) => {
         const cur = latest.current.stack;
         const next = opened(cur, record, from);
-        if (sameStack(next, cur)) return;
+        const dropping = !!drop?.some((k) => new URLSearchParams(latest.current.location.search).has(k));
+        if (sameStack(next, cur) && !dropping) return;
         const added = next[next.length - 1];
         const isNew = !cur.some((e) => e.id === added.id);
         if (isNew) openers.current.set(added.id, document.activeElement);
-        write(next, isNew ? "push" : "close");
+        // Leaving a dialog for a sheet is a step forward too: Back returns to the dialog.
+        write(next, isNew || dropping ? "push" : "close", drop);
       },
       close: (index) => {
         const cur = latest.current.stack;
@@ -117,9 +132,9 @@ export function SheetStackProvider({ children }: { children: ReactNode }) {
         const next = cur.map((e, i) => (i === index ? { id: e.id, record } : e));
         if (!sameStack(next, cur)) write(next, "replace");
       },
-      hrefFor: (record, from = -1) => {
+      hrefFor: (record, from = -1, drop) => {
         const loc = latest.current.location;
-        return loc.pathname + writeStack(loc.search, opened(latest.current.stack, record, from).map((e) => e.record));
+        return loc.pathname + writeStack(without(loc.search, drop), opened(latest.current.stack, record, from).map((e) => e.record));
       },
       opener: (id) => openers.current.get(id) ?? null,
       requestRows,

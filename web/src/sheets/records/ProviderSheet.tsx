@@ -109,7 +109,7 @@ export default function ProviderSheet({ record }: SheetBodyProps<"provider">) {
               </span>
             </Fact>
             <Fact label="Upstream Keys">
-              {counts ? `${formatNumber(counts.total)}: ${formatNumber(counts.active)} active` : formatNumber(pr.upstream_key_count)}
+              {counts ? `${formatNumber(counts.total)}, ${formatNumber(counts.active)} active` : formatNumber(pr.upstream_key_count)}
             </Fact>
             <Fact label="Not usable now">
               {counts ? (counts.cooling + counts.invalid + counts.disabled > 0 ? `${counts.cooling} cooling, ${counts.invalid} invalid, ${counts.disabled} off` : "None") : none}

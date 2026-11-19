@@ -4,6 +4,10 @@
 
 **Blocked by:** none
 
-**Status:** needs-decision (small once agreed)
+**Status:** closed (won't do)
 
 - [ ] `TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited` (or a new test) asserts the entry's before/after lack the header value and revert restores it
+
+## Comments
+
+- Closed by the Owner (2026-11-19): not worth it; static header values stay visible in Audit Entries.

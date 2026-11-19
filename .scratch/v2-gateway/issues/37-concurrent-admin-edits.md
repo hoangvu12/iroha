@@ -4,6 +4,10 @@
 
 **Blocked by:** none
 
-**Status:** needs-decision
+**Status:** closed (won't do)
 
 - [ ] If built: audit test with two actors racing one record; conventions skill text (`10_conventions.md`) says how to retry
+
+## Comments
+
+- Closed by the Owner (2026-11-19): last-write-wins is accepted; concurrent edits are rare and every change is a revertible Audit Entry.

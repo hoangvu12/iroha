@@ -70,6 +70,8 @@ export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   label: string; // accessible name and tooltip
   size?: "sm" | "md";
   bordered?: boolean;
+  // A disabled icon button stays focusable, so its tooltip can still be reached.
+  focusableWhenDisabled?: boolean;
 };
 
 export function iconButtonClass(size: "sm" | "md" = "md", bordered?: boolean, className?: string) {

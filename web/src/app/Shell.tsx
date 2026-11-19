@@ -9,6 +9,8 @@ import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, 
 import { ScrollArea } from "@/ui/ScrollArea";
 import { notify } from "@/ui/toast";
 import { ChatPanel } from "@/pages/chat/ChatPanel";
+import { SheetStack } from "@/sheets/SheetStack";
+import { SheetStackProvider } from "@/sheets/stack";
 import { Avatar, BANNER_SRC } from "./brand";
 import { useChatPanel } from "./chat-panel";
 import type { HealthState } from "./health";
@@ -23,9 +25,17 @@ export const CHAT_WIDTH = 460;
 
 /**
  * The signed-in app: sidebar (desktop) or bottom tab bar (phone), the page
- * in the middle, and the chat panel slot on the right.
+ * in the middle, the chat panel slot on the right, and the record sheets.
  */
 export function Shell() {
+  return (
+    <SheetStackProvider>
+      <ShellFrame />
+    </SheetStackProvider>
+  );
+}
+
+function ShellFrame() {
   useNavShortcuts();
   const phone = useIsPhone();
   const chat = useChatPanel();
@@ -59,6 +69,8 @@ export function Shell() {
         </aside>
       )}
       {phone && <TabBar />}
+      {/* Record sheets open beside the page, left of the chat panel (UI ticket 10). */}
+      <SheetStack right={chat.isOpen && !chatPage ? CHAT_WIDTH : 0} />
     </div>
   );
 }

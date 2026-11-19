@@ -55,10 +55,10 @@ func (tr *Trail) List(ctx context.Context, f Filter) ([]Entry, error) {
 	var args []any
 	add := func(cond string, a ...any) { where, args = append(where, cond), append(args, a...) }
 	if !f.Since.IsZero() {
-		add("e.at >= ?", store.Millis(f.Since))
+		add("e.created_at >= ?", store.Millis(f.Since))
 	}
 	if !f.Until.IsZero() {
-		add("e.at < ?", store.Millis(f.Until))
+		add("e.created_at < ?", store.Millis(f.Until))
 	}
 	if f.Actor != "" {
 		add("(e.actor_id = ? OR e.actor_name = ?)", f.Actor, f.Actor)
@@ -158,7 +158,7 @@ func (tr *Trail) Filters(ctx context.Context) (FilterOptions, error) {
 	out := FilterOptions{Actors: []ActorOption{}, Resources: []ResourceOption{}}
 	// Owner sessions are one actor; each Admin Token is one actor by ID,
 	// named as in its latest entry.
-	rows, err := tr.db.QueryContext(ctx, `SELECT g.kind, g.who, e.actor_name, g.n, e.at FROM (
+	rows, err := tr.db.QueryContext(ctx, `SELECT g.kind, g.who, e.actor_name, g.n, e.created_at FROM (
 			SELECT actor_kind AS kind, CASE WHEN actor_kind = ? THEN '' ELSE actor_id END AS who, count(*) AS n, max(rowid) AS last
 			FROM audit_entries GROUP BY kind, who
 		) g JOIN audit_entries e ON e.rowid = g.last
@@ -218,7 +218,7 @@ func (tr *Trail) read(ctx context.Context, q queryer, id string) (Entry, []store
 	var e Entry
 	var at int64
 	var irreversible, revertOf, revertedBy sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT id, at, actor_kind, actor_id, actor_name, action, summary, irreversible, revert_of, reverted_by
+	err := q.QueryRowContext(ctx, `SELECT id, created_at, actor_kind, actor_id, actor_name, action, summary, irreversible, revert_of, reverted_by
 		FROM audit_entries WHERE id = ?`, id).
 		Scan(&e.ID, &at, &e.Actor.Kind, &e.Actor.ID, &e.Actor.Name, &e.Action, &e.Summary, &irreversible, &revertOf, &revertedBy)
 	if errors.Is(err, sql.ErrNoRows) {

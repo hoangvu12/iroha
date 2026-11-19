@@ -372,7 +372,7 @@ func (m *Mutation) write(changes []stored, revertOf string) (*committed, error) 
 		rev = revertOf
 	}
 	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO audit_entries
-		(id, at, actor_kind, actor_id, actor_name, action, summary, irreversible, revert_of)
+		(id, created_at, actor_kind, actor_id, actor_name, action, summary, irreversible, revert_of)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.id, store.Millis(m.Now), m.Actor.Kind, m.Actor.ID, m.Actor.Name, m.action, summary, irreversible, rev); err != nil {
 		return nil, err

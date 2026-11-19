@@ -60,8 +60,8 @@ var kinds = []kind{
 	},
 	{
 		detail: "log_events", label: "log events", setting: LogsDays,
-		count:  `SELECT count(*) FROM log_events WHERE at < ?`,
-		delete: `DELETE FROM log_events WHERE id IN (SELECT id FROM log_events WHERE at < ? LIMIT ?)`,
+		count:  `SELECT count(*) FROM log_events WHERE logged_at < ?`,
+		delete: `DELETE FROM log_events WHERE id IN (SELECT id FROM log_events WHERE logged_at < ? LIMIT ?)`,
 	},
 	{
 		// An Owner session stops working when revoked or expired; it stays

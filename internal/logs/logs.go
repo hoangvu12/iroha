@@ -147,7 +147,7 @@ func (l *Log) write(batch []item) {
 	}
 	if len(rows) > 0 && l.db != nil {
 		err := l.db.Tx(context.Background(), func(tx *sql.Tx) error {
-			stmt, err := tx.Prepare(`INSERT INTO log_events (at, level, kind, message, request_id, provider, attrs) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+			stmt, err := tx.Prepare(`INSERT INTO log_events (logged_at, level, kind, message, request_id, provider, attrs) VALUES (?, ?, ?, ?, ?, ?, ?)`)
 			if err != nil {
 				return err
 			}

@@ -52,10 +52,10 @@ func (l *Log) Query(ctx context.Context, f Filter) ([]Event, error) {
 	var where []string
 	var args []any
 	if !f.Since.IsZero() {
-		where, args = append(where, "at >= ?"), append(args, store.Millis(f.Since))
+		where, args = append(where, "logged_at >= ?"), append(args, store.Millis(f.Since))
 	}
 	if !f.Until.IsZero() {
-		where, args = append(where, "at < ?"), append(args, store.Millis(f.Until))
+		where, args = append(where, "logged_at < ?"), append(args, store.Millis(f.Until))
 	}
 	if f.MinLevel != nil {
 		where, args = append(where, "level >= ?"), append(args, int(*f.MinLevel))
@@ -80,7 +80,7 @@ func (l *Log) Query(ctx context.Context, f Filter) ([]Event, error) {
 	if f.Before > 0 {
 		where, args = append(where, "id < ?"), append(args, f.Before)
 	}
-	q := "SELECT id, at, level, kind, message, request_id, provider, attrs FROM log_events"
+	q := "SELECT id, logged_at, level, kind, message, request_id, provider, attrs FROM log_events"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}

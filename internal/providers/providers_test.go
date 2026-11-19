@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/providers"
@@ -127,6 +128,121 @@ func TestEndpointsAreCreatedByNameValidatedAndRevertible(t *testing.T) {
 	srv.Admin.Post("/api/providers/other/endpoints", map[string]any{"url": "https://o.example.com/v1", "shape": "anthropic-messages"}).Expect(201)
 	if e := srv.Admin.Get("/api/providers/other/endpoints/" + ep.ID).Expect(404).Err(); !strings.Contains(e.Hint, "/api/providers/other/endpoints") {
 		t.Fatalf("another Provider's Endpoint: %+v", e)
+	}
+}
+
+func TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
+	base := "/api/providers/acme/endpoints"
+	ep := func(extra map[string]any) map[string]any {
+		m := map[string]any{"name": "eu", "url": "https://eu.example.com/v1", "shape": "openai-chat"}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+	for _, bad := range []map[string]any{
+		{"auth_style": "basic"},
+		{"auth_style": "header"},
+		{"auth_style": "query", "auth_param": "a key"},
+		{"auth_style": "bearer", "auth_param": "x"},
+		{"auth_style": "header", "auth_param": "Content-Length"},
+		{"static_headers": map[string]string{"Authorization": "Bearer fixed"}},
+		{"static_headers": map[string]string{"Host": "evil.example"}},
+		{"static_headers": map[string]string{"X-A": "line\r\nbreak"}},
+		{"renames": map[string]string{"glm": ""}},
+		{"renames": map[string]string{" glm": "x"}},
+	} {
+		if e := srv.Admin.Post(base, ep(bad)).Expect(400).Err(); e.Hint == "" {
+			t.Errorf("%v: no hint", bad)
+		}
+	}
+
+	var created providers.EndpointResult
+	srv.Admin.Post(base, ep(map[string]any{"auth_style": "header", "auth_param": "api-key",
+		"static_headers": map[string]string{"HTTP-Referer": "https://example.com"}, "renames": map[string]string{"glm-4.6": "glm-4.6-fp8"}})).Expect(201).JSON(&created)
+	e := created.Endpoint
+	if e.AuthStyle != "header" || e.AuthParam != "api-key" || e.StaticHeaders["HTTP-Referer"] != "https://example.com" || e.Renames["glm-4.6"] != "glm-4.6-fp8" {
+		t.Fatalf("created = %+v", e)
+	}
+	// A static Authorization header is fine when the key is not sent there.
+	var edited providers.EndpointResult
+	srv.Admin.Patch(base+"/eu", map[string]any{"auth_style": "none", "static_headers": map[string]string{"Authorization": "Bearer relay-fixed"}}).Expect(200).JSON(&edited)
+	if edited.Endpoint.AuthStyle != "none" || edited.Endpoint.AuthParam != "" || !slices.Equal(edited.Changes[0].Fields, []string{"auth_param", "auth_style", "static_headers"}) {
+		t.Fatalf("edit = %+v", edited)
+	}
+	var unchanged providers.EndpointResult
+	srv.Admin.Post(base, map[string]any{"name": "eu", "auth_style": "none"}).Expect(200).JSON(&unchanged)
+	if unchanged.Outcome != "unchanged" {
+		t.Fatalf("repeat = %+v", unchanged)
+	}
+	srv.Admin.Post("/api/audit-entries/"+edited.AuditEntry+"/revert", nil).Expect(200)
+	var back providers.Endpoint
+	srv.Admin.Get(base + "/eu").Expect(200).JSON(&back)
+	if back.AuthStyle != "header" || back.AuthParam != "api-key" || back.StaticHeaders["Authorization"] != "" || back.Renames["glm-4.6"] != "glm-4.6-fp8" {
+		t.Fatalf("after revert = %+v", back)
+	}
+	var entries audit.EntryPage
+	srv.Admin.Get("/api/audit-entries?record=acme/eu").Expect(200).JSON(&entries)
+	if len(entries.Entries) != 3 { // created, edited, revert
+		t.Fatalf("entries for acme/eu = %d", len(entries.Entries))
+	}
+}
+
+func TestKeysAreRestrictedToEndpointsAndEndpointDeletesKeepThemConsistent(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
+	for _, n := range []string{"eu", "us"} {
+		srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": n, "url": "https://" + n + ".example.com/v1", "shape": "openai-chat"}).Expect(201)
+		srv.Clock.Advance(time.Second) // Endpoints keep their creation order, also across a revert
+	}
+	keys := "/api/providers/acme/keys"
+	var k providers.UpstreamKeyResult
+	srv.Admin.Post(keys, map[string]any{"name": "plan", "secret": "sk-test-plan", "endpoints": []string{"eu"}}).Expect(201).JSON(&k)
+	if !slices.Equal(k.UpstreamKey.Endpoints, []string{"eu"}) {
+		t.Fatalf("created = %+v", k.UpstreamKey)
+	}
+	if e := srv.Admin.Post(keys, map[string]any{"name": "x", "secret": "sk-test-x", "endpoints": []string{"mars"}}).Expect(404).Err(); !strings.Contains(e.Hint, "/api/providers/acme/endpoints") {
+		t.Fatalf("unknown endpoint: %+v", e)
+	}
+	// Pasting the same secret with a restriction restricts the existing key.
+	srv.Admin.Post(keys, map[string]any{"secret": "sk-test-plan", "endpoints": []string{"eu", "us", "eu"}}).Expect(200).JSON(&k)
+	if k.Outcome != "updated" || !slices.Equal(k.UpstreamKey.Endpoints, []string{"eu", "us"}) {
+		t.Fatalf("restricted by secret = %+v", k)
+	}
+	srv.Admin.Patch(keys+"/plan", map[string]any{"endpoints": []string{"eu"}}).Expect(200)
+
+	// An Endpoint a key may use alone cannot go.
+	e := srv.Admin.Delete("/api/providers/acme/endpoints/eu").Expect(409).Err()
+	if e.Code != "endpoint_in_use" || !strings.Contains(e.Message, "plan") || e.Hint == "" {
+		t.Fatalf("delete in use: %+v", e)
+	}
+	// With another Endpoint left, the delete takes eu out of the key's
+	// restriction in the same Audit Entry, and its revert puts both back.
+	srv.Admin.Patch(keys+"/plan", map[string]any{"endpoints": []string{"eu", "us"}}).Expect(200)
+	var del providers.EndpointResult
+	srv.Admin.Delete("/api/providers/acme/endpoints/eu").Expect(200).JSON(&del)
+	if len(del.Changes) != 2 || del.Changes[1].Name != "acme/plan" {
+		t.Fatalf("delete = %+v", del)
+	}
+	var got providers.UpstreamKey
+	srv.Admin.Get(keys + "/plan").Expect(200).JSON(&got)
+	if !slices.Equal(got.Endpoints, []string{"us"}) {
+		t.Fatalf("after delete = %+v", got.Endpoints)
+	}
+	srv.Admin.Post("/api/audit-entries/"+del.AuditEntry+"/revert", nil).Expect(200)
+	srv.Admin.Get(keys + "/plan").Expect(200).JSON(&got)
+	if !slices.Equal(got.Endpoints, []string{"eu", "us"}) {
+		t.Fatalf("after revert = %+v", got.Endpoints)
+	}
+
+	// [] lifts the restriction; the key list shows it.
+	srv.Admin.Patch(keys+"/plan", map[string]any{"endpoints": []string{}}).Expect(200)
+	var list providers.UpstreamKeyList
+	srv.Admin.Get(keys).Expect(200).JSON(&list)
+	if len(list.UpstreamKeys) != 1 || list.UpstreamKeys[0].Endpoints == nil || len(list.UpstreamKeys[0].Endpoints) != 0 {
+		t.Fatalf("list = %+v", list)
 	}
 }
 

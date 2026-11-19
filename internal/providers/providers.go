@@ -67,12 +67,16 @@ func EffectiveBudget(maxAttempts int, firstByte time.Duration) (int, time.Durati
 
 // Endpoint is an Endpoint as the API returns it.
 type Endpoint struct {
-	ID        string    `json:"id"`
-	Provider  string    `json:"provider" doc:"Handle of the Provider."`
-	Name      string    `json:"name"`
-	URL       string    `json:"url" doc:"Base URL including the version path; Iroha appends the operation path such as /chat/completions."`
-	Shape     string    `json:"shape" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks."`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string            `json:"id"`
+	Provider      string            `json:"provider" doc:"Handle of the Provider."`
+	Name          string            `json:"name"`
+	URL           string            `json:"url" doc:"Base URL including the version path; Iroha appends the operation path such as /chat/completions."`
+	Shape         string            `json:"shape" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks."`
+	AuthStyle     string            `json:"auth_style" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent: Authorization: Bearer, an x-api-key header, the header named auth_param, the query parameter named auth_param, or not at all. A key with an empty secret sends nothing in any style."`
+	AuthParam     string            `json:"auth_param,omitempty" doc:"Header name (auth_style header) or query parameter name (auth_style query)."`
+	StaticHeaders map[string]string `json:"static_headers" doc:"Headers sent on every Attempt to this Endpoint; they replace a Caller header of the same name."`
+	Renames       map[string]string `json:"renames" doc:"Model renames: the model a Caller names -> the model this URL is sent. Applied per Attempt, after the Endpoint is chosen."`
+	CreatedAt     time.Time         `json:"created_at"`
 }
 
 // UpstreamKey is an Upstream Key as the API returns it, secret included.
@@ -84,6 +88,7 @@ type UpstreamKey struct {
 	Enabled       bool                    `json:"enabled" doc:"false: the Owner disabled the key; its state is disabled."`
 	State         keystate.State          `json:"state" doc:"The key's one Key State and why it is in it."`
 	CoolingModels []keystate.ModelCooling `json:"cooling_models" doc:"Models this key is cooling for while it serves the others."`
+	Endpoints     []string                `json:"endpoints" doc:"Names of the Endpoints this key is restricted to; empty: every Endpoint of the Provider."`
 	CreatedAt     time.Time               `json:"created_at"`
 	LastUsedAt    *time.Time              `json:"last_used_at,omitempty" doc:"Last Attempt with this key, to the minute; absent when never used."`
 }
@@ -153,14 +158,48 @@ func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	return p, err
 }
 
-const endpointColumns = `e.id, p.handle, e.name, e.url, e.shape, e.created_at`
+const endpointColumns = `e.id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.created_at`
 
 func scanEndpoint(row interface{ Scan(...any) error }) (Endpoint, error) {
 	var e Endpoint
 	var created int64
-	err := row.Scan(&e.ID, &e.Provider, &e.Name, &e.URL, &e.Shape, &created)
+	var headers, renames string
+	if err := row.Scan(&e.ID, &e.Provider, &e.Name, &e.URL, &e.Shape, &e.AuthStyle, &e.AuthParam, &headers, &renames, &created); err != nil {
+		return e, err
+	}
 	e.CreatedAt = store.FromMillis(created)
-	return e, err
+	var err error
+	if e.StaticHeaders, err = decodeMap(headers); err != nil {
+		return e, fmt.Errorf("endpoint %s static_headers: %w", e.ID, err)
+	}
+	if e.Renames, err = decodeMap(renames); err != nil {
+		return e, fmt.Errorf("endpoint %s renames: %w", e.ID, err)
+	}
+	return e, nil
+}
+
+// decodeMap reads a stored JSON object of strings; never nil.
+func decodeMap(s string) (map[string]string, error) {
+	m := map[string]string{}
+	if s == "" {
+		return m, nil
+	}
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		m = map[string]string{}
+	}
+	return m, nil
+}
+
+// encodeMap is the stored form of a map of strings ("{}" when empty).
+func encodeMap(m map[string]string) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
 }
 
 func listEndpoints(ctx context.Context, q queryer, providerID string) ([]Endpoint, error) {
@@ -222,6 +261,9 @@ func readKey(ctx context.Context, q queryer, id string, at time.Time) (UpstreamK
 	if err != nil {
 		return k, err
 	}
+	if k.Endpoints, err = keyEndpointNames(ctx, q, id); err != nil {
+		return k, err
+	}
 	return withState(k, d, rec, at), nil
 }
 
@@ -253,8 +295,16 @@ func listKeys(ctx context.Context, q queryer, providerID string, at time.Time) (
 	if err != nil {
 		return nil, err
 	}
+	names, err := keyEndpointNamesByKey(ctx, q, providerID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]UpstreamKey, 0, len(items))
 	for _, it := range items {
+		it.k.Endpoints = names[it.k.ID]
+		if it.k.Endpoints == nil {
+			it.k.Endpoints = []string{}
+		}
 		out = append(out, withState(it.k, it.d, recs[it.k.ID], at))
 	}
 	return out, nil
@@ -333,11 +383,12 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 			return r, false, err
 		}
 		e.Shape = shape.Shape(sh)
-		if err := json.Unmarshal([]byte(headers), &e.StaticHeaders); err != nil {
+		var err error
+		if e.StaticHeaders, err = decodeMap(headers); err != nil {
 			rows.Close()
 			return r, false, fmt.Errorf("endpoint %s static_headers: %w", e.ID, err)
 		}
-		if err := json.Unmarshal([]byte(renames), &e.Renames); err != nil {
+		if e.Renames, err = decodeMap(renames); err != nil {
 			rows.Close()
 			return r, false, fmt.Errorf("endpoint %s renames: %w", e.ID, err)
 		}
@@ -363,12 +414,17 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 	if err := rows.Err(); err != nil {
 		return r, false, err
 	}
+	restricted, err := keyEndpointIDs(ctx, s.db, r.ID)
+	if err != nil {
+		return r, false, err
+	}
 	recs, err := keystate.ForProvider(ctx, s.db, r.ID)
 	if err != nil {
 		return r, false, err
 	}
 	for i := range r.Keys {
 		k := &r.Keys[i]
+		k.Endpoints = restricted[k.ID]
 		rec, ok := recs[k.ID]
 		if !ok {
 			continue

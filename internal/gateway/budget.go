@@ -136,7 +136,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest)
 // to the key's Key State and fills in the Attempt's rule, outcome and action.
 func (x *exchange) classify(set *rules.Set, c planner.Candidate, a requests.Attempt, f *rules.Failure) tried {
 	g := x.g
-	d := set.Classify(*f, g.clock.Now())
+	d := noCredential(set.Classify(*f, g.clock.Now()), c)
 	t := tried{attempt: a, decision: d, failure: f}
 	k := keystate.Key{ID: c.Key.ID, Name: c.Key.Name, Provider: c.Provider.Handle}
 	switch d.Outcome {
@@ -160,6 +160,17 @@ func (x *exchange) classify(set *rules.Set, c planner.Candidate, a requests.Atte
 		"upstream_key", c.Key.Name, "model", c.WireModel, "status", f.Status, "reason", d.Reason}
 	g.log.Info("Failure Rule matched", attrs...)
 	return t
+}
+
+// noCredential keeps a keyless Attempt (empty secret, or auth style none)
+// from making its key invalid: an auth refusal of a request that carried no
+// credential says the Endpoint wants one, not that the key is bad.
+func noCredential(d rules.Decision, c planner.Candidate) rules.Decision {
+	if d.Outcome == rules.Invalid && c.Key.Keyless(c.Endpoint) {
+		d.Outcome = rules.RetryElsewhere
+		d.Reason += " (no credential was sent, so the key is not invalid)"
+	}
+	return d
 }
 
 // noteProvider records the serving Provider as soon as the first Attempt

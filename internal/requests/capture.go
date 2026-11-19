@@ -134,6 +134,18 @@ func (rc *Recorder) SaveCapture(ctx context.Context, id string, sh shape.Shape, 
 	})
 }
 
+// Answer is the response captured so far: its status and body, a stream
+// reassembled into one answer of Shape sh (as SaveCapture stores it).
+func (c *Capture) Answer(sh shape.Shape) (int, []byte) {
+	c.mu.Lock()
+	body, status, respType := bytes.Clone(c.resp.buf.Bytes()), c.status, c.respType
+	c.mu.Unlock()
+	if isEventStream(respType) {
+		body = reassemble(sh, body)
+	}
+	return status, body
+}
+
 func isEventStream(contentType string) bool {
 	mt, _, err := mime.ParseMediaType(contentType)
 	return err == nil && mt == "text/event-stream"

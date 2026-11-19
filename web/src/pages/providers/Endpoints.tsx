@@ -145,7 +145,7 @@ const AUTH: { value: AuthStyle; label: string }[] = [
   { value: "x-api-key", label: "x-api-key: <key>" },
   { value: "header", label: "A header you name" },
   { value: "query", label: "A query parameter you name" },
-  { value: "none", label: "Not sent" },
+  { value: "none", label: "Not sent (no key needed)" },
 ];
 
 const linesToMap = (text: string, sep: RegExp) => {
@@ -218,7 +218,8 @@ function EndpointDialog({
     try {
       const res = endpoint ? await calls.updateEndpoint(handle, endpoint.name, body) : await calls.createEndpoint(handle, body);
       refresh();
-      notifyChange(endpoint ? `Endpoint ${res.endpoint.name} saved` : `Endpoint ${res.endpoint.name} added`, res, { onUndone: refresh });
+      const what = endpoint ? `Endpoint ${res.endpoint.name} saved` : `Endpoint ${res.endpoint.name} added`;
+      notifyChange(res.keyless_key ? `${what}, with a keyless key` : what, res, { onUndone: refresh });
       onOpenChange(false);
     } catch (e) {
       setError(errorText(e));

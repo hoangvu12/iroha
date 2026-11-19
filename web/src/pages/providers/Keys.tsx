@@ -170,6 +170,21 @@ export function KeysTab({
     }
   };
 
+  // A keyless key: no secret, so Iroha sends no credential with it.
+  const addKeyless = async () => {
+    setBusy("keyless");
+    try {
+      const res = await calls.addKeylessKey(handle, keylessName(all));
+      refresh();
+      setAdding(false);
+      notifyChange(res.upstream_key.name === "keyless" ? "Keyless key added" : `Keyless key ${res.upstream_key.name} added`, res, { onUndone: refresh });
+    } catch (e) {
+      notify.failure("Couldn't add a keyless key", e);
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
   const keyActions: KeyActions = {
     open: (k) => setParam("key", k.name),
     test: (k) => void test([k.name]),
@@ -279,11 +294,16 @@ export function KeysTab({
       <EmptyState
         icon={KeyRound}
         title="No Upstream Keys yet"
-        description={`Paste the keys ${handle} issued you, one per line. Iroha names them and spreads Requests across them.`}
+        description={`Paste the keys ${handle} issued you, one per line. If its Endpoints need no key, add one keyless key instead.`}
         action={
-          <Button variant="primary" onClick={() => setAdding(true)}>
-            Add keys
-          </Button>
+          <span className="flex flex-wrap justify-center gap-2">
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              Add keys
+            </Button>
+            <Button onClick={() => void addKeyless()} loading={busy === "keyless"}>
+              Add keyless key
+            </Button>
+          </span>
         }
       />
     );
@@ -378,11 +398,18 @@ export function KeysTab({
       {body}
       {all.length > 0 && shown.length > 0 && (
         <p className="mt-4 text-[13px] text-fg-muted">
-          {shown.length === all.length ? `${all.length} keys` : `${shown.length} of ${all.length} keys`}. Hover a state for its reason; shift-click to select a range.
+          {shown.length === all.length ? `${all.length} key${all.length === 1 ? "" : "s"}` : `${shown.length} of ${all.length} keys`}. Hover a state for its reason; shift-click to select a range.
         </p>
       )}
 
-      <AddKeysDialog handle={handle} open={adding} onOpenChange={setAdding} onResults={setResults} />
+      <AddKeysDialog
+        handle={handle}
+        open={adding}
+        onOpenChange={setAdding}
+        onResults={setResults}
+        onKeyless={() => void addKeyless()}
+        keylessPending={busy === "keyless"}
+      />
       <KeyDialog
         handle={handle}
         k={detail}
@@ -686,6 +713,15 @@ function ResultsDialog({ results, onClose }: { results?: Results; onClose: () =>
 
 // ---- Add keys (C11) ----
 
+/** The first free name for a keyless key: keyless, keyless-2, ... */
+function keylessName(keys: UpstreamKey[]): string {
+  const taken = new Set(keys.map((k) => k.name));
+  if (!taken.has("keyless")) return "keyless";
+  let n = 2;
+  while (taken.has(`keyless-${n}`)) n++;
+  return `keyless-${n}`;
+}
+
 /** Keys pasted one per line (or separated by spaces or commas), deduplicated. */
 function parseKeys(text: string): string[] {
   const seen = new Set<string>();
@@ -701,11 +737,15 @@ function AddKeysDialog({
   open,
   onOpenChange,
   onResults,
+  onKeyless,
+  keylessPending,
 }: {
   handle: string;
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onResults: (r: Results) => void;
+  onKeyless: () => void;
+  keylessPending: boolean;
 }) {
   const refresh = useRefresh();
   const [text, setText] = useState("");
@@ -837,6 +877,15 @@ function AddKeysDialog({
         <Switch checked={testAfter} onChange={setTestAfter} label="Test each new key after adding" />
         Test each new key after adding
       </label>
+      {secrets.length === 0 && (
+        <p className="mt-4 text-[14px] text-fg-muted">
+          No key needed?{" "}
+          <button type="button" className="text-info hover:underline disabled:opacity-60" disabled={keylessPending} onClick={onKeyless}>
+            Add a keyless key
+          </button>{" "}
+          instead: Iroha then sends no credential.
+        </p>
+      )}
       {error && <p className="mt-3 text-[13px] text-danger-text">{error}</p>}
     </Dialog>
   );
@@ -1030,11 +1079,11 @@ function KeyDialog({
         <section>
           <h3 className="mb-2 text-[14px] font-semibold">Key</h3>
           <div className="flex items-center gap-1 rounded-lg border border-border bg-subtle py-1 pl-3 pr-1">
-            <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{k.secret ? (shown ? k.secret : maskSecret(k.secret)) : "No secret: a keyless slot"}</Mono>
+            <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{k.secret ? (shown ? k.secret : maskSecret(k.secret)) : "Keyless: no credential is sent"}</Mono>
             {k.secret && <IconButton icon={shown ? EyeOff : Eye} label={shown ? "Hide the key" : "Show the key"} size="sm" onClick={() => setShown((x) => !x)} />}
             {k.secret && <IconButton icon={Copy} label="Copy the key" size="sm" onClick={() => void copyText(k.secret, "Key")} />}
             <Button size="sm" variant="ghost" onClick={() => setSecret(secret === undefined ? "" : undefined)}>
-              {secret === undefined ? "Replace" : "Cancel"}
+              {secret !== undefined ? "Cancel" : k.secret ? "Replace" : "Add a secret"}
             </Button>
           </div>
           {secret !== undefined && (

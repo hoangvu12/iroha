@@ -193,7 +193,7 @@ export type Pool = {
   created_at: string;
 };
 
-export type KeyCounts = { total: number; active: number; disabled: number; invalid: number; cooling: number };
+export type KeyCounts = { total: number; active: number; disabled: number; invalid: number; cooling: number; keyless: number };
 export type Traffic = { requests: number; succeeded: number; failed: number; last_request_at?: string };
 export type ProviderOverview = { provider: string; keys: KeyCounts; models: number } & Traffic;
 export type PoolOverview = { pool: string; served_by: { provider: string; requests: number; succeeded: number }[] } & Traffic;
@@ -232,7 +232,8 @@ export type RoutePreview = {
 export type GatewayKeyLite = { id: string; name: string; revoked: boolean; scope: { all: boolean; pools?: string[] } };
 
 export type ProviderResult = AuditResult & { provider: Provider };
-export type EndpointResult = AuditResult & { endpoint: Endpoint };
+/** keyless_key: the keyless key added with the Endpoint (auth style none on a Provider holding no keys). */
+export type EndpointResult = AuditResult & { endpoint: Endpoint; keyless_key?: UpstreamKey };
 export type KeyResult = AuditResult & { upstream_key: UpstreamKey };
 export type ModelResult = AuditResult & { model: Model };
 export type RuleResult = AuditResult & { rule: Rule; replay?: Replay };
@@ -379,6 +380,8 @@ export const calls = {
   updateEndpoint: (h: string, name: string, body: Partial<Endpoint>) => api.patch<EndpointResult>(`${P(h)}/endpoints/${seg(name)}`, body),
   deleteEndpoint: (h: string, name: string) => api.delete<EndpointResult>(`${P(h)}/endpoints/${seg(name)}`),
 
+  /** A key with no secret: Iroha sends no credential with it. */
+  addKeylessKey: (h: string, name: string) => api.post<KeyResult>(`${P(h)}/keys`, { name }),
   addKeys: (h: string, items: { secret: string }[], dryRun?: boolean) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }, { query: dry(dryRun) }),
   restrictKeys: (h: string, items: { name: string; endpoints: string[] }[]) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }),
   updateKey: (h: string, key: string, body: Partial<Pick<UpstreamKey, "name" | "secret" | "enabled" | "endpoints">>) =>
@@ -405,7 +408,7 @@ export const calls = {
 
 /** "sk-…a91f": enough to recognise a key without showing it. Keyless slots say so. */
 export function maskSecret(s: string): string {
-  if (!s) return "keyless";
+  if (!s) return "no secret";
   const dash = s.indexOf("-");
   const prefix = dash > 0 && dash <= 4 ? s.slice(0, dash + 1) : "";
   return `${prefix}…${s.slice(-4)}`;

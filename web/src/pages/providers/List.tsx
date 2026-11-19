@@ -15,7 +15,7 @@ import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notifyChange } from "@/ui/toast";
 import type { Pool, PoolOverview, Provider, ProviderOverview, Shape } from "./api";
 import { calls, errorText, natural, SHAPES, successRate, useOverview, usePools, useProviders, useRefresh } from "./api";
-import { Pill, PoolTile, ProviderTile, Select } from "./controls";
+import { Pill, PoolTile, ProviderTile, Select, Switch } from "./controls";
 
 /** /providers: every Provider, then every Model Pool (C05; phones C30). */
 export function ProvidersList() {
@@ -334,6 +334,7 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
   const [handle, setHandle] = useState("");
   const [url, setUrl] = useState("");
   const [shape, setShape] = useState<Shape>("openai-chat");
+  const [keyless, setKeyless] = useState(false);
   const [error, setError] = useState<{ handle?: string; url?: string; other?: string }>({});
   const [pending, setPending] = useState(false);
 
@@ -343,6 +344,7 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
       setHandle("");
       setUrl("");
       setShape("openai-chat");
+      setKeyless(false);
       setError({});
     }
   };
@@ -369,9 +371,12 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
     setError({});
     try {
       const res = await calls.createProvider({ handle: h });
+      let added: string | undefined;
       if (u) {
         try {
-          await calls.createEndpoint(h, { url: u, shape });
+          // Auth style none on a Provider with no keys also adds its keyless key.
+          const ep = await calls.createEndpoint(h, keyless ? { url: u, shape, auth_style: "none" } : { url: u, shape });
+          added = ep.keyless_key?.name;
         } catch (e) {
           notifyChange(`Provider ${h} added, without its Endpoint`, res, { onUndone: refresh });
           setError({ url: errorText(e) });
@@ -381,7 +386,7 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
           return;
         }
       }
-      notifyChange(`Provider ${h} added`, res, { undoneMessage: `${h} removed`, onUndone: refresh });
+      notifyChange(added ? `Provider ${h} added, with a keyless key` : `Provider ${h} added`, res, { undoneMessage: `${h} removed`, onUndone: refresh });
       refresh();
       close(false);
       navigate(`/providers/${seg(h)}/keys`);
@@ -397,7 +402,9 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
       open={open}
       onOpenChange={close}
       title="Add Provider"
-      description="An AI service with its own keys. You add its Upstream Keys next."
+      description={
+        keyless && url.trim() ? "An AI service that needs no key: Iroha sends it no credential." : "An AI service with its own keys. You add its Upstream Keys next."
+      }
       footer={
         <>
           <Button onClick={() => close(false)}>Cancel</Button>
@@ -445,6 +452,15 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
               </Select>
             )}
           </Field>
+        )}
+        {url.trim() && (
+          <label className="flex items-start gap-3 text-[15px]">
+            <Switch checked={keyless} onChange={setKeyless} label="No key needed" />
+            <span>
+              No key needed
+              <span className="block text-[13px] text-fg-muted">For self-hosted servers and free relays. Iroha sends no credential and adds a keyless key for you.</span>
+            </span>
+          </label>
         )}
       </form>
     </Dialog>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { api, isApiError, seg } from "@/api/client";
 import { formatNumber } from "@/lib/format";
@@ -10,13 +10,16 @@ import { DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
 import { Dialog } from "@/ui/Dialog";
 import { Field, Input, ToolbarSearch } from "@/ui/Input";
 import { MenuItem } from "@/ui/Menu";
-import { EmptyState } from "@/ui/States";
+import { useIsPhone } from "@/lib/media";
+import { Skeleton } from "@/ui/Skeleton";
+import { EmptyState, ErrorState } from "@/ui/States";
 import { SaveError, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import type { Outcome, Replay, Rule, RuleFields } from "./api";
 import { calls, errorText, OUTCOMES, useRefresh, useRules } from "./api";
 import { Reveal, riseIn } from "@/ui/Reveal";
-import { appearClass, Checkbox, Pill, ringRoom, Select, Switch } from "./controls";
+import { appearClass, Checkbox, Pill, ringRoom, Segmented, Select, Switch } from "./controls";
+import { RulesFlow } from "./RulesFlow";
 import { SAMPLE_RULES } from "./samples";
 
 /** The Rules tab (C09): which Failure Rules decide this Provider's failures, in order, and how often each did today. */
@@ -28,6 +31,11 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
   const { params, setParam } = useUrlParams();
   const q = params.get("q") ?? "";
   const setQ = (v: string) => setParam("q", v);
+  const [view, setView] = useRulesView();
+  const phone = useIsPhone();
+  const [flowWidth, flowRef] = useWidth();
+  // A rule and its match branch side by side need about 940 px; narrower, each step holds its effect.
+  const stacked = phone || (flowWidth !== undefined && flowWidth < 940);
 
   // Asks first, naming the rule; the result (with Undo) toasts, since the confirm has closed.
   const askDelete = (r: Rule) =>
@@ -58,46 +66,107 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
 
   return (
     <section aria-label="Failure Rules">
-      <p className="mb-4 text-[15px] text-fg-muted">
-        When {handle} fails, the first matching rule decides what happens to the Upstream Key and the Request. Your rules run before built-in ones.
-      </p>
-      <DataTable<Rule>
-        id="provider-rules"
-        label="Failure Rules"
-        columns={columns}
-        data={rules.data}
-        sample={SAMPLE_RULES}
-        getRowId={(r) => r.name}
-        rowName={(r) => r.name}
-        error={rules.isError ? rules.error : undefined}
-        errorTitle="Couldn't load the rules"
-        onRetry={() => void rules.refetch()}
-        toolbar={
-          <ToolbarSearch
-            placeholder="Search rules"
-            aria-label="Search rules"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        }
-        search={q}
-        searchFn={searchRules}
-        filterChips={q ? [{ label: `Search: ${q}`, onRemove: () => setQ("") }] : []}
-        onClearFilters={() => setQ("")}
-        noResultsTitle="No rules match"
-        rowActions={menu}
-        onRowClick={setEditing}
-        phoneRow={(r) => <RuleLine r={r} />}
-        phoneActions={(r) => <RuleSwitch r={r} />}
-        empty={<EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />}
-        footer={({ shown, total }) => (shown === total ? `${total} rule${total === 1 ? "" : "s"}, in the order they're tried` : `${shown} of ${total} rules`)}
-      />
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-6">
+        <p className="text-[15px] text-fg-muted">
+          When {handle} fails, the first matching rule decides what happens to the Upstream Key and the Request. Your rules run before built-in ones.
+        </p>
+        <Segmented<RulesView> label="View" value={view} onChange={setView} items={VIEWS} />
+      </div>
+      {view === "flow" ? (
+        rules.isError && !rules.data ? (
+          <ErrorState title="Couldn't load the rules" error={rules.error} onRetry={() => void rules.refetch()} />
+        ) : rules.data?.length === 0 ? (
+          <EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />
+        ) : (
+          // The route view's dotted ground (C19); on phones a band across the screen, as there.
+          <div
+            ref={flowRef}
+            className={cn(phone ? "-mx-4 bg-subtle px-4 py-6" : "rounded-xl border border-border bg-subtle px-8 py-8")}
+            style={{ backgroundImage: "radial-gradient(var(--border-strong) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
+          >
+            <Skeleton data={rules.data} sample={SAMPLE_RULES} id={stacked ? "rules-flow:stacked" : "rules-flow"} label="Loading the rules">
+              {(list) => <RulesFlow handle={handle} rules={list} onOpen={setEditing} aside={(r) => <RuleSwitch r={r} />} stacked={stacked} />}
+            </Skeleton>
+          </div>
+        )
+      ) : (
+        <DataTable<Rule>
+          id="provider-rules"
+          label="Failure Rules"
+          columns={columns}
+          data={rules.data}
+          sample={SAMPLE_RULES}
+          getRowId={(r) => r.name}
+          rowName={(r) => r.name}
+          error={rules.isError ? rules.error : undefined}
+          errorTitle="Couldn't load the rules"
+          onRetry={() => void rules.refetch()}
+          toolbar={
+            <ToolbarSearch
+              placeholder="Search rules"
+              aria-label="Search rules"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          }
+          search={q}
+          searchFn={searchRules}
+          filterChips={q ? [{ label: `Search: ${q}`, onRemove: () => setQ("") }] : []}
+          onClearFilters={() => setQ("")}
+          noResultsTitle="No rules match"
+          rowActions={menu}
+          onRowClick={setEditing}
+          phoneRow={(r) => <RuleLine r={r} />}
+          phoneActions={(r) => <RuleSwitch r={r} />}
+          empty={<EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />}
+          footer={({ shown, total }) => (shown === total ? `${total} rule${total === 1 ? "" : "s"}, in the order they're tried` : `${shown} of ${total} rules`)}
+        />
+      )}
 
       {confirm.dialog}
       <RuleDialog handle={handle} open={adding} onOpenChange={setAdding} />
       <RuleDialog handle={handle} rule={editing} open={!!editing} onOpenChange={(o) => !o && setEditing(undefined)} />
     </section>
   );
+}
+
+/** Table or Flow (UI ticket 31): the same rules as rows, or as the path a failure takes through them. Remembered in this browser. */
+type RulesView = "table" | "flow";
+const VIEWS: { value: RulesView; label: string }[] = [
+  { value: "table", label: "Table" },
+  { value: "flow", label: "Flow" },
+];
+const VIEW_KEY = "iroha:rules:view";
+
+function useRulesView() {
+  const [view, setState] = useState<RulesView>(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === "flow" ? "flow" : "table";
+    } catch {
+      return "table";
+    }
+  });
+  const setView = (v: RulesView) => {
+    setState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      // Storage refused (private window, blocked site data): the choice lasts this visit only.
+    }
+  };
+  return [view, setView] as const;
+}
+
+/** The width of an element, kept up to date (undefined until measured, and where ResizeObserver is missing). */
+function useWidth() {
+  const [width, setWidth] = useState<number>();
+  const ref = useCallback((el: HTMLElement | null) => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [width, ref] as const;
 }
 
 const matchesText = (r: Rule) => [...(r.code ?? []), ...(r.body ? [r.body] : [])].join(", ");

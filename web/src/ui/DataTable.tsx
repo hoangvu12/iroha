@@ -397,9 +397,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   // ---- Toolbar or bulk bar ----
   const selectedRows = bulk ? table.getSelectedRowModel().rows.map((r) => r.original) : [];
   const canSelectMore = bulk && paging.mode === "pages" && table.getIsAllPageRowsSelected() && filteredRows.some((r) => !r.getIsSelected());
-  // The bar rises in over the toolbar's place; when the selection clears it fades
-  // out where it was (showing what it said, inert) while the toolbar fades back
-  // in under it: one crossfade (architecture.md "UI ticket 16").
   const barContent =
     bulk && selectedCount > 0 ? (
       <>
@@ -416,47 +413,13 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
         </Button>
       </>
     ) : undefined;
-  const barExit = useLeaving<ReactNode, HTMLDivElement>(barContent);
-  const shownCount = useRef(selectedCount);
-  if (selectedCount > 0) shownCount.current = selectedCount;
-  const toolbarRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    if (barExit.leaving && toolbarRef.current) return animateIn(toolbarRef.current);
-  }, [barExit.leaving]);
-  const toolbar =
-    !barContent && (props.toolbar || (phone && bulk)) ? (
-      <div
-        key="toolbar"
-        ref={toolbarRef}
-        className="col-start-1 row-start-1 flex flex-wrap items-center gap-2 transition-opacity duration-fade ease-out data-starting-style:opacity-0"
-      >
+  const toolbarContent =
+    props.toolbar || (phone && bulk) ? (
+      <>
         {props.toolbar}
         {phone && bulk && data && data.length > 0 && <Button onClick={() => setSelecting((s) => !s)}>{selecting ? "Done" : "Select"}</Button>}
-      </div>
-    ) : null;
-  const bar =
-    barExit.shown !== undefined || toolbar ? (
-      <div className="grid">
-        {toolbar}
-        {barExit.shown !== undefined && (
-          <div
-            key="bulk"
-            ref={barExit.ref}
-            data-bulk-bar=""
-            aria-label={`${shownCount.current} selected`}
-            aria-hidden={barExit.leaving || undefined}
-            role="group"
-            className={cn(
-              "col-start-1 row-start-1 flex min-h-9 flex-wrap items-center gap-2",
-              "transition-[opacity,translate] duration-list-in ease-out starting:translate-y-(--motion-shift) starting:opacity-0",
-              "data-ending-style:opacity-0 data-ending-style:duration-list-out",
-            )}
-          >
-            {barExit.shown}
-          </div>
-        )}
-      </div>
-    ) : null;
+      </>
+    ) : undefined;
 
   // ---- The table ----
   const extraCols = (bulk ? 1 : 0) + (renderExpanded ? 1 : 0) + (rowActions ? 1 : 0);
@@ -668,7 +631,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
 
   return (
     <div ref={rootRef} data-table={id}>
-      {showToolbar && bar && <div className="mb-4">{bar}</div>}
+      {(bulk || toolbarContent) && <BarSlot bar={showToolbar ? barContent : undefined} count={selectedCount} toolbar={showToolbar ? toolbarContent : undefined} />}
       {state !== undefined ? (
         state
       ) : (
@@ -720,9 +683,57 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
 const rowClass =
   "transition-[opacity,translate] duration-list-in ease-out data-starting-style:translate-y-(--motion-shift-sm) data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-list-out";
 // The previous query's rows dim only once the next is slow, so a fast answer never flickers; they come back at once.
-const dimClass = "opacity-60 transition-opacity duration-fade delay-(--duration-fade)";
+const dimClass = "opacity-60 transition-opacity duration-fade ease-out delay-(--duration-fade)";
 const thClass = "h-10 px-1.5 text-[13px] font-normal text-fg-muted";
 const tdClass = "h-12 px-1.5 align-middle";
+
+/**
+ * The toolbar, or the bulk bar in its place while rows are selected. The bar
+ * rises in; when the selection clears it fades out where it was (showing what
+ * it said, inert) while the toolbar fades back in under it, in the same cell:
+ * one crossfade (architecture.md "UI ticket 16"). Its own component, so the
+ * exit ending re-renders only this, not the table.
+ */
+function BarSlot({ bar, count, toolbar }: { bar: ReactNode | undefined; count: number; toolbar: ReactNode | undefined }) {
+  const exit = useLeaving<ReactNode, HTMLDivElement>(bar);
+  const shownCount = useRef(count);
+  if (count > 0) shownCount.current = count;
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (exit.leaving && toolbarRef.current) return animateIn(toolbarRef.current);
+  }, [exit.leaving]);
+  const showToolbar = bar === undefined && toolbar !== undefined;
+  if (exit.shown === undefined && !showToolbar) return null;
+  return (
+    <div className="mb-4 grid">
+      {showToolbar && (
+        <div
+          ref={toolbarRef}
+          className="col-start-1 row-start-1 flex flex-wrap items-center gap-2 self-start transition-opacity duration-fade ease-out data-starting-style:opacity-0"
+        >
+          {toolbar}
+        </div>
+      )}
+      {exit.shown !== undefined && (
+        <div
+          ref={exit.ref}
+          data-bulk-bar=""
+          aria-label={`${shownCount.current} selected`}
+          aria-hidden={exit.leaving || undefined}
+          role="group"
+          className={cn(
+            // Both sit at the top of the shared cell: a taller (wrapped) bar leaving doesn't move the toolbar under it.
+            "col-start-1 row-start-1 flex min-h-9 flex-wrap items-center gap-2 self-start",
+            "transition-[opacity,translate] duration-list-in ease-out starting:translate-y-(--motion-shift) starting:opacity-0",
+            "data-ending-style:opacity-0 data-ending-style:duration-list-out",
+          )}
+        >
+          {exit.shown}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function HeaderCell<T extends RowData>({ header, render }: { header: Header<DataTableFeatures, T, unknown>; render: ReactNode }) {
   const col = header.column;

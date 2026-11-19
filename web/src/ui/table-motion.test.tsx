@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import css from "@/styles/index.css?raw";
 import { Button } from "./Button";
+import { Checkbox } from "./Checkbox";
 import { CopyButton } from "./CopyButton";
 import { type DataTableProps, DataTable, columnsFor } from "./DataTable";
 import { DONE_MS, SaveStatus, useSave } from "./SaveStatus";
@@ -144,7 +145,7 @@ test("selecting again while the bar leaves brings it back from where it is", asy
 test("dimmed rows dim only after the fade's length (a fast answer never flickers) and come back at once", () => {
   const { rerender } = render(<Fruits dimmed />);
   const table = screen.getByRole("table", { name: "Fruit" });
-  expect(classesOf(table)).toEqual(expect.arrayContaining(["opacity-60", "transition-opacity", "duration-fade", "delay-(--duration-fade)"]));
+  expect(classesOf(table)).toEqual(expect.arrayContaining(["opacity-60", "transition-opacity", "duration-fade", "ease-out", "delay-(--duration-fade)"]));
   rerender(<Fruits />);
   expect(classesOf(table).filter((c) => c.startsWith("transition") || c.startsWith("opacity"))).toEqual([]);
 });
@@ -189,9 +190,23 @@ test("a switch's thumb moves on the press token and its track colours on hover's
   const track = screen.getByRole("switch", { name: "Enabled" });
   const thumb = track.querySelector("[data-slot=switch-thumb]") ?? track.firstElementChild!;
   expect(classesOf(thumb)).toEqual(expect.arrayContaining(["transition-[translate]", "duration-press", "ease-out"]));
-  expect(classesOf(track)).toEqual(expect.arrayContaining(["transition-colors", "duration-hover"]));
+  expect(classesOf(track)).toEqual(expect.arrayContaining(["transition-colors", "duration-hover", "ease-[ease]"]));
   expectOnlyTokens(thumb);
   expectOnlyTokens(track);
+});
+
+test("selection checkboxes and segmented items change colour only, on hover's duration and curve", () => {
+  render(
+    <>
+      <Checkbox label="Select apple" checked={false} onChange={() => {}} />
+      <Segmented label="Show" value="all" onChange={() => {}} items={[{ value: "all", label: "All" }]} />
+    </>,
+  );
+  for (const el of [screen.getByRole("checkbox", { name: "Select apple" }), document.querySelector("[data-slot=segmented-control-item]")!]) {
+    expect(classesOf(el)).toEqual(expect.arrayContaining(["transition-colors", "duration-hover", "ease-[ease]"]));
+    expect(classesOf(el).some((c) => c.includes("scale"))).toBe(false);
+    expectOnlyTokens(el);
+  }
 });
 
 test("Copied crossfades in on the fade token", async () => {

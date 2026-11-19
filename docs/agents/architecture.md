@@ -706,3 +706,31 @@ The Providers and Model Pools lists (`pages/providers/List.tsx`), Endpoints, Mod
 - **Sign-in names** (agents match labels by word): "Change password…" opens the dialog whose button is "Save the new password"; the current browser's button is "Sign out this browser", the others "Sign out <browser>…" (with "signed in <date>" when two are the same kind); "Sign out the other browsers…".
 - `/states` shows DataTable loading, empty, no results, error, and a table with sort, bulk bar, row menu, details and pages.
 - Tests: `pages/gateway-keys/List.test.tsx`, `pages/settings/AdminTokens.test.tsx`, `AuditEntries.test.tsx`, `SignIn.test.tsx`, `pages/states/States.test.tsx` (incl. agent tests).
+
+### UI ticket 16: table motion
+
+Built into `DataTable` and the shared controls, so a page needs nothing:
+- **Rows added or removed after an action** (`ui/row-motion.ts`, `useRowMotion`).
+  - Only when `data` changes and still shares a row with the last `data`, in `pages` and `none` paging, and not while `dimmed`.
+  - A new row enters with `animateIn`: shift-sm + fade, `duration-list-in`.
+  - A row gone from `data` is drawn again in its old place for its exit: its last element, `inert`, `aria-hidden`, `data-leaving`. It fades (`animateOut`, `duration-list-out`), then leaves, and the rows under it close the gap at once.
+  - No row motion on sort, filter, search or page changes (they don't change `data`), on the first load, or for another record's rows (no row in common). None in server or infinite paging either: the Requests feed's arrivals are ticket 18's.
+  - In jsdom a leaving row is gone at once (no animations). Tests that hold it there stub `getAnimations` as `ui/table-motion.test.tsx` does.
+- **Bulk bar** (`BarSlot` in `DataTable.tsx`, over `ui/presence.ts` `useLeaving`).
+  - It rises in (`--motion-shift`, `duration-list-in`).
+  - When the selection clears, it fades out in place (`duration-list-out`, inert, still showing the last selection). The toolbar fades back in under it in the same grid cell (`animateIn`, `duration-fade`): one crossfade.
+  - Selecting again mid-exit turns it back. Its own component, so the exit ending doesn't re-render the table.
+  - `useLeaving(value)` is the reusable form for any plain element that should fade out with what it last showed. `SaveStatus` uses it: a result whose time is up fades out, while "Saving…" replaces one at once.
+- **Dimmed rows** (`keepPreviousData`) dim only after `--duration-fade`, so a fast answer never flickers, and come back at once.
+- **Expanded details** fade in (`starting:opacity-0`, `duration-fade`) and close at once.
+- **Controls**:
+  - The `Segmented` indicator moves by `translate` (never `left`) on `duration-indicator`, with no slide into its first place.
+  - The `Switch` thumb moves on `duration-press`, so it jumps under reduced motion.
+  - Checkbox, segmented item and switch track colours use `duration-hover ease-[ease]`.
+  - The `CopyButton` result icon crossfades in (`duration-fade`, from `--motion-scale-popup`).
+- **`row-reveal`** (`styles/index.css`) is for a row's quiet buttons (copy a secret, Test in Chat).
+  - Hidden until the row (the `group`) is hovered, where there is hover.
+  - Shown while focused or showing a copy's result (`data-copy`), and always where there is no hover (touch).
+  - Instant. Use it instead of `opacity-0 group-hover:opacity-100`.
+- **Still**: row hover and press, selection colour aside; sorting; filters; search; page changes; the sort arrow; `activeRowId` scrolling.
+- Tests: `ui/table-motion.test.tsx`. Browser probes and traces: `iroha-v2-notes/v2-ui/shots/16/check16.mjs`, with `window.mjs` for one marked window of a trace.

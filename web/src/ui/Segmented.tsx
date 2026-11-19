@@ -32,7 +32,7 @@ export function Segmented<T extends string>({
         <SegmentedControlItem
           key={it.value}
           value={it.value}
-          className="flex items-center whitespace-nowrap rounded-md px-3 text-[14px] text-fg-muted transition-colors duration-hover hover:text-fg data-checked:font-medium data-checked:text-fg"
+          className="flex items-center whitespace-nowrap rounded-md px-3 text-[14px] text-fg-muted transition-colors duration-hover ease-[ease] hover:text-fg data-checked:font-medium data-checked:text-fg"
         >
           {it.label}
         </SegmentedControlItem>

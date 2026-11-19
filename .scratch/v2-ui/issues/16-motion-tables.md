@@ -6,14 +6,14 @@
 
 **Blocked by:** 04, 07, 08
 
-**Status:** open
+**Status:** done
 
 Spec story: 15.
 
-- [ ] Proposal from `find-animation-opportunities` recorded in Comments, with what was rejected and why
-- [ ] Built motion matches the proposal; reduced motion holds still
-- [ ] No dropped frames in a Chrome performance trace of this area's main interactions
-- [ ] `review-animations` findings fixed or answered in Comments
+- [x] Proposal from `find-animation-opportunities` recorded in Comments, with what was rejected and why
+- [x] Built motion matches the proposal; reduced motion holds still
+- [x] No dropped frames in a Chrome performance trace of this area's main interactions
+- [x] `review-animations` findings fixed or answered in Comments
 
 ## Comments
 
@@ -42,3 +42,61 @@ Expanded details (Audit Entries): the chevron rotates already (`duration-collaps
 - Stagger on the first load of a table: **seen many times a day, functional**; rejected.
 
 **Verdict:** tables need little motion. The highest leverage is #2 (a row that leaves after a delete or revoke fades where it was, so the Owner sees what went) together with #1 (the bulk bar leaving as one crossfade). #3 is a correctness fix (layout property). Everything else is tokens and small fixes.
+
+### Built (test-first)
+
+Test-first with the `tdd` skill: `web/src/ui/table-motion.test.tsx` (15 tests) was written red against the proposal, then the code. Built as proposed, plus two changes from the browser and the trace (below). Skills followed in order: `find-animation-opportunities` (above), `animate`, `choreograph`, `animation-performance` thinking on the traces, `remove-animations` thinking (the "Leave still" list), and `review-animations` read from its files (below).
+
+- `ui/row-motion.ts` (`useRowMotion`): rows added to or removed from `data` enter (shift-sm and a fade, `animateIn`) or leave (drawn again in place, inert and `aria-hidden`, `animateOut` fade), only in `pages`/`none` paging.
+- `ui/presence.ts` (`useLeaving`): keeps what an element last showed while it fades out. Used by the bulk bar (`BarSlot`) and `SaveStatus`.
+- `DataTable.tsx`: `BarSlot` (the bar and the toolbar crossfade in one grid cell), the delayed dim, the details fade.
+- `Segmented` on translate, `Switch`, `Checkbox`, `CopyButton`, `SaveStatus` on the tokens. `row-reveal` in `styles/index.css`, now used by the four quiet row buttons (Keys copy, Providers/Pools Test, Gateway Keys copy, Admin Tokens copy).
+- architecture.md: `### UI ticket 16: table motion`.
+
+**Changed after the browser check:**
+- On phones the bar wraps to two lines. While it faded, the returning toolbar sat centred in the taller cell, then moved up. Both now sit at the top of the cell (`self-start`).
+- Under 4x CPU the bar's exit ending re-rendered the whole table. The bar and toolbar moved into their own `BarSlot`, so it re-renders only that.
+
+### Browser checks (`iroha-v2-notes/v2-ui/shots/16/`)
+
+`check16.mjs` drives `/providers/dashscope/keys` on a seeded testkit Iroha (8 keys). It samples `getComputedStyle` every frame, and `results-headed-cpu1.json` / `results-headed-cpu4.json` hold the numbers.
+- **Bulk bar in:** 8px to 0 with a fade over 200 ms.
+- **Bulk bar out:** opacity 1 to 0, gone at about 150 ms. The toolbar fades 0 to 1 in the same frames.
+- **Row deleted (Delete… confirmed):** fades in place, then leaves. The bar leaves on the same frame.
+- **Row back (Undo on the toast):** 4px to 0 with a fade over 200 ms.
+- **Segmented:** `translate` and `width` animate, 200 ms.
+- **Reduced motion (emulated):** the bar and rows fade with `0px` shift, and the segmented indicator has no animation (it jumps).
+- **Quiet buttons:** opacity 0 at rest with a mouse and 1 on row hover. With touch emulation, `(hover: none)` matches and they show at 1.
+- **Screenshots:** `bar`, `keys-light`, `keys-dark`, `keys-phone`, `keys-phone-dark`, `keys-phone-bar`, `keys-phone-bar-leaving`, `keys-touch-1024`.
+
+**Trace** (headed Chrome, 144/240 Hz display). Each interaction ran twice with motion and twice with every transition off as the control, after a warm-up.
+- **CPU 1x:** motion matches the control in every pass: bulk bar select and clear ×3, segmented ×4, row hover sweep, delete a row, Undo it back. Median frame 7 ms; at most 1 frame over 17 ms, none over 34 ms, the same as the control.
+- **Animated properties:** translate, opacity and scale run on the compositor. Not composited, as the recipes allow: the indicator's `width`, and the colour transitions of checkboxes and segmented items.
+- **CPU 4x:** long tasks of 50–300 ms come from React re-rendering the table on select and filter, in both modes. `window.mjs` shows main-thread time with motion no higher than the control, and the composited indicator keeps moving through them (`PRESENTED_PARTIAL`). Passes vary a lot on this machine, because other agents' builds share it: the bulk bar with motion ran 195 and 430 frames across the two passes, against 434 and 611 for the control.
+- The 4x trace file was deleted for size. `trace16-headed-cpu1.json` is kept.
+
+### `review-animations` on the diff
+
+| Before | After | Why |
+|---|---|---|
+| `dimClass` `transition-opacity duration-fade` (Tailwind's default curve) | `+ ease-out` | Weak built-in curve on a deliberate state change |
+| Checkbox, Segmented item, Switch track `transition-colors` (default curve) | `duration-hover ease-[ease]` | Hover and colour changes take `ease` (motion system) |
+| Segmented indicator `transition-[left,width]` | `translate-x/y-(--segmented-control-indicator-*)`, `transition-[translate,width]` | `left` is layout every frame. `width` stays, as the indicator recipe allows (no transform equivalent without distorting the radius); it is not composited but cost no frames in the trace |
+| Bar's exit end re-rendered the table | `BarSlot` | Main-thread work while the next interaction starts |
+
+Answered, not changed:
+- **Pure-fade entrances** (toolbar back, save result, details): no transform on purpose.
+  - The toolbar is one side of a crossfade in the same slot; a shift would make the two views fight.
+  - The save result is text beside the field that made it. The motion system says these morphs crossfade.
+  - The details open under a row while the rows below move at once, on a tens-a-day action.
+- **A leaving row holds its space for 150 ms before the gap closes** (`choreograph` prefers it out of layout at once). A table row can't be lifted out without overlapping the row that takes its place, and sliding the rows below would move every row on the page. Feel-checked in the browser: it reads as "this one went". Rows never animate height (motion system).
+- **The Copied icon swaps in with a fade, without blur.** At 15 px and 150 ms there is nothing to bridge.
+- **Space on a row's checkbox brings the bar in with motion.** That is activating a control, not a shortcut or a navigation key. The bar comes once per selection, and the table's own keys (arrows) don't animate.
+- No `transition-all`, `scale(0)` or `ease-in`, and no typed durations in the diff. Exits are faster than entrances (150 against 200 ms), and every exit can be interrupted (`animateOut`'s stop; tested).
+- Decision: approve.
+
+### Deferred and notes
+
+- Row motion is off for server and infinite paging: Models, Audit Entries, the Requests feed and its numbered pages. In server paging a page that loses a row pulls one in from the next page, and that would read as an arrival. The feed's arrivals are ticket 18's.
+- `row-reveal` meant one-class edits in pages owned by 17 and 20: `providers/Keys.tsx`, `providers/List.tsx`, `gateway-keys/List.tsx`, `settings/AdminTokens.tsx`. Merges may touch those lines.
+- `CopyButton` and `SaveStatus` are shared beyond tables, so the token changes apply everywhere. Ticket 20's reveal-once secret builds on the same Copied crossfade.

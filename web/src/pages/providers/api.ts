@@ -362,10 +362,13 @@ export function useGatewayKeys() {
 /** Every change here can touch any list (and an Undo anything), so they all refetch. */
 export function useRefresh() {
   const qc = useQueryClient();
-  return () => {
-    for (const k of [qk.providers, qk.pools, qk.overview, ["rules"], ["route-preview"], ["audit-entries"], qk.gatewayKeys, ["gateway-keys"]])
-      void qc.invalidateQueries({ queryKey: k });
-  };
+  // Resolves once the refetches are in, so an inline result shows on fresh data.
+  return () =>
+    Promise.all(
+      [qk.providers, qk.pools, qk.overview, ["rules"], ["route-preview"], ["audit-entries"], qk.gatewayKeys, ["gateway-keys"]].map((k) =>
+        qc.invalidateQueries({ queryKey: k }),
+      ),
+    );
 }
 
 /** A mutation that refetches everything when it settles. */

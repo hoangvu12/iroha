@@ -15,6 +15,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/modelmeta"
 	"github.com/hoangvu12/iroha/internal/models"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
@@ -105,7 +106,8 @@ func (s *Server) gateway() *gateway.Gateway {
 // daily refresh job of ticket 20).
 func (s *Server) models() *models.Store {
 	if s.modelStore == nil {
-		s.modelStore = models.New(models.Options{DB: s.db, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db)})
+		s.modelStore = models.New(models.Options{DB: s.db, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db),
+			ModelsDev: modelmeta.NewSource(modelmeta.SourceOptions{Bases: s.opts.Config.ModelsDev, HTTPClient: s.httpc, Clock: s.clock, Log: s.log})})
 	}
 	return s.modelStore
 }

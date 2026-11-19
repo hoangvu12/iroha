@@ -13,6 +13,7 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
+	"github.com/hoangvu12/iroha/internal/modelmeta"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/store"
 )
@@ -28,6 +29,8 @@ type snapshot struct {
 	Model      string `json:"model"`
 	Added      bool   `json:"added"`
 	Hidden     bool   `json:"hidden"`
+	// Ticket 11: the Owner's metadata overrides; absent when none.
+	Overrides *modelmeta.Facts `json:"overrides,omitempty"`
 }
 
 // Resource is the model list entry resource of the audit machinery.
@@ -37,18 +40,23 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 	NameOf: func(s snapshot) string { return s.Provider + "/" + s.Model },
 	Load: func(ctx context.Context, q audit.Querier, id string) (*snapshot, error) {
 		var s snapshot
-		err := q.QueryRowContext(ctx, `SELECT m.id, m.provider_id, p.handle, m.model, m.added, m.hidden
+		var overrides string
+		err := q.QueryRowContext(ctx, `SELECT m.id, m.provider_id, p.handle, m.model, m.added, m.hidden, m.overrides
 			FROM provider_models m JOIN providers p ON p.id = m.provider_id WHERE m.id = ?`, id).
-			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Model, &s.Added, &s.Hidden)
-		if errors.Is(err, sql.ErrNoRows) || err == nil && !s.Added && !s.Hidden {
+			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Model, &s.Added, &s.Hidden, &overrides)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && !s.Added && !s.Hidden && overrides == "" {
 			return nil, nil
+		}
+		if overrides != "" {
+			f := modelmeta.Parse(overrides)
+			s.Overrides = &f
 		}
 		return &s, err
 	},
 	Restore: func(ctx context.Context, tx *sql.Tx, id string, s *snapshot) error {
 		if s == nil {
 			var providerID string
-			err := tx.QueryRowContext(ctx, `UPDATE provider_models SET added = 0, hidden = 0 WHERE id = ? RETURNING provider_id`, id).Scan(&providerID)
+			err := tx.QueryRowContext(ctx, `UPDATE provider_models SET added = 0, hidden = 0, overrides = '' WHERE id = ? RETURNING provider_id`, id).Scan(&providerID)
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil
 			}
@@ -65,8 +73,13 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO provider_models (id, provider_id, model, added, hidden) VALUES (?, ?, ?, ?, ?)
-			ON CONFLICT (id) DO UPDATE SET added = excluded.added, hidden = excluded.hidden`, id, s.ProviderID, s.Model, s.Added, s.Hidden)
+		overrides := ""
+		if s.Overrides != nil {
+			overrides = s.Overrides.String()
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO provider_models (id, provider_id, model, added, hidden, overrides) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET added = excluded.added, hidden = excluded.hidden, overrides = excluded.overrides`,
+			id, s.ProviderID, s.Model, s.Added, s.Hidden, overrides)
 		return err
 	},
 })
@@ -75,8 +88,10 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 // item of its bulk.
 type ModelChange struct {
 	Model  string `json:"model" doc:"The model ID exactly as the Provider names it (case-sensitive; may contain /)."`
-	Added  *bool  `json:"added,omitempty" doc:"true: the model is on the list whatever discovery finds; false: take it off unless discovered. Default true when hidden is not sent either."`
+	Added  *bool  `json:"added,omitempty" doc:"true: the model is on the list whatever discovery finds; false: take it off unless discovered. Default true when neither hidden nor metadata is sent."`
 	Hidden *bool  `json:"hidden,omitempty" doc:"true: Callers never see it and asking for it is refused (404 model_not_found), even if it was never discovered; false: show it again."`
+	// Metadata replaces the Owner's overrides (ticket 11).
+	Metadata *modelmeta.Facts `json:"metadata,omitempty" doc:"Replaces your metadata overrides of the model: the fields Callers' model lists show (context_length, max_input_tokens, max_output_tokens, architecture, reasoning, reasoning_levels, chat). Each field sent beats what the Provider and models.dev say; {} removes every override. Overrides never change whether the model is listed or routed."`
 }
 
 // ModelResult is the response of a single model change.
@@ -139,9 +154,10 @@ func Routes(tr *audit.Trail, s *Store) []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: base, Tag: tag,
-			Summary: "Add, hide or show one model of a Provider, by model ID",
+			Summary: "Add, hide or show one model of a Provider, or override its metadata, by model ID",
 			Description: "`{\"model\": \"x\"}` adds a model discovery does not find; refreshes never remove it. `{\"model\": \"x\", \"hidden\": true}` hides any model, even one never discovered: " +
-				"Callers no longer see it and asking for it is refused before any Attempt. `\"added\": false` / `\"hidden\": false` undo them. Revertible through the Audit Entry.",
+				"Callers no longer see it and asking for it is refused before any Attempt. `\"added\": false` / `\"hidden\": false` undo them. " +
+				"`{\"model\": \"x\", \"metadata\": {\"context_length\": 1000000}}` replaces your metadata overrides of the model (`{}` removes them). Revertible through the Audit Entry.",
 			Query:   []api.Param{audit.DryRun},
 			Request: ModelChange{}, Response: ModelResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -150,20 +166,24 @@ func Routes(tr *audit.Trail, s *Store) []api.Route {
 					return nil, err
 				}
 				var out Model
+				var p provRef
 				res, err := h.tr.Mutate(c, "model.change", "Changed", func(m *audit.Mutation) error {
-					p, err := resolve(m.Ctx, m.Tx, c.Path("provider"))
-					if err != nil {
+					var err error
+					if p, err = resolve(m.Ctx, m.Tx, c.Path("provider")); err != nil {
 						return err
 					}
 					out, err = h.change(m, p, in)
 					return err
 				})
+				if err == nil && !res.DryRun {
+					out, err = h.s.lookUp(c.R.Context(), p, out)
+				}
 				return ModelResult{Result: res, Model: out}, err
 			},
 		},
 		{
 			Method: http.MethodPost, Path: base + "/bulk", Tag: tag,
-			Summary:     "Add, hide or show many models of a Provider",
+			Summary:     "Add, hide, show or override the metadata of many models of a Provider",
 			Description: "Each item is a body of POST /api/providers/{provider}/models, applied or refused on its own. One Audit Entry covers them all.",
 			Query:       []api.Param{audit.DryRun},
 			Request:     audit.BulkRequest[ModelChange]{}, Response: audit.BulkResult[Model]{},
@@ -176,9 +196,27 @@ func Routes(tr *audit.Trail, s *Store) []api.Route {
 				if err != nil {
 					return nil, err
 				}
-				return audit.Bulk(h.tr, c, "model.change", "Changed", in.Items, func(m *audit.Mutation, in ModelChange) (Model, error) {
+				res, err := audit.Bulk(h.tr, c, "model.change", "Changed", in.Items, func(m *audit.Mutation, in ModelChange) (Model, error) {
 					return h.change(m, p, in)
 				})
+				if err != nil || res.DryRun {
+					return res, err
+				}
+				var changed []string
+				for _, it := range res.Items {
+					if it.Result != nil {
+						changed = append(changed, it.Result.Model)
+					}
+				}
+				h.s.supplementAfterChange(c.R.Context(), p, changed)
+				for _, it := range res.Items {
+					if it.Result != nil {
+						if m, ok, err := readEntry(c.R.Context(), h.s.db, p.id, it.Result.Model, h.s.clock.Now()); err == nil && ok {
+							*it.Result = m
+						}
+					}
+				}
+				return res, nil
 			},
 		},
 		{
@@ -217,7 +255,9 @@ func Routes(tr *audit.Trail, s *Store) []api.Route {
 			Method: http.MethodGet, Path: "/providers/{handle}/v1/models", Tag: "Gateway", Auth: api.AuthCaller,
 			Summary: "List the models of one Provider a Gateway Key may use (OpenAI list shape)",
 			Description: "The Provider's visible models (discovered or added by the Owner, not hidden), sorted. A Gateway Key narrowed to some models of the Provider lists exactly those, " +
-				"even ones the list lacks, minus hidden ones. A Provider that does not exist, is disabled or archived, or is outside the key's scope gets 403 provider_not_allowed.",
+				"even ones the list lacks, minus hidden ones. A Provider that does not exist, is disabled or archived, or is outside the key's scope gets 403 provider_not_allowed. " +
+				"Each entry carries what is known of the model (context_length, max_input_tokens, max_output_tokens, architecture.input_modalities/output_modalities, reasoning, reasoning_levels; " +
+				"absent when unknown) and chat: ok unless the model is known not to chat.",
 			Response: CallerModelList{},
 			Handle:   s.callerList,
 		},
@@ -326,17 +366,26 @@ func (h handlers) change(m *audit.Mutation, p provRef, in ModelChange) (Model, e
 		return Model{}, api.BadRequest(modelHint, "model %q is not a model ID.", model)
 	}
 	added, hidden := in.Added, in.Hidden
-	if added == nil && hidden == nil {
+	if added == nil && hidden == nil && in.Metadata == nil {
 		t := true
 		added = &t
+	}
+	var overrides *string
+	if in.Metadata != nil {
+		f, err := checkOverrides(*in.Metadata)
+		if err != nil {
+			return Model{}, err
+		}
+		s := f.String()
+		overrides = &s
 	}
 	id := entryID(p.id, model)
 	if err := m.Track(Resource, id); err != nil {
 		return Model{}, err
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO provider_models (id, provider_id, model, added, hidden) VALUES (?, ?, ?, coalesce(?, 0), coalesce(?, 0))
-		ON CONFLICT (id) DO UPDATE SET added = coalesce(?, added), hidden = coalesce(?, hidden)`,
-		id, p.id, model, added, hidden, added, hidden); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO provider_models (id, provider_id, model, added, hidden, overrides) VALUES (?, ?, ?, coalesce(?, 0), coalesce(?, 0), coalesce(?, ''))
+		ON CONFLICT (id) DO UPDATE SET added = coalesce(?, added), hidden = coalesce(?, hidden), overrides = coalesce(?, overrides)`,
+		id, p.id, model, added, hidden, overrides, added, hidden, overrides); err != nil {
 		return Model{}, err
 	}
 	if err := pruneEntries(m.Ctx, m.Tx, p.id); err != nil {
@@ -346,12 +395,15 @@ func (h handlers) change(m *audit.Mutation, p provRef, in ModelChange) (Model, e
 	return out, err
 }
 
-// CallerModel is one model of the Caller-facing list.
+// CallerModel is one model of the Caller-facing list: the OpenAI list entry
+// plus what is known of the model (ticket 11; the global /v1/models of
+// ticket 12 emits the same fields). chat is always present.
 type CallerModel struct {
 	ID      string `json:"id"`
 	Object  string `json:"object" enum:"model"`
 	Created int64  `json:"created" doc:"Unix seconds: when the Provider was added to Iroha."`
 	OwnedBy string `json:"owned_by" doc:"The Provider's handle."`
+	modelmeta.Facts
 }
 
 // CallerModelList is the answer of GET /providers/{handle}/v1/models.
@@ -399,10 +451,14 @@ func (s *Store) callerList(c *api.Call) (any, error) {
 		names = kept
 		sort.Strings(names)
 	}
+	meta, err := s.Metadata(ctx, rt.ID)
+	if err != nil {
+		return nil, err
+	}
 	out := CallerModelList{Object: "list", Data: make([]CallerModel, 0, len(names))}
 	at := store.FromMillis(created).Unix()
 	for _, n := range names {
-		out.Data = append(out.Data, CallerModel{ID: n, Object: "model", Created: at, OwnedBy: rt.Handle})
+		out.Data = append(out.Data, CallerModel{ID: n, Object: "model", Created: at, OwnedBy: rt.Handle, Facts: meta.Of(n)})
 	}
 	return out, nil
 }

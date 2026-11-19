@@ -35,6 +35,7 @@ type Provider struct {
 	Budget           Budget     `json:"budget" doc:"The Request budget for this Provider."`
 	Strict           bool       `json:"strict" doc:"true: a model missing from the Provider's model list (GET /api/providers/{provider}/models) is refused before any Attempt. false: it is forwarded anyway."`
 	Discovery        string     `json:"discovery" enum:"none,provider,key" doc:"How the model list is discovered: provider (once per Endpoint, with one key), key (per key and Endpoint; keys whose list names a model are tried first for it) or none."`
+	ModelsDevBrand   string     `json:"models_dev_brand" doc:"The models.dev provider ID model metadata is looked up under; \"\": none (by model name in models.dev's maker catalog only)."`
 	Endpoints        []Endpoint `json:"endpoints"`
 	UpstreamKeyCount int        `json:"upstream_key_count"`
 }
@@ -157,10 +158,10 @@ func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	var p Provider
 	var created int64
 	var maxAttempts, firstByte int
-	err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery,
+	err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand,
 		(SELECT count(*) FROM upstream_keys k WHERE k.provider_id = providers.id)
 		FROM providers WHERE id = ?`, id).
-		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &maxAttempts, &firstByte, &p.Strict, &p.Discovery, &p.UpstreamKeyCount)
+		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &maxAttempts, &firstByte, &p.Strict, &p.Discovery, &p.ModelsDevBrand, &p.UpstreamKeyCount)
 	if err != nil {
 		return p, err
 	}

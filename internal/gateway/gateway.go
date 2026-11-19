@@ -315,7 +315,8 @@ func noCandidate(handle string, e *planner.Empty) *api.Error {
 		return api.Errorf(http.StatusNotFound, "model_unavailable", "Use another model; the Provider refused it to every usable key. The gaps expire by "+until+", or the Owner clears them (GET /api/providers/"+handle+"/model-gaps).",
 			"%s", e.Message).WithDetails(map[string]string{"reason": e.Code, "until": until})
 	}
-	hint := "Ask the Owner to add an Upstream Key to " + handle + " (POST /api/providers/" + handle + "/keys)."
+	hint := "Ask the Owner to add an Upstream Key to " + handle + " (POST /api/providers/" + handle + "/keys), or, when its Endpoints need no key, " +
+		"a keyless key ({\"name\": \"keyless\"}, or auth_style none on the Endpoint)."
 	switch e.Code {
 	case planner.NoEndpoint:
 		hint = "Ask the Owner to add an Endpoint speaking this Shape to " + handle + " (POST /api/providers/" + handle + "/endpoints)."

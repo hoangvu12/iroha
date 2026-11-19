@@ -80,7 +80,7 @@ type Endpoint struct {
 	Shape         string            `json:"shape" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks."`
 	AuthStyle     string            `json:"auth_style" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent: Authorization: Bearer, an x-api-key header, the header named auth_param, the query parameter named auth_param, or not at all. A key with an empty secret sends nothing in any style."`
 	AuthParam     string            `json:"auth_param,omitempty" doc:"Header name (auth_style header) or query parameter name (auth_style query)."`
-	StaticHeaders map[string]string `json:"static_headers" doc:"Headers sent on every Attempt to this Endpoint; they replace a Caller header of the same name."`
+	StaticHeaders map[string]string `json:"static_headers" doc:"Headers sent on every Attempt to this Endpoint; they replace a Caller header of the same name. An empty value sends no such header."`
 	Renames       map[string]string `json:"renames" doc:"Model renames: the model a Caller names -> the model this URL is sent. Applied per Attempt, after the Endpoint is chosen."`
 	DiscoveryURL  string            `json:"discovery_url" doc:"Where this Endpoint's model list is read: empty for <url>/models, \"none\" to never ask it, or a URL."`
 	CreatedAt     time.Time         `json:"created_at"`

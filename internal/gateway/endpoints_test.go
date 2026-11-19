@@ -35,7 +35,7 @@ func TestEachAuthStyleSendsTheKeyItsWayAndKeylessSendsNothing(t *testing.T) {
 		{"xapikey", map[string]any{"auth_style": "x-api-key"}, map[string]any{"secret": "sk-test-2"}, "X-Api-Key=sk-test-2"},
 		{"header", map[string]any{"auth_style": "header", "auth_param": "api-key"}, map[string]any{"secret": "sk-test-3"}, "Api-Key=sk-test-3"},
 		{"query", map[string]any{"auth_style": "query", "auth_param": "key"}, map[string]any{"secret": "sk-test-4"}, "?key=sk-test-4"},
-		{"none", map[string]any{"auth_style": "none"}, map[string]any{"secret": "sk-test-5"}, ""},
+		{"none", map[string]any{"auth_style": "none"}, map[string]any{"name": "key-1", "secret": "sk-test-5"}, ""}, // the Endpoint also added the key "keyless" (41)
 		{"keyless", map[string]any{"auth_style": "header", "auth_param": "X-Custom-Auth"}, map[string]any{"name": "free"}, ""},
 	}
 	for _, tc := range cases {

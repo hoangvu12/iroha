@@ -336,7 +336,9 @@ func discoveryRequest(ctx context.Context, ep *planner.Endpoint, k *planner.Key,
 		req.Header.Set("Anthropic-Version", "2023-06-01")
 	}
 	for name, v := range ep.StaticHeaders {
-		req.Header.Set(name, v)
+		if v != "" { // an empty static header is never sent (as on an Attempt)
+			req.Header.Set(name, v)
+		}
 	}
 	if send {
 		switch ep.AuthStyle {

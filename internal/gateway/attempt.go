@@ -131,13 +131,23 @@ func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []b
 			req.Header.Set("Accept", "application/json")
 		}
 	}
-	for k, v := range ep.StaticHeaders {
-		req.Header.Set(k, v)
-	}
+	setStatic(req.Header, ep.StaticHeaders)
 	if send && slot != "" {
 		req.Header.Set(slot, prefix+c.Key.Secret)
 	}
 	return req, nil
+}
+
+// setStatic applies an Endpoint's static headers over h. An empty value
+// sends no such header (removing the Caller's), never "Name: ".
+func setStatic(h http.Header, static map[string]string) {
+	for k, v := range static {
+		if v == "" {
+			h.Del(k)
+		} else {
+			h.Set(k, v)
+		}
+	}
 }
 
 // preparePassthrough returns the body to send to an Endpoint speaking the

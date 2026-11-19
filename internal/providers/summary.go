@@ -56,6 +56,25 @@ type KeyCounts struct {
 	Disabled int `json:"disabled"`
 	Invalid  int `json:"invalid"`
 	Cooling  int `json:"cooling"`
+	Keyless  int `json:"keyless" doc:"Keys with no secret (keyless keys, counted in their Key State too): they send no credential."`
+}
+
+// count adds k to the counts.
+func (c *KeyCounts) count(k UpstreamKey) {
+	c.Total++
+	switch k.State.State {
+	case keystate.Active:
+		c.Active++
+	case keystate.Disabled:
+		c.Disabled++
+	case keystate.Invalid:
+		c.Invalid++
+	case keystate.Cooling:
+		c.Cooling++
+	}
+	if k.Secret == "" {
+		c.Keyless++
+	}
 }
 
 // CoolingEntry is one current cooling.
@@ -98,16 +117,8 @@ func (h handlers) summaryRoute() api.Route {
 			out := ProviderSummary{Provider: p.Handle, Enabled: p.Enabled, Archived: p.Archived, Budget: p.Budget, Cooling: []CoolingEntry{}, ModelGaps: []GapEntry{}}
 			var next time.Time
 			for _, k := range keys {
-				out.Keys.Total++
-				switch k.State.State {
-				case keystate.Active:
-					out.Keys.Active++
-				case keystate.Disabled:
-					out.Keys.Disabled++
-				case keystate.Invalid:
-					out.Keys.Invalid++
-				case keystate.Cooling:
-					out.Keys.Cooling++
+				out.Keys.count(k)
+				if k.State.State == keystate.Cooling {
 					out.Cooling = append(out.Cooling, CoolingEntry{UpstreamKey: k.Name, Until: *k.State.Until, Reason: k.State.Reason})
 					if next.IsZero() || k.State.Until.Before(next) {
 						next = *k.State.Until

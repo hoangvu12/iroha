@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
-	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
@@ -146,17 +145,7 @@ func overview(ctx context.Context, db *store.DB, since, now time.Time) (Overview
 			return out, err
 		}
 		for _, k := range keys {
-			p.o.Keys.Total++
-			switch k.State.State {
-			case keystate.Active:
-				p.o.Keys.Active++
-			case keystate.Disabled:
-				p.o.Keys.Disabled++
-			case keystate.Invalid:
-				p.o.Keys.Invalid++
-			case keystate.Cooling:
-				p.o.Keys.Cooling++
-			}
+			p.o.Keys.count(k)
 		}
 		p.o.Traffic = byProvider[p.o.Provider]
 		out.Providers = append(out.Providers, p.o)

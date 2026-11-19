@@ -160,9 +160,9 @@ type CreateEndpoint struct {
 	Name          string             `json:"name,omitempty" doc:"Unique within the Provider. Repeating a create with an existing name updates that Endpoint. Without a name, the Endpoint with the same url and shape is updated, else the name is \"default\"."`
 	URL           *string            `json:"url,omitempty" doc:"Base URL including the version path, e.g. https://api.openai.com/v1 (Iroha appends /chat/completions). Required for a new Endpoint."`
 	Shape         *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks. Required for a new Endpoint."`
-	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent; default bearer."`
+	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent; default bearer. none sends no credential; on a Provider holding no Upstream Keys it also adds the keyless key \"keyless\" (see keyless_key)."`
 	AuthParam     *string            `json:"auth_param,omitempty" doc:"The header name for auth_style header (e.g. api-key) or the query parameter name for auth_style query (e.g. key)."`
-	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Headers sent on every Attempt, e.g. {\"HTTP-Referer\": \"https://example.com\"}. Replaces the whole set; {} clears it."`
+	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Headers sent on every Attempt, e.g. {\"HTTP-Referer\": \"https://example.com\"}. An empty value sends no such header and drops the Caller's. Replaces the whole set; {} clears it."`
 	Renames       *map[string]string `json:"renames,omitempty" doc:"Model renames for this URL, Caller's name -> wire name, e.g. {\"glm-4.6\": \"glm-4.6-fp8\"}. Replaces the whole set; {} clears it."`
 	DiscoveryURL  *string            `json:"discovery_url,omitempty" doc:"Where the model list is read: \"\" (default) for <url>/models, \"none\" to never ask this Endpoint, or a full http(s) URL such as https://api.acme.example/api/coding/v4/models."`
 }
@@ -172,7 +172,7 @@ type UpdateEndpoint struct {
 	Name          *string            `json:"name,omitempty"`
 	URL           *string            `json:"url,omitempty"`
 	Shape         *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini"`
-	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"Changing to a style without a parameter clears auth_param."`
+	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"Changing to a style without a parameter clears auth_param. Changing to none on a Provider holding no Upstream Keys adds the keyless key \"keyless\" (see keyless_key)."`
 	AuthParam     *string            `json:"auth_param,omitempty"`
 	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Replaces the whole set; {} clears it."`
 	Renames       *map[string]string `json:"renames,omitempty" doc:"Replaces the whole set; {} clears it."`
@@ -182,7 +182,36 @@ type UpdateEndpoint struct {
 // EndpointResult is the response of a single Endpoint change.
 type EndpointResult struct {
 	audit.Result
-	Endpoint Endpoint `json:"endpoint" doc:"The Endpoint after the change (before it, for a delete)."`
+	Endpoint   Endpoint     `json:"endpoint" doc:"The Endpoint after the change (before it, for a delete)."`
+	KeylessKey *UpstreamKey `json:"keyless_key,omitempty" doc:"The keyless Upstream Key added with this change: an Endpoint with auth_style none on a Provider that held no Upstream Keys gets one, in the same Audit Entry, so the Provider serves at once."`
+}
+
+// KeylessKeyName is the name of the keyless Upstream Key Iroha adds itself.
+const KeylessKeyName = "keyless"
+
+// addKeylessKey gives a Provider holding no Upstream Keys one keyless key
+// when e needs no auth (auth style none), so a keyless Provider serves with
+// no key added by hand (ticket 41). It is an ordinary key, tracked in the
+// same mutation: it has a Key State and Model Gaps like any other, and a
+// revert of the change removes it. nil when nothing was added.
+func addKeylessKey(m *audit.Mutation, p ref, e Endpoint) (*UpstreamKey, error) {
+	if e.AuthStyle != planner.AuthNone {
+		return nil, nil
+	}
+	var n int
+	if err := m.Tx.QueryRowContext(m.Ctx, `SELECT count(*) FROM upstream_keys WHERE provider_id = ?`, p.id).Scan(&n); err != nil || n > 0 {
+		return nil, err
+	}
+	id := ids.New("uk")
+	if err := m.Track(KeyResource, id); err != nil {
+		return nil, err
+	}
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO upstream_keys (id, provider_id, name, secret, created_at) VALUES (?, ?, ?, '', ?)`,
+		id, p.id, KeylessKeyName, store.Millis(m.Now)); err != nil {
+		return nil, err
+	}
+	k, err := readKey(m.Ctx, m.Tx, id, m.Now)
+	return &k, err
 }
 
 // EndpointList is the response of GET /api/providers/{provider}/endpoints.
@@ -358,7 +387,8 @@ func (h handlers) endpointRoutes() []api.Route {
 			Method: http.MethodPost, Path: base, Tag: tag,
 			Summary: "Add an Endpoint to a Provider, or update the one with that name",
 			Description: "An Endpoint is one URL speaking one Shape, with its own auth style, static headers and model renames. " +
-				"Callers' requests go to Endpoints speaking their Shape; Upstream Keys go to every Endpoint unless restricted to some.",
+				"Callers' requests go to Endpoints speaking their Shape; Upstream Keys go to every Endpoint unless restricted to some. " +
+				"For a service that needs no key, use auth_style none: a Provider holding no Upstream Keys then gets the keyless key \"keyless\" in the same Audit Entry and serves at once.",
 			Query:   []api.Param{audit.DryRun},
 			Request: CreateEndpoint{}, Response: EndpointResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -367,15 +397,19 @@ func (h handlers) endpointRoutes() []api.Route {
 					return nil, err
 				}
 				var out Endpoint
+				var keyless *UpstreamKey
 				res, err := h.tr.Mutate(c, "endpoint.create", "Created", func(m *audit.Mutation) error {
 					p, err := resolveProvider(m.Ctx, m.Tx, c.Path("provider"))
 					if err != nil {
 						return err
 					}
-					out, err = h.upsertEndpoint(m, p, in)
+					if out, err = h.upsertEndpoint(m, p, in); err != nil {
+						return err
+					}
+					keyless, err = addKeylessKey(m, p, out)
 					return err
 				})
-				return EndpointResult{Result: res, Endpoint: out}, err
+				return EndpointResult{Result: res, Endpoint: out, KeylessKey: keyless}, err
 			},
 		},
 		{
@@ -394,7 +428,11 @@ func (h handlers) endpointRoutes() []api.Route {
 					return nil, err
 				}
 				return audit.Bulk(h.tr, c, "endpoint.create", "Created", in.Items, func(m *audit.Mutation, in CreateEndpoint) (Endpoint, error) {
-					return h.upsertEndpoint(m, p, in)
+					e, err := h.upsertEndpoint(m, p, in)
+					if err == nil {
+						_, err = addKeylessKey(m, p, e)
+					}
+					return e, err
 				})
 			},
 		},
@@ -409,6 +447,7 @@ func (h handlers) endpointRoutes() []api.Route {
 					return nil, err
 				}
 				var out Endpoint
+				var keyless *UpstreamKey
 				res, err := h.tr.Mutate(c, "endpoint.update", "Edited", func(m *audit.Mutation) error {
 					p, err := resolveProvider(m.Ctx, m.Tx, c.Path("provider"))
 					if err != nil {
@@ -418,10 +457,13 @@ func (h handlers) endpointRoutes() []api.Route {
 					if err != nil {
 						return err
 					}
-					out, err = h.updateEndpoint(m, p, id, in)
+					if out, err = h.updateEndpoint(m, p, id, in); err != nil {
+						return err
+					}
+					keyless, err = addKeylessKey(m, p, out)
 					return err
 				})
-				return EndpointResult{Result: res, Endpoint: out}, err
+				return EndpointResult{Result: res, Endpoint: out, KeylessKey: keyless}, err
 			},
 		},
 		{

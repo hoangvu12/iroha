@@ -9,6 +9,7 @@ import { SearchInput } from "@/ui/Input";
 import { ProviderTile } from "@/ui/LogoTile";
 import { RadioCards } from "@/ui/Radio";
 import { Reveal } from "@/ui/Reveal";
+import { ScrollArea } from "@/ui/ScrollArea";
 import { useProviderModels } from "./api";
 import { Skeleton } from "@/ui/Skeleton";
 import { SAMPLE_MODEL_IDS } from "./samples";
@@ -94,7 +95,7 @@ export function ModelPicker({
       <Reveal open={only} label="Models to allow">
         <div className="pt-4">
           {picked.length > 0 && (
-            <div className="mb-3 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+            <ScrollArea className="mb-3" viewportClassName="max-h-24" contentClassName="flex flex-wrap gap-1.5">
               {picked.slice(0, CHIPS).map((m) => (
                 <span key={m} className="inline-flex h-7 max-w-full items-center gap-1 rounded-md bg-muted pl-2 pr-1 font-mono text-[12.5px] text-fg">
                   <span className="truncate">{m}</span>
@@ -105,7 +106,7 @@ export function ModelPicker({
               {picked.length > CHIPS && (
                 <span className="inline-flex h-7 items-center px-1 text-[13px] text-fg-muted">and {formatNumber(picked.length - CHIPS)} more</span>
               )}
-            </div>
+            </ScrollArea>
           )}
           <ModelList provider={provider!} q={q} typed={text.trim()} picked={picked} setPicked={setPicked} search={text} onSearch={setText} />
         </div>
@@ -141,6 +142,7 @@ function ModelList({
   const extra = typed && settled && !rows.includes(typed) ? typed : undefined;
   const items = extra ? [...rows, extra] : rows;
 
+  // The list scrolls in the shared Scroll Area (its viewport is `box`); a new search goes back to its top.
   const box = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
   useEffect(() => {
@@ -180,11 +182,11 @@ function ModelList({
           {q ? `No model of ${provider} matches “${q}”.` : `${provider} lists no models yet. Type a model ID to allow it.`}
         </p>
       ) : (
-        <div
-          ref={items === SAMPLE_MODEL_IDS ? undefined : box}
-          aria-label={`Models of ${provider}`}
+        <ScrollArea
+          label={`Models of ${provider}`}
+          viewportRef={items === SAMPLE_MODEL_IDS ? undefined : box}
           onScroll={(e) => setTop(e.currentTarget.scrollTop)}
-          className={cn("relative overflow-y-auto", models.isPlaceholderData && "opacity-60")}
+          className={cn(models.isPlaceholderData && "opacity-60")}
           style={{ height: Math.min(VIEW, items.length * ROW) }}
         >
           <div style={{ height: items.length * ROW }} className="relative">
@@ -206,7 +208,7 @@ function ModelList({
               );
             })}
           </div>
-        </div>
+        </ScrollArea>
       )}
       </Skeleton>
       )}

@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Copy, KeyRound, Plus, RotateCcw, Trash2 } from "lucide-react";
-import { revertEntry } from "@/api/audit";
-import { isApiError } from "@/api/client";
+import { Copy, KeyRound, Plus, Trash2 } from "lucide-react";
+import { errorText } from "@/api/client";
 import { timeAgo } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
@@ -14,8 +13,8 @@ import { Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
 import { MenuItem, MenuSeparator } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
-import { SaveError, useSave } from "@/ui/SaveStatus";
-import { notify, notifyChange } from "@/ui/toast";
+import { SaveError, UndoCreate, useSave } from "@/ui/SaveStatus";
+import { notifyChange } from "@/ui/toast";
 import { type AdminToken, useAdminTokens, useCreateAdminToken, useInvalidateAll, useRevokeAdminToken } from "./api";
 import { lastUsed, shortDate, shortSecret } from "./format";
 import { SAMPLE_ADMIN_TOKENS } from "./samples";
@@ -192,20 +191,13 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
       {
         // The dialog stays open on the new token, which says it was created; Undo is in its footer.
         onSuccess: (res) => setMade({ token: res.admin_token, entry: res.audit_entry }),
-        onError: (e) => setError(isApiError(e) ? `${e.message} ${e.hint}`.trim() : String(e)),
+        onError: (e) => setError(errorText(e)),
       },
     );
   };
 
   if (made) {
     const { token, entry } = made;
-    // Undo deletes the token again and closes the dialog; with the dialog gone, a toast says so.
-    const undoCreate = async () => {
-      if (entry && (await undo.run(() => revertEntry(entry)))) {
-        close(false);
-        notify.success(`Admin Token ${token.name} deleted`);
-      }
-    };
     return (
       <Dialog
         open={open}
@@ -215,11 +207,8 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
         description={<span className={cn("block", riseIn)}>Give it to {token.name}. It works on every admin route, sent as a Bearer token.</span>}
         footer={
           <>
-            {entry && (
-              <Button variant="ghost" icon={RotateCcw} className="mr-auto" aria-label={`Undo: delete ${token.name}`} loading={undo.pending} onClick={() => void undoCreate()}>
-                Undo
-              </Button>
-            )}
+            {/* Undo deletes the token again and closes the dialog; with the dialog gone, a toast says so. */}
+            <UndoCreate save={undo} entry={entry} name={token.name} deleted={`Admin Token ${token.name} deleted`} onClose={() => close(false)} />
             <Button variant="primary" onClick={() => close(false)}>
               Done
             </Button>

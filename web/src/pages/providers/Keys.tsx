@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
 import {
   CircleCheck,
   CircleSlash,
@@ -22,7 +21,8 @@ import { rec, RecordLink } from "@/sheets/RecordLink";
 import type { BulkResult } from "@/api/types";
 import { formatDate, formatDuration, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button, IconButton } from "@/ui/Button";
+import { useUrlParams } from "@/lib/url-state";
+import { Button, IconButton, TextButton } from "@/ui/Button";
 import { Mono, StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
 import { useConfirm } from "@/ui/Confirm";
@@ -31,7 +31,7 @@ import { type ColumnFiltersState, type SortingState, DataTable, RowMenu, columns
 import { type Done, type Save, SaveError, SaveStatus, toastDone, useSave } from "@/ui/SaveStatus";
 import { ScrollArea } from "@/ui/ScrollArea";
 import { Dialog } from "@/ui/Dialog";
-import { Field, Input, SearchInput } from "@/ui/Input";
+import { Field, Input, ToolbarSearch } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { notify, notifyChange } from "@/ui/toast";
@@ -110,23 +110,12 @@ export function KeysTab({
   const phone = useIsPhone();
   const chat = useChatActions();
   const confirm = useConfirm();
-  const [params, setParams] = useSearchParams();
+  const { params, setParam, setParams, setSort } = useUrlParams();
   const q = params.get("q") ?? "";
   const filter = (params.get("state") as StateFilter) || "all";
   const sort = (params.get("sort") as Sort) || "name";
   const desc = params.get("dir") === "desc";
   const openKey = params.get("key");
-
-  const setParam = (k: string, v?: string) =>
-    setParams(
-      (p) => {
-        const n = new URLSearchParams(p);
-        if (v) n.set(k, v);
-        else n.delete(k);
-        return n;
-      },
-      { replace: true },
-    );
 
   const [results, setResults] = useState<Results>();
   const [restricting, setRestricting] = useState<string[]>();
@@ -217,7 +206,7 @@ export function KeysTab({
     });
   };
 
-  // A keyless key: no secret, so Iroha sends no credential with it. A failure
+  // A keyless key: no secret, so Iroha sends no key with it. A failure
   // shows at `at` (the empty state or the Add keys dialog), which stays.
   const addKeyless = (at: Save) => {
     setBusy("keyless");
@@ -309,8 +298,7 @@ export function KeysTab({
 
   const toolbar = (
     <>
-      <SearchInput
-        className="min-w-0 flex-1 md:max-w-[320px] md:flex-none"
+      <ToolbarSearch
         placeholder="Search keys"
         aria-label="Search keys by name or secret"
         value={q}
@@ -363,19 +351,9 @@ export function KeysTab({
         columnFilters={columnFilters}
         filterChips={filters}
         noResultsTitle="No keys match"
-        onClearFilters={() =>
-          setParams(
-            (p) => {
-              const n = new URLSearchParams(p);
-              n.delete("q");
-              n.delete("state");
-              return n;
-            },
-            { replace: true },
-          )
-        }
+        onClearFilters={() => setParams({ q: undefined, state: undefined })}
         sorting={sorting}
-        onSortingChange={(s) => setSortParams(setParams, (s[0]?.id as Sort) ?? "name", s[0]?.desc ?? false)}
+        onSortingChange={(s) => setSort(s[0]?.id ?? "name", s[0]?.desc ?? false, "name")}
         bulk={({ rows }) => bulkBar(rows)}
         rowActions={(k) => <KeyMenu k={k} actions={keyActions} multipleEndpoints={multipleEndpoints} />}
         onRowClick={keyActions.open}
@@ -456,20 +434,6 @@ const counts: Record<Exclude<StateFilter, "all">, (k: UpstreamKey[]) => number> 
   disabled: (k) => k.filter((x) => x.state.state === "disabled").length,
   gaps: (k) => k.filter(hasGaps).length,
 };
-
-function setSortParams(setParams: ReturnType<typeof useSearchParams>[1], sort: Sort, desc: boolean) {
-  setParams(
-    (p) => {
-      const n = new URLSearchParams(p);
-      if (sort === "name") n.delete("sort");
-      else n.set("sort", sort);
-      if (desc) n.set("dir", "desc");
-      else n.delete("dir");
-      return n;
-    },
-    { replace: true },
-  );
-}
 
 function SecretCell({ k }: { k: UpstreamKey }) {
   return (
@@ -602,6 +566,7 @@ function bulkDone(res: BulkResult<UpstreamKey>, items: string[], past: string, s
 /** A bulk change whose place is gone (a dialog that closed): its toast. */
 function reportBulk(res: BulkResult<UpstreamKey>, items: string[], past: string, show: (r: Results) => void, refresh: () => void) {
   const d = bulkDone(res, items, past, show);
+  // Toast: the dialog it came from (a confirm, the Endpoints dialog) has closed, so the result has no place left.
   if (d) toastDone(d, refresh);
 }
 
@@ -653,8 +618,8 @@ function ResultsDialog({ results, onClose }: { results?: Results; onClose: () =>
     >
       <ScrollArea className="rounded-lg border border-border" viewportClassName="max-h-[50vh]">
         <ul className="divide-y divide-border">
-          {results?.rows.map((r, i) => (
-            <li key={i} className="flex items-start gap-3 px-4 py-2.5 text-[14px]">
+          {results?.rows.map((r) => (
+            <li key={r.name} className="flex items-start gap-3 px-4 py-2.5 text-[14px]">
               <StatusDot tone={r.tone ?? (r.ok ? "green" : "red")} className="mt-1.5" />
               <span className="w-28 shrink-0 truncate font-mono">{r.name}</span>
               <span className={cn("min-w-0 flex-1", !r.ok && "text-danger-text")}>{r.text}</span>
@@ -818,8 +783,9 @@ function AddKeysDialog({
           {rows && (
             <ScrollArea className="border-t border-border" viewportClassName="max-h-[240px]">
               <ul className="divide-y divide-border">
-                {rows.map((r, i) => (
-                  <li key={i} className="flex items-center gap-3 px-4 py-2 text-[14px]">
+                {/* Pasted keys are deduplicated, so each secret is one row. */}
+                {rows.map((r) => (
+                  <li key={r.secret} className="flex items-center gap-3 px-4 py-2 text-[14px]">
                     <Mono className="w-20 shrink-0 text-fg-muted">{maskSecret(r.secret)}</Mono>
                     <span className={cn("min-w-0 flex-1 truncate", r.kind === "existing" && "text-fg-muted", r.kind === "error" && "text-danger-text")}>
                       {r.kind === "error" ? r.error : r.name}
@@ -843,10 +809,10 @@ function AddKeysDialog({
       {secrets.length === 0 && (
         <p className="mt-4 text-[14px] text-fg-muted">
           No key needed?{" "}
-          <button type="button" className="text-info hover:underline disabled:opacity-60" disabled={keylessPending} onClick={() => onKeyless(keylessSave)}>
+          <TextButton disabled={keylessPending} onClick={() => onKeyless(keylessSave)}>
             Add a keyless key
-          </button>{" "}
-          instead: Iroha then sends no credential.
+          </TextButton>{" "}
+          instead: Iroha then sends no key.
         </p>
       )}
       {error && <p className={cn("mt-3 text-[13px] text-danger-text", appearClass)}>{error}</p>}
@@ -1081,7 +1047,7 @@ function KeyDialog({
         <section>
           <h3 className="mb-2 text-[14px] font-semibold">Key</h3>
           <div className="flex items-center gap-1 rounded-lg border border-border bg-subtle py-1 pl-3 pr-1">
-            <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{k.secret ? (shown ? k.secret : maskSecret(k.secret)) : "Keyless: no credential is sent"}</Mono>
+            <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{k.secret ? (shown ? k.secret : maskSecret(k.secret)) : "Keyless: no key is sent"}</Mono>
             {k.secret && <IconButton icon={shown ? EyeOff : Eye} label={shown ? "Hide the key" : "Show the key"} size="sm" onClick={() => setShown((x) => !x)} />}
             {k.secret && <CopyButton icon value={k.secret} what="Key" label="Copy the key" />}
             <Button size="sm" variant="ghost" onClick={() => setSecret(secret === undefined ? "" : undefined)}>
@@ -1133,9 +1099,9 @@ function KeyDialog({
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-[14px] font-semibold">Models this key can't serve now</h3>
               {k.model_gaps.length > 1 && (
-                <button type="button" className="text-[13.5px] text-info hover:underline" onClick={() => void clearGap()}>
+                <TextButton className="text-[13.5px]" onClick={() => void clearGap()}>
                   Clear all Model Gaps
-                </button>
+                </TextButton>
               )}
             </div>
             <ul className="divide-y divide-border rounded-lg border border-border text-[14px]">
@@ -1148,9 +1114,9 @@ function KeyDialog({
                       Model Gap: {g.reason}. Ends {formatDate(g.expires_at)}.
                     </span>
                   </span>
-                  <button type="button" className="shrink-0 text-info hover:underline" onClick={() => void clearGap(g.model)}>
+                  <TextButton className="shrink-0" aria-label={`Clear the Model Gap for ${g.model}`} onClick={() => void clearGap(g.model)}>
                     Clear
-                  </button>
+                  </TextButton>
                 </li>
               ))}
               {k.cooling_models.map((c) => (
@@ -1164,9 +1130,9 @@ function KeyDialog({
           <section>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-[14px] font-semibold">Endpoints</h3>
-              <button type="button" className="text-[13.5px] text-info hover:underline" onClick={() => actions.endpoints(k)}>
+              <TextButton className="text-[13.5px]" aria-label={`Change the Endpoints of ${k.name}`} onClick={() => actions.endpoints(k)}>
                 Change
-              </button>
+              </TextButton>
             </div>
             <p className="text-[14px] text-fg-muted">
               {k.endpoints.length ? (
@@ -1196,9 +1162,9 @@ function KeyDialog({
                         </span>
                         <span className="block text-fg-muted">Endpoint Gap: {g.reason}. Not sent there until cleared; a passing test there clears it.</span>
                       </span>
-                      <button type="button" className="shrink-0 text-info hover:underline" onClick={() => void clearEndpointGap(g.endpoint)}>
+                      <TextButton className="shrink-0" aria-label={`Clear the Endpoint Gap on ${g.endpoint}`} onClick={() => void clearEndpointGap(g.endpoint)}>
                         Clear
-                      </button>
+                      </TextButton>
                     </li>
                   ))}
                 </ul>

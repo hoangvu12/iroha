@@ -1,7 +1,7 @@
 import type { ComponentType, ReactNode } from "react";
 import { CircleAlert, RotateCw, X } from "lucide-react";
 import { isApiError } from "@/api/client";
-import { Button } from "./Button";
+import { Button, IconButton } from "./Button";
 import { cn } from "./cn";
 
 // Page states from C25. Each keeps the page around it: render them inside
@@ -37,16 +37,16 @@ export function EmptyState({
   );
 }
 
-export type FilterChip = { label: ReactNode; onRemove: () => void };
+/** `name` says which filter in words when `label` isn't plain text; the × is named "Remove filter <name>". */
+export type FilterChip = { label: ReactNode; name?: string; onRemove: () => void };
 
 /** A filter shown as a removable chip; used above tables and in NoResults. */
-export function Chip({ label, onRemove }: FilterChip) {
+export function Chip({ label, name, onRemove }: FilterChip) {
+  const what = name ?? (typeof label === "string" ? label : "");
   return (
-    <span className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-muted pl-3 pr-1.5 text-[13px] text-fg">
+    <span className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-muted pl-3 pr-1 text-[13px] text-fg">
       {label}
-      <button type="button" onClick={onRemove} aria-label="Remove filter" className="rounded p-0.5 text-fg-muted hover:text-fg">
-        <X size={14} />
-      </button>
+      <IconButton icon={X} size="xs" label={`Remove filter ${what}`.trim()} onClick={onRemove} />
     </span>
   );
 }

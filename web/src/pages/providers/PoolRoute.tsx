@@ -5,7 +5,7 @@ import { rec, RecordLink } from "@/sheets/RecordLink";
 import { ArrowUpRight, CircleX, Layers, X } from "lucide-react";
 import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
-import { Button, buttonClass, IconButton } from "@/ui/Button";
+import { Button, buttonClass, IconButton, TextButton } from "@/ui/Button";
 import type { Tone } from "@/ui/bits";
 import { StatusDot } from "@/ui/bits";
 import { Canvas } from "@/ui/Canvas";
@@ -439,9 +439,9 @@ function MemberPanel({ m, pool, onClose }: { m: PreviewMember; pool: string; onC
             ))}
           </ol>
           {ready.length > shown.length && (
-            <button type="button" className="mt-1 text-[14.5px] text-info hover:underline" onClick={() => setAll(true)}>
+            <TextButton className="mt-1 text-[14.5px]" aria-label={`Show ${ready.length - shown.length} more ready keys`} onClick={() => setAll(true)}>
               {ready.length - shown.length} more
-            </button>
+            </TextButton>
           )}
         </Section>
       )}

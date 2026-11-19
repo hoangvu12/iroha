@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { animateIn, animateOut } from "@ui-sdk/core";
 import { useChatPanel } from "./chat-panel";
 
@@ -33,12 +33,26 @@ export function ChatSheet({ hidden, children }: { hidden: boolean; children: Rea
   const leaving = useRef(false);
   const wasOpen = useRef(chat.isOpen);
 
+  // Where focus was outside the sheet last (the trigger that opened it: a Test
+  // button, the sidebar's Chat, a row menu's ⋯ once the menu gave focus back).
+  // Closing with focus inside gives it back there, not to the page body.
+  const outside = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const note = (e: FocusEvent) => {
+      if (e.target instanceof HTMLElement && !ref.current?.contains(e.target)) outside.current = e.target;
+    };
+    document.addEventListener("focusin", note);
+    return () => document.removeEventListener("focusin", note);
+  }, []);
+
   useLayoutEffect(() => {
     // Only the panel's own open and close slide; a route change swaps it at once.
     const instant = chat.instant || wasOpen.current === chat.isOpen;
     wasOpen.current = chat.isOpen;
     const el = ref.current;
     if (!el) return;
+    // Closed (not swapped for the /chat page) while focus was in it: back to the trigger.
+    if (!show && !chat.isOpen && el.contains(document.activeElement) && outside.current?.isConnected) outside.current.focus({ preventScroll: true });
     if (show) {
       // Reopened mid-exit: the exit's cleanup already lifted data-ending-style,
       // so the running transition turns back on its own.

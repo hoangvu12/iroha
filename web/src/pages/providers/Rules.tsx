@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router";
 import { Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { api, isApiError, seg } from "@/api/client";
 import { formatNumber } from "@/lib/format";
+import { useUrlParams } from "@/lib/url-state";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { useConfirm } from "@/ui/Confirm";
 import { DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
 import { Dialog } from "@/ui/Dialog";
-import { Field, Input, SearchInput } from "@/ui/Input";
+import { Field, Input, ToolbarSearch } from "@/ui/Input";
 import { MenuItem } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { SaveError, useSave } from "@/ui/SaveStatus";
@@ -25,18 +25,9 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
   const refresh = useRefresh();
   const confirm = useConfirm();
   const [editing, setEditing] = useState<Rule>();
-  const [params, setParams] = useSearchParams();
+  const { params, setParam } = useUrlParams();
   const q = params.get("q") ?? "";
-  const setQ = (v: string) =>
-    setParams(
-      (p) => {
-        const n = new URLSearchParams(p);
-        if (v) n.set("q", v);
-        else n.delete("q");
-        return n;
-      },
-      { replace: true },
-    );
+  const setQ = (v: string) => setParam("q", v);
 
   // Asks first, naming the rule; the result (with Undo) toasts, since the confirm has closed.
   const askDelete = (r: Rule) =>
@@ -82,8 +73,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
         errorTitle="Couldn't load the rules"
         onRetry={() => void rules.refetch()}
         toolbar={
-          <SearchInput
-            className="min-w-0 flex-1 md:max-w-[320px] md:flex-none"
+          <ToolbarSearch
             placeholder="Search rules"
             aria-label="Search rules"
             value={q}

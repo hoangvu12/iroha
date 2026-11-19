@@ -62,7 +62,16 @@ export const SearchInput = forwardRef<HTMLInputElement, InputProps>(function Sea
   );
 });
 
-type ControlProps = { id?: string; "aria-invalid"?: boolean; "aria-describedby"?: string };
+/**
+ * The search box of a table's toolbar (DataTable `toolbar`): fills the line on
+ * phones beside a filter, at most 320 px from md up. `className` adds to it
+ * (Audit Entries sets a fixed width).
+ */
+export const ToolbarSearch = forwardRef<HTMLInputElement, InputProps>(function ToolbarSearch({ className, ...props }, ref) {
+  return <SearchInput ref={ref} className={cn("min-w-0 flex-1 md:max-w-[320px] md:flex-none", className)} {...props} />;
+});
+
+type ControlProps ={ id?: string; "aria-invalid"?: boolean; "aria-describedby"?: string };
 
 /**
  * Label, control, then a hint or an error under it (UI SDK's Field). The

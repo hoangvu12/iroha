@@ -133,6 +133,8 @@
   --duration-toast: 400ms;       /* toasts stacking, entering, leaving (with ease, not ease-out) */
   --duration-fade: 150ms;        /* a crossfade; what a moving entrance becomes under reduced motion */
   --duration-flash: 1600ms;      /* the background of a row that just arrived, fading back */
+  --duration-scrollbar-in: 100ms;  /* a Scroll Area's bar showing on hover or scroll */
+  --duration-scrollbar-out: 200ms; /* ...and fading once it isn't needed (it lingers, unlike other exits) */
 
   /* Distances and scales: where an entrance starts and an exit ends */
   --motion-scale-popup: 0.96;    /* popups and dialogs grow from this; never from 0 */
@@ -171,6 +173,8 @@
   --transition-duration-list-out: var(--duration-list-out);
   --transition-duration-toast: var(--duration-toast);
   --transition-duration-fade: var(--duration-fade);
+  --transition-duration-scrollbar-in: var(--duration-scrollbar-in);
+  --transition-duration-scrollbar-out: var(--duration-scrollbar-out);
 
   /* animate-rise-in: a page's first screen entering once (Login, Setup).
      A keyframe, not @starting-style, because Chrome skips @starting-style

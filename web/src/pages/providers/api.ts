@@ -17,6 +17,22 @@ export const shapeLabel = (s: string) => SHAPES.find((x) => x.value === s)?.labe
 
 export type AuthStyle = "bearer" | "x-api-key" | "header" | "query" | "none";
 
+/** How an Endpoint sends the Upstream Key, in one set of words for the Endpoint dialog's choice and the Endpoint sheet. */
+export const AUTH_STYLES: { value: AuthStyle; label: string }[] = [
+  { value: "bearer", label: "Authorization: Bearer <key>" },
+  { value: "x-api-key", label: "x-api-key: <key>" },
+  { value: "header", label: "A header you name" },
+  { value: "query", label: "A query parameter you name" },
+  { value: "none", label: "Not sent (no key needed)" },
+];
+
+/** An Endpoint's auth style as shown on its record: the named header or parameter filled in ("api-key: <key>", "?key=<key>"). */
+export function authStyleLabel(style: string, param?: string): string {
+  if (style === "header" && param) return `${param}: <key>`;
+  if (style === "query" && param) return `?${param}=<key>`;
+  return AUTH_STYLES.find((a) => a.value === style)?.label ?? style;
+}
+
 export type Endpoint = {
   id: string;
   provider: string;
@@ -389,7 +405,7 @@ export const calls = {
   updateEndpoint: (h: string, name: string, body: Partial<Endpoint>) => api.patch<EndpointResult>(`${P(h)}/endpoints/${seg(name)}`, body),
   deleteEndpoint: (h: string, name: string) => api.delete<EndpointResult>(`${P(h)}/endpoints/${seg(name)}`),
 
-  /** A key with no secret: Iroha sends no credential with it. */
+  /** A key with no secret: Iroha sends no key with it. */
   addKeylessKey: (h: string, name: string) => api.post<KeyResult>(`${P(h)}/keys`, { name }),
   addKeys: (h: string, items: { secret: string }[], dryRun?: boolean) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }, { query: dry(dryRun) }),
   restrictKeys: (h: string, items: { name: string; endpoints: string[] }[]) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }),
@@ -444,7 +460,4 @@ export function successRate(t?: Pick<Traffic, "succeeded" | "failed">): number |
   return done ? t.succeeded / done : undefined;
 }
 
-export function errorText(e: unknown): string {
-  if (isApiError(e)) return e.hint ? `${e.message} ${e.hint}` : e.message;
-  return e instanceof Error ? e.message : String(e);
-}
+export { errorText } from "@/api/client";

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { announce } from "@ui-sdk/core";
 import { CircleAlert, CircleCheck, RotateCcw } from "lucide-react";
 import { revertEntry } from "@/api/audit";
-import { isApiError } from "@/api/client";
+import { errorText } from "@/api/client";
 import { Button } from "./Button";
 import { cn } from "./cn";
 import { useLeaving } from "./presence";
@@ -49,11 +49,8 @@ export type Save = {
   hold(on: boolean): void;
 };
 
-/** "team-6 is taken. Pick another name." */
-export function describeError(e: unknown): string {
-  if (isApiError(e)) return e.hint ? `${e.message} ${e.hint}` : e.message;
-  return e instanceof Error ? e.message : String(e);
-}
+/** "team-6 is taken. Pick another name." (`errorText` from the API client.) */
+export const describeError = errorText;
 
 const entryOf = (r: unknown) => (r && typeof r === "object" && "audit_entry" in r ? (r as { audit_entry?: string }).audit_entry : undefined);
 
@@ -214,4 +211,27 @@ export function toastDone(d: Done, onUndone?: () => void) {
   if (d.tone === "bad") return notify.error(d.message, d.action);
   if (d.entry && !d.action) return notifyChange(d.message, { audit_entry: d.entry }, { onUndone });
   return notify.success(d.message, d.action);
+}
+
+/**
+ * Undo in the footer of a create dialog that stays open on what it made (a new
+ * Gateway Key or Admin Token, shown once): reverts the create's Audit Entry,
+ * closes the dialog and toasts `deleted`. `save` holds its pending state and a
+ * failure (render `<SaveError save={save} />` in the dialog). Nothing without
+ * an `entry`.
+ */
+export function UndoCreate({ save, entry, name, deleted, onClose }: { save: Save; entry?: string; name: string; deleted: string; onClose: () => void }) {
+  if (!entry) return null;
+  const undo = async () => {
+    if (await save.run(() => revertEntry(entry))) {
+      onClose();
+      // Toast: Undo closed the dialog the create showed in, so its result has no place left.
+      notify.success(deleted);
+    }
+  };
+  return (
+    <Button variant="ghost" icon={RotateCcw} className="mr-auto" aria-label={`Undo: delete ${name}`} loading={save.pending} onClick={() => void undo()}>
+      Undo
+    </Button>
+  );
 }

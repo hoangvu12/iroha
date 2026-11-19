@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from "react-router";
 import { LogOut, Monitor, Moon, Settings, Sun } from "lucide-react";
 import { useSignOut } from "@/api/session";
 import { useIsPhone } from "@/lib/media";
+import { Button as SdkButton } from "@ui-sdk/react/button";
 import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Kbd } from "@/ui/bits";
@@ -91,15 +92,14 @@ function SidebarItem({ item }: { item: NavItem }) {
   );
   if (item.action === "chat") {
     return (
-      <button
-        type="button"
+      <SdkButton
         onClick={() => chat.toggle()}
         aria-pressed={chat.isOpen}
         aria-keyshortcuts={item.key}
         className={cn(navItemClass(chat.isOpen), "w-full text-left")}
       >
         {inner}
-      </button>
+      </SdkButton>
     );
   }
   return (

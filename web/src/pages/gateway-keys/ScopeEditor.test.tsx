@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createAgent } from "@ui-sdk/react/agent";
 import { useState } from "react";
@@ -26,6 +26,10 @@ beforeEach(() => {
       if (u.pathname === "/api/pools") return json({ pools: [{ id: "m1", name: "glm-4.6", maker: "zai" }] });
       if (u.pathname === "/api/providers/openai/models") {
         const all = ["gpt-4o", "gpt-4o-mini", "o3"].filter((m) => m.includes(u.searchParams.get("q") ?? ""));
+        return json({ total: all.length, offset: 0, limit: 200, models: all.map((m) => ({ id: m, model: m, visible: true, hidden: false })) });
+      }
+      if (u.pathname === "/api/providers/zai/models") {
+        const all = Array.from({ length: 100 }, (_, i) => `glm-${String(i).padStart(3, "0")}`);
         return json({ total: all.length, offset: 0, limit: 200, models: all.map((m) => ({ id: m, model: m, visible: true, hidden: false })) });
       }
       return new Response("{}", { status: 404 });
@@ -81,6 +85,23 @@ test("a checked Provider's models open a dialog that picks some by keyboard and 
   expect(latest.providers.get("openai")).toEqual(["gpt-4o-mini"]);
   const again = screen.getByRole("button", { name: "Models of openai: 1 model" });
   expect(document.activeElement).toBe(again);
+});
+
+test("a long model list scrolls in the shared Scroll Area and draws the rows scrolled into view", async () => {
+  const user = userEvent.setup();
+  renderEditor({ all: false, providers: new Map([["zai", null]]), pools: new Set() });
+  await user.click(await screen.findByRole("button", { name: "Models of zai: All models" }));
+  const dialog = await screen.findByRole("dialog", { name: "Models of zai" });
+  await user.click(within(dialog).getByRole("radio", { name: "Only these" }));
+  await within(dialog).findByRole("checkbox", { name: "glm-000" });
+  // The list is the Scroll Area's viewport (its own thin bar), not a native scroller.
+  const list = within(dialog).getByRole("region", { name: "Models of zai" });
+  expect(list.getAttribute("data-slot")).toBe("scroll-area-viewport");
+  expect(within(dialog).queryByRole("checkbox", { name: "glm-099" })).toBeNull();
+  list.scrollTop = 100 * 36 - 300;
+  fireEvent.scroll(list);
+  expect(await within(dialog).findByRole("checkbox", { name: "glm-099" })).toBeTruthy();
+  expect(within(dialog).queryByRole("checkbox", { name: "glm-000" })).toBeNull();
 });
 
 test("an agent picks the scope by names alone", async () => {

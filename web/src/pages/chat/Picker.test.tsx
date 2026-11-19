@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { createAgent } from "@ui-sdk/react/agent";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { popupMotionClass } from "@/ui/popup";
 import { DEFAULT_SETTINGS, type Settings } from "./api";
 import { createPickerController, PickerPopover, PickerTrigger, type View } from "./Picker";
 
@@ -162,4 +163,25 @@ test("an agent reads the picker by names and changes its settings", async () => 
   expect(run.ok, run.error?.message).toBe(true);
   expect(latest.reasoning).toBe("high");
   expect(latest.toolCheck).toBe(true);
+});
+
+test("an agent opens a settings row by its name: the rows and the model are UI SDK buttons", async () => {
+  const user = userEvent.setup();
+  renderComposer({ ...DEFAULT_SETTINGS, model: "openai/o3" });
+  await user.click(screen.getByRole("button", { name: "Model openai/o3. Settings" }));
+  const popover = await screen.findByRole("dialog", { name: "Model and settings" });
+  const labels = agent.snapshot().map((e) => e.label);
+  for (const l of ["Shape OpenAI Chat", "Send as Owner", "Change the model: o3 on openai"]) expect(labels, `${l} is missing`).toContain(l);
+  const run = await agent.act({ steps: [{ ref: "Shape OpenAI Chat", action: "press" }] });
+  expect(run.ok, run.error?.message).toBe(true);
+  await within(popover).findByRole("listbox", { name: "Shape" });
+});
+
+test("the popover grows from the composer on the shared popup recipe (ui/popup.ts)", async () => {
+  const user = userEvent.setup();
+  renderComposer({ ...DEFAULT_SETTINGS, model: "openai/o3" });
+  await user.click(screen.getByRole("button", { name: "Model openai/o3. Settings" }));
+  const popover = await screen.findByRole("dialog", { name: "Model and settings" });
+  const classes = popover.className.split(/\s+/);
+  for (const c of popupMotionClass.split(/\s+/)) expect(classes).toContain(c);
 });

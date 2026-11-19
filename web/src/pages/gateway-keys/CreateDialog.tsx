@@ -1,15 +1,13 @@
 import { useState } from "react";
-import { Check, RotateCcw } from "lucide-react";
-import { revertEntry } from "@/api/audit";
-import { isApiError } from "@/api/client";
+import { Check } from "lucide-react";
+import { errorText } from "@/api/client";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { riseIn } from "@/ui/Reveal";
 import { Dialog } from "@/ui/Dialog";
 import { Disclosure } from "@/ui/Disclosure";
 import { Field, Input } from "@/ui/Input";
-import { SaveError, useSave } from "@/ui/SaveStatus";
-import { notify } from "@/ui/toast";
+import { SaveError, UndoCreate, useSave } from "@/ui/SaveStatus";
 import { type GatewayKey, useCreateKey, useInvalidateKeys } from "./api";
 import { baseUrls, CopyBox } from "./bits";
 import { emptyDraft, toScope } from "./scope";
@@ -56,7 +54,7 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
       {
         // The dialog stays open on the new key, which says it was created; Undo is in its footer.
         onSuccess: (res) => setMade({ key: res.gateway_key, entry: res.audit_entry }),
-        onError: (e) => setError(isApiError(e) ? `${e.message} ${e.hint}`.trim() : String(e)),
+        onError: (e) => setError(errorText(e)),
       },
     );
   };
@@ -64,13 +62,6 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
   if (made) {
     const urls = baseUrls();
     const { key, entry } = made;
-    // Undo deletes the key again and closes the dialog; with the dialog gone, a toast says so.
-    const undoCreate = async () => {
-      if (entry && (await undo.run(() => revertEntry(entry)))) {
-        close(false);
-        notify.success(`Gateway Key ${key.name} deleted`);
-      }
-    };
     return (
       <Dialog
         open={open}
@@ -92,11 +83,8 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
         description={<span className={cn("block", riseIn)}>Copy it now and give it to the Caller. You can copy it again later from the key's page.</span>}
         footer={
           <>
-            {entry && (
-              <Button variant="ghost" icon={RotateCcw} className="mr-auto" aria-label={`Undo: delete ${key.name}`} loading={undo.pending} onClick={() => void undoCreate()}>
-                Undo
-              </Button>
-            )}
+            {/* Undo deletes the key again and closes the dialog; with the dialog gone, a toast says so. */}
+            <UndoCreate save={undo} entry={entry} name={key.name} deleted={`Gateway Key ${key.name} deleted`} onClose={() => close(false)} />
             <Button variant="primary" onClick={() => close(false)}>
               Done
             </Button>

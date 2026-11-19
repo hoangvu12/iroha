@@ -121,6 +121,7 @@ export default function StatesPage() {
         </Panel>
         <Panel title="Toasts" note="Only when the place that caused a result is gone. Bottom right for 6 s; a change that can be put back has Undo.">
           <div className="flex flex-wrap gap-2">
+            {/* Toast: these buttons only show each kind of toast on the States page. */}
             <Button onClick={() => notify.success("3 keys disabled", { label: "Undo", onClick: () => notify.success("Change reverted") })}>
               Change with Undo
             </Button>

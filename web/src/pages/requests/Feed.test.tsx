@@ -100,7 +100,8 @@ test("changing a filter keeps the rows on screen until the new ones arrive, with
   const { container } = renderFeed("/requests?status=failed");
 
   await waitFor(() => expect(opener("req_failed")).toBeTruthy());
-  await user.click(screen.getByRole("button", { name: "Remove filter" }));
+  // Each chip's × names its own filter.
+  await user.click(screen.getByRole("button", { name: "Remove filter Status is Failed" }));
   await waitFor(() => expect(release).toBeTypeOf("function"));
 
   expect(opener("req_failed")).toBeTruthy();
@@ -191,6 +192,34 @@ test("numbered pages, if the Owner prefers them: a later page loads the older Re
   expect(listCalls(fetch).map((u) => u.searchParams.get("before"))).toEqual([null, "req_100"]);
 });
 
+test("the Owner switches the feed to numbered pages in the View menu, and this browser remembers it", async () => {
+  const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => request(`req_${String(from + i).padStart(3, "0")}`));
+  iroha(
+    (p) => {
+      if (p.has("changed_after")) return { requests: [], cursor: 1 };
+      return { requests: page(1, 100), next_before: "req_100", cursor: 1 };
+    },
+    { ...STATS, requests: 120 },
+  );
+  const user = userEvent.setup();
+  const first = renderFeed();
+  await waitFor(() => expect(shownIds()).toHaveLength(100));
+  expect(screen.queryByRole("navigation", { name: "Pages of Requests" })).toBeNull();
+
+  await user.click(screen.getByRole("button", { name: "View" }));
+  const choice = await screen.findByRole("menuitemradio", { name: "Numbered pages" });
+  expect(screen.getByRole("menuitemradio", { name: "Live, load older as you scroll" }).getAttribute("aria-checked")).toBe("true");
+  await user.click(choice);
+  await waitFor(() => expect(shownIds()).toHaveLength(25));
+  expect(screen.getByRole("navigation", { name: "Pages of Requests" })).toBeTruthy();
+  expect(localStorage.getItem("iroha:requests:paging")).toBe("pages");
+
+  first.unmount();
+  renderFeed();
+  await waitFor(() => expect(shownIds()).toHaveLength(25));
+  expect(screen.getByRole("navigation", { name: "Pages of Requests" })).toBeTruthy();
+});
+
 test("an agent finds the feed's controls by name, opens a Request and loads older ones", async () => {
   iroha((p) => {
     if (p.has("changed_after")) return { requests: [], cursor: 1 };
@@ -202,7 +231,7 @@ test("an agent finds the feed's controls by name, opens a Request and loads olde
   const entries = agent.snapshot().filter((e) => !e.offPage && e.component !== "more");
   for (const e of entries) expect(e.label, `${e.component} ${e.ref} has no name`).toBeTruthy();
   const labels = entries.map((e) => e.label);
-  for (const l of ["Search Requests", "Open Request req_1", "Load older Requests", "Requests"]) expect(labels, `${l} is missing`).toContain(l);
+  for (const l of ["Search Requests", "Open Request req_1", "Load older Requests", "Requests", "Live"]) expect(labels, `${l} is missing`).toContain(l);
 
   const more = await agent.act({ steps: [{ ref: "Load older Requests", action: "press" }] });
   expect(more.ok, more.error?.message).toBe(true);

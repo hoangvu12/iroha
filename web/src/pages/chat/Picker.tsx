@@ -4,6 +4,7 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, CornerDownLeft } from "luc
 import { Command, CommandEmpty, CommandGroup, CommandGroupLabel, CommandInput, CommandItem, CommandList } from "@ui-sdk/react/command";
 import { Listbox, ListboxItem, ListboxItemIndicator } from "@ui-sdk/react/listbox";
 import { createPopoverController, Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@ui-sdk/react/popover";
+import { Button as SdkButton } from "@ui-sdk/react/button";
 import { formatNumber } from "@/lib/format";
 import { useGatewayKeys, useKeys, useProvider } from "@/pages/providers/api";
 import { KeyStateLabel, Segmented, Switch } from "@/pages/providers/controls";
@@ -11,6 +12,7 @@ import { Kbd } from "@/ui/bits";
 import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
+import { popupMotionClass } from "@/ui/popup";
 import { ScrollArea } from "@/ui/ScrollArea";
 import { Skeleton } from "@/ui/Skeleton";
 import type { ModelChoice, Reasoning, Settings, Shape } from "./api";
@@ -72,10 +74,9 @@ export function PickerPopover({
         initialFocus="[data-autofocus]"
         className={cn(
           "flex w-(--anchor-width) max-h-[min(640px,calc(100dvh-160px),var(--available-height))] flex-col overflow-hidden rounded-xl border border-border bg-elevated text-fg shadow-elevated outline-none",
-          // The popup recipe (architecture.md "UI motion system"): grows from the composer, leaves faster; fades only under reduced motion.
-          "origin-(--transform-origin) transition-[opacity,scale] duration-popup-in ease-out",
-          "data-starting-style:scale-(--motion-scale-popup) data-starting-style:opacity-0",
-          "data-ending-style:scale-(--motion-scale-popup) data-ending-style:opacity-0 data-ending-style:duration-popup-out",
+          // The shared popup recipe: grows from the composer, leaves faster; fades only under reduced motion.
+          // Its own surface (wider radius, no padding), so the recipe without popupClass's surface.
+          popupMotionClass,
         )}
       >
         {(state) => (
@@ -174,9 +175,10 @@ function Main({ settings, onChange, open }: { settings: Settings; onChange: (p: 
   const provider = providerOf(settings.model);
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <button
+      <SdkButton
         type="button"
         data-autofocus
+        aria-label={`Change the model: ${bareModel(settings.model)} ${provider ? `on ${provider}` : "(Model Pool)"}`}
         onClick={() => open("models")}
         className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted/60"
       >
@@ -186,9 +188,9 @@ function Main({ settings, onChange, open }: { settings: Settings; onChange: (p: 
           <span className="block truncate text-[13px] text-fg-muted">{provider ? `on ${provider}` : "Model Pool"}</span>
         </span>
         <ChevronDown size={16} aria-hidden className="text-fg-muted" />
-      </button>
+      </SdkButton>
       <div className="py-1">
-        <Row label="Provider" onClick={() => open("models", provider ? `${provider}/` : "")}>
+        <Row label="Provider" value={provider ?? "Model Pool"} onClick={() => open("models", provider ? `${provider}/` : "")}>
           {provider ? (
             <>
               <ProviderTile handle={provider} size={18} /> {provider}
@@ -197,18 +199,10 @@ function Main({ settings, onChange, open }: { settings: Settings; onChange: (p: 
             "Model Pool"
           )}
         </Row>
-        <Row label="Upstream Key" disabled={!provider} onClick={() => open("keys")}>
-          {provider ? (settings.upstreamKey ?? "Any active key") : "Each member's keys"}
-        </Row>
-        <Row label="Endpoint" disabled={!provider} onClick={() => open("endpoints")}>
-          {provider ? (settings.endpoint ?? "Any") : "Each member's"}
-        </Row>
-        <Row label="Shape" onClick={() => open("shapes")}>
-          {shapeLabel(settings.shape)}
-        </Row>
-        <Row label="Send as" onClick={() => open("as")}>
-          {settings.as ?? "Owner"}
-        </Row>
+        <Row label="Upstream Key" value={provider ? (settings.upstreamKey ?? "Any active key") : "Each member's keys"} disabled={!provider} onClick={() => open("keys")} />
+        <Row label="Endpoint" value={provider ? (settings.endpoint ?? "Any") : "Each member's"} disabled={!provider} onClick={() => open("endpoints")} />
+        <Row label="Shape" value={shapeLabel(settings.shape)} onClick={() => open("shapes")} />
+        <Row label="Send as" value={settings.as ?? "Owner"} onClick={() => open("as")} />
       </div>
       <div className="border-t border-border px-4 py-3">
         <p className="mb-2 text-[13px] text-fg-muted" aria-hidden>
@@ -237,18 +231,20 @@ function Main({ settings, onChange, open }: { settings: Settings; onChange: (p: 
   );
 }
 
-function Row({ label, children, onClick, disabled }: { label: string; children: ReactNode; onClick: () => void; disabled?: boolean }) {
+/** A setting and its value ("Shape OpenAI Chat Completions", its name too); pressing it opens the setting's list. `children` draws the value when it is more than text. */
+function Row({ label, value, children, onClick, disabled }: { label: string; value: string; children?: ReactNode; onClick: () => void; disabled?: boolean }) {
   return (
-    <button
+    <SdkButton
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex h-11 w-full items-center gap-3 px-4 text-left text-[14.5px] outline-none hover:bg-muted/60 focus-visible:bg-muted/60 disabled:cursor-default disabled:hover:bg-transparent"
+      aria-label={`${label} ${value}`}
+      className="flex h-11 w-full items-center gap-3 px-4 text-left text-[14.5px] outline-none hover:bg-muted/60 focus-visible:bg-muted/60 disabled:cursor-default disabled:hover:bg-transparent data-disabled:cursor-default data-disabled:hover:bg-transparent"
     >
       <span className="flex-1">{label}</span>
-      <span className="inline-flex min-w-0 items-center gap-2 truncate text-fg-muted">{children}</span>
+      <span className="inline-flex min-w-0 items-center gap-2 truncate text-fg-muted">{children ?? value}</span>
       {!disabled && <ChevronRight size={15} aria-hidden className="shrink-0 text-fg-muted" />}
-    </button>
+    </SdkButton>
   );
 }
 

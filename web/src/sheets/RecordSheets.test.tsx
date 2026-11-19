@@ -72,6 +72,28 @@ test("the Endpoint sheet lists the keys sent there; a missing record says so", a
   expect(within(ep).getByRole("link", { name: "Open page" }).getAttribute("href")).toBe("/providers/acme/endpoints");
 });
 
+test("the Upstream Key sheet copies the key's name and its key, as the Keys tab does", async () => {
+  const user = userEvent.setup();
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  renderWithSheets(null, "/x?sheet=key:acme/team-6");
+  const key = await loadedSheet("Upstream Key team-6");
+  await user.click(within(key).getByRole("button", { name: "Copy key name" }));
+  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("team-6"));
+  await user.click(within(key).getByRole("button", { name: "Copy Upstream Key" }));
+  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("sk-abcdefteam-6"));
+  // The key itself stays masked on screen.
+  expect(key.textContent).not.toContain("sk-abcdefteam-6");
+});
+
+test("the Endpoint sheet says how the key is sent in the Endpoint dialog's words", async () => {
+  renderWithSheets(null, "/x?sheet=endpoint:acme/main");
+  const ep = await loadedSheet("Endpoint main");
+  expect(within(ep).getByText("Key sent as")).toBeTruthy();
+  expect(ep.textContent).toContain("Authorization: Bearer <key>");
+  expect(ep.textContent).not.toMatch(/credential/i);
+});
+
 test("enable/disable and Test act on the record and show the result in the sheet", async () => {
   const user = userEvent.setup();
   routes["PATCH /api/providers/acme/keys/team-6"] = { upstream_key: {} };

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { rec, RecordLink } from "@/sheets/RecordLink";
 import { ArrowUpRight, KeyRound, MessageCircle, Pencil } from "lucide-react";
-import { isApiError } from "@/api/client";
+import { errorText, isApiError } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
 import { PageBody } from "@/app/PageBody";
 import { PageHeader } from "@/app/PageHeader";
@@ -326,7 +326,7 @@ function AccessDialog({ k, open, onClose }: { k: GatewayKey; open: boolean; onCl
           notifyChange(`Access of ${k.name} changed`, res, { undoneMessage: `${k.name}'s access is as before`, onUndone: invalidate });
           onClose();
         },
-        onError: (e) => setError(isApiError(e) ? `${e.message} ${e.hint}`.trim() : String(e)),
+        onError: (e) => setError(errorText(e)),
       },
     );
   };

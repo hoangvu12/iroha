@@ -88,7 +88,36 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   );
 });
 
-export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+export type TextButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  /** `link` (default): blue, underlined on hover, for an action inside a sentence or a card ("Clear", "Make one"). `quiet`: grey, darker on hover. */
+  tone?: "link" | "quiet";
+};
+
+const textTones = { link: "text-info hover:underline", quiet: "text-fg-muted hover:text-fg" };
+
+/**
+ * A button that reads as a link in running text: UI SDK's Button (so agents
+ * see it and an async `onClick` makes it pending) with no box, padding or press.
+ * `className` sets its size and spacing. Give each one a name of its own: when
+ * the words alone repeat on a page ("Clear" on every row), add an `aria-label`
+ * that starts with them ("Clear the Model Gap for gpt-4o").
+ */
+export const TextButton = forwardRef<HTMLButtonElement, TextButtonProps>(function TextButton(
+  { tone = "link", className, type = "button", onClick, ...rest },
+  ref,
+) {
+  return (
+    <SdkButton
+      ref={ref}
+      type={type}
+      className={cn(textTones[tone], "disabled:opacity-60 data-disabled:opacity-60", className)}
+      onClick={onClick && ((e) => onClick(e as MouseEvent<HTMLButtonElement>))}
+      {...rest}
+    />
+  );
+});
+
+export type IconButtonProps =ButtonHTMLAttributes<HTMLButtonElement> & {
   icon: ComponentType<{ size?: number; className?: string }>;
   label: string; // accessible name and tooltip
   size?: "xs" | "sm" | "md";

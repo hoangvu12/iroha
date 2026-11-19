@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import { formatNumber } from "@/lib/format";
 import { rec, RecordLink } from "@/sheets/RecordLink";
+import { TextButton } from "@/ui/Button";
 import type { RequestRecord } from "./api";
 import { Fact, failed, longShape, msOrSecs, ProviderLogo, secs, Summary } from "./bits";
 
@@ -91,9 +92,9 @@ export function RequestDetails({ r, onShowCaptured }: { r: RequestRecord; onShow
         <Fact label="Reasoning">{r.usage ? formatNumber(r.usage.reasoning) : none}</Fact>
       </Section>
       {r.captured && onShowCaptured && (
-        <button type="button" onClick={onShowCaptured} className="mt-6 inline-flex items-center gap-1.5 text-[15px] font-medium text-info hover:underline">
-          View prompt and response <ArrowRight size={16} />
-        </button>
+        <TextButton onClick={onShowCaptured} className="mt-6 inline-flex items-center gap-1.5 text-[15px] font-medium">
+          View prompt and response <ArrowRight size={16} aria-hidden />
+        </TextButton>
       )}
     </div>
   );

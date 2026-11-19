@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode, Ref, UIEventHandler } from "react";
 import {
   ScrollArea as Root,
   ScrollAreaContent,
@@ -14,20 +14,24 @@ import { cn } from "./cn";
 export { createScrollAreaController } from "@ui-sdk/react/scroll-area";
 type Controller = ScrollAreaController;
 
+// Shows quickly and lingers when it goes (motion tokens scrollbar-in/out).
 const bar =
-  "flex p-0.5 opacity-0 transition-opacity duration-200 data-visible:opacity-100 data-visible:duration-100 motion-reduce:transition-none";
+  "flex p-0.5 opacity-0 transition-opacity duration-scrollbar-out data-visible:opacity-100 data-visible:duration-scrollbar-in motion-reduce:transition-none";
 const thumb = "rounded-full bg-fg/20 transition-colors hover:bg-fg/35 data-dragging:bg-fg/45";
 
 /**
  * Iroha's one scrolling region: UI SDK Scroll Area with a thin bar that shows
  * on hover or scroll, and edge fades where content continues. The root needs a
- * size (or put `max-h-*` in `viewportClassName`); the viewport is the real
- * scroller. `bars={false}` keeps the bar invisible (tab rows): a Scrollbar
- * part must still render, or the browser's own bars come back.
+ * size (a class, `style`, or `max-h-*` in `viewportClassName`); the viewport is
+ * the real scroller, exposed as `viewportRef` and `onScroll` for code that reads
+ * the scroll position (a virtualised list). `bars={false}` keeps the bar
+ * invisible (tab rows): a Scrollbar part must still render, or the browser's own
+ * bars come back.
  */
 export function ScrollArea({
   children,
   className,
+  style,
   viewportClassName,
   contentClassName,
   axis = "y",
@@ -38,9 +42,12 @@ export function ScrollArea({
   type = "hover",
   stickToEnd,
   controller,
+  viewportRef,
+  onScroll,
 }: {
   children: ReactNode;
   className?: string;
+  style?: CSSProperties;
   viewportClassName?: string;
   contentClassName?: string;
   axis?: "x" | "y" | "both";
@@ -51,12 +58,16 @@ export function ScrollArea({
   type?: ScrollAreaType;
   stickToEnd?: boolean;
   controller?: Controller;
+  viewportRef?: Ref<HTMLDivElement>;
+  onScroll?: UIEventHandler<HTMLDivElement>;
 }) {
   const y = axis !== "x";
   const x = axis !== "y";
   return (
-    <Root className={cn("min-h-0 min-w-0", className)} type={type} stickToEnd={stickToEnd} controller={controller}>
+    <Root className={cn("min-h-0 min-w-0", className)} style={style} type={type} stickToEnd={stickToEnd} controller={controller}>
       <ScrollAreaViewport
+        ref={viewportRef}
+        onScroll={onScroll}
         role={label ? (role ?? "region") : role}
         aria-label={label}
         className={cn(

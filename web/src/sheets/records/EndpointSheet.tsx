@@ -3,7 +3,7 @@ import { MessageCircle } from "lucide-react";
 import { api, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
 import { formatDate } from "@/lib/format";
-import { type Endpoint, natural, shapeLabel, useKeys } from "@/pages/providers/api";
+import { authStyleLabel, type Endpoint, natural, shapeLabel, useKeys } from "@/pages/providers/api";
 import { KeyStateLabel } from "@/pages/providers/controls";
 import { Button } from "@/ui/Button";
 import { ProviderTile } from "@/ui/LogoTile";
@@ -25,14 +25,6 @@ import {
   SheetTitle,
 } from "../Sheet";
 import type { SheetBodyProps } from "../SheetStack";
-
-const auth: Record<string, string> = {
-  bearer: "Authorization: Bearer",
-  "x-api-key": "x-api-key header",
-  header: "Header",
-  query: "Query parameter",
-  none: "No credential",
-};
 
 const SHOWN_KEYS = 8;
 
@@ -91,9 +83,8 @@ export default function EndpointSheet({ record }: SheetBodyProps<"endpoint">) {
               </span>
             </Fact>
             <Fact label="Shape">{shapeLabel(e.shape)}</Fact>
-            <Fact label="Credential">
-              {auth[e.auth_style] ?? e.auth_style}
-              {e.auth_param ? ` ${e.auth_param}` : ""}
+            <Fact label="Key sent as">
+              {authStyleLabel(e.auth_style, e.auth_param)}
             </Fact>
             <Fact label="Model list" mono wide>
               {e.discovery_url || none}

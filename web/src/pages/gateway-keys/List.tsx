@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Copy, KeyRound, MessageCircle, Plus, Settings2, Trash2, Ban } from "lucide-react";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
+import { useUrlParams } from "@/lib/url-state";
 import { shortDate, shortSecret } from "@/pages/settings/format";
 import { Button, IconButton } from "@/ui/Button";
 import { useConfirm } from "@/ui/Confirm";
@@ -13,7 +14,7 @@ import { CopyButton, useCopy } from "@/ui/CopyButton";
 import { type SortingState, DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
 import { Disclosure } from "@/ui/Disclosure";
 import { Mono } from "@/ui/bits";
-import { SearchInput } from "@/ui/Input";
+import { ToolbarSearch } from "@/ui/Input";
 import { MenuItem, MenuSeparator } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { Tip } from "@/ui/Tooltip";
@@ -117,21 +118,10 @@ export function KeysList() {
   const confirm = useConfirm();
   const ask = useKeyQuestions();
   const [creating, setCreating] = useState(false);
-  const [params, setParams] = useSearchParams();
+  const { params, setParam, setSort } = useUrlParams();
   const q = params.get("q") ?? "";
   const sort = (params.get("sort") as Sort) || "name";
   const desc = params.get("dir") === "desc";
-
-  const setParam = (k: string, v?: string) =>
-    setParams(
-      (p) => {
-        const n = new URLSearchParams(p);
-        if (v) n.set(k, v);
-        else n.delete(k);
-        return n;
-      },
-      { replace: true },
-    );
 
   const active = useMemo(() => list.data?.filter((k) => !k.revoked), [list.data]);
   const revoked = useMemo(() => list.data?.filter((k) => k.revoked) ?? [], [list.data]);
@@ -167,8 +157,7 @@ export function KeysList() {
         error={list.isError ? list.error : undefined}
         onRetry={() => void list.refetch()}
         toolbar={
-          <SearchInput
-            className="min-w-0 flex-1 md:max-w-[320px] md:flex-none"
+          <ToolbarSearch
             placeholder="Search keys"
             aria-label="Search Gateway Keys by name or key"
             value={q}
@@ -181,7 +170,7 @@ export function KeysList() {
         noResultsTitle="No Gateway Keys match"
         onClearFilters={() => setParam("q")}
         sorting={sorting}
-        onSortingChange={(s) => setSortParams(setParams, (s[0]?.id as Sort) ?? "name", s[0]?.desc ?? false)}
+        onSortingChange={(s) => setSort(s[0]?.id ?? "name", s[0]?.desc ?? false, "name")}
         rowActions={(k) => <KeyMenu k={k} {...act} />}
         onRowClick={(k) => navigate(keyHref(k))}
         phoneRow={(k) => <KeyLine k={k} />}
@@ -226,20 +215,6 @@ export function KeysList() {
       {confirm.dialog}
       <CreateDialog open={creating} onOpenChange={setCreating} existing={list.data ?? []} />
     </>
-  );
-}
-
-function setSortParams(setParams: ReturnType<typeof useSearchParams>[1], sort: Sort, desc: boolean) {
-  setParams(
-    (p) => {
-      const n = new URLSearchParams(p);
-      if (sort === "name") n.delete("sort");
-      else n.set("sort", sort);
-      if (desc) n.set("dir", "desc");
-      else n.delete("dir");
-      return n;
-    },
-    { replace: true },
   );
 }
 

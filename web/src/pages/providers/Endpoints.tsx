@@ -11,7 +11,7 @@ import { MenuItem, MenuSeparator } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { notifyChange } from "@/ui/toast";
 import type { AuthStyle, Endpoint, Provider, Shape, UpstreamKey } from "./api";
-import { calls, errorText, natural, shapeLabel, SHAPES, useKeys, useRefresh } from "./api";
+import { AUTH_STYLES, calls, errorText, natural, shapeLabel, SHAPES, useKeys, useRefresh } from "./api";
 import { Reveal } from "@/ui/Reveal";
 import { appearClass, ringRoom, Select } from "./controls";
 import { SAMPLE_ENDPOINTS } from "./samples";
@@ -143,14 +143,6 @@ function EndpointLine({ e }: { e: EndpointRow }) {
   );
 }
 
-const AUTH: { value: AuthStyle; label: string }[] = [
-  { value: "bearer", label: "Authorization: Bearer <key>" },
-  { value: "x-api-key", label: "x-api-key: <key>" },
-  { value: "header", label: "A header you name" },
-  { value: "query", label: "A query parameter you name" },
-  { value: "none", label: "Not sent (no key needed)" },
-];
-
 const linesToMap = (text: string, sep: RegExp) => {
   const out: Record<string, string> = {};
   for (const line of text.split("\n")) {
@@ -278,7 +270,7 @@ function EndpointDialog({
         {/* No row gap: on phones the name's gap is inside its panel, so it opens and folds with it. */}
         <div className="grid gap-x-4 md:grid-cols-2">
           <Field label="Key sent as">
-            {() => <Select value={f.auth_style} onValueChange={(v) => set("auth_style")({ target: { value: v } })} items={AUTH} />}
+            {() => <Select value={f.auth_style} onValueChange={(v) => set("auth_style")({ target: { value: v } })} items={AUTH_STYLES} />}
           </Field>
           <Reveal open={f.auth_style === "header" || f.auth_style === "query"} label="Name of the key's header or parameter" className={ringRoom}>
             <div className="pt-4 md:pt-0">

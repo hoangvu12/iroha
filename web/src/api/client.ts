@@ -39,6 +39,12 @@ export function isApiError(e: unknown): e is ApiError {
   return e instanceof ApiError;
 }
 
+/** What went wrong, for a line under a field or in a dialog: Iroha's message and its hint ("Name taken. Pick another name."). */
+export function errorText(e: unknown): string {
+  if (isApiError(e)) return e.hint ? `${e.message} ${e.hint}` : e.message;
+  return e instanceof Error ? e.message : String(e);
+}
+
 /** Codes that mean "this browser is not signed in any more". */
 const signedOutCodes = new Set(["admin_token_missing", "owner_session_invalid", "owner_session_expired", "owner_session_revoked"]);
 

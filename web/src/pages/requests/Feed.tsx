@@ -5,7 +5,8 @@ import { Activity, ChevronDown, Columns3, ListFilter } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button, buttonClass } from "@/ui/Button";
+import { Button as SdkButton } from "@ui-sdk/react/button";
+import { Button, buttonClass, TextButton } from "@/ui/Button";
 import { StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
@@ -37,17 +38,47 @@ import { rec, RecordLink } from "@/sheets/RecordLink";
 import { COLUMNS, type ColumnId, type FilterKey, RANGES, type RequestsUrl, STATUSES, useRequestsUrl } from "./url-state";
 
 /**
- * How the feed pages. "live" (spec "Pagination"): new Requests come in on top and
- * older ones load as you scroll. "pages": numbered pages with a page size, if the
- * Owner prefers them (live rows then push the rows down a page).
+ * How the feed pages. "live" (spec "Pagination", the default): new Requests come in
+ * on top and older ones load as you scroll. "pages": numbered pages with a page
+ * size, if the Owner prefers them (live rows then push the rows down a page). The
+ * Owner picks it in the View menu; this browser remembers it, like page sizes.
  */
 export type FeedPaging = "live" | "pages";
-export const FEED_PAGING: FeedPaging = "live";
+const PAGING_KEY = "iroha:requests:paging";
 
-/** Requests (C03, C04, C32): stats for the current filters and the live feed on the DataTable; a row opens the Request sheet. */
-export function RequestsFeed({ paging = FEED_PAGING }: { paging?: FeedPaging }) {
+function readPaging(): FeedPaging {
+  try {
+    return localStorage.getItem(PAGING_KEY) === "pages" ? "pages" : "live";
+  } catch {
+    return "live";
+  }
+}
+
+/** The Owner's choice of paging, remembered in this browser (where storage is refused, for this visit). */
+function useFeedPaging() {
+  const [paging, setState] = useState<FeedPaging>(readPaging);
+  const setPaging = (p: FeedPaging) => {
+    setState(p);
+    try {
+      localStorage.setItem(PAGING_KEY, p);
+    } catch {
+      // Storage refused (private window, blocked site data): the choice lasts this visit only.
+    }
+  };
+  return [paging, setPaging] as const;
+}
+
+const PAGING_CHOICES: { value: FeedPaging; label: string }[] = [
+  { value: "live", label: "Live, load older as you scroll" },
+  { value: "pages", label: "Numbered pages" },
+];
+
+/** Requests (C03, C04, C32): stats for the current filters and the live feed on the DataTable; a row opens the Request sheet. `paging` overrides the Owner's choice (tests). */
+export function RequestsFeed({ paging: forced }: { paging?: FeedPaging }) {
   const url = useRequestsUrl();
   const phone = useIsPhone();
+  const [chosen, setPaging] = useFeedPaging();
+  const paging = forced ?? chosen;
   const [live, setLive] = useState(true);
   const feed = useRequestFeed(url.query, live);
   const stats = useRequestStats(url.query, live);
@@ -96,15 +127,15 @@ export function RequestsFeed({ paging = FEED_PAGING }: { paging?: FeedPaging }) 
         {(s) => <StatsRow stats={s} phone={phone} />}
       </Skeleton>
 
-      <Toolbar url={url} options={options.data} phone={phone} />
+      <Toolbar url={url} options={options.data} phone={phone} paging={paging} onPaging={setPaging} />
       {chips.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          {chips.map((c, i) => (
-            <Chip key={i} {...c} />
+          {chips.map((c) => (
+            <Chip key={c.label} {...c} />
           ))}
-          <button type="button" onClick={url.clearFilters} className="ml-1 text-[13px] text-fg-muted hover:text-fg">
+          <TextButton tone="quiet" onClick={url.clearFilters} className="ml-1 text-[13px]">
             Clear filters
-          </button>
+          </TextButton>
         </div>
       )}
 
@@ -184,7 +215,7 @@ function useNumberedPages(on: boolean, loaded: RequestRecord[] | undefined, page
 function LiveToggle({ live, onToggle, phone }: { live: boolean; onToggle: () => void; phone: boolean }) {
   return (
     <Tip label={live ? "New Requests appear as they arrive. Click to pause." : "Paused. Click to follow new Requests again."} type="description">
-      <button
+      <SdkButton
         type="button"
         onClick={onToggle}
         aria-pressed={live}
@@ -195,7 +226,7 @@ function LiveToggle({ live, onToggle, phone }: { live: boolean; onToggle: () => 
       >
         <StatusDot tone={live ? "green" : "gray"} />
         {live ? "Live" : "Paused"}
-      </button>
+      </SdkButton>
     </Tip>
   );
 }
@@ -237,7 +268,19 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-function Toolbar({ url, options, phone }: { url: RequestsUrl; options?: FilterOptions; phone: boolean }) {
+function Toolbar({
+  url,
+  options,
+  phone,
+  paging,
+  onPaging,
+}: {
+  url: RequestsUrl;
+  options?: FilterOptions;
+  phone: boolean;
+  paging: FeedPaging;
+  onPaging: (p: FeedPaging) => void;
+}) {
   const [text, setText] = useState(url.filters.q ?? "");
   const q = useDebounced(text.trim(), 250);
   useEffect(() => {
@@ -269,14 +312,14 @@ function Toolbar({ url, options, phone }: { url: RequestsUrl; options?: FilterOp
             {active > 0 && <span className="tabular text-fg-muted">{active}</span>}
           </MenuTrigger>
         )}
-        <FilterMenu url={url} options={options} phone={phone} />
+        <FilterMenu url={url} options={options} phone={phone} paging={paging} onPaging={onPaging} />
       </Menu>
       {!phone && (
         <>
           <Menu>
             <MenuTrigger className={buttonClass()}>
               <Columns3 size={16} aria-hidden className="shrink-0" />
-              Columns
+              View
             </MenuTrigger>
             <MenuContent align="start">
               <MenuGroup label="Show columns">
@@ -292,6 +335,8 @@ function Toolbar({ url, options, phone }: { url: RequestsUrl; options?: FilterOp
                   <MenuItem onSelect={url.resetColumns}>Show all</MenuItem>
                 </>
               )}
+              <MenuSeparator />
+              <PagingChoice paging={paging} onPaging={onPaging} />
             </MenuContent>
           </Menu>
           <div className="flex-1" />
@@ -316,7 +361,32 @@ function Toolbar({ url, options, phone }: { url: RequestsUrl; options?: FilterOp
   );
 }
 
-function FilterMenu({ url, options, phone }: { url: RequestsUrl; options?: FilterOptions; phone: boolean }) {
+/** Live feed or numbered pages (spec "Pagination": the Owner may prefer pages). */
+function PagingChoice({ paging, onPaging }: { paging: FeedPaging; onPaging: (p: FeedPaging) => void }) {
+  return (
+    <MenuRadioGroup label="Load Requests" value={paging} onValueChange={(v) => onPaging(v as FeedPaging)}>
+      {PAGING_CHOICES.map((c) => (
+        <MenuRadioItem key={c.value} value={c.value}>
+          {c.label}
+        </MenuRadioItem>
+      ))}
+    </MenuRadioGroup>
+  );
+}
+
+function FilterMenu({
+  url,
+  options,
+  phone,
+  paging,
+  onPaging,
+}: {
+  url: RequestsUrl;
+  options?: FilterOptions;
+  phone: boolean;
+  paging: FeedPaging;
+  onPaging: (p: FeedPaging) => void;
+}) {
   const f = url.filters;
   const withCurrent = <T extends { name: string }>(list: T[] | undefined, current?: string): { name: string; requests?: number }[] => {
     const l: { name: string; requests?: number }[] = list ?? [];
@@ -407,6 +477,12 @@ function FilterMenu({ url, options, phone }: { url: RequestsUrl; options?: Filte
               </MenuRadioItem>
             ))}
           </MenuRadioGroup>
+        </SubMenu>
+      )}
+      {/* Phones have no View menu: the paging choice sits here, like Time. */}
+      {phone && (
+        <SubMenu label="Load Requests" value={paging === "pages" ? "Numbered pages" : "Live"}>
+          <PagingChoice paging={paging} onPaging={onPaging} />
         </SubMenu>
       )}
       {any && (

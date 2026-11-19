@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { ChevronRight, Layers, MessageCircle, Plus, Server } from "lucide-react";
 import { useChatActions } from "@/app/chat-panel";
@@ -8,11 +8,12 @@ import { PageHeader } from "@/app/PageHeader";
 import { api, isApiError, seg } from "@/api/client";
 import { formatNumber, formatPercent, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button, IconButton } from "@/ui/Button";
+import { useUrlParams } from "@/lib/url-state";
+import { Button, IconButton, TextButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Dialog } from "@/ui/Dialog";
 import { DataTable, columnsFor } from "@/ui/DataTable";
-import { Field, Input, SearchInput } from "@/ui/Input";
+import { Field, Input, ToolbarSearch } from "@/ui/Input";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { notifyChange } from "@/ui/toast";
 import type { Pool, PoolOverview, Provider, ProviderOverview, Shape } from "./api";
@@ -32,18 +33,9 @@ export function ProvidersList() {
 
   const navigate = useNavigate();
   const chat = useChatActions();
-  const [params, setParams] = useSearchParams();
+  const { params, setParam } = useUrlParams();
   const q = params.get("q") ?? "";
-  const setQ = (v: string) =>
-    setParams(
-      (p) => {
-        const n = new URLSearchParams(p);
-        if (v) n.set("q", v);
-        else n.delete("q");
-        return n;
-      },
-      { replace: true },
-    );
+  const setQ = (v: string) => setParam("q", v);
 
   const stats = new Map(overview.data?.providers.map((p) => [p.provider, p]));
   const poolStats = new Map(overview.data?.pools.map((p) => [p.pool, p]));
@@ -108,8 +100,7 @@ export function ProvidersList() {
               getRowId={(p) => p.id}
               rowName={(p) => p.handle}
               toolbar={
-                <SearchInput
-                  className="min-w-0 flex-1 md:max-w-[320px] md:flex-none"
+                <ToolbarSearch
                   placeholder="Search Providers"
                   aria-label="Search Providers"
                   value={q}
@@ -152,9 +143,9 @@ export function ProvidersList() {
               empty={
                 <p className="border-t border-border py-6 text-[15px] text-fg-muted">
                   No Model Pools. A Pool is one model name that Iroha serves from several Providers, trying the next one when a Provider can't serve.{" "}
-                  <button type="button" className="text-info hover:underline" onClick={() => setPooling(true)}>
+                  <TextButton onClick={() => setPooling(true)}>
                     Make one
-                  </button>
+                  </TextButton>
                 </p>
               }
               footer={({ total }) => `${total} Model Pool${total === 1 ? "" : "s"}`}
@@ -437,7 +428,7 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
       onOpenChange={close}
       title="Add Provider"
       description={
-        keyless && url.trim() ? "An AI service that needs no key: Iroha sends it no credential." : "An AI service with its own keys. You add its Upstream Keys next."
+        keyless && url.trim() ? "An AI service that needs no key: Iroha sends it none." : "An AI service with its own keys. You add its Upstream Keys next."
       }
       footer={
         <>
@@ -485,7 +476,7 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
                 <Switch checked={keyless} onChange={setKeyless} label="No key needed" />
                 <span>
                   No key needed
-                  <span className="block text-[13px] text-fg-muted">For self-hosted servers and free relays. Iroha sends no credential and adds a keyless key for you.</span>
+                  <span className="block text-[13px] text-fg-muted">For self-hosted servers and free relays. Iroha sends no key and adds a keyless key for you.</span>
                 </span>
               </label>
             </div>

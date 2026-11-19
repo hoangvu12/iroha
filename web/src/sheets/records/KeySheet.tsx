@@ -11,7 +11,7 @@ import { Button } from "@/ui/Button";
 import { ProviderTile } from "@/ui/LogoTile";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { rec, RecordLink } from "../RecordLink";
-import { Fact, Facts, LinkList, LinkRow, SheetActions, SheetBar, SheetBody, SheetLoading, SheetProblem, SheetSection, SheetTitle } from "../Sheet";
+import { CopyIconButton, Fact, Facts, LinkList, LinkRow, SheetActions, SheetBar, SheetBody, SheetLoading, SheetProblem, SheetSection, SheetTitle } from "../Sheet";
 import type { SheetBodyProps } from "../SheetStack";
 
 export default function KeySheet({ record }: SheetBodyProps<"key">) {
@@ -116,8 +116,18 @@ export default function KeySheet({ record }: SheetBodyProps<"key">) {
         )}
         <SheetSection title="Facts">
           <Facts>
-            <Fact label="Secret" mono>
-              <span data-agent-secret>{k.secret ? maskSecret(k.secret) : "Keyless: no credential is sent"}</span>
+            <Fact label="Name" mono>
+              <span className="inline-flex max-w-full items-center gap-1">
+                <span className="min-w-0 break-all">{k.name}</span>
+                <CopyIconButton text={k.name} what="key name" />
+              </span>
+            </Fact>
+            <Fact label="Key" mono>
+              {/* Copied as the Keys tab copies it (its row and its dialog); shown masked. */}
+              <span className="inline-flex max-w-full items-center gap-1">
+                <span data-agent-secret>{k.secret ? maskSecret(k.secret) : "Keyless: no key is sent"}</span>
+                {k.secret && <CopyIconButton text={k.secret} what="Upstream Key" />}
+              </span>
             </Fact>
             <Fact label="Last used">{k.last_used_at ? timeAgo(k.last_used_at) : "Never"}</Fact>
             <Fact label="Added">{formatDate(k.created_at)}</Fact>

@@ -252,8 +252,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
                 <ChevronDown size={14} aria-hidden className="shrink-0 text-fg-muted" />
               </PickerTrigger>
               <Tip label="Offer a test tool and check the call" type="description">
-                <button
-                  type="button"
+                <SdkButton
                   aria-pressed={s.toolCheck}
                   onClick={() => change({ toolCheck: !s.toolCheck })}
                   className={cn(
@@ -263,7 +262,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
                   )}
                 >
                   <Wrench size={14} aria-hidden /> Tools
-                </button>
+                </SdkButton>
               </Tip>
               <IconButton icon={Code2} label="Use from code" size="sm" disabled={!s.model} onClick={() => setSnippets(true)} />
               <div className="flex-1" />
@@ -325,8 +324,8 @@ function Empty({ chat, onPrompt }: { chat: Chat; onPrompt: (prompt: string, patc
 
 function Chip({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={cn("h-9 rounded-full border border-border-strong bg-bg px-4 text-[14.5px] hover:bg-muted", pressClass)}>
+    <SdkButton onClick={onClick} className={cn("h-9 rounded-full border border-border-strong bg-bg px-4 text-[14.5px] hover:bg-muted", pressClass)}>
       {children}
-    </button>
+    </SdkButton>
   );
 }

@@ -96,6 +96,43 @@ test("Close keeps the sheet on screen, inert, until its exit finishes", async ()
   await waitFor(() => expect(sheet()).toBeNull());
 });
 
+test("closing returns focus to the trigger that opened it, not the page body", async () => {
+  const user = userEvent.setup();
+  renderShell();
+  const trigger = screen.getByRole("button", { name: "Chat" });
+  await user.click(trigger);
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(document.activeElement).toBe(trigger);
+});
+
+test("the C key closing it from inside returns focus to where it was opened", async () => {
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter>
+      <ChatPanelProvider>
+        <OpenFrom />
+        <Harness />
+      </ChatPanelProvider>
+    </MemoryRouter>,
+  );
+  const test = screen.getByRole("button", { name: "Test acme" });
+  await user.click(test);
+  // Focus moves into the sheet (its Close button), then C closes it at once.
+  screen.getByRole("button", { name: "Close" }).focus();
+  await user.keyboard("c");
+  expect(sheet()).toBeNull();
+  expect(document.activeElement).toBe(test);
+});
+
+function OpenFrom() {
+  const chat = useChatActions();
+  return (
+    <button type="button" onClick={() => chat.open({ kind: "provider", provider: "acme" })}>
+      Test acme
+    </button>
+  );
+}
+
 test("opening again while it leaves turns it back without remounting", async () => {
   const user = userEvent.setup();
   renderShell();

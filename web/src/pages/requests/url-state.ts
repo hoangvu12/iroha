@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router";
+import { patchParams } from "@/lib/url-state";
 import { useSheets } from "@/sheets/stack";
 import type { Query } from "./api";
 
@@ -67,18 +68,7 @@ export function useRequestsUrl() {
   const query: Query = useMemo(() => ({ ...filters, since: rangeInfo.since }), [filters, rangeInfo.since]);
 
   const update = useCallback(
-    (changes: Record<string, string | undefined>, push = false) =>
-      setParams(
-        (p) => {
-          const n = new URLSearchParams(p);
-          for (const [k, v] of Object.entries(changes)) {
-            if (v) n.set(k, v);
-            else n.delete(k);
-          }
-          return n;
-        },
-        { replace: !push },
-      ),
+    (changes: Record<string, string | undefined>, push = false) => setParams((p) => patchParams(p, changes), { replace: !push }),
     [setParams],
   );
 

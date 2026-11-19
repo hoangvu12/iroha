@@ -51,6 +51,8 @@ const tokens: Record<string, string> = {
   "--duration-toast": "400ms",
   "--duration-fade": "150ms",
   "--duration-flash": "1600ms",
+  "--duration-scrollbar-in": "100ms",
+  "--duration-scrollbar-out": "200ms",
   "--motion-scale-popup": "0.96",
   "--motion-scale-press": "0.97",
   "--motion-shift": "8px",

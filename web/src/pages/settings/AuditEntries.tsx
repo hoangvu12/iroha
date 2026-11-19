@@ -1,14 +1,14 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
 import { ChevronDown, History, KeyRound, LockKeyhole, Monitor, RotateCcw, User } from "lucide-react";
 import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import type { Actor, AuditEntry } from "@/api/types";
 import { useIsPhone } from "@/lib/media";
+import { useUrlParams } from "@/lib/url-state";
 import { Button, buttonClass } from "@/ui/Button";
 import { ConfirmAction } from "@/ui/Confirm";
 import { DataTable, columnsFor, useTablePaging } from "@/ui/DataTable";
-import { SearchInput } from "@/ui/Input";
+import { ToolbarSearch } from "@/ui/Input";
 import { LogoTile, PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { Menu, MenuContent, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { cn } from "@/ui/cn";
@@ -59,22 +59,12 @@ const columns = col.columns([
 /** Settings → Audit Entries (C29): every change, newest first, with Revert on the row. */
 export function AuditEntriesTab() {
   const phone = useIsPhone();
-  const [params, setParams] = useSearchParams();
+  const { params, setParam, setParams } = useUrlParams();
   const actor = params.get("actor") ?? "";
   const resource = params.get("resource") ?? "";
   const [text, setText] = useState(params.get("q") ?? "");
   const q = useDebounced(text.trim(), 250);
 
-  const setParam = (k: string, v: string) =>
-    setParams(
-      (p) => {
-        const n = new URLSearchParams(p);
-        if (v) n.set(k, v);
-        else n.delete(k);
-        return n;
-      },
-      { replace: true },
-    );
   useEffect(() => setParam("q", q), [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [pagination, setPagination] = useTablePaging("audit-entries");
@@ -125,18 +115,12 @@ export function AuditEntriesTab() {
   ];
   const clear = () => {
     setText("");
-    setParams({}, { replace: true });
+    setParams({ q: undefined, actor: undefined, resource: undefined });
   };
 
   const toolbar = (
     <>
-      <SearchInput
-        placeholder="Search changes"
-        aria-label="Search changes"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        className="min-w-0 flex-1 md:w-[300px] md:flex-none"
-      />
+      <ToolbarSearch placeholder="Search changes" aria-label="Search changes" value={text} onChange={(e) => setText(e.target.value)} className="md:w-[300px]" />
       <Menu>
         <MenuTrigger className={buttonClass("secondary", "md", "gap-1.5")}>
           {actor ? actorLabel : "Anyone"}

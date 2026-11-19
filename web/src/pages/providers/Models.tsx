@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
 import { Eraser, Eye, EyeOff, ListPlus, ListX, MessageCircle, MoreHorizontal, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { useChatActions } from "@/app/chat-panel";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button } from "@/ui/Button";
+import { useUrlParams } from "@/lib/url-state";
+import { Button, TextButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { useConfirm } from "@/ui/Confirm";
 import { type ColumnFiltersState, DataTable, RowMenu, columnsFor, useTablePaging } from "@/ui/DataTable";
 import { Dialog } from "@/ui/Dialog";
-import { Field, Input, SearchInput } from "@/ui/Input";
+import { Field, Input, ToolbarSearch } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
@@ -49,7 +49,7 @@ function useDebounced(value: string, ms = 250) {
  * selected models are hidden or shown together through the bulk API.
  */
 export function ModelsTab({ handle }: { handle: string }) {
-  const [params, setParams] = useSearchParams();
+  const { params, setParam, setParams } = useUrlParams();
   const q = params.get("q") ?? "";
   const filter = (MODEL_FILTERS as string[]).includes(params.get("filter") ?? "") ? (params.get("filter") as ModelFilter) : "all";
   const query = useDebounced(q.trim());
@@ -65,28 +65,20 @@ export function ModelsTab({ handle }: { handle: string }) {
   const barSave = useSave({ describe: errorText });
   const [busy, setBusy] = useState<"hide" | "show">();
 
-  const setParam = (k: string, v?: string) =>
-    setParams(
-      (p) => {
-        const n = new URLSearchParams(p);
-        if (v) n.set(k, v);
-        else n.delete(k);
-        return n;
-      },
-      { replace: true },
-    );
   const setFilter = (f: ModelFilter) => setParam("filter", f === "all" ? undefined : f);
 
   const totalKeys = keys.data?.length ?? 0;
   const data = models.data;
 
-  // Toast (both): these run from the row's menu, which has closed, and the row may leave the filter.
+  // These run from the row's menu, which has closed, and the row may leave the filter.
   const change = async (m: Model, body: { hidden?: boolean; added?: boolean }, what: string) => {
     try {
       const res = await calls.saveModel(handle, { model: m.model, ...body });
       refresh();
+      // Toast: the row's menu has closed (and the row may leave the filter).
       notifyChange(what, res, { onUndone: refresh });
     } catch (e) {
+      // Toast: an error with nowhere else to go (the row's menu has closed).
       notify.failure(`Couldn't change ${m.model}`, e);
     }
   };
@@ -94,8 +86,10 @@ export function ModelsTab({ handle }: { handle: string }) {
     try {
       const res = await calls.bulkKeys(handle, "clear-model-gaps", m.model_gaps, m.model);
       refresh();
+      // Toast: the row's menu has closed, or the row leaves "With Model Gaps".
       notifyChange(gapsCleared(m, res.succeeded), res, { onUndone: refresh });
     } catch (e) {
+      // Toast: an error with nowhere else to go (the menu has closed, or the row is leaving).
       notify.failure("Couldn't clear the Model Gaps", e);
     }
   };
@@ -196,8 +190,7 @@ export function ModelsTab({ handle }: { handle: string }) {
     <>
       {/* Phones: search and filter have the first line to themselves (C31); the rest wraps under them. */}
       <div className={phone ? "flex w-full items-center gap-2" : "contents"}>
-      <SearchInput
-        className="min-w-0 flex-1 md:max-w-[300px] md:flex-none"
+      <ToolbarSearch
         placeholder={data ? `Search ${formatNumber(data.counts.all)} models` : "Search models"}
         aria-label="Search models"
         value={q}
@@ -269,17 +262,7 @@ export function ModelsTab({ handle }: { handle: string }) {
         columnFilters={columnFilters}
         manualFiltering
         filterChips={chips}
-        onClearFilters={() =>
-          setParams(
-            (p) => {
-              const n = new URLSearchParams(p);
-              n.delete("q");
-              n.delete("filter");
-              return n;
-            },
-            { replace: true },
-          )
-        }
+        onClearFilters={() => setParams({ q: undefined, filter: undefined })}
         noResultsTitle="No models match"
         paging={{ mode: "server", pagination, onPaginationChange: setPagination, rowCount: data?.total ?? 0 }}
         dimmed={models.isPlaceholderData}
@@ -416,9 +399,9 @@ function GapsCell({ handle, m, onLeaves }: { handle: string; m: Model; onLeaves?
     <span className="inline-flex flex-col items-start gap-1">
       <span className="inline-flex items-center gap-2" title={m.model_gaps.join(", ")}>
         <Pill tone="blue">{m.model_gaps.length === 1 ? "1 key" : `${m.model_gaps.length} keys`}</Pill>
-        <button type="button" className="text-[14px] text-info hover:underline" onClick={clear}>
+        <TextButton className="text-[14px]" aria-label={`Clear the Model Gaps of ${m.model}`} onClick={clear}>
           Clear
-        </button>
+        </TextButton>
       </span>
       <SaveError save={saving} className="text-[12.5px]" />
     </span>

@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Braces, FileX, MessageCircle, SquareTerminal } from "lucide-react";
 import { isApiError } from "@/api/client";
 import { formatNumber } from "@/lib/format";
-import { Button } from "@/ui/Button";
+import { Button as SdkButton } from "@ui-sdk/react/button";
+import { Button, TextButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/ui/States";
@@ -61,14 +62,13 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
           <Tab value="response">Response</Tab>
         </TabList>
         <div className="flex-1" />
-        <button
-          type="button"
+        <SdkButton
           aria-pressed={raw}
           onClick={() => setRaw((x) => !x)}
           className={cn("inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[14px]", raw ? "bg-muted text-fg" : "text-fg hover:bg-muted")}
         >
           <Braces size={15} /> Raw JSON
-        </button>
+        </SdkButton>
       </div>
       <TabPanel value="sent">
         <SentSide c={c} r={r} raw={raw} />
@@ -202,9 +202,9 @@ function MessageBlock({ b }: { b: Block }) {
       <div className="rounded-xl border border-border bg-subtle px-4 py-3">
         <p className={cn("whitespace-pre-wrap break-words", b.code ? "font-mono text-[13px] leading-relaxed" : "text-[15px] leading-relaxed")}>{text}</p>
         {long && (
-          <button type="button" onClick={() => setAll((x) => !x)} className="mt-2 text-[14.5px] font-medium text-info hover:underline">
+          <TextButton onClick={() => setAll((x) => !x)} className="mt-2 text-[14.5px] font-medium">
             {all ? "Show less" : `Show all ${formatNumber(b.text.length)} characters`}
-          </button>
+          </TextButton>
         )}
       </div>
     </section>

@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { Button as SdkButton } from "@ui-sdk/react/button";
 import { Checkbox } from "@/ui/Checkbox";
 import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
@@ -124,15 +125,14 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
                     {!p.enabled && !p.gone && <span className="shrink-0 text-[13px] text-fg-muted">Disabled</span>}
                   </label>
                   {on && !p.gone && (
-                    <button
-                      type="button"
+                    <SdkButton
                       aria-label={`Models of ${p.handle}: ${modelsLabel(models)}`}
                       onClick={() => setPicking(p.handle)}
                       className="press inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm text-fg-muted hover:bg-muted hover:text-fg"
                     >
                       {modelsLabel(models)}
                       <ChevronDown size={15} aria-hidden />
-                    </button>
+                    </SdkButton>
                   )}
                 </div>
               );

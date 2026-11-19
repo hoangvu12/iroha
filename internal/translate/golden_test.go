@@ -209,6 +209,56 @@ func checkInvariants(t *testing.T, gc goldenCase, o output) {
 		if !bytes.HasPrefix(o.stream, []byte("event: message_start\n")) || !bytes.HasSuffix(o.stream, []byte("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")) {
 			t.Errorf("an Anthropic stream runs from message_start to message_stop:\n%s", o.stream)
 		}
+	case shape.OpenAIResponses:
+		checkResponsesStream(t, gc, o.stream)
+	}
+}
+
+// checkResponsesStream: a Responses stream runs from response.created to
+// response.completed, each event named by its type and numbered in order,
+// every response object naming Iroha's id and the Caller's model, and every
+// message's text accumulated through a content part as the SDKs expect.
+func checkResponsesStream(t *testing.T, gc goldenCase, stream []byte) {
+	t.Helper()
+	blocks := strings.Split(strings.TrimSpace(string(stream)), "\n\n")
+	parts := map[string]bool{}
+	var first, last string
+	for i, block := range blocks {
+		name, data, ok := strings.Cut(block, "\ndata: ")
+		name = strings.TrimPrefix(name, "event: ")
+		var ev struct {
+			Type     string `json:"type"`
+			Seq      *int   `json:"sequence_number"`
+			ItemID   string `json:"item_id"`
+			Response *struct {
+				ID    string `json:"id"`
+				Model string `json:"model"`
+			} `json:"response"`
+		}
+		if !ok || json.Unmarshal([]byte(data), &ev) != nil || ev.Type != name {
+			t.Fatalf("event %d is not a named Responses event: %q", i, block)
+		}
+		if ev.Seq == nil || *ev.Seq != i {
+			t.Errorf("event %d (%s) has sequence_number %v", i, name, ev.Seq)
+		}
+		if r := ev.Response; r != nil && (r.ID != "resp_req_golden" || r.Model != gc.Model) {
+			t.Errorf("%s names response %s, model %s", name, r.ID, r.Model)
+		}
+		switch name {
+		case "response.content_part.added":
+			parts[ev.ItemID] = true
+		case "response.output_text.delta":
+			if !parts[ev.ItemID] {
+				t.Errorf("text for %s before its content part", ev.ItemID)
+			}
+		}
+		if i == 0 {
+			first = name
+		}
+		last = name
+	}
+	if first != "response.created" || last != "response.completed" && last != "response.incomplete" {
+		t.Errorf("a Responses stream runs from response.created to response.completed: %s ... %s", first, last)
 	}
 }
 

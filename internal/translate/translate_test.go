@@ -13,10 +13,13 @@ import (
 )
 
 func TestTargetsAreTheShapesWithCodecs(t *testing.T) {
-	if got := translate.Targets(shape.OpenAIChat); !slices.Equal(got, []shape.Shape{shape.AnthropicMessages}) {
+	if got := translate.Targets(shape.OpenAIChat); !slices.Equal(got, []shape.Shape{shape.OpenAIResponses, shape.AnthropicMessages}) {
 		t.Errorf("Chat targets = %v", got)
 	}
-	if got := translate.Targets(shape.AnthropicMessages); !slices.Equal(got, []shape.Shape{shape.OpenAIChat}) {
+	if got := translate.Targets(shape.OpenAIResponses); !slices.Equal(got, []shape.Shape{shape.OpenAIChat, shape.AnthropicMessages}) {
+		t.Errorf("Responses targets = %v", got)
+	}
+	if got := translate.Targets(shape.AnthropicMessages); !slices.Equal(got, []shape.Shape{shape.OpenAIChat, shape.OpenAIResponses}) {
 		t.Errorf("Anthropic targets = %v", got)
 	}
 	if translate.Supported(shape.OpenAIChat, shape.OpenAIChat) || translate.Supported(shape.OpenAIChat, shape.Gemini) {

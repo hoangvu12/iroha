@@ -59,6 +59,13 @@ One Request runs through four seams, in this order. Change the seam that owns a 
 
 Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `echoModel`) replaces one top-level value in place, so passthrough never re-serialises a body. Streams of OpenAI Chat get `stream_options.include_usage` added when the Caller did not ask, so usage is recorded for every stream.
 
+### Ticket 14: OpenAI Responses
+
+- Per-Shape files, following "Adding a Shape": `translate/responses.go` (codec), `gateway/responses.go` (`responsesStream`, `opResponses`, route docs, `echoResponsesEvent` for passthrough: the model lives in the event's `response` object), `usage/responses.go`, `requests/capture_responses.go`; one line each in `codecs`, `streamShapes`, `opFor`, `bodyHints`, `reassemblers`, `usage.Reader` and `Routes`. The global `/v1/responses` waits for 12 (`serveScoped` with `shape.OpenAIResponses`).
+- Two codec hooks were added for it, optional for other Shapes: `fixUp` (correct the decoded upstream DTO before conversion; Responses copies `output_tokens_details.reasoning_tokens` where RelayKit reads it) and `streamID` (name a stream converted to the Shape; Responses uses `resp_<Request ID>`, also for buffered answers). `Stream` passes `EmitSequenceNumber` (only Responses output uses it) and, before finalising, pushes the usage merged over every event into each converter step, so a two-step conversion (Anthropic → Chat → Responses) closes with the whole usage.
+- The Responses stream writer renumbers `sequence_number`, adds the `content_part.added/done` events RelayKit leaves out (the SDKs' stream helpers need them), unwraps RelayKit's `{Type, Payload}` events and tidies every response object. Iroha's failure on a Responses stream is `event: error` (with a top-level `error` object, which the OpenAI SDKs raise) then `response.failed`.
+- Responses stateful fields are refused by RelayKit toward Chat and Anthropic (→ 400 `untranslatable_request`); requests translated to Responses get `store: false` unless set; `store` is dropped toward Chat. The fake Responses upstream (`testkit`) now sends OpenAI's full event sequence for a message.
+
 ### Ticket 10: model lists
 
 - **Configuration** lives on Providers and Endpoints (`internal/providers`): `strict` and `discovery` (`none`, `provider` default, `key`) on the Provider, `discovery_url` (`""` = `<url>/models`, `"none"`, or a URL) on the Endpoint. `providers.Routing` carries them (`Strict`, `Discovery`, `DiscoveryURLs`).

@@ -45,13 +45,14 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
       <SettingsCard title="General">
         <SettingsRow title="Name" hint="Shown in lists. Callers use the handle, which never changes.">
           <form
-            className="flex w-full gap-2"
+            className="flex w-full flex-wrap items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               if (name.trim() && name.trim() !== p.name) void naming.run(update({ name: name.trim() }), { message: `Renamed to ${name.trim()}` });
             }}
           >
-            <Input aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!naming.error} />
+            {/* The field keeps its width; a long result wraps under it. */}
+            <Input aria-label="Name" className="min-w-48 flex-1" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!naming.error} />
             {name.trim() !== p.name ? (
               <Button type="submit" variant="primary" loading={naming.pending}>
                 Save
@@ -71,23 +72,25 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
           }
         >
           <form
-            className="flex w-full items-start gap-2"
+            className="flex w-full flex-wrap items-start gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               if (logoChanged)
                 void logoSave.run(update({ logo_domain: logo.trim() }), { message: logo.trim() ? `Logo domain set to ${logo.trim()}` : "Logo domain guessed again" });
             }}
           >
-            <LogoInput
-              label="Logo domain"
-              name={p.handle}
-              value={logo}
-              fallback={p.logo_domain}
-              previewUrl={(domain) => (domain.toLowerCase() === "none" ? undefined : logoPreview({ domain }))}
-              onChange={setLogo}
-              placeholder={p.logo_domain_guessed ? p.logo_domain || "example.com" : "example.com"}
-              invalid={!!logoSave.error}
-            />
+            <div className="min-w-48 flex-1">
+              <LogoInput
+                label="Logo domain"
+                name={p.handle}
+                value={logo}
+                fallback={p.logo_domain}
+                previewUrl={(domain) => (domain.toLowerCase() === "none" ? undefined : logoPreview({ domain }))}
+                onChange={setLogo}
+                placeholder={p.logo_domain_guessed ? p.logo_domain || "example.com" : "example.com"}
+                invalid={!!logoSave.error}
+              />
+            </div>
             {logoChanged ? (
               <Button type="submit" variant="primary" loading={logoSave.pending}>
                 Save

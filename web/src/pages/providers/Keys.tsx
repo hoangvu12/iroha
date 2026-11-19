@@ -1230,8 +1230,8 @@ function KeyDialog({
         >
           <Field label="Name" hint="Unique within the Provider; Requests and Audit Entries show it." error={nameSave.error}>
             {(p) => (
-              <div className="flex items-center gap-2">
-                <Input {...p} mono autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} />
+              <div className="flex flex-wrap items-center gap-2">
+                <Input {...p} mono className="min-w-48 flex-1" autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} />
                 {name.trim() !== k.name ? (
                   <Button type="submit" variant="primary" loading={nameSave.pending}>
                     Rename
@@ -1330,10 +1330,7 @@ function KeyDialog({
         <Button variant="ghost" icon={Trash2} className="text-danger-text" onClick={() => actions.remove(k)}>
           Delete
         </Button>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2">
-          <SaveStatus save={actionSave} saving={false} />
-          <SaveError save={actionSave} />
-        </div>
+        <div className="flex-1" />
         <Button icon={k.enabled ? Pause : CircleSlash} onClick={() => actions.toggle(k, actionSave)}>
           {k.enabled ? "Disable" : "Enable"}
         </Button>
@@ -1343,6 +1340,11 @@ function KeyDialog({
         <Button variant="primary" icon={Play} loading={testing} onClick={() => actions.test(k, actionSave)}>
           Test
         </Button>
+      </div>
+      {/* Its own line under the buttons that caused it, so a long result never squeezes them. */}
+      <div className="mt-3 flex min-h-5 flex-wrap items-center justify-end gap-x-2 empty:hidden">
+        <SaveStatus save={actionSave} saving={false} />
+        <SaveError save={actionSave} />
       </div>
     </Dialog>
   );

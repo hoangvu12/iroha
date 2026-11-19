@@ -204,7 +204,8 @@ function General({ k }: { k: GatewayKey }) {
   const invalidate = useInvalidateKeys();
   const [name, setName] = useState(k.name);
   useEffect(() => setName(k.name), [k.name]);
-  // Saved on blur: the result shows beside the field, a failure under it.
+  // Saved on blur: the result (or the failure) shows under the field, which
+  // has room for it at any width.
   const saving = useSave({ refresh: invalidate });
 
   const save = () => {
@@ -218,8 +219,16 @@ function General({ k }: { k: GatewayKey }) {
 
   return (
     <Card title="General">
-      <Row title="Name" description="Requests from this key show this name" below={<SaveError save={saving} />}>
-        <SaveStatus save={saving} />
+      <Row
+        title="Name"
+        description="Requests from this key show this name"
+        below={
+          <>
+            <SaveStatus save={saving} />
+            <SaveError save={saving} />
+          </>
+        }
+      >
         <Input
           aria-label="Name"
           className="md:w-[300px]"

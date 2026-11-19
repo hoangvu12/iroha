@@ -90,6 +90,8 @@ export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   bordered?: boolean;
   /** The danger tone (UI ticket 21): grey at rest like every icon button, red on hover and focus. */
   danger?: boolean;
+  // A disabled icon button stays focusable, so its tooltip can still be reached.
+  focusableWhenDisabled?: boolean;
 };
 
 // xs: the × inside a chip.

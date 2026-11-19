@@ -8,6 +8,7 @@ import type { Actor, AuditEntry } from "@/api/types";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton, buttonClass } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { ConfirmAction } from "@/ui/Confirm";
 import { SearchInput } from "@/ui/Input";
 import { LogoTile, PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { Menu, MenuContent, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
@@ -349,6 +350,30 @@ function RevertControl({ entry }: { entry: AuditEntry }) {
       <span className="whitespace-nowrap text-[14px] text-fg-muted" title={entry.not_revertible}>
         Can't be reverted
       </span>
+    );
+  // Reverting a create deletes what it made: that asks first, naming what goes (UI ticket 21).
+  const goes = entry.changes.filter((c) => c.op === "create");
+  if (goes.length)
+    return (
+      <ConfirmAction
+        title={`Revert and delete ${goes.length === 1 ? goes[0].name : `${goes.length} records`}?`}
+        body={`${goes.length === 1 ? goes[0].name : goes.map((c) => c.name).join(", ")} ${goes.length === 1 ? "was" : "were"} made by this change and ${goes.length === 1 ? "goes" : "go"} with it. Undo brings ${goes.length === 1 ? "it" : "them"} back.`}
+        confirmLabel="Revert and delete"
+        onConfirm={async () => {
+          try {
+            const res = await revertEntry(entry.id);
+            notifyChange(`Change reverted: ${entry.summary}`, res, { onUndone: invalidate });
+          } catch (e) {
+            throw new Error(revertError(e));
+          } finally {
+            invalidate();
+          }
+        }}
+      >
+        <Button danger="hover" icon={RotateCcw}>
+          Revert…
+        </Button>
+      </ConfirmAction>
     );
   return (
     <Button icon={RotateCcw} loading={revert.isPending} onClick={() => revert.mutate()}>

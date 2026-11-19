@@ -122,7 +122,7 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
             title="Archive Provider"
             hint={`${p.handle} stops serving with its ${p.upstream_key_count} Upstream Keys and ${p.endpoints.length} Endpoints, and Pools skip it. Its handle stays reserved; nothing is deleted.`}
           >
-            <Button variant="secondary" className="border-danger text-danger-text" onClick={() => setArchiving(true)}>
+            <Button danger onClick={() => setArchiving(true)}>
               Archive
             </Button>
           </SettingsRow>

@@ -1261,8 +1261,8 @@ function KeyDialog({
       </div>
 
       <div className="mt-7 flex flex-wrap items-center gap-2 border-t border-border pt-5">
-        <Button variant="ghost" icon={Trash2} className="text-danger-text" onClick={() => actions.remove(k)}>
-          Delete
+        <Button variant="ghost" danger icon={Trash2} onClick={() => actions.remove(k)}>
+          Delete…
         </Button>
         <div className="flex-1" />
         <Button icon={k.enabled ? Pause : CircleSlash} onClick={() => actions.toggle(k)}>

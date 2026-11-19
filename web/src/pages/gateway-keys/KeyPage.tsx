@@ -121,7 +121,7 @@ export function KeyPage() {
                 title="Revoke key"
                 description={`Callers using ${g.name} get 401 straight away. It can't be turned back on, and its name stays on record.`}
               >
-                <Button className="border-danger-text! text-danger-text!" onClick={() => setRevoking(true)}>
+                <Button danger onClick={() => setRevoking(true)}>
                   Revoke
                 </Button>
               </Row>
@@ -134,7 +134,7 @@ export function KeyPage() {
                   : `Removes ${g.name}; Callers using it get 401. You can undo it, and Requests already logged keep its name.`
               }
             >
-              <Button className="border-danger-text! text-danger-text!" onClick={() => setDeleting(true)}>
+              <Button danger onClick={() => setDeleting(true)}>
                 Delete
               </Button>
             </Row>

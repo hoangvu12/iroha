@@ -32,6 +32,7 @@ import { useFilterOptions, useRequestFeed, useRequestStats } from "./api";
 import { SAMPLE_CALLERS, SAMPLE_REQUESTS, SAMPLE_STATS } from "./samples";
 import { clock, compactNumber, failed, PoolTag, ProviderLogo, secs, shapeInOut, StatusCell, statusTone } from "./bits";
 import { useLendRequestRows } from "@/sheets/stack";
+import { rec, RecordLink } from "@/sheets/RecordLink";
 import { COLUMNS, type ColumnId, type FilterKey, RANGES, type RequestsUrl, STATUSES, useRequestsUrl } from "./url-state";
 
 /**
@@ -493,16 +494,29 @@ const col = columnsFor<RequestRecord>();
 const cells: Record<ColumnId, (r: RequestRecord) => ReactNode> = {
   time: (r) => clock(r.started_at),
   status: (r) => <StatusCell r={r} />,
-  caller: (r) => (
-    <span className="block max-w-[200px] truncate" title={r.caller.name}>
-      {r.caller.name}
-    </span>
-  ),
+  // Names of records are links to their sheets (UI ticket 11); a click on one opens it, not the Request.
+  caller: (r) =>
+    r.caller.gateway_key_id ? (
+      <span className="flex max-w-[200px]" title={r.caller.name}>
+        <RecordLink record={rec.gatewayKey(r.caller.gateway_key_id)}>{r.caller.name}</RecordLink>
+      </span>
+    ) : (
+      <span className="block max-w-[200px] truncate" title={r.caller.name}>
+        {r.caller.name}
+      </span>
+    ),
   model: (r) => (
     <span className="inline-flex max-w-[260px] items-center gap-2">
-      <span className="truncate font-medium" title={r.model}>
-        {r.model || dash}
-      </span>
+      {/* A Pool is named by the model the Caller asked for. */}
+      {r.pool ? (
+        <RecordLink record={rec.pool(r.pool)} className="font-medium" title={r.model}>
+          {r.model}
+        </RecordLink>
+      ) : (
+        <span className="truncate font-medium" title={r.model}>
+          {r.model || dash}
+        </span>
+      )}
       {r.pool && <PoolTag />}
     </span>
   ),
@@ -510,12 +524,12 @@ const cells: Record<ColumnId, (r: RequestRecord) => ReactNode> = {
     r.provider ? (
       <span className="inline-flex items-center gap-2">
         <ProviderLogo handle={r.provider} />
-        {r.provider}
+        <RecordLink record={rec.provider(r.provider)}>{r.provider}</RecordLink>
       </span>
     ) : (
       dash
     ),
-  key: (r) => r.upstream_key || "–",
+  key: (r) => (r.upstream_key && r.provider ? <RecordLink record={rec.key(r.provider, r.upstream_key)}>{r.upstream_key}</RecordLink> : r.upstream_key || "–"),
   shape: (r) => shapeInOut(r),
   attempts: (r) => (
     <span title={r.attempt_count > 1 ? "Retried" : undefined} className={cn(r.attempt_count > 1 && "font-semibold text-warning", r.attempt_count === 0 && "text-fg-subtle")}>
@@ -530,8 +544,9 @@ const cells: Record<ColumnId, (r: RequestRecord) => ReactNode> = {
 
 const cellClass: Partial<Record<ColumnId, string>> = { time: "font-mono text-[13px] text-fg-muted", key: "font-mono text-[13px] text-fg-muted" };
 
-// The column whose cell is the row's "Open Request <id>" button (keyboard, agents): the first one shown that holds plain text.
-const OPENERS: ColumnId[] = ["time", "model", "caller", "key", "shape", "duration", "first_token", "attempts", "input", "output", "status", "provider"];
+// The column whose cell is the row's "Open Request <id>" button (keyboard, agents): the first one shown that holds plain text
+// (never one with a record's link in it: a link can't sit inside a button).
+const OPENERS: ColumnId[] = ["time", "status", "shape", "duration", "first_token", "attempts", "input", "output"];
 
 /** The feed's columns; `hidden` (the URL's ?hide=) only moves the Open button to a column still shown. */
 function feedColumns(hidden: Set<string>): DataColumn<RequestRecord>[] {

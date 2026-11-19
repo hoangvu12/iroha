@@ -11,6 +11,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 const where = () => screen.getByRole("status", { name: "Location" }).textContent;
 const sheets = () => screen.queryAllByRole("dialog");
+const hrefOf = (el: HTMLElement) => decodeURIComponent(el.getAttribute("href") ?? "");
 
 const req1 = routes["GET /api/requests/req_1"] as Record<string, unknown>;
 const req2 = { ...req1, id: "req_2", model: "slow", started_at: "2026-11-19T09:59:00Z", pool: undefined };
@@ -41,6 +42,24 @@ test("a feed row opens the Request sheet first; ↓ steps to the next row in pla
   await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1"));
   await waitFor(() => expect(sheets()).toHaveLength(1));
   expect(sheet).toBeTruthy();
+});
+
+test("a feed row's Caller, Pool, Provider and key are links to their sheets, not to the Request", async () => {
+  const user = userEvent.setup();
+  renderWithSheets(<RequestsFeed />, "/requests");
+  const row = within(await feedRow("req_1"));
+  expect(hrefOf(row.getByRole("link", { name: "zeron" }))).toBe("/requests?sheet=gateway-key:gk_1");
+  // A Pool's name is the model the Caller asked for.
+  expect(hrefOf(row.getByRole("link", { name: "fast" }))).toBe("/requests?sheet=pool:fast");
+  expect(hrefOf(row.getByRole("link", { name: "acme" }))).toBe("/requests?sheet=provider:acme");
+  expect(hrefOf(row.getByRole("link", { name: "team-5" }))).toBe("/requests?sheet=key:acme/team-5");
+  // A model that names no Pool is no record: plain text.
+  expect(within(await feedRow("req_2")).queryByRole("link", { name: "slow" })).toBeNull();
+
+  await user.click(row.getByRole("link", { name: "team-5" }));
+  await screen.findByRole("dialog", { name: "Upstream Key team-5" });
+  expect(where()).toBe("/requests?sheet=key:acme/team-5");
+  expect(screen.queryByRole("dialog", { name: "Request fast" })).toBeNull();
 });
 
 test("an old ?request= link opens the Request sheet and becomes ?sheet=", async () => {

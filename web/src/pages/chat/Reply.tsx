@@ -10,6 +10,7 @@ import { useRequest } from "@/pages/requests/api";
 import { AttemptList } from "@/pages/requests/Attempts";
 import { secs } from "@/pages/requests/bits";
 import { SAMPLE_REQUEST } from "@/pages/requests/samples";
+import { rec, RecordLink } from "@/sheets/RecordLink";
 import { cn } from "@/ui/cn";
 import { Skeleton } from "@/ui/Skeleton";
 import { bareModel } from "./api";
@@ -167,9 +168,9 @@ function Details({ round, rounds }: { round: Round; rounds: Round[] }) {
           {(r) => (
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 min-[400px]:grid-cols-4">
               <Fact label="Served by" mono>
-                {r.upstream_key || "–"}
+                {r.upstream_key && r.provider ? <RecordLink record={rec.key(r.provider, r.upstream_key)}>{r.upstream_key}</RecordLink> : r.upstream_key || "–"}
               </Fact>
-              <Fact label="Endpoint">{r.endpoint || "–"}</Fact>
+              <Fact label="Endpoint">{r.endpoint && r.provider ? <RecordLink record={rec.endpoint(r.provider, r.endpoint)}>{r.endpoint}</RecordLink> : r.endpoint || "–"}</Fact>
               <Fact label="Attempts">{r.attempt_count}</Fact>
               <Fact label="Tool call">
                 {check ? <span className={check.passed ? "text-success" : "text-danger-text"}>{check.passed ? "Passed" : "Failed"}</span> : <span className="text-fg-muted">Off</span>}

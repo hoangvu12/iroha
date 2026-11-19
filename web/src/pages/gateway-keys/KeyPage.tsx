@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { rec, RecordLink } from "@/sheets/RecordLink";
 import { ArrowUpRight, KeyRound, MessageCircle, Pencil } from "lucide-react";
 import { isApiError } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
@@ -278,7 +279,9 @@ function Access({ k }: { k: GatewayKey }) {
       {providers.map((p) => (
         <div key={p.provider} className="flex h-12 items-center gap-3 px-5">
           <ProviderTile handle={p.provider} />
-          <span className="min-w-0 flex-1 truncate text-[15px]">{p.provider}</span>
+          <span className="flex min-w-0 flex-1 text-[15px]">
+            <RecordLink record={rec.provider(p.provider)}>{p.provider}</RecordLink>
+          </span>
           <span className="shrink-0 text-sm text-fg-muted" title={p.models?.join(", ")}>
             {modelsLabel(p.models?.length ? p.models : null)}
           </span>
@@ -287,7 +290,9 @@ function Access({ k }: { k: GatewayKey }) {
       {pools.map((n) => (
         <div key={n} className="flex h-12 items-center gap-3 px-5">
           <PoolTile name={n} />
-          <span className="min-w-0 flex-1 truncate text-[15px]">{n}</span>
+          <span className="flex min-w-0 flex-1 text-[15px]">
+            <RecordLink record={rec.pool(n)}>{n}</RecordLink>
+          </span>
           <span className="shrink-0 text-sm text-fg-muted">Model Pool</span>
         </div>
       ))}

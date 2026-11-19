@@ -16,7 +16,7 @@ test("Request → Provider → Upstream Key opens three sheets; closing returns 
   expect((await details.findByRole("link", { name: "acme" })).getAttribute("href")).toBe("/requests?sheet=request%3Areq_1&sheet=provider%3Aacme");
   expect(details.getByRole("link", { name: "team-5" })).toBeTruthy();
   expect(details.getByRole("link", { name: "main" })).toBeTruthy();
-  expect(details.getByRole("link", { name: "gk_1" })).toBeTruthy();
+  expect(details.getByRole("link", { name: "zeron" })).toBeTruthy();
   expect(details.getByRole("link", { name: "fast" })).toBeTruthy();
 
   await user.click(details.getByRole("link", { name: "acme" }));

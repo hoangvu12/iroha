@@ -3,3 +3,7 @@
 go.mod text eol=lf
 go.sum text eol=lf
 *.sql  text eol=lf
+# Deploy scripts and the unit run on Linux; CRLF would break them.
+*.sh        text eol=lf
+*.service   text eol=lf
+*.Dockerfile text eol=lf

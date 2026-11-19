@@ -17,6 +17,7 @@ One Go binary (`cmd/iroha`), one SQLite file (`<data-dir>/iroha.db`), pure-Go dr
 | `internal/ids` | Record IDs (`at_xxxx`) and secrets. |
 | `internal/shape` | The four Shape names. |
 | `internal/testkit` | In-process server, clients, fake upstreams. |
+| `deploy` | `deploy.sh` (run locally: build, copy, back up, swap, restart, readiness, rollback over SSH keys), `remote.sh` (its server half), `iroha.service` (systemd unit template), Go tests tying the unit's stop timeout to the drain limit and the runbook (`internal/api/skill/50_deploy.md`) to the script. `deploy/test/e2e.sh` runs the scripts against a local Docker container with systemd and sshd; run it after changing anything in `deploy/` (needs Docker; never point it at a real server). |
 
 Suggested homes for later work (create when needed, one package per concern so parallel tickets do not collide): `audit` (02), `providers` (Providers, Endpoints, Upstream Keys; 04, 09), `gatewaykeys` (04, 12), `requests` (Request and Attempt history; 04), `gateway` (inference routes, passthrough, streaming; 04, 13–17), `planner` (candidate planning, pure; 05, 09, 18), `rules` (Failure Rules, pure matching; 05–07), `keystate` (Key States, Cooling, Model Gaps; 05, 08), `models` (lists, discovery, metadata; 10, 11), `pools` (18), `translate` and `normalise` (13–16), `jobs` (19, 20), `session` (Owner login; 21). The UI goes in `web/` (21), deploy files in `deploy/` (03).
 
@@ -84,5 +85,7 @@ func TestSomething(t *testing.T) {
 ```
 
 Fake upstream replies: `up.Text` (streams automatically when the request asks; OpenAI Chat includes usage only with `stream_options.include_usage`), `up.Stream(pieces...)`, `up.Error` / `up.ErrorCode` (the Shape's error envelope), `up.SetModels`, `up.SetUsage`, `up.Handle(method, path, r)` for other routes, generic `testkit.JSON`, `Raw`, `SSE`, `Hang`, `Drop`, and modifiers `.Header`, `.After(d)`, `.HoldUntil(ch)` (with `up.Await(n)` to know the request arrived), `.ThenDisconnect()`. For finer control build a `testkit.Reply` with `Chunks` (each may `Delay` or `Wait`). `up.URL()` is the Endpoint URL including `/v1` (or `/v1beta` for Gemini). Use `srv.Clock.BlockUntil(ctx, n)` before `Advance` when the server must be waiting on a timer first. `srv.App.DB()` exists only for state no API can reach yet; prefer the API.
+
+To test behaviour that needs a route production lacks (a deliberately slow handler, say), pass it in `server.Options.Routes` and drive `server.Run` directly; `internal/server/drain_test.go` does this to prove the SIGTERM drain.
 
 `go build ./... && go vet ./... && go test ./...` must pass. `go test -short` skips the binary build test in `cmd/iroha`.

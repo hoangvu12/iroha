@@ -158,6 +158,9 @@ func TestDocumentsDescribeEveryRegisteredRoute(t *testing.T) {
 	if !strings.HasPrefix(skill, "---\nname: iroha\n") {
 		t.Fatalf("skill lacks frontmatter:\n%.200s", skill)
 	}
+	if !strings.Contains(skill, "\n## Deploying Iroha\n") || !strings.Contains(skill, "deploy/deploy.sh --host") {
+		t.Fatal("skill lacks the deploy runbook")
+	}
 
 	routes := srv.App.Routes()
 	var admin int

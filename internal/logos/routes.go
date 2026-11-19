@@ -2,6 +2,7 @@ package logos
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,8 +15,9 @@ type Lookups struct {
 	// ProviderDomain is the logo domain of the Provider addressed by handle
 	// or ID ("" when it has none); an *api.Error when there is no Provider.
 	ProviderDomain func(ctx context.Context, ref string) (string, error)
-	// PoolMaker is the maker of the Pool addressed by name or ID ("" when
-	// none is known); an *api.Error when there is no Pool.
+	// PoolMaker is the logo value of the Pool addressed by name or ID: its
+	// maker or a website (ReadPoolLogo), "" when none is known; an
+	// *api.Error when there is no Pool.
 	PoolMaker func(ctx context.Context, ref string) (string, error)
 }
 
@@ -41,8 +43,8 @@ func Routes(s *Service, l Lookups) []api.Route {
 		},
 		{
 			Method: http.MethodGet, Path: "/api/pools/{pool}/logo", Tag: "Model Pools",
-			Summary:     "Read a Model Pool's logo: its model maker's",
-			Description: desc + " Set the maker with PATCH /api/pools/{pool} {\"maker\": ...}.",
+			Summary:     "Read a Model Pool's logo: its model maker's, or a website's",
+			Description: desc + " Set it with PATCH /api/pools/{pool} {\"maker\": ...}: a maker ID (openai) or a website (chatgpt.com).",
 			Response:    "", ContentType: "image/*",
 			Raw: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				m, err := l.PoolMaker(r.Context(), r.PathValue("pool"))
@@ -50,17 +52,17 @@ func Routes(s *Service, l Lookups) []api.Route {
 					api.WriteError(w, api.AsError(err))
 					return
 				}
-				img, err := s.Maker(r.Context(), m)
+				img, err := s.Pool(r.Context(), m)
 				serve(w, img, err, "Model Pool "+r.PathValue("pool"))
 			}),
 		},
 		{
 			Method: http.MethodGet, Path: "/api/logos", Tag: "Providers",
-			Summary:     "Read the logo of a domain or a model maker, before setting it",
+			Summary:     "Read the logo of a domain or a Model Pool's maker value, before setting it",
 			Description: desc,
 			Query: []api.Param{
 				{Name: "domain", Description: "A site, e.g. alibabacloud.com: its logo as a Provider would show it."},
-				{Name: "maker", Description: "A model maker, e.g. zhipuai: its logo as a Model Pool would show it."},
+				{Name: "maker", Description: "What a Model Pool's maker field takes: a model maker (zhipuai) or a website (chatgpt.com, or a URL read for its host); its logo as the Pool would show it."},
 			},
 			Response: "", ContentType: "image/*",
 			Raw: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,12 +77,12 @@ func Routes(s *Service, l Lookups) []api.Route {
 					img, err := s.Domain(r.Context(), d)
 					serve(w, img, err, d)
 				case q.Get("maker") != "":
-					m := strings.ToLower(strings.TrimSpace(q.Get("maker")))
-					if !CheckMaker(m) {
-						api.WriteError(w, api.BadRequest("Use a maker ID such as anthropic, openai or zhipuai.", "maker %q is not valid.", m))
+					m, err := ReadPoolLogo(q.Get("maker"))
+					if err != nil {
+						api.WriteError(w, PoolLogoError(q.Get("maker"), err))
 						return
 					}
-					img, err := s.Maker(r.Context(), m)
+					img, err := s.Pool(r.Context(), m)
 					serve(w, img, err, m)
 				default:
 					api.WriteError(w, api.BadRequest("Pass domain=<site> or maker=<maker ID>.", "Name a domain or a maker."))
@@ -88,6 +90,15 @@ func Routes(s *Service, l Lookups) []api.Route {
 			}),
 		},
 	}
+}
+
+// PoolLogoError is the 400 for a Pool logo value ReadPoolLogo refused.
+func PoolLogoError(value string, err error) *api.Error {
+	v := strings.TrimSpace(value)
+	if errors.Is(err, ErrBadDomain) {
+		return api.BadRequest("Use a website such as chatgpt.com (no IP address or port), or a maker ID such as openai.", "%q is not a website's domain.", v)
+	}
+	return api.BadRequest("Use a maker ID such as anthropic, openai or zhipuai (letters, digits, '_', '-'), a website such as chatgpt.com, or \"\" to guess it.", "%q is not a maker ID.", v)
 }
 
 func serve(w http.ResponseWriter, img *Image, err error, what string) {

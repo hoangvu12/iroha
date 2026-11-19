@@ -109,6 +109,10 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 65. As the Owner, I want a Pool request to try the first Provider's keys and then move down the list within the Request's budget, so that failover is automatic but bounded.
 66. As the Owner, I want to reorder a Pool's members, so that I can change preference without touching Callers.
 67. As the Owner, I want Pool names to be stable even as members change, so that clients caching model lists keep working.
+114. As the Owner, I want to see where a request for a Pool or a Provider's model would go right now (members and Endpoints in order, ready keys, and every skipped key with its reason such as "cooling, 40 s left" or "Model Gap"), without sending anything, so that I know how traffic will flow before it arrives.
+115. As an agent, I want the same route preview through the admin API, so that I can check routing after a change.
+116. As the Owner, I want every Provider to show a logo found from its logo domain, which I can change, so that Providers are recognisable at a glance.
+117. As the Owner, I want every Model Pool to show the logo of its model's maker, guessed from the model name and changeable, drawn differently from Provider logos, so that Pools and Providers are never confused.
 
 ### Gateway Keys
 
@@ -130,14 +134,19 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 80. As the Owner, I want test Requests attributed to a "Test" caller, so that tests never masquerade as someone else.
 81. As the Owner, I want history retention configurable, defaulting to 30 days, so that I can investigate last week's failures.
 82. As the Owner, I want captured prompts kept for a configurable short time, defaulting to 3 days, so that capture does not grow without bound.
+111. As the Owner, I want a stats row above the Requests feed (Requests, succeeded, retried, median duration, median time to first token, tokens) for the current filters, so that I see the shape of traffic at a glance.
+112. As the Owner, I want to hide and show Requests columns, with failed rows tinted and retried Requests marked, so that the feed stays readable while carrying every fact.
+113. As the Owner, I want a Request's route drawn as a top-to-bottom chain of Attempt cards, each connection labelled with why Iroha moved on, with the selected card's details beside it, so that I can follow what happened at a glance.
 
 ### Testing models
 
-83. As the Owner, I want a test panel on each Provider where I pick a model (from the Provider or any Pool), any key or one key, and a Shape, so that I can try exactly the path a Caller would take.
-84. As the Owner, I want the panel to give me a ready-to-copy snippet in curl, Python and TypeScript, so that I can wire up a client quickly.
-85. As the Owner, I want to hold a multi-turn chat with the model in the panel, streamed, so that I can test real conversations rather than a single "hello".
-86. As the Owner, I want a one-click tool-call check in the panel, so that I can see whether a model handles tools through Iroha.
+83. As the Owner, I want one shared test chat panel on the right, openable from any page (sidebar and a keyboard shortcut) and expandable to full page, where the composer's model button sets model, Provider, Upstream Key (any or one), Endpoint, Shape, reasoning level and a tool-call check, so that I can try exactly the path a Caller would take without leaving what I am looking at.
+84. As the Owner, I want the chat to give me a ready-to-copy snippet in curl, Python and TypeScript for the current settings, so that I can wire up a client quickly.
+85. As the Owner, I want to hold a multi-turn streamed chat in that panel, with a collapsed details block under each reply (serving key, timings, tokens, tool-call result), so that I can test real conversations rather than a single "hello".
+86. As the Owner, I want Test buttons on Providers, Model Pools, key rows, past Requests and Gateway Keys that open the chat already filled in (that Provider, that Pool, that key, a replay of that prompt, or sending as that Gateway Key with its scope), so that I never set it up by hand.
 87. As the Owner, I want a failed test to show the same Attempt explanation as the Requests page, so that I see why it failed.
+109. As the Owner, I want a chat sent as a Gateway Key recorded under "Test (as <key name>)", using that key's scope but never counted as that Caller's own traffic, so that tests never inflate a friend's usage.
+110. As the Owner, I want earlier test chats listed so that I can reopen one, so that a useful test is not lost.
 
 ### Agents operating Iroha
 
@@ -213,6 +222,8 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 - Every mutation writes an Audit Entry (actor, before, after); `revert` restores the before-state.
 - `GET /skill.md` serves the agent skill; `GET /api/openapi.json` serves the description. Both are generated or checked from the same route definitions so they cannot drift.
 - Provider summary endpoint: key-state counts, cooling-until times, Model Gaps, recent failure rate.
+- Route preview endpoint: for a Pool or `provider/model` (optionally as a Gateway Key), runs candidate planning without sending and returns members, Endpoints and keys in order, with each excluded key's reason and until-time.
+- Test endpoint backing the chat: sends a Request as the Test caller, optionally pinned to one key or Endpoint, optionally "as" a Gateway Key (its scope applies; recorded as "Test (as <name>)" and excluded from that key's usage).
 
 ### Logs and history
 - Structured log events for every Attempt, rule match, Key State change, Model Gap, discovery run, job run, configuration change, startup and shutdown; written to stdout and to a queryable store; read through the logs API with filters.
@@ -223,10 +234,13 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 - Daily model refresh per Provider, start times spread across the day. Hourly retention cleanup. Nothing else. No job changes or deletes keys.
 
 ### UI
-- React single-page app embedded in the binary, consuming only the public admin API. Three pages, freshly designed (design produced in a separate design session):
-  - Providers: searchable list of names (Model Pools also reachable here; placement is a design choice). Detail: Upstream Keys data table (primary), test panel (primary: model, key, Shape pickers; snippet copy in curl, Python, TypeScript; multi-turn streamed chat; tool-call check), then Endpoints, Models and Rules (secondary, plain).
-  - Gateway Keys: list (name, key with copy, scope summary, last used, recent Requests) and a redesigned create/edit dialog for scope and capture.
-  - Requests: live feed with filters and a detail view with the full Attempt explanation and captured content.
+- React single-page app embedded in the binary, consuming only the public admin API. The design to build is `.scratch/v2-gateway/design/v2-clean/` (calm style: one line per row, few columns, one main button, no dot-chained text); earlier sets in `design/` and `design/v2-directions/` are superseded.
+- Shell: sidebar with the Iroha banner art and avatar, a health status, Providers / Gateway Keys / Requests / Chat with keyboard shortcuts, and the Owner row.
+- Providers: list with logos and Model Pools (Pools drawn with maker-logo tiles). Provider detail tabs: Keys (primary data table, bulk actions, paste keys), Endpoints, Models, Rules, Settings (name, logo domain, enabled). Model Pool detail: Route (live route preview) and Members (order, on/off).
+- Shared test chat: a right-side panel available on every page, expandable to full page, not modal, no tabs; settings behind the composer's model button; filled in by Test buttons; earlier chats in a dropdown.
+- Gateway Keys: list, a create dialog (name; Everything or Only some Providers and Pools, each Provider narrowable to models) and a key page holding settings such as prompt capture and a danger zone.
+- Requests: stats row for the current filters, live feed with configurable columns, a drawer with Details, Attempts and Captured tabs stepping with arrow keys, and a full-page Route view (chain of Attempt cards).
+- Logos: Providers by logo domain (Owner-editable); Pools by the model maker inferred from the model name (Owner-editable). Fetched through Iroha, never hot-linked from the browser to third parties.
 - Owner login with a password; sessions last 30 days.
 
 ### Operations
@@ -252,7 +266,7 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 - Balance or usage polling of Providers (DeepAI, MiniMax, Z.ai and others).
 - Gateway Key rate or token limits.
 - CORS origins on Gateway Keys.
-- Overview, Audit and Settings pages, charts, and Provider logos (audit and settings remain API-only).
+- Overview page and charts (beyond the Requests stats row). Audit Entries and Admin Tokens stay API-only unless a Settings screen is designed later.
 - Upstream Accounts and Management Key scopes.
 - Multiple Owners or tenants.
 - Any pipeline for gathering Upstream Keys from third parties; Iroha only holds keys the Owner is entitled to use.

@@ -1,11 +1,16 @@
-# 25: Requests page
+# 25: Requests page and Request route view
 
-**What to build:** A live feed of Requests with filters by caller, Provider or Pool, model, status and time range. Each row shows caller, requested model, serving Provider, Endpoint and wire model, Shape in and out, status, time to first token, total time, tokens and Attempt count. The detail view shows the one-line summary, each Attempt with its key, Endpoint, status, matched Failure Rule, action, error body and headers, related log events, and captured prompt and response when capture was on.
+**What to build:** Following `design/v2-clean/` (C03, C04, C18):
+- A stats row for the current filters: Requests, succeeded, retried, median duration, median time to first token, tokens.
+- A live feed with filters (caller including Test callers, Provider or Pool, model, status, time range) and configurable columns: time, status, caller, model with Pool tag, Provider with logo, Upstream Key, Shape in and out, Attempts, time to first token, duration, input and output tokens. Failed rows tinted; retried Requests marked.
+- A drawer with Details, Attempts and Captured tabs; arrow keys step through Requests; a Replay button opens the test chat with the prompt when captured.
+- A full-page Route view: the Request's Attempts as a top-to-bottom chain of cards from Start to End, each connection labelled with why Iroha moved on ("Cooling, tried the next key", "Model Gap, tried the next key"), the selected card's details (what happened, matched Failure Rule, Key State effect, Endpoint, raw error) beside it.
 
 **Blocked by:** 21, 19
 
 **Status:** ready-for-agent
 
-- [ ] New Requests appear without reloading
-- [ ] Filters combine and are reflected in the URL
-- [ ] Detail links to the key and Provider involved
+- [ ] New Requests appear without reloading; pausing the feed is possible
+- [ ] Filters and visible columns are reflected in the URL
+- [ ] Stats row is computed by the API for the same filters
+- [ ] Route view and drawer read the same Attempt data as the API explanation

@@ -1,11 +1,11 @@
-# 24: Gateway Keys page and new-key dialog
+# 24: Gateway Keys page, create dialog and key page
 
-**What to build:** The Gateway Keys page lists every key with name, readable secret and copy, scope summary, last used and recent Requests. A redesigned create and edit dialog picks all-access or chosen Providers and Pools, optionally narrowing each to models with search, and sets the capture switch. Revoke from the list.
+**What to build:** Following `design/v2-clean/` (C02, C12): the Gateway Keys list (name, readable key with copy, scope summary, last used, recent Requests). The create dialog takes a name and Everything or Only some, where Only some is a checklist of Providers (with logos) and Model Pools, each checked Provider showing "All models" that opens the model picker to narrow it. After creation the full key and base URLs are shown with Copy. A key page holds its settings (scope, prompt capture), a Test button that opens the chat as this key, and a danger zone (revoke, delete).
 
 **Blocked by:** 21, 18, 19
 
 **Status:** ready-for-agent
 
-- [ ] Scope picker handles Providers with thousands of models without lag
-- [ ] A new key is shown and copyable immediately after creation
-- [ ] Capture switch reflected on the Requests page
+- [ ] Model narrowing handles Providers with thousands of models without lag
+- [ ] Capture switch on the key page is reflected on the Requests page
+- [ ] Revoke and delete ask for confirmation and are undoable through Audit revert where possible

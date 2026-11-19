@@ -10,3 +10,5 @@
 - [ ] Reordering members changes routing on the next Request
 - [ ] Pool scope on Gateway Keys enforced with the uniform refusal
 - [ ] Pool names cannot collide with each other; changes are audited
+- [ ] Route preview API: for a Pool or `provider/model` (optionally as a Gateway Key) returns members, Endpoints and keys in try order, each skipped key with its reason and until-time, using the same planner as live traffic and sending nothing
+- [ ] Members can be switched off without removing them; switched-off members are reported, not planned

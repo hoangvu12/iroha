@@ -155,7 +155,7 @@ func TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited(t *testing.T) {
 		{"renames": map[string]string{"glm": ""}},
 		{"renames": map[string]string{" glm": "x"}},
 		{"renames": map[string]string{strings.Repeat("m", 257): "x"}}, // MOD-13: names are at most 256 characters
-		{"renames": manyRenames(1001)},                                  // MOD-13: at most 1000 renames
+		{"renames": manyRenames(1001)},                                // MOD-13: at most 1000 renames
 	} {
 		if e := srv.Admin.Post(base, ep(bad)).Expect(400).Err(); e.Hint == "" {
 			t.Errorf("%v: no hint", bad)

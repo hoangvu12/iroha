@@ -382,3 +382,25 @@ func TestASlashedModelIDIsAddedHiddenAndRevertedLikeAnyOther(t *testing.T) {
 		t.Fatalf("caller list = %s", got)
 	}
 }
+
+// PRV-54: a model list answered with a redirect is a failed list; the
+// redirect is never followed, so the key never reaches the other host.
+func TestAModelListRedirectIsNeverFollowed(t *testing.T) {
+	srv := testkit.Start(t)
+	elsewhere := testkit.NewOpenAIChat(t)
+	elsewhere.SetModels("stolen")
+	up := testkit.NewOpenAIChat(t)
+	up.Handle(http.MethodGet, "/v1/models", testkit.Raw(302, "text/plain", "moved").Header("Location", elsewhere.URL()+"/models"))
+	addProvider(t, srv, up.URL(), nil, "sk-test-redirected")
+
+	r := refresh(t, srv)
+	if r.Outcome != "failed" || len(r.Lists) != 1 || r.Lists[0].Status != 302 {
+		t.Fatalf("refresh = %+v", r)
+	}
+	if elsewhere.Count() != 0 {
+		t.Fatalf("the redirect was followed: %d requests reached the other host", elsewhere.Count())
+	}
+	if l := list(t, srv, ""); len(l.Models) != 0 {
+		t.Fatalf("models after a redirected list = %s", names(l))
+	}
+}

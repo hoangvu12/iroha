@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Eraser, Eye, EyeOff, ListPlus, ListX, MessageCircle, MoreHorizontal, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { useChatActions } from "@/app/chat-panel";
@@ -487,15 +487,20 @@ const tri = (b?: boolean) => (b === undefined ? "" : b ? "yes" : "no");
 const num = (s: string) => (s.trim() ? Number(s.replace(/[_,\s]/g, "")) : undefined);
 
 /** A model's details: where its facts come from, and the Owner's overrides. */
-function ModelDialog({ handle, model, onClose }: { handle: string; model?: Model; onClose: () => void }) {
+function ModelDialog({ handle, model: current, onClose }: { handle: string; model?: Model; onClose: () => void }) {
+  // Motion: the dialog stays mounted while it leaves, still about the model it showed, so its exit plays.
+  const last = useRef(current);
+  if (current) last.current = current;
+  const model = current ?? last.current;
   const refresh = useRefresh();
   const [f, setF] = useState({ context_length: "", max_output_tokens: "", reasoning: "", chat: "" });
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
 
+  // A model opened (not one closing): start from its overrides.
   useEffect(() => {
-    if (!model) return;
-    const o = model.overrides;
+    if (!current) return;
+    const o = current.overrides;
     setF({
       context_length: o.context_length ? String(o.context_length) : "",
       max_output_tokens: o.max_output_tokens ? String(o.max_output_tokens) : "",
@@ -503,7 +508,7 @@ function ModelDialog({ handle, model, onClose }: { handle: string; model?: Model
       chat: o.chat ?? "",
     });
     setError(undefined);
-  }, [model]);
+  }, [current]);
 
   if (!model) return null;
   const save = async () => {
@@ -539,7 +544,7 @@ function ModelDialog({ handle, model, onClose }: { handle: string; model?: Model
 
   return (
     <Dialog
-      open
+      open={!!current}
       onOpenChange={(o) => !o && onClose()}
       title={<span className="font-mono">{model.model}</span>}
       description={[

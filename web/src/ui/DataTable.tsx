@@ -451,13 +451,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const rootRef = useRef<HTMLDivElement>(null);
   const newRowsLabel = paging.mode === "infinite" ? paging.newRowsLabel : undefined;
   const hold = useHoldView({ enabled: !!newRowsLabel && !loading && state === undefined, ids: pageRows.map((r) => r.id), root: rootRef });
-  const pill =
-    newRowsLabel && hold.newAbove > 0 ? (
-      <Button size="sm" className="pointer-events-auto rounded-full bg-elevated shadow-md" onClick={hold.toTop}>
-        <ArrowUp size={14} aria-hidden />
-        {newRowsLabel(hold.newAbove)}
-      </Button>
-    ) : null;
+  const pill = newRowsLabel ? <NewRowsPill count={hold.newAbove} label={newRowsLabel} onPress={hold.toTop} /> : null;
   // Stepping through rows from the sheet (↑/↓) keeps the open row in view.
   const active = props.activeRowId;
   useEffect(() => {
@@ -777,6 +771,35 @@ function BodyCell<T extends RowData>({ cell, name, onOpen, render }: { cell: Cel
         render
       )}
     </td>
+  );
+}
+
+/**
+ * "3 new" (live tables, UI ticket 18): rises into place like the bulk bar and fades out where it is.
+ * Kept mounted and switched by `data-shown`, so it can leave with what it said; while hidden it is
+ * inert and hidden from readers. The translate snaps back only once the fade is done.
+ */
+function NewRowsPill({ count, label, onPress }: { count: number; label: (n: number) => string; onPress: () => void }) {
+  const last = useRef(count);
+  if (count > 0) last.current = count;
+  const shown = count > 0;
+  return (
+    <div
+      data-new-rows=""
+      data-shown={shown ? "" : undefined}
+      inert={!shown}
+      aria-hidden={shown ? undefined : true}
+      className={cn(
+        "transition-[opacity,translate] duration-list-in ease-out",
+        "not-data-shown:translate-y-(--motion-shift) not-data-shown:opacity-0",
+        "not-data-shown:[transition-duration:var(--duration-list-out),0ms] not-data-shown:[transition-delay:0ms,var(--duration-list-out)]",
+      )}
+    >
+      <Button size="sm" className="pointer-events-auto rounded-full bg-elevated shadow-md" onClick={onPress}>
+        <ArrowUp size={14} aria-hidden />
+        {label(last.current)}
+      </Button>
+    </div>
   );
 }
 

@@ -1,5 +1,5 @@
-import type { ReactNode, RefObject } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { Activity, ChevronDown, Columns3, ListFilter } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
@@ -32,6 +32,7 @@ import { useFilterOptions, useRequestFeed, useRequestStats } from "./api";
 import { SAMPLE_CALLERS, SAMPLE_REQUESTS, SAMPLE_STATS } from "./samples";
 import { clock, compactNumber, failed, PoolTag, ProviderLogo, secs, shapeInOut, StatusCell, statusTone } from "./bits";
 import { useLendRequestRows } from "@/sheets/stack";
+import { useArrivals } from "./arrivals";
 import { rec, RecordLink } from "@/sheets/RecordLink";
 import { COLUMNS, type ColumnId, type FilterKey, RANGES, type RequestsUrl, STATUSES, useRequestsUrl } from "./url-state";
 
@@ -80,7 +81,7 @@ export function RequestsFeed({ paging = FEED_PAGING }: { paging?: FeedPaging }) 
         newRowsLabel: (n) => `${n} new`,
       };
 
-  // Requests that arrived live flash once (motion: UI ticket 18 tunes it).
+  // Requests that arrived live enter and flash once (arrivals.ts).
   const box = useRef<HTMLDivElement>(null);
   useArrivals(box, feed.added);
 
@@ -180,21 +181,6 @@ function useNumberedPages(on: boolean, loaded: RequestRecord[] | undefined, page
   return { rows: shown.current ?? (loaded ? [] : undefined), waiting, paging };
 }
 
-/** Rows that arrived live get one background flash (reduced motion: none). */
-function useArrivals(box: RefObject<HTMLDivElement | null>, added: Set<string>) {
-  const seen = useRef(new Set<string>());
-  useLayoutEffect(() => {
-    const fresh = [...added].filter((id) => !seen.current.has(id));
-    if (fresh.length === 0) return;
-    for (const id of fresh) seen.current.add(id);
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    for (const id of fresh) {
-      const el = box.current?.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`);
-      el?.animate?.([{ backgroundColor: "var(--info-tint)" }, { backgroundColor: "transparent" }], { duration: 1600, easing: "ease-out" });
-    }
-  }, [added, box]);
-}
-
 function LiveToggle({ live, onToggle, phone }: { live: boolean; onToggle: () => void; phone: boolean }) {
   return (
     <Tip label={live ? "New Requests appear as they arrive. Click to pause." : "Paused. Click to follow new Requests again."} type="description">
@@ -203,7 +189,7 @@ function LiveToggle({ live, onToggle, phone }: { live: boolean; onToggle: () => 
         onClick={onToggle}
         aria-pressed={live}
         className={cn(
-          "inline-flex h-8 items-center gap-2 rounded-full px-3 text-[14px] transition-colors",
+          "inline-flex h-8 items-center gap-2 rounded-full px-3 text-[14px] transition-colors duration-hover ease-[ease]",
           phone ? (live ? "bg-success-tint font-medium text-success" : "bg-muted text-fg-muted") : "text-fg hover:bg-muted",
         )}
       >

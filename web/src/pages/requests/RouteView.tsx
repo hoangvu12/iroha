@@ -175,7 +175,11 @@ function RouteCanvas({ r, phone }: { r: RequestRecord; phone: boolean }) {
         <div className="flex flex-col items-center bg-subtle px-4 py-8" style={dots}>
           {chain}
         </div>
-        {panel && <div className="border-t border-border">{panel}</div>}
+        {panel && (
+          <div data-step-panel="" className={cn("border-t border-border", panelFade)}>
+            {panel}
+          </div>
+        )}
       </ScrollArea>
     );
 
@@ -185,20 +189,28 @@ function RouteCanvas({ r, phone }: { r: RequestRecord; phone: boolean }) {
         {chain}
       </Canvas>
       {panel && (
-        <ScrollArea label="Selected step" className="w-[420px] shrink-0 border-l border-border bg-bg" contentClassName="flex min-h-full flex-col *:grow">
-          {panel}
-        </ScrollArea>
+        <div data-step-panel="" className={cn("flex w-[420px] shrink-0 border-l border-border bg-bg", panelFade)}>
+          <ScrollArea label="Selected step" className="min-w-0 flex-1" contentClassName="flex min-h-full flex-col *:grow">
+            {panel}
+          </ScrollArea>
+        </div>
       )}
     </div>
   );
 }
+
+// The selected step's panel comes in from the edge it sits on when it appears (after Close, or
+// with the page): shift + fade on the list tokens, a plain fade under reduced motion. Choosing
+// another card swaps its content at once; Close takes it away at once (UI ticket 18).
+const panelFade = "transition-[opacity,translate] duration-list-in ease-out starting:translate-x-(--motion-shift) starting:opacity-0";
 
 /** A step on the canvas: the whole card is the button that selects it; a record's name on it is a link of its own, above it. */
 function Card({ selected, onSelect, children, label }: { selected: boolean; onSelect: () => void; children: ReactNode; label: string }) {
   return (
     <div
       className={cn(
-        "relative flex w-[min(360px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-shadow",
+        // Border and ring change together: a press's feedback, on the hover tokens.
+        "relative flex w-[min(360px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-[border-color,box-shadow] duration-hover ease-[ease]",
         selected ? "border-info ring-2 ring-info/30" : "border-border hover:border-border-strong",
       )}
     >

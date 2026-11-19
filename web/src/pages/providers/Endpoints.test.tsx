@@ -84,6 +84,22 @@ test("Delete… in a row's menu is red and asks, naming the Endpoint; confirming
   expect(screen.queryByRole("dialog", { name: "Edit cn" })).toBeNull();
 });
 
+test("picking a header you name opens its name field under the choice, folding as it opens (UI ticket 17)", async () => {
+  const user = userEvent.setup();
+  renderTab();
+  await user.click(await screen.findByRole("button", { name: "Open cn" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit cn" });
+  expect(within(dialog).queryByRole("textbox", { name: "Header name" })).toBeNull();
+  await user.click(within(dialog).getByRole("combobox", { name: "Key sent as" }));
+  await user.click(await screen.findByRole("option", { name: "A header you name" }));
+  const name = await within(dialog).findByRole("textbox", { name: "Header name" });
+  const panel = name.closest("[data-slot=collapsible-panel]")!;
+  for (const c of ["transition-[height]", "duration-collapse", "data-starting-style:h-0", "data-ending-style:h-0", "overflow-hidden"])
+    expect(panel.className.split(/\s+/)).toContain(c);
+  // The input's focus ring has room inside the clipping panel.
+  for (const c of ["-mx-1", "px-1", "-mb-1", "pb-1"]) expect(panel.className.split(/\s+/)).toContain(c);
+});
+
 test("an agent finds every endpoint control by name and opens one", async () => {
   renderTab();
   await screen.findByRole("table", { name: "Endpoints" });

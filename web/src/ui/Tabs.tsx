@@ -23,7 +23,7 @@ export function TabList({ label, variant = "underline", className, children }: {
     return (
       <VariantContext.Provider value="segmented">
         <TabsList aria-label={label} className={cn("relative inline-flex rounded-lg bg-muted p-1", className)}>
-          <TabsIndicator className="absolute left-0 top-0 h-(--active-tab-height) w-(--active-tab-width) translate-x-(--active-tab-left) translate-y-(--active-tab-top) rounded-md bg-bg shadow-sm transition-[translate,width] duration-200 ease-out data-[activation-direction=none]:transition-none motion-reduce:transition-none" />
+          <TabsIndicator className="absolute left-0 top-0 h-(--active-tab-height) w-(--active-tab-width) translate-x-(--active-tab-left) translate-y-(--active-tab-top) rounded-md bg-bg shadow-sm transition-[translate,width] duration-indicator ease-out data-[activation-direction=none]:transition-none" />
           {children}
         </TabsList>
       </VariantContext.Provider>
@@ -33,7 +33,7 @@ export function TabList({ label, variant = "underline", className, children }: {
       <ScrollArea axis="x" bars={false} className={cn("shadow-[inset_0_-1px_0_var(--border)]", className)}>
         <TabsList aria-label={label} className="relative flex w-max min-w-full gap-6">
           {children}
-          <TabsIndicator className="absolute bottom-0 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) bg-fg transition-[translate,width] duration-200 ease-out data-[activation-direction=none]:transition-none motion-reduce:transition-none" />
+          <TabsIndicator className="absolute bottom-0 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) bg-fg transition-[translate,width] duration-indicator ease-out data-[activation-direction=none]:transition-none" />
         </TabsList>
       </ScrollArea>
     </VariantContext.Provider>
@@ -42,9 +42,9 @@ export function TabList({ label, variant = "underline", className, children }: {
 
 const tabClass: Record<Variant, string> = {
   underline:
-    "whitespace-nowrap pb-2.5 text-[15px] text-fg-muted transition-colors hover:text-fg data-selected:text-fg focus-visible:-outline-offset-2",
+    "whitespace-nowrap pb-2.5 text-[15px] text-fg-muted transition-colors duration-hover ease-[ease] hover:text-fg data-selected:text-fg focus-visible:-outline-offset-2",
   segmented:
-    "relative flex h-8 flex-1 items-center justify-center whitespace-nowrap rounded-md px-4 text-[14.5px] text-fg-muted transition-colors hover:text-fg data-selected:font-medium data-selected:text-fg",
+    "relative flex h-8 flex-1 items-center justify-center whitespace-nowrap rounded-md px-4 text-[14.5px] text-fg-muted transition-colors duration-hover ease-[ease] hover:text-fg data-selected:font-medium data-selected:text-fg",
 };
 
 export function Tab({ className, ...props }: ComponentProps<typeof TabsTab>) {

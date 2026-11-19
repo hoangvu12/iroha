@@ -1,9 +1,8 @@
-import { useState } from "react";
 import { ChevronDown, Route as RouteIcon, Send } from "lucide-react";
-import { Button as SdkButton } from "@ui-sdk/react/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
 import { rec, RecordLink } from "@/sheets/RecordLink";
 import { Button } from "@/ui/Button";
-import { cn } from "@/ui/cn";
+import { Disclosure } from "@/ui/Disclosure";
 import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState } from "@/ui/States";
 import type { Attempt, RequestRecord } from "./api";
@@ -38,7 +37,8 @@ function Attempts({ r, attempts, onOpenRoute }: { r: RequestRecord; attempts: At
           Route view
         </Button>
       </div>
-      <ol className="flex flex-col gap-3">
+      {/* Keyed by Request: ↑/↓ in the sheet swaps the cards at once, each with its own default. */}
+      <ol key={r.id} className="flex flex-col gap-3">
         {attempts.map((a, i) => (
           <AttemptCard key={a.seq} a={a} next={attempts[i + 1]} defaultOpen={attemptFailed(a) && i === 0} />
         ))}
@@ -52,44 +52,42 @@ function attemptsLine(attempts: Attempt[]): string {
   return n === 1 ? "One Attempt." : `${n} Attempts.`;
 }
 
+/** One Attempt: the header opens and closes its facts on the collapse recipe (UI ticket 18). */
 function AttemptCard({ a, next, defaultOpen }: { a: Attempt; next?: Attempt; defaultOpen: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
   const e = explain(a);
   return (
     <li className="rounded-xl border border-border">
-      {/* The whole header toggles the Attempt; the key's name above it is a link of its own. */}
-      <div className="relative flex w-full items-center gap-3 px-4 py-3 text-left">
-        <SdkButton
-          aria-label={`Attempt ${a.seq}`}
-          aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
-          className="absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-info/30"
-        />
-        <ProviderLogo handle={a.provider} size={32} />
-        <span className="min-w-0 flex-1">
-          <span className="block text-[13px] text-fg-muted">Attempt {a.seq}</span>
-          <span className="flex min-w-0">
-            <RecordLink record={rec.key(a.provider, a.upstream_key)} className="relative font-mono text-[14.5px] font-medium">
-              {a.upstream_key}
-            </RecordLink>
+      {/* Open on first paint when it failed first: UI SDK doesn't animate that. */}
+      <Collapsible defaultOpen={defaultOpen} className="group/attempt">
+        {/* The whole header toggles the Attempt; the key's name above it is a link of its own. */}
+        <div className="relative flex w-full items-center gap-3 px-4 py-3 text-left">
+          <CollapsibleTrigger aria-label={`Attempt ${a.seq}`} className="absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-info/30" />
+          <ProviderLogo handle={a.provider} size={32} />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] text-fg-muted">Attempt {a.seq}</span>
+            <span className="flex min-w-0">
+              <RecordLink record={rec.key(a.provider, a.upstream_key)} className="relative font-mono text-[14.5px] font-medium">
+                {a.upstream_key}
+              </RecordLink>
+            </span>
           </span>
-        </span>
-        <span className="shrink-0 text-[13.5px] text-fg-muted tabular">{secs(a.duration_ms)}</span>
-        <Badge tone={a.status ? statusBadgeTone(a.status) : "red"}>{a.status || "–"}</Badge>
-        <ChevronDown size={16} aria-hidden className={cn("shrink-0 text-fg-muted transition-transform", open && "rotate-180")} />
-      </div>
-      {open && (
-        <div className="border-t border-border px-4 pb-4 pt-3">
-          <AttemptFacts a={a} next={next} />
-          {e.body && (
-            <div className="mt-3">
-              <h4 className="mb-2 text-[13px] text-fg-muted">Upstream error</h4>
-              <CodeBlock>{pretty(e.body)}</CodeBlock>
-            </div>
-          )}
-          {e.headers && <Headers headers={e.headers} />}
+          <span className="shrink-0 text-[13.5px] text-fg-muted tabular">{secs(a.duration_ms)}</span>
+          <Badge tone={a.status ? statusBadgeTone(a.status) : "red"}>{a.status || "–"}</Badge>
+          <ChevronDown size={16} aria-hidden className="shrink-0 text-fg-muted transition-[rotate] duration-collapse ease-out group-data-open/attempt:rotate-180" />
         </div>
-      )}
+        <CollapsiblePanel className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-collapse ease-out data-starting-style:h-0 data-ending-style:h-0">
+          <div className="border-t border-border px-4 pb-4 pt-3">
+            <AttemptFacts a={a} next={next} />
+            {e.body && (
+              <div className="mt-3">
+                <h4 className="mb-2 text-[13px] text-fg-muted">Upstream error</h4>
+                <CodeBlock>{pretty(e.body)}</CodeBlock>
+              </div>
+            )}
+            {e.headers && <Headers headers={e.headers} />}
+          </div>
+        </CollapsiblePanel>
+      </Collapsible>
     </li>
   );
 }
@@ -155,16 +153,12 @@ export const keyStateClass: Record<string, string> = {
   gray: "text-fg",
 };
 
+/** "Response headers (n)", folded (the shared Disclosure: collapse recipe). */
 export function Headers({ headers }: { headers: Record<string, string> }) {
-  const [open, setOpen] = useState(false);
   const names = Object.keys(headers).sort();
   return (
-    <div className="mt-3">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="inline-flex items-center gap-1 text-[13px] text-fg-muted hover:text-fg">
-        <ChevronDown size={14} className={cn("transition-transform", open ? "rotate-0" : "-rotate-90")} />
-        Response headers ({names.length})
-      </button>
-      {open && <CodeBlock className="mt-2">{names.map((n) => `${n}: ${headers[n]}`).join("\n")}</CodeBlock>}
-    </div>
+    <Disclosure className="mt-3" triggerClassName="text-[13px]" summary={`Response headers (${names.length})`}>
+      <CodeBlock className="mt-2">{names.map((n) => `${n}: ${headers[n]}`).join("\n")}</CodeBlock>
+    </Disclosure>
   );
 }

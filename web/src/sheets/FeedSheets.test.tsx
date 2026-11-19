@@ -46,6 +46,15 @@ test("a feed row opens the Request sheet first; ↓ steps to the next row in pla
   expect(screen.getByRole("dialog", { name: "Request fast" })).toBe(sheet);
 });
 
+test("the open Request's neighbours in the feed are fetched ahead, so ↓ shows the next one whole, at once (UI ticket 18)", async () => {
+  const user = userEvent.setup();
+  const { fetch } = renderWithSheets(<RequestsFeed />, "/requests");
+  await user.click(await feedRow("req_1"));
+  await screen.findByRole("dialog", { name: "Request fast" });
+  const asked = (path: string) => fetch.mock.calls.some(([url]) => String(url).split("?")[0] === path);
+  await waitFor(() => expect(asked("/api/requests/req_2")).toBe(true));
+});
+
 test("a feed row's Caller, Pool, Provider and key are links to their sheets, not to the Request", async () => {
   const user = userEvent.setup();
   renderWithSheets(<RequestsFeed />, "/requests");

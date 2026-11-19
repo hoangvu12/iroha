@@ -57,3 +57,32 @@ test("the route's cards and the selected step link the records they name; a card
   await user.click(within(route).getByRole("link", { name: "team-6" }));
   await screen.findByRole("dialog", { name: "Upstream Key team-6" });
 });
+
+// UI ticket 18: motion in the Route view. jsdom has no Tailwind, so this reads the classes on the real markup.
+const classesOf = (el: Element) => el.getAttribute("class")!.split(/\s+/);
+
+test("motion: a card's border and ring change together on the hover tokens; the panel comes in from its edge when it comes back, swaps at once, closes at once", async () => {
+  const user = userEvent.setup();
+  renderWithSheets(page, "/requests/req_rv/route");
+  const route = await screen.findByRole("group", { name: "Route of req_rv" });
+  const card = within(route).getByRole("button", { name: "Start" }).parentElement!;
+  for (const k of ["transition-[border-color,box-shadow]", "duration-hover", "ease-[ease]"]) expect(classesOf(card)).toContain(k);
+  expect(classesOf(card)).not.toContain("transition-shadow");
+
+  const panel = screen.getByRole("region", { name: "Selected step" });
+  const fade = ["starting:opacity-0", "starting:translate-x-(--motion-shift)", "transition-[opacity,translate]", "duration-list-in", "ease-out"];
+  const root = panel.closest("[data-step-panel]")!;
+  for (const k of fade) expect(classesOf(root)).toContain(k);
+  // Another card: the same panel, its content swapped (no entrance again).
+  await user.click(within(route).getByRole("button", { name: "End" }));
+  expect(screen.getByRole("region", { name: "Selected step" }).closest("[data-step-panel]")).toBe(root);
+  // Close: gone at once, nothing kept for an exit.
+  await user.click(within(panel).getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("region", { name: "Selected step" })).toBeNull();
+  expect(document.querySelector("[data-step-panel]")).toBeNull();
+
+  // The view tabs' indicator slides on the indicator tokens, never on first placement.
+  const indicator = screen.getByRole("tablist", { name: "Request views" }).querySelector("[data-slot=tabs-indicator]")!;
+  for (const k of ["transition-[translate,width]", "duration-indicator", "ease-out", "data-[activation-direction=none]:transition-none"]) expect(classesOf(indicator)).toContain(k);
+  expect(classesOf(indicator).filter((k) => /^duration-\d/.test(k) || k === "motion-reduce:transition-none")).toEqual([]);
+});

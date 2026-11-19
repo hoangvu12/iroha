@@ -230,6 +230,8 @@ export type DataTableProps<T extends RowData> = {
 
   /** Phones (< 768 px): the row as two lines (C31). Without it phones get the table, scrolling sideways. */
   phoneRow?: (row: T) => ReactNode;
+  /** Phones: controls that stay on the row beside it (a row's Switch), even when the row opens on a tap. */
+  phoneActions?: (row: T) => ReactNode;
 
   paging?: DataTablePaging;
   /** Line under the table, left of the pages: "42 keys". */
@@ -539,6 +541,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
               ) : (
                 <div className="flex min-w-0 flex-1 items-center gap-3">{content}</div>
               )}
+              {!showChecks && props.phoneActions?.(r)}
               {!onRowClick && !showChecks && rowActions?.(r)}
             </li>
           );

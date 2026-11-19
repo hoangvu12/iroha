@@ -1,17 +1,16 @@
-import { useEffect, useState } from "react";
-import { MoreHorizontal, Pencil, Plug, Trash2 } from "lucide-react";
-import { useIsPhone } from "@/lib/media";
+import { useEffect, useMemo, useState } from "react";
+import { Pencil, Plug, Trash2 } from "lucide-react";
 import { Button } from "@/ui/Button";
+import { useConfirm } from "@/ui/Confirm";
 import { useCopy } from "@/ui/CopyButton";
-import { ConfirmDialog, Dialog } from "@/ui/Dialog";
+import { DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
+import { Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
+import { MenuItem, MenuSeparator } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
-import { Skeleton } from "@/ui/Skeleton";
-import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notifyChange } from "@/ui/toast";
 import type { AuthStyle, Endpoint, Provider, Shape, UpstreamKey } from "./api";
-import { calls, errorText, shapeLabel, SHAPES, useKeys, useRefresh } from "./api";
+import { calls, errorText, natural, shapeLabel, SHAPES, useKeys, useRefresh } from "./api";
 import { Select } from "./controls";
 import { SAMPLE_ENDPOINTS } from "./samples";
 
@@ -29,105 +28,116 @@ export function EndpointsTab({
 }) {
   const keys = useKeys(handle);
   const refresh = useRefresh();
-  const phone = useIsPhone();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState<Endpoint>();
-  const [deleting, setDeleting] = useState<Endpoint>();
   const eps = provider?.endpoints ?? [];
 
-  const keysFor = (e: Endpoint) => {
+  // Each Endpoint with the keys that go there, so the table's cells and sorts read one row.
+  const rows = useMemo<EndpointRow[] | undefined>(() => {
+    if (!provider || keys.isPending) return undefined; // Waits for the keys too, so the Keys column arrives filled in.
     const all = keys.data ?? [];
-    const n = all.filter((k: UpstreamKey) => k.endpoints.length === 0 || k.endpoints.includes(e.name)).length;
-    if (!keys.data) return "–";
-    if (n === all.length) return all.length ? "All keys" : "No keys";
-    return `${n} key${n === 1 ? "" : "s"}`;
-  };
+    return provider.endpoints.map((e) => ({ ...e, keys: keys.data ? all.filter((k: UpstreamKey) => k.endpoints.length === 0 || k.endpoints.includes(e.name)).length : undefined, allKeys: all.length }));
+  }, [provider, keys.isPending, keys.data]);
 
-  const menu = (e: Endpoint) => <EndpointMenu e={e} onEdit={setEditing} onDelete={setDeleting} />;
+  // Asks first, naming the Endpoint; the row is gone afterwards, so the result (with Undo) toasts.
+  const askDelete = (e: Endpoint) =>
+    confirm.ask({
+      title: `Delete ${e.name}?`,
+      body: `Iroha stops sending Requests to ${e.url}. Keys limited to it alone stop being used. Undo brings it back.`,
+      confirmLabel: "Delete endpoint",
+      onConfirm: async () => {
+        const res = await calls.deleteEndpoint(handle, e.name);
+        refresh();
+        // Toast: the confirm dialog has closed and the row is gone; Undo after a delete.
+        notifyChange(`Endpoint ${e.name} deleted`, res, { onUndone: refresh });
+      },
+    });
 
   return (
     <section aria-label="Endpoints">
-      {/* Waits for the keys too, so the Keys column arrives filled in. */}
-      <Skeleton
-        data={provider && !keys.isPending ? eps : undefined}
-        sample={SAMPLE_ENDPOINTS}
-        id={phone ? "provider-endpoints:phone" : "provider-endpoints"}
-        label="Loading Endpoints"
-      >
-      {(eps) => eps.length === 0 ? (
-        <EmptyState
-          icon={Plug}
-          title="No Endpoints"
-          description={`Add the URL of ${handle}'s API. Iroha sends Requests there with the Upstream Keys.`}
-          action={
-            <Button variant="primary" onClick={() => setAdding(true)}>
-              Add endpoint
-            </Button>
-          }
-        />
-      ) : phone ? (
-        <ul className="divide-y divide-border border-y border-border">
-          {eps.map((e) => (
-            <li key={e.id} className="flex items-center gap-3 py-3">
-              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setEditing(e)}>
-                <span className="flex items-center justify-between gap-2">
-                  <span className="truncate text-[16px] font-medium">{e.name}</span>
-                  <span className="shrink-0 text-[14px] text-fg-muted">{shapeLabel(e.shape)}</span>
-                </span>
-                <span className="block truncate font-mono text-[13px] text-fg-muted">{e.url}</span>
-              </button>
-              {menu(e)}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <Table>
-          <THead>
-            <tr>
-              <TH className="w-[16%]">Name</TH>
-              <TH>URL</TH>
-              <TH className="w-[18%]">Shape</TH>
-              <TH className="w-[12%]">Keys</TH>
-              <TH className="w-10">
-                <span className="sr-only">Actions</span>
-              </TH>
-            </tr>
-          </THead>
-          <TBody>
-            {eps.map((e) => (
-              <TR key={e.id} interactive onClick={() => setEditing(e)}>
-                <TD className="text-[15px] font-medium">{e.name}</TD>
-                <TD mono className="max-w-0 truncate" title={e.url}>
-                  {e.url}
-                </TD>
-                <TD>{shapeLabel(e.shape)}</TD>
-                <TD>{keysFor(e)}</TD>
-                <TD align="right" onClick={(ev) => ev.stopPropagation()}>
-                  {menu(e)}
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      )}
-      </Skeleton>
+      <DataTable<EndpointRow>
+        id="provider-endpoints"
+        label="Endpoints"
+        columns={columns}
+        data={rows}
+        sample={SAMPLE_ENDPOINT_ROWS}
+        getRowId={(e) => e.id}
+        rowName={(e) => e.name}
+        rowActions={(e) => <EndpointMenu e={e} onEdit={setEditing} onDelete={askDelete} />}
+        onRowClick={setEditing}
+        phoneRow={(e) => <EndpointLine e={e} />}
+        empty={
+          <EmptyState
+            icon={Plug}
+            title="No Endpoints"
+            description={`Add the URL of ${handle}'s API. Iroha sends Requests there with the Upstream Keys.`}
+            action={
+              <Button variant="primary" onClick={() => setAdding(true)}>
+                Add endpoint
+              </Button>
+            }
+          />
+        }
+        footer={({ total }) => `${total} Endpoint${total === 1 ? "" : "s"}`}
+      />
 
+      {confirm.dialog}
       <EndpointDialog handle={handle} existing={eps} open={adding} onOpenChange={setAdding} />
       <EndpointDialog handle={handle} existing={eps} endpoint={editing} open={!!editing} onOpenChange={(o) => !o && setEditing(undefined)} />
-      <ConfirmDialog
-        open={!!deleting}
-        onOpenChange={(o) => !o && setDeleting(undefined)}
-        title={`Delete ${deleting?.name}?`}
-        body={`Iroha stops sending Requests to ${deleting?.url}. Keys limited to it alone stop being used. Undo brings it back.`}
-        confirmLabel="Delete endpoint"
-        onConfirm={async () => {
-          if (!deleting) return;
-          const res = await calls.deleteEndpoint(handle, deleting.name);
-          refresh();
-          // Toast: the confirm dialog has closed and the row is gone; Undo after a delete.
-          notifyChange(`Endpoint ${deleting.name} deleted`, res, { onUndone: refresh });
-        }}
-      />
     </section>
+  );
+}
+
+/** An Endpoint with how many Upstream Keys go there (`undefined` until the keys load). */
+type EndpointRow = Endpoint & { keys?: number; allKeys: number };
+
+const SAMPLE_ENDPOINT_ROWS: EndpointRow[] = SAMPLE_ENDPOINTS.map((e) => ({ ...e, keys: 24, allKeys: 24 }));
+
+const keysText = (e: EndpointRow) => {
+  if (e.keys === undefined) return "–";
+  if (e.keys === e.allKeys) return e.allKeys ? "All keys" : "No keys";
+  return `${e.keys} key${e.keys === 1 ? "" : "s"}`;
+};
+
+const col = columnsFor<EndpointRow>();
+const columns = col.columns([
+  col.accessor("name", {
+    header: "Name",
+    sortFn: (a, b) => natural(a.original.name, b.original.name),
+    meta: { width: "w-[16%]", className: "text-[15px] font-medium", opens: true },
+    cell: ({ row }) => <span className="truncate">{row.original.name}</span>,
+  }),
+  col.accessor("url", {
+    header: "URL",
+    sortFn: (a, b) => a.original.url.localeCompare(b.original.url) || natural(a.original.name, b.original.name),
+    meta: { className: "max-w-0 truncate font-mono text-[13px] text-fg-muted" },
+    cell: ({ row }) => <span title={row.original.url}>{row.original.url}</span>,
+  }),
+  col.accessor((e) => shapeLabel(e.shape), {
+    id: "shape",
+    header: "Shape",
+    sortFn: (a, b) => shapeLabel(a.original.shape).localeCompare(shapeLabel(b.original.shape)) || natural(a.original.name, b.original.name),
+    meta: { width: "w-[18%]" },
+  }),
+  col.accessor((e) => e.keys ?? -1, {
+    id: "keys",
+    header: "Keys",
+    sortFn: (a, b) => (a.original.keys ?? -1) - (b.original.keys ?? -1) || natural(a.original.name, b.original.name),
+    meta: { width: "w-[12%]" },
+    cell: ({ row }) => keysText(row.original),
+  }),
+]);
+
+/** Phones (C31): an Endpoint in two lines. */
+function EndpointLine({ e }: { e: EndpointRow }) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className="flex items-center justify-between gap-2">
+        <span className="truncate text-[16px] font-medium">{e.name}</span>
+        <span className="shrink-0 text-[14px] text-fg-muted">{shapeLabel(e.shape)}</span>
+      </span>
+      <span className="block truncate font-mono text-[13px] text-fg-muted">{e.url}</span>
+    </span>
   );
 }
 
@@ -297,24 +307,21 @@ function EndpointDialog({
   );
 }
 
-function EndpointMenu({ e, onEdit, onDelete }: { e: Endpoint; onEdit: (e: Endpoint) => void; onDelete: (e: Endpoint) => void }) {
+function EndpointMenu({ e, onEdit, onDelete }: { e: EndpointRow; onEdit: (e: Endpoint) => void; onDelete: (e: Endpoint) => void }) {
   // "Copy URL" closes the menu, so the trigger it closes back to shows the result.
   const copied = useCopy();
   return (
-    <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${e.name}`} size="sm" copy={copied.state} />
-      <MenuContent>
-        <MenuItem icon={Pencil} onSelect={() => onEdit(e)}>
-          Edit…
-        </MenuItem>
-        <MenuItem icon={Plug} onSelect={() => void copied.copy(e.url, "URL")}>
-          Copy URL
-        </MenuItem>
-        <MenuSeparator />
-        <MenuItem icon={Trash2} danger onSelect={() => onDelete(e)}>
-          Delete…
-        </MenuItem>
-      </MenuContent>
-    </Menu>
+    <RowMenu name={e.name} copy={copied.state}>
+      <MenuItem icon={Pencil} onSelect={() => onEdit(e)}>
+        Edit…
+      </MenuItem>
+      <MenuItem icon={Plug} onSelect={() => void copied.copy(e.url, "URL")}>
+        Copy URL
+      </MenuItem>
+      <MenuSeparator />
+      <MenuItem icon={Trash2} danger onSelect={() => onDelete(e)}>
+        Delete…
+      </MenuItem>
+    </RowMenu>
   );
 }

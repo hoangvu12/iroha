@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { Button as SdkButton } from "@ui-sdk/react/button";
 import { ChevronRight, Layers, MessageCircle, Plus, Server } from "lucide-react";
 import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
@@ -9,10 +11,9 @@ import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Dialog } from "@/ui/Dialog";
-import { Field, Input } from "@/ui/Input";
+import { DataTable, columnsFor } from "@/ui/DataTable";
+import { Field, Input, SearchInput } from "@/ui/Input";
 import { EmptyState, ErrorState } from "@/ui/States";
-import { Skeleton } from "@/ui/Skeleton";
-import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notifyChange } from "@/ui/toast";
 import type { Pool, PoolOverview, Provider, ProviderOverview, Shape } from "./api";
 import { calls, errorText, natural, SHAPES, successRate, useOverview, usePools, useProviders, useRefresh } from "./api";
@@ -28,9 +29,36 @@ export function ProvidersList() {
   const [adding, setAdding] = useState(false);
   const [pooling, setPooling] = useState(false);
 
+  const navigate = useNavigate();
+  const chat = useChatActions();
+  const [params, setParams] = useSearchParams();
+  const q = params.get("q") ?? "";
+  const setQ = (v: string) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (v) n.set("q", v);
+        else n.delete("q");
+        return n;
+      },
+      { replace: true },
+    );
+
   const stats = new Map(overview.data?.providers.map((p) => [p.provider, p]));
   const poolStats = new Map(overview.data?.pools.map((p) => [p.pool, p]));
+  // Archived last, then the busiest today, then by name: the order until a column is sorted.
   const list = [...(providers.data ?? [])].sort((a, b) => Number(a.archived) - Number(b.archived) || (stats.get(b.handle)?.requests ?? 0) - (stats.get(a.handle)?.requests ?? 0) || natural(a.handle, b.handle));
+  // Waits for the overview too, so the counts arrive filled in; its 15 s refetch keeps what is shown.
+  const providerRows: ProviderRow[] | undefined = providers.data && !overview.isPending ? list.map((p) => ({ ...p, stats: stats.get(p.handle) })) : undefined;
+  const poolRows: PoolRow[] | undefined = pools.data && !overview.isPending ? pools.data.map((p) => ({ ...p, stats: poolStats.get(p.name) })) : undefined;
+  const openProvider = (p: Provider) => navigate(providerPath(p.handle));
+  const openPool = (p: Pool) => navigate(poolPath(p.name));
+  const testButton = (label: string, onPress: () => void) => (
+    <span className="inline-flex items-center gap-1">
+      <IconButton icon={MessageCircle} label={label} size="sm" className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" onClick={onPress} />
+      <ChevronRight size={17} className="text-fg-muted" aria-hidden />
+    </span>
+  );
 
   return (
     <>
@@ -70,15 +98,33 @@ export function ProvidersList() {
         <>
           <section aria-label="Providers">
             <h2 className="mb-2 text-[17px] font-semibold">Providers</h2>
-            {/* Waits for the overview too, so the counts arrive filled in; its 15 s refetch keeps what is shown. */}
-            <Skeleton
-              data={providers.data && !overview.isPending ? list : undefined}
-              sample={SAMPLE_PROVIDERS}
-              id={phone ? "providers-list:phone" : "providers-list"}
-              label="Loading Providers"
-            >
-              {(list) => (phone ? <ProviderCards list={list} stats={stats} /> : <ProviderTable list={list} stats={stats} />)}
-            </Skeleton>
+            <DataTable<ProviderRow>
+              id="providers"
+              label="Providers"
+              columns={providerColumns}
+              data={providerRows}
+              sample={SAMPLE_PROVIDER_ROWS}
+              getRowId={(p) => p.id}
+              rowName={(p) => p.handle}
+              toolbar={
+                <SearchInput
+                  className="min-w-0 flex-1 md:max-w-[320px] md:flex-none"
+                  placeholder="Search Providers"
+                  aria-label="Search Providers"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
+              }
+              search={q}
+              searchFn={searchProviders}
+              filterChips={q ? [{ label: `Search: ${q}`, onRemove: () => setQ("") }] : []}
+              onClearFilters={() => setQ("")}
+              noResultsTitle="No Providers match"
+              rowActions={(p) => testButton(`Test ${p.handle} in Chat`, () => chat.open({ kind: "provider", provider: p.handle }))}
+              onRowClick={openProvider}
+              phoneRow={(p) => <ProviderLine p={p} />}
+              footer={({ shown, total }) => (shown === total ? `${total} Provider${total === 1 ? "" : "s"}` : `${shown} of ${total} Providers`)}
+            />
           </section>
           <section aria-label="Model Pools" className="mt-12">
             <div className="mb-2 flex items-center justify-between">
@@ -89,29 +135,29 @@ export function ProvidersList() {
                 </Button>
               )}
             </div>
-            {pools.isError ? (
-              <ErrorState title="Couldn't load Model Pools" error={pools.error} onRetry={() => void pools.refetch()} />
-            ) : (
-              <Skeleton
-                data={overview.isPending ? undefined : pools.data}
-                sample={SAMPLE_POOLS}
-                id={phone ? "pools-list:phone" : "pools-list"}
-                label="Loading Model Pools"
-              >
-            {(pools) => pools.length === 0 ? (
-              <p className="border-t border-border py-6 text-[15px] text-fg-muted">
-                No Model Pools. A Pool is one model name that Iroha serves from several Providers, trying the next one when a Provider can't serve.{" "}
-                <button type="button" className="text-info hover:underline" onClick={() => setPooling(true)}>
-                  Make one
-                </button>
-              </p>
-            ) : phone ? (
-              <PoolCards pools={pools} stats={poolStats} />
-            ) : (
-              <PoolTable pools={pools} stats={poolStats} />
-            )}
-              </Skeleton>
-            )}
+            <DataTable<PoolRow>
+              id="pools"
+              label="Model Pools"
+              columns={poolColumns}
+              data={poolRows}
+              sample={SAMPLE_POOL_ROWS}
+              getRowId={(p) => p.id}
+              rowName={(p) => p.name}
+              error={pools.isError ? pools.error : undefined}
+              onRetry={() => void pools.refetch()}
+              rowActions={(p) => testButton(`Test ${p.name} in Chat`, () => chat.open({ kind: "pool", pool: p.name }))}
+              onRowClick={openPool}
+              phoneRow={(p) => <PoolLine p={p} />}
+              empty={
+                <p className="border-t border-border py-6 text-[15px] text-fg-muted">
+                  No Model Pools. A Pool is one model name that Iroha serves from several Providers, trying the next one when a Provider can't serve.{" "}
+                  <button type="button" className="text-info hover:underline" onClick={() => setPooling(true)}>
+                    Make one
+                  </button>
+                </p>
+              }
+              footer={({ total }) => `${total} Model Pool${total === 1 ? "" : "s"}`}
+            />
           </section>
         </>
       )}
@@ -138,93 +184,88 @@ function ProviderName({ p }: { p: Provider }) {
   );
 }
 
-function ProviderTable({ list, stats }: { list: Provider[]; stats: Map<string, ProviderOverview> }) {
-  const navigate = useNavigate();
-  const chat = useChatActions();
+/** A Provider with its numbers of today (`undefined` when the overview doesn't name it). */
+type ProviderRow = Provider & { stats?: ProviderOverview };
+/** A Model Pool with its numbers of today. */
+type PoolRow = Pool & { stats?: PoolOverview };
+
+const providerPath = (handle: string) => `/providers/${seg(handle)}/keys`;
+const poolPath = (name: string) => `/providers/pools/${seg(name)}/route`;
+
+const SAMPLE_PROVIDER_ROWS: ProviderRow[] = SAMPLE_PROVIDERS;
+const SAMPLE_POOL_ROWS: PoolRow[] = SAMPLE_POOLS;
+
+const searchProviders = (p: ProviderRow, needle: string) => !needle || p.handle.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle);
+
+/** The page's own link around a name: a real link (new tab works), named "Open <name>" for the keyboard and agents. */
+function OpenLink({ to, name, children }: { to: string; name: string; children: ReactNode }) {
   return (
-    <Table>
-      <THead>
-        <tr>
-          <TH>Name</TH>
-          <TH align="right">Keys</TH>
-          <TH align="right">Active keys</TH>
-          <TH align="right">Models</TH>
-          <TH align="right">Requests today</TH>
-          <TH align="right">Success</TH>
-          <TH className="pl-6">Last request</TH>
-          <TH className="w-20">
-            <span className="sr-only">Actions</span>
-          </TH>
-        </tr>
-      </THead>
-      <TBody>
-        {list.map((p) => {
-          const s = stats.get(p.handle);
-          return (
-            <TR key={p.id} interactive className={cn("group", p.archived && "opacity-60")} onClick={() => navigate(`/providers/${seg(p.handle)}/keys`)}>
-              <TD>
-                <Link to={`/providers/${seg(p.handle)}/keys`} onClick={(e) => e.stopPropagation()} className="block min-w-0">
-                  <ProviderName p={p} />
-                </Link>
-              </TD>
-              <TD align="right">{formatNumber(s?.keys.total ?? p.upstream_key_count)}</TD>
-              <TD align="right">{s ? formatNumber(s.keys.active) : "–"}</TD>
-              <TD align="right">{s ? formatNumber(s.models) : "–"}</TD>
-              <TD align="right">{s ? formatNumber(s.requests) : "–"}</TD>
-              <TD align="right">
-                <Rate t={s} />
-              </TD>
-              <TD className="whitespace-nowrap pl-6">{s?.last_request_at ? timeAgo(s.last_request_at) : <span className="text-fg-subtle">–</span>}</TD>
-              <TD align="right">
-                <span className="inline-flex items-center gap-1">
-                  <IconButton
-                    icon={MessageCircle}
-                    label={`Test ${p.handle} in Chat`}
-                    size="sm"
-                    className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      chat.open({ kind: "provider", provider: p.handle });
-                    }}
-                  />
-                  <ChevronRight size={17} className="text-fg-muted" />
-                </span>
-              </TD>
-            </TR>
-          );
-        })}
-      </TBody>
-    </Table>
+    <SdkButton render={<Link to={to} />} aria-label={`Open ${name}`} className="flex min-w-0 rounded outline-none focus-visible:underline">
+      {children}
+    </SdkButton>
   );
 }
 
-function ProviderCards({ list, stats }: { list: Provider[]; stats: Map<string, ProviderOverview> }) {
+// Numbers sort smallest first on the first press; a missing number counts as less than none.
+const num = (n: number | undefined) => n ?? -1;
+const byHandle = (a: ProviderRow, b: ProviderRow) => natural(a.handle, b.handle);
+
+const pcol = columnsFor<ProviderRow>();
+const providerNumber = (id: string, header: string, value: (p: ProviderRow) => number | undefined, shown?: (p: ProviderRow) => ReactNode) =>
+  pcol.accessor((p) => num(value(p)), {
+    id,
+    header,
+    sortFn: (a, b) => num(value(a.original)) - num(value(b.original)) || byHandle(a.original, b.original),
+    meta: { align: "right" },
+    cell: ({ row }) => shown?.(row.original) ?? (value(row.original) === undefined ? "–" : formatNumber(value(row.original) ?? 0)),
+  });
+const providerColumns = pcol.columns([
+  pcol.accessor("handle", {
+    header: "Name",
+    sortFn: (a, b) => byHandle(a.original, b.original),
+    cell: ({ row }) => (
+      <span className={cn("block min-w-0", row.original.archived && "opacity-60")}>
+        <OpenLink to={providerPath(row.original.handle)} name={row.original.handle}>
+          <ProviderName p={row.original} />
+        </OpenLink>
+      </span>
+    ),
+  }),
+  providerNumber("keys", "Keys", (p) => p.stats?.keys.total ?? p.upstream_key_count),
+  providerNumber("active", "Active keys", (p) => p.stats?.keys.active),
+  providerNumber("models", "Models", (p) => p.stats?.models),
+  providerNumber("requests", "Requests today", (p) => p.stats?.requests),
+  providerNumber("success", "Success", (p) => successRate(p.stats), (p) => <Rate t={p.stats} />),
+  pcol.accessor((p) => p.stats?.last_request_at ?? "", {
+    id: "last",
+    header: "Last request",
+    // Most recent first, then by name.
+    sortFn: (a, b) => (b.original.stats?.last_request_at ?? "").localeCompare(a.original.stats?.last_request_at ?? "") || byHandle(a.original, b.original),
+    meta: { className: "whitespace-nowrap pl-6", width: "pl-6" },
+    cell: ({ row }) => (row.original.stats?.last_request_at ? timeAgo(row.original.stats.last_request_at) : <span className="text-fg-subtle">–</span>),
+  }),
+]);
+
+/** Phones (C30): a Provider in two lines. */
+function ProviderLine({ p }: { p: ProviderRow }) {
+  const s = p.stats;
+  const r = successRate(s);
   return (
-    <ul className="divide-y divide-border border-y border-border">
-      {list.map((p) => {
-        const s = stats.get(p.handle);
-        const r = successRate(s);
-        return (
-          <li key={p.id}>
-            <Link to={`/providers/${seg(p.handle)}/keys`} className={cn("flex items-center gap-3 py-3", p.archived && "opacity-60")}>
-              <ProviderTile handle={p.handle} version={p.logo_domain} size={40} />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2">
-                  <span className="truncate text-[16px] font-medium">{p.handle}</span>
-                  {p.archived ? <Pill>Archived</Pill> : !p.enabled ? <Pill>Off</Pill> : null}
-                </span>
-                <span className="block truncate text-[14px] text-fg-muted">
-                  {s ? `${formatNumber(s.keys.active)} of ${formatNumber(s.keys.total)} keys active` : `${p.upstream_key_count} keys`}
-                  {s && s.requests > 0 && ` · ${formatNumber(s.requests)} today`}
-                </span>
-              </span>
-              {r !== undefined && <span className="text-[14px] tabular text-fg-muted">{formatPercent(r)}</span>}
-              <ChevronRight size={17} className="text-fg-subtle" />
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <span className={cn("flex min-w-0 flex-1 items-center gap-3", p.archived && "opacity-60")}>
+      <ProviderTile handle={p.handle} version={p.logo_domain} size={40} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-[16px] font-medium">{p.handle}</span>
+          {p.archived ? <Pill>Archived</Pill> : !p.enabled ? <Pill>Off</Pill> : null}
+        </span>
+        <span className="block truncate text-[14px] text-fg-muted">
+          {s ? `${formatNumber(s.keys.active)} of ${formatNumber(s.keys.total)} keys active` : `${p.upstream_key_count} keys`}
+          {s && s.requests > 0 && ` · ${formatNumber(s.requests)} today`}
+        </span>
+      </span>
+      {r !== undefined && <span className="text-[14px] tabular text-fg-muted">{formatPercent(r)}</span>}
+      <ChevronRight size={17} className="text-fg-subtle" aria-hidden />
+    </span>
   );
 }
 
@@ -259,87 +300,62 @@ function ServedBy({ pool }: { pool: Pool }) {
   );
 }
 
-function PoolTable({ pools, stats }: { pools: Pool[]; stats: Map<string, PoolOverview> }) {
-  const navigate = useNavigate();
-  const chat = useChatActions();
-  return (
-    <Table>
-      <THead>
-        <tr>
-          <TH>Name</TH>
-          <TH>Served by</TH>
-          <TH align="right">Requests today</TH>
-          <TH align="right">Success</TH>
-          <TH className="w-20">
-            <span className="sr-only">Actions</span>
-          </TH>
-        </tr>
-      </THead>
-      <TBody>
-        {pools.map((p) => {
-          const s = stats.get(p.name);
-          return (
-            <TR key={p.id} interactive className="group" onClick={() => navigate(`/providers/pools/${seg(p.name)}/route`)}>
-              <TD>
-                <Link to={`/providers/pools/${seg(p.name)}/route`} onClick={(e) => e.stopPropagation()} className="flex min-w-0 items-center gap-3">
-                  <PoolTile name={p.name} version={p.maker} size={28} />
-                  <span className="truncate text-[15px] font-medium">{p.name}</span>
-                </Link>
-              </TD>
-              <TD className="w-[34%]">
-                <ServedBy pool={p} />
-              </TD>
-              <TD align="right">{s ? formatNumber(s.requests) : "–"}</TD>
-              <TD align="right">
-                <Rate t={s} />
-              </TD>
-              <TD align="right">
-                <span className="inline-flex items-center gap-1">
-                  <IconButton
-                    icon={MessageCircle}
-                    label={`Test ${p.name} in Chat`}
-                    size="sm"
-                    className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      chat.open({ kind: "pool", pool: p.name });
-                    }}
-                  />
-                  <ChevronRight size={17} className="text-fg-muted" />
-                </span>
-              </TD>
-            </TR>
-          );
-        })}
-      </TBody>
-    </Table>
-  );
-}
+const byName = (a: PoolRow, b: PoolRow) => natural(a.name, b.name);
+const qcol = columnsFor<PoolRow>();
+const poolColumns = qcol.columns([
+  qcol.accessor("name", {
+    header: "Name",
+    sortFn: (a, b) => byName(a.original, b.original),
+    // The Providers table above has its own "Sort by Name": these names tell them apart.
+    meta: { label: "Pool name" },
+    cell: ({ row }) => (
+      <OpenLink to={poolPath(row.original.name)} name={row.original.name}>
+        <span className="flex min-w-0 items-center gap-3">
+          <PoolTile name={row.original.name} version={row.original.maker} size={28} />
+          <span className="truncate text-[15px] font-medium">{row.original.name}</span>
+        </span>
+      </OpenLink>
+    ),
+  }),
+  qcol.accessor((p) => servingProviders(p).length, {
+    id: "served",
+    header: "Served by",
+    sortFn: (a, b) => servingProviders(a.original).length - servingProviders(b.original).length || byName(a.original, b.original),
+    meta: { width: "w-[34%]" },
+    cell: ({ row }) => <ServedBy pool={row.original} />,
+  }),
+  qcol.accessor((p) => num(p.stats?.requests), {
+    id: "requests",
+    header: "Requests today",
+    sortFn: (a, b) => num(a.original.stats?.requests) - num(b.original.stats?.requests) || byName(a.original, b.original),
+    meta: { align: "right", label: "Pool Requests today" },
+    cell: ({ row }) => (row.original.stats ? formatNumber(row.original.stats.requests) : "–"),
+  }),
+  qcol.accessor((p) => num(successRate(p.stats)), {
+    id: "success",
+    header: "Success",
+    sortFn: (a, b) => num(successRate(a.original.stats)) - num(successRate(b.original.stats)) || byName(a.original, b.original),
+    meta: { align: "right", label: "Pool success" },
+    cell: ({ row }) => <Rate t={row.original.stats} />,
+  }),
+]);
 
-function PoolCards({ pools, stats }: { pools: Pool[]; stats: Map<string, PoolOverview> }) {
+/** Phones (C30): a Pool in two lines. */
+function PoolLine({ p }: { p: PoolRow }) {
+  const handles = servingProviders(p);
   return (
-    <ul className="divide-y divide-border border-y border-border">
-      {pools.map((p) => {
-        const s = stats.get(p.name);
-        const handles = servingProviders(p);
-        return (
-          <li key={p.id}>
-            <Link to={`/providers/pools/${seg(p.name)}/route`} className="flex items-center gap-3 py-3">
-              <PoolTile name={p.name} version={p.maker} size={40} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[16px] font-medium">{p.name}</span>
-                <span className="flex items-center gap-2 text-[14px] text-fg-muted">
-                  <LogoStack handles={handles} size={18} />
-                  {handles.length} Provider{handles.length === 1 ? "" : "s"}
-                  {s && s.requests > 0 && ` · ${formatNumber(s.requests)} today`}
-                </span>
-              </span>
-              <ChevronRight size={17} className="text-fg-subtle" />
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <span className="flex min-w-0 flex-1 items-center gap-3">
+      <PoolTile name={p.name} version={p.maker} size={40} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[16px] font-medium">{p.name}</span>
+        <span className="flex items-center gap-2 text-[14px] text-fg-muted">
+          <LogoStack handles={handles} size={18} />
+          {handles.length} Provider{handles.length === 1 ? "" : "s"}
+          {p.stats && p.stats.requests > 0 && ` · ${formatNumber(p.stats.requests)} today`}
+        </span>
+      </span>
+      <ChevronRight size={17} className="text-fg-subtle" aria-hidden />
+    </span>
   );
 }
 

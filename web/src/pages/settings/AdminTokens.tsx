@@ -143,14 +143,8 @@ function SecretCell({ t }: { t: AdminToken }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{shortSecret(t.secret)}</Mono>
-      {/* Shown on the row's hover, at once (row hover is instant); where nothing hovers (a tablet's table), always. */}
-      <CopyButton
-        icon
-        value={t.secret}
-        what="Admin Token"
-        label={`Copy ${t.name}`}
-        className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
-      />
+      {/* Shown on the row's hover, at once (row hover is instant); where nothing hovers (a tablet's table), always (row-reveal). */}
+      <CopyButton icon value={t.secret} what="Admin Token" label={`Copy ${t.name}`} className="row-reveal" />
     </span>
   );
 }

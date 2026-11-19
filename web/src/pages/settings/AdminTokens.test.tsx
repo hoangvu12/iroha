@@ -104,8 +104,8 @@ test("a row's copy button, shown on hover, is always shown where nothing hovers 
   renderTab([token(1)]);
   const copy = await screen.findByRole("button", { name: "Copy script-1" });
   const c = copy.getAttribute("class")!.split(/\s+/);
-  expect(c).toContain("group-hover:opacity-100");
-  expect(c).toContain("[@media(hover:none)]:opacity-100");
+  // row-reveal (styles/index.css): hidden until the row is hovered, always shown where nothing hovers.
+  expect(c).toContain("row-reveal");
 });
 
 test("an agent sorts the tokens and opens a menu, and needs a person to revoke one", async () => {

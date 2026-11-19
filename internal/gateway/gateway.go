@@ -51,8 +51,8 @@ type Options struct {
 	Recorder   *requests.Recorder
 	KeyStates  *keystate.Store
 	// Rules gives the Failure Rules in force for the next Attempt; nil
-	// means the built-in rules. Ticket 06 passes the live set with the
-	// Owner's rules merged in.
+	// means the built-in rules. The server passes failurerules.Store.Set:
+	// the built-ins merged with the Owner's rules, reloaded on every change.
 	Rules func() *rules.Set
 }
 

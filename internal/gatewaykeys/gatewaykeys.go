@@ -357,7 +357,6 @@ func Credential(r *http.Request) string {
 // credential; the Gateway never forwards them.
 var CredentialHeaders = []string{"authorization", "x-api-key", "api-key", "x-goog-api-key"}
 
-const lastUsedGranularity = time.Minute
 
 var errInvalid = &api.Error{
 	Status: http.StatusUnauthorized, Code: "gateway_key_invalid",
@@ -383,9 +382,6 @@ func (s *Store) Authenticate(r *http.Request) (Caller, *api.Error) {
 	if err != nil {
 		return Caller{}, api.AsError(err)
 	}
-	now := s.clock.Now()
-	if k.LastUsedAt == nil || now.Sub(*k.LastUsedAt) >= lastUsedGranularity {
-		_, _ = s.db.ExecContext(r.Context(), `UPDATE gateway_keys SET last_used_at = ? WHERE id = ?`, store.Millis(now), k.ID)
-	}
+	_ = s.db.Touch(r.Context(), "gateway_keys", "last_used_at", k.ID, k.LastUsedAt, s.clock.Now(), store.TouchEvery)
 	return Caller{KeyID: k.ID, Name: k.Name, Capture: k.Capture, scope: k.scope}, nil
 }

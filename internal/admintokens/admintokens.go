@@ -109,8 +109,6 @@ func (s *Store) Bootstrap(ctx context.Context) (tok Token, created bool, err err
 	return tok, created, err
 }
 
-// lastUsedGranularity limits last_used_at writes to one per token per minute.
-const lastUsedGranularity = time.Minute
 
 // Authenticator recognises "Authorization: Bearer iroha_admin_...".
 func (s *Store) Authenticator() api.Authenticator {
@@ -139,10 +137,7 @@ func (s *Store) Authenticator() api.Authenticator {
 				Hint:    "Ask the Owner for a new Admin Token; revoked tokens never work again.",
 			}
 		}
-		now := s.clock.Now()
-		if t.LastUsedAt == nil || now.Sub(*t.LastUsedAt) >= lastUsedGranularity {
-			_, _ = s.db.ExecContext(r.Context(), `UPDATE admin_tokens SET last_used_at = ? WHERE id = ?`, store.Millis(now), t.ID)
-		}
+		_ = s.db.Touch(r.Context(), "admin_tokens", "last_used_at", t.ID, t.LastUsedAt, s.clock.Now(), store.TouchEvery)
 		return &api.Actor{Kind: api.ActorAdminToken, ID: t.ID, Name: t.Name}, nil
 	})
 }

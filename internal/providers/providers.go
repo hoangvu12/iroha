@@ -538,15 +538,10 @@ func (s *Store) KeyState(ctx context.Context, id string) (keystate.State, error)
 	return k.State, err
 }
 
-// lastUsedGranularity limits last_used_at writes to one per key per minute.
-const lastUsedGranularity = time.Minute
-
-// MarkKeyUsed records that an Attempt used Upstream Key id.
+// MarkKeyUsed records that an Attempt used Upstream Key id (at most once a
+// minute per key).
 func (s *Store) MarkKeyUsed(ctx context.Context, id string) error {
-	now := s.clock.Now()
-	_, err := s.db.ExecContext(ctx, `UPDATE upstream_keys SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at <= ?)`,
-		store.Millis(now), id, store.Millis(now.Add(-lastUsedGranularity)))
-	return err
+	return s.db.Touch(ctx, "upstream_keys", "last_used_at", id, nil, s.clock.Now(), store.TouchEvery)
 }
 
 // Handles maps Provider IDs to handles (IDs without a Provider are left out).

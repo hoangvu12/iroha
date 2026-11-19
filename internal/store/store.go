@@ -66,6 +66,25 @@ func (db *DB) Tx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	return tx.Commit()
 }
 
+// TouchEvery limits "last used" writes to one per record per minute.
+const TouchEvery = time.Minute
+
+// Touch is the throttled "last used" write: it sets the time column of row
+// id in table to now, unless the stored time is less than every old. last
+// is the stored time when the caller already read it (nil: unknown), so a
+// recent use costs no write at all. table and column are Iroha's own
+// constants, never input.
+func (db *DB) Touch(ctx context.Context, table, column, id string, last *time.Time, now time.Time, every time.Duration) error {
+	if last != nil && !last.IsZero() && now.Sub(*last) < every {
+		return nil
+	}
+	return db.Tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE `+table+` SET `+column+` = ? WHERE id = ? AND (`+column+` IS NULL OR `+column+` <= ?)`,
+			Millis(now), id, Millis(now.Add(-every)))
+		return err
+	})
+}
+
 // Millis converts t to the stored form. The zero time becomes 0.
 func Millis(t time.Time) int64 {
 	if t.IsZero() {

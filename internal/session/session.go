@@ -119,8 +119,6 @@ func (s *Store) fromCookie(r *http.Request) (OwnerSession, error) {
 		`SELECT `+sessionColumns+` FROM owner_sessions WHERE secret_hash = ?`, secretHash(c.Value)), s.clock.Now())
 }
 
-// lastSeenGranularity limits last_seen_at writes to one per session per minute.
-const lastSeenGranularity = time.Minute
 
 // Authenticator recognises the session cookie. A session acts as the Owner
 // (actor kind owner_session, name "Owner"). A changing call from another
@@ -149,9 +147,7 @@ func (s *Store) Authenticator() api.Authenticator {
 				Message: "A page on another site tried to change Iroha with the Owner's session.",
 				Hint:    "Make changes from Iroha's own pages, or send an Admin Token instead of the session cookie."}
 		}
-		if x.LastSeenAt == nil || now.Sub(*x.LastSeenAt) >= lastSeenGranularity {
-			_, _ = s.db.ExecContext(r.Context(), `UPDATE owner_sessions SET last_seen_at = ? WHERE id = ?`, store.Millis(now), x.ID)
-		}
+		_ = s.db.Touch(r.Context(), "owner_sessions", "last_seen_at", x.ID, x.LastSeenAt, now, store.TouchEvery)
 		return &api.Actor{Kind: api.ActorOwnerSession, ID: x.ID, Name: OwnerName}, nil
 	})
 }

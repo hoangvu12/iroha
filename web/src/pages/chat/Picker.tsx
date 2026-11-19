@@ -259,7 +259,7 @@ function Header({ title, onBack, children }: { title?: ReactNode; onBack: () => 
 }
 
 const optionClass =
-  "flex min-h-10 w-full cursor-default select-none items-center gap-3 rounded-lg px-3 text-left text-[14.5px] outline-none data-highlighted:bg-selected hover:bg-muted/60 data-highlighted:hover:bg-selected";
+  "flex min-h-10 w-full select-none items-center gap-3 rounded-lg px-3 text-left text-[14.5px] outline-none data-highlighted:bg-selected hover:bg-muted/60 data-highlighted:hover:bg-selected";
 const searchClass = "h-8 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-fg-subtle md:text-[14.5px]";
 const noteClass = "shrink-0 border-t border-border px-4 py-2 text-[12.5px] text-fg-muted";
 

@@ -114,6 +114,19 @@
     line-height: 1.45;
     font-feature-settings: "cv11", "ss01";
   }
+  /* UI SDK popups render in place: a menu in a right-aligned cell or a bold
+     header would take on its text styles, so they start from the body's. */
+  :is([popover], dialog) {
+    font-size: 14px;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1.45;
+    letter-spacing: normal;
+    text-align: start;
+    text-transform: none;
+    white-space: normal;
+    cursor: auto;
+  }
   :focus-visible {
     outline: 2px solid var(--info);
     outline-offset: 2px;

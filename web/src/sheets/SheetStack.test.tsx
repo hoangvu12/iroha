@@ -25,13 +25,13 @@ test("Provider then Upstream Key: two sheets side by side, newest focused; Escap
 
   await user.click(link);
   const providerSheet = await screen.findByRole("dialog", { name: "Provider acme" });
-  expect(where()).toBe("/page?sheet=provider:acme");
+  await waitFor(() => expect(where()).toBe("/page?sheet=provider:acme"));
   expect(providerSheet.contains(document.activeElement)).toBe(true);
   expect(providerSheet.getAttribute("aria-modal")).toBeNull();
 
   await user.click(await within(providerSheet).findByRole("link", { name: "team-5" }));
   const keySheet = await screen.findByRole("dialog", { name: "Upstream Key team-5" });
-  expect(where()).toBe("/page?sheet=provider:acme&sheet=key:acme/team-5");
+  await waitFor(() => expect(where()).toBe("/page?sheet=provider:acme&sheet=key:acme/team-5"));
   expect(keySheet.contains(document.activeElement)).toBe(true);
   expect(providerSheet.getAttribute("data-depth")).toBe("1");
   expect(keySheet.getAttribute("data-depth")).toBe("0");
@@ -39,7 +39,7 @@ test("Provider then Upstream Key: two sheets side by side, newest focused; Escap
   const historyBefore = router.state.historyAction;
   await user.keyboard("{Escape}");
   await waitFor(() => expect(sheets()).toHaveLength(1));
-  expect(where()).toBe("/page?sheet=provider:acme");
+  await waitFor(() => expect(where()).toBe("/page?sheet=provider:acme"));
   expect(router.state.historyAction).toBe("POP"); // closing went Back, so Forward reopens it
   expect(historyBefore).toBe("PUSH");
   expect(document.activeElement).toBe(within(providerSheet).getByRole("link", { name: "team-5" }));
@@ -47,7 +47,7 @@ test("Provider then Upstream Key: two sheets side by side, newest focused; Escap
 
   await user.keyboard("{Escape}");
   await waitFor(() => expect(sheets()).toHaveLength(0));
-  expect(where()).toBe("/page");
+  await waitFor(() => expect(where()).toBe("/page"));
   expect(document.activeElement).toBe(link);
 });
 
@@ -90,7 +90,7 @@ test("opening a record already open focuses it; opening from a lower sheet close
   // The key's "Upstream Key of acme" link names a Provider already open: no duplicate, the key sheet closes.
   await user.click(await within(keySheet).findByRole("link", { name: "acme" }));
   await waitFor(() => expect(sheets()).toHaveLength(1));
-  expect(where()).toBe("/page?sheet=provider:acme");
+  await waitFor(() => expect(where()).toBe("/page?sheet=provider:acme"));
 
   // From the Provider (now top) open team-5, then from the Provider (lower) open team-6: team-5 closes first.
   await user.click(await within(providerSheet).findByRole("link", { name: "team-5" }));
@@ -98,7 +98,7 @@ test("opening a record already open focuses it; opening from a lower sheet close
   await user.click(within(providerSheet).getByRole("link", { name: "team-6" }));
   await screen.findByRole("dialog", { name: "Upstream Key team-6" });
   await waitFor(() => expect(sheets()).toHaveLength(2));
-  expect(where()).toBe("/page?sheet=provider:acme&sheet=key:acme/team-6");
+  await waitFor(() => expect(where()).toBe("/page?sheet=provider:acme&sheet=key:acme/team-6"));
 });
 
 test("Escape with focus in an older sheet closes only the top sheet; Close on an older sheet closes it and those above", async () => {
@@ -115,7 +115,7 @@ test("Escape with focus in an older sheet closes only the top sheet; Close on an
   await screen.findByRole("dialog", { name: "Upstream Key team-6" });
   await user.click(within(providerSheet).getByRole("button", { name: "Close (Esc)" }));
   await waitFor(() => expect(sheets()).toHaveLength(0));
-  expect(where()).toBe("/page");
+  await waitFor(() => expect(where()).toBe("/page"));
 });
 
 test("Escape on the page closes the top sheet; page shortcuts still see no popup open", async () => {

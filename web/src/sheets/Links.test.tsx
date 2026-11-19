@@ -12,7 +12,7 @@ import type { Pool, Provider, UpstreamKey } from "@/pages/providers/api";
 import { KeysTab } from "@/pages/providers/Keys";
 import { PoolMembersTab } from "@/pages/providers/PoolMembers";
 import { PoolRouteTab } from "@/pages/providers/PoolRoute";
-import { renderWithSheets, routes } from "./test-iroha";
+import { loadedSheet, renderWithSheets, routes } from "./test-iroha";
 
 // UI ticket 11: wherever a record names another, the name is a RecordLink
 // that opens its sheet (and whose href is the URL with that sheet open).
@@ -237,11 +237,11 @@ test("an Upstream Key's dialog links its Endpoints and gaps; following one close
   // Back closes the sheet and brings the key's dialog back.
   await router.navigate(-1);
   await screen.findByRole("dialog", { name: "team-7" });
-  expect(where()).toBe("/providers/acme/keys?key=team-7");
+  await waitFor(() => expect(where()).toBe("/providers/acme/keys?key=team-7"));
 
   // Closing the sheet does the same.
   await user.click(within(await screen.findByRole("dialog", { name: "team-7" })).getByRole("link", { name: "intl" }));
-  const sheet = await screen.findByRole("dialog", { name: "Endpoint intl" });
+  const sheet = await loadedSheet("Endpoint intl");
   await user.click(within(sheet).getByRole("button", { name: "Close (Esc)" }));
   await screen.findByRole("dialog", { name: "team-7" });
   await waitFor(() => expect(where()).toBe("/providers/acme/keys?key=team-7"));
@@ -262,5 +262,5 @@ test("an agent finds an Attempt's toggle and its links by name, and follows one"
   const result = await agent.act({ steps: [{ ref: link.ref, action: "press" }] });
   expect(result.ok, result.error?.message).toBe(true);
   await screen.findByRole("dialog", { name: "Upstream Key team-6" });
-  expect(where()).toBe("/requests?sheet=request:req_3/attempts&sheet=key:acme/team-6");
+  await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_3/attempts&sheet=key:acme/team-6"));
 });

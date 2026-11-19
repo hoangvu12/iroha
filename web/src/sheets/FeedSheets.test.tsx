@@ -28,7 +28,7 @@ test("a feed row opens the Request sheet first; ↓ steps to the next row in pla
   renderWithSheets(<RequestsFeed />, "/requests");
   await user.click(await feedRow("req_1"));
   const sheet = await screen.findByRole("dialog", { name: "Request fast" });
-  expect(where()).toBe("/requests?sheet=request:req_1");
+  await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1"));
   expect((await feedRow("req_1")).getAttribute("aria-current")).toBe("true");
 
   await user.keyboard("{ArrowDown}");
@@ -58,7 +58,7 @@ test("a feed row's Caller, Pool, Provider and key are links to their sheets, not
 
   await user.click(row.getByRole("link", { name: "team-5" }));
   await screen.findByRole("dialog", { name: "Upstream Key team-5" });
-  expect(where()).toBe("/requests?sheet=key:acme/team-5");
+  await waitFor(() => expect(where()).toBe("/requests?sheet=key:acme/team-5"));
   expect(screen.queryByRole("dialog", { name: "Request fast" })).toBeNull();
 });
 
@@ -95,11 +95,11 @@ test("an agent finds every sheet control by name and follows a link to the next 
   const result = await agent.act({ steps: [{ ref: "team-5", action: "press" }] });
   expect(result.ok, result.error?.message).toBe(true);
   await screen.findByRole("dialog", { name: "Upstream Key team-5" });
-  expect(where()).toBe("/requests?sheet=request:req_1&sheet=key:acme/team-5");
+  await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1&sheet=key:acme/team-5"));
 
   // Closing a sheet is the dialog's own action: the top one goes, back to the Request.
   const closed = await agent.act({ steps: [{ ref: "Upstream Key team-5", action: "close" }] });
   expect(closed.ok, closed.error?.message).toBe(true);
   await waitFor(() => expect(sheets()).toHaveLength(1));
-  expect(where()).toBe("/requests?sheet=request:req_1");
+  await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1"));
 });

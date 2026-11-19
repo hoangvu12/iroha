@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
-import { renderWithSheets, routes } from "./test-iroha";
+import { loadedSheet, renderWithSheets, routes } from "./test-iroha";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -22,9 +22,9 @@ test("Request → Provider → Upstream Key opens three sheets; closing returns 
   await user.click(details.getByRole("link", { name: "acme" }));
   const provider = await screen.findByRole("dialog", { name: "Provider acme" });
   await user.click(await within(provider).findByRole("link", { name: "team-5" }));
-  const key = await screen.findByRole("dialog", { name: "Upstream Key team-5" });
+  const key = await loadedSheet("Upstream Key team-5");
   expect(sheets()).toHaveLength(3);
-  expect(where()).toBe("/requests?sheet=request:req_1&sheet=provider:acme&sheet=key:acme/team-5");
+  await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1&sheet=provider:acme&sheet=key:acme/team-5"));
   expect(request.getAttribute("data-depth")).toBe("2");
 
   // Closing the key returns to the Provider, then to the Request.
@@ -34,7 +34,7 @@ test("Request → Provider → Upstream Key opens three sheets; closing returns 
   await user.keyboard("{Escape}");
   await waitFor(() => expect(sheets()).toHaveLength(1));
   expect(request.hasAttribute("data-top")).toBe(true);
-  expect(where()).toBe("/requests?sheet=request:req_1");
+  await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1"));
 });
 
 test("the Request sheet's tab is in the URL", async () => {

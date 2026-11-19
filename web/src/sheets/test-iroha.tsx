@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { configure, render } from "@testing-library/react";
+import { configure, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import { vi } from "vitest";
@@ -124,6 +124,18 @@ export function fakeIroha() {
   });
   vi.stubGlobal("fetch", fetch);
   return fetch;
+}
+
+/**
+ * The sheet named `name` once its body has loaded. While a body's chunk
+ * loads, the stack shows a fallback with its own bar and the same name, and
+ * the body's bar (the one with "Open page") replaces it: a button found in
+ * the fallback can be gone by the time a click reaches it (busy runs).
+ */
+export async function loadedSheet(name: string): Promise<HTMLElement> {
+  const sheet = await screen.findByRole("dialog", { name });
+  await within(sheet).findByRole("link", { name: "Open page" });
+  return sheet;
 }
 
 /** The URL the router is at, for assertions. */

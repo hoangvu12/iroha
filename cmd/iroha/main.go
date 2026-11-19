@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/hoangvu12/iroha/internal/config"
@@ -23,7 +24,9 @@ func main() {
 		return
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "iroha:", err)
+		for _, line := range strings.Split(err.Error(), "\n") { // one line per bad value
+			fmt.Fprintln(os.Stderr, "iroha:", line)
+		}
 		os.Exit(2)
 	}
 	if cfg.ShowVersion {

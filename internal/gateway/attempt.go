@@ -328,6 +328,16 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 			a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(body)
 			return a, f
 		}
+		// An answer to translate must be JSON; anything else (an HTML page
+		// sent with 200) is a failure of this Attempt, which the Failure
+		// Rules read as a 502, so the budget moves on to another key.
+		if call.tr != nil {
+			if body := notJSON(resp); body != nil {
+				f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), body
+				a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(body)
+				return a, f
+			}
+		}
 	}
 
 	// Usage is read from the Provider's own answer, before any translation.

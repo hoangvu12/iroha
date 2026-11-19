@@ -55,3 +55,26 @@ func TestModelsDevBaseURLs(t *testing.T) {
 		}
 	}
 }
+
+// CFG-03: every bad startup value is reported in one go, flags and
+// environment alike, so one restart fixes them all.
+func TestEveryBadStartupValueIsReportedTogether(t *testing.T) {
+	env := func(name string) string {
+		if name == "IROHA_DRAIN_TIMEOUT" {
+			return "soon"
+		}
+		return ""
+	}
+	_, err := config.Parse([]string{"--data-dir", t.TempDir(), "--log-level", "loud", "--log-format", "xml", "--models-dev", "ftp://x"}, env, io.Discard)
+	if err == nil {
+		t.Fatal("Parse accepted bad values")
+	}
+	for _, want := range []string{`log-level: unknown level "loud"`, `log-format: want json or text, got "xml"`, `drain-timeout: "soon"`, `models-dev: "ftp://x"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q:\n%v", want, err)
+		}
+	}
+	if _, err := config.Parse([]string{"--data-dir", t.TempDir(), "--log-level", "warn"}, func(string) string { return "" }, io.Discard); err != nil {
+		t.Fatalf("good values: %v", err)
+	}
+}

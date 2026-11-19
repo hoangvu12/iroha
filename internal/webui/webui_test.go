@@ -1,10 +1,12 @@
 package webui_test
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/hoangvu12/iroha/internal/testkit"
+	"github.com/hoangvu12/iroha/internal/webui"
 )
 
 func TestTheUIAndItsBrandArtAreServedByIroha(t *testing.T) {
@@ -43,5 +45,55 @@ func TestTheUIAndItsBrandArtAreServedByIroha(t *testing.T) {
 	}
 	if e := srv.Anon.Post("/api/nope", map[string]any{}).Expect(404).Err(); e.Code != "not_found" {
 		t.Fatalf("POST miss: %+v", e)
+	}
+}
+
+// RUN-07: the app page is revalidated on every load (no-cache), hashed
+// assets are cached for a year, brand art for a day; and no path, however
+// it climbs, serves a file from outside the embedded bundle.
+func TestUICachingAndPathsThatClimbOutOfTheBundle(t *testing.T) {
+	srv := testkit.Start(t)
+	page := srv.Anon.WithHeader("Accept", "text/html,application/xhtml+xml")
+	root := page.Get("/").Expect(200)
+	for _, p := range []string{"/", "/index.html", "/providers"} {
+		if r := page.Get(p).Expect(200); r.Header.Get("Cache-Control") != "no-cache" || r.Header.Get("X-Frame-Options") != "DENY" {
+			t.Errorf("%s: Cache-Control %q, X-Frame-Options %q", p, r.Header.Get("Cache-Control"), r.Header.Get("X-Frame-Options"))
+		}
+	}
+	if r := srv.Anon.Get("/brand/iroha-avatar.png").Expect(200); r.Header.Get("Cache-Control") != "public, max-age=86400" {
+		t.Errorf("brand art Cache-Control %q", r.Header.Get("Cache-Control"))
+	}
+	if webui.Built() {
+		asset := regexp.MustCompile(`/assets/[^"']+`).FindString(root.Text())
+		if asset == "" {
+			t.Fatalf("the built index.html names no asset:\n%s", root.Body)
+		}
+		if r := srv.Anon.Get(asset).Expect(200); r.Header.Get("Cache-Control") != "public, max-age=31536000, immutable" {
+			t.Errorf("%s: Cache-Control %q", asset, r.Header.Get("Cache-Control"))
+		}
+	}
+
+	// Files that exist beside the bundle: the database, this package's
+	// source, the module file.
+	outside := []string{"SQLite format", "package webui", "module github.com"}
+	for _, p := range []string{
+		"/../iroha.db", "/%2e%2e/", "/%2e%2e/iroha.db", "/brand/../../webui.go", "/brand/%2e%2e/%2e%2e/webui.go",
+		"/assets/..%2f..%2fwebui.go", "/brand/..%5c..%5cwebui.go", "/..%5c..%5cgo.mod", "/../../../go.mod", "//etc/passwd",
+		"/" + srv.DataDir + "/iroha.db",
+	} {
+		for _, c := range []*testkit.Client{srv.Anon, page} {
+			r := c.Get(p)
+			switch {
+			case r.Status == 200 && r.Text() == root.Text():
+			case r.Status == 404 && strings.Contains(r.Text(), `"not_found"`):
+			default:
+				t.Errorf("%s: %d, want the app page or the JSON 404:\n%.200s", p, r.Status, r.Body)
+			}
+			for _, s := range outside {
+				if strings.Contains(r.Text(), s) {
+					t.Errorf("%s served a file from outside the bundle (%q)", p, s)
+				}
+			}
+		}
 	}
 }

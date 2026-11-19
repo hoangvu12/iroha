@@ -125,21 +125,27 @@ const messagesDescription = "Anthropic Messages. Authenticate with \"x-api-key: 
 	"Errors use the Anthropic envelope {\"type\":\"error\",\"error\":{\"type\",\"message\",\"code\",\"hint\",\"request_id\"}}. " +
 	"A stream with no upstream byte after 10 s is committed (200, ping events every 15 s of silence); failures after that arrive as a final error event."
 
-// Routes returns the inference routes.
+// Routes returns the inference routes: each Shape's provider-scoped route,
+// and its global variant (global.go) on the line below it.
 func (g *Gateway) Routes() []api.Route {
-	return []api.Route{{
+	chat := api.Route{
 		Method: http.MethodPost, Path: "/providers/{handle}/v1/chat/completions", Tag: "Gateway", Auth: api.AuthCaller,
 		Summary:     "Send an OpenAI Chat Completions request to one Provider",
 		Description: chatDescription + " " + translationNote,
 		Request:     ChatCompletionRequest{}, Response: map[string]any{},
 		Raw: g.serveProvider(shape.OpenAIChat),
-	}, {
+	}
+	messages := api.Route{
 		Method: http.MethodPost, Path: "/providers/{handle}/v1/messages", Tag: "Gateway", Auth: api.AuthCaller,
 		Summary:     "Send an Anthropic Messages request to one Provider",
 		Description: messagesDescription,
 		Request:     MessagesRequest{}, Response: map[string]any{},
 		Raw: g.serveProvider(shape.AnthropicMessages),
-	}}
+	}
+	return []api.Route{
+		chat, g.globalRoute(shape.OpenAIChat, chat),
+		messages, g.globalRoute(shape.AnthropicMessages, messages),
+	}
 }
 
 // serveProvider serves a provider-scoped route whose Caller speaks sh.
@@ -147,7 +153,33 @@ func (g *Gateway) serveProvider(sh shape.Shape) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { g.serveScoped(w, r, sh) }
 }
 
+// serveScoped serves a provider-scoped route whose Caller speaks sh.
 func (g *Gateway) serveScoped(w http.ResponseWriter, r *http.Request, sh shape.Shape) {
+	g.serve(w, r, sh, (*exchange).scoped)
+}
+
+// resolver finds where a Request goes from the model the Caller named: the
+// Provider, ready for planning (models.Store.Prepare applied), and the model
+// as that Provider's list names it. scoped (provider-scoped routes) and
+// global (global.go) are the two.
+type resolver func(x *exchange, caller gatewaykeys.Caller, model string) (planner.Provider, string, *api.Error)
+
+// scoped resolves the model of a provider-scoped route: the Provider is the
+// one the path names, the model is the name as sent.
+func (x *exchange) scoped(caller gatewaykeys.Caller, model string) (planner.Provider, string, *api.Error) {
+	p, err := x.provider(caller, x.r.PathValue("handle"), model, "Check the handle in the URL")
+	if err != nil {
+		return p, "", err
+	}
+	if err := x.g.models.Prepare(x.ctx, &p, model); err != nil {
+		return p, "", api.AsError(err)
+	}
+	return p, model, nil
+}
+
+// serve serves one inference Request whose Caller speaks sh, resolving its
+// model with resolve.
+func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, sh shape.Shape, resolve resolver) {
 	x := g.newExchange(w, r, sh)
 	defer g.track(x)()
 	caller, aerr := g.keys.Authenticate(r)
@@ -165,18 +197,16 @@ func (g *Gateway) serveScoped(w http.ResponseWriter, r *http.Request, sh shape.S
 	}
 	x.rec.Model, x.rec.Stream = cr.model, cr.stream
 
-	p, err := x.provider(caller, r.PathValue("handle"), cr.model)
+	// cr.model stays the name the Caller sent: answers echo it and the
+	// Request records it. model is that name on the Provider.
+	p, model, err := resolve(x, caller, cr.model)
 	if err != nil {
 		x.fail(err)
 		return
 	}
-	if err := g.models.Prepare(x.ctx, &p, cr.model); err != nil {
-		x.fail(api.AsError(err))
-		return
-	}
 	now := g.clock.Now()
 	g.expireGaps(x, &p, now)
-	plan := planner.Plan(planner.Request{Shape: sh, Model: cr.model, Now: now, Translate: translate.Targets(sh)}, []planner.Provider{p}, g.rotation)
+	plan := planner.Plan(planner.Request{Shape: sh, Model: model, Now: now, Translate: translate.Targets(sh)}, []planner.Provider{p}, g.rotation)
 	if len(plan.Candidates) == 0 {
 		e := noCandidate(p.Handle, plan.Empty)
 		if plan.Empty.Code == planner.Cooling {
@@ -198,15 +228,16 @@ func retryAfter(t, now time.Time) int {
 }
 
 // provider resolves the Provider a provider-scoped route names, refusing
-// unknown, disabled, archived and out-of-scope Providers alike.
-func (x *exchange) provider(caller gatewaykeys.Caller, handle, model string) (planner.Provider, *api.Error) {
+// unknown, disabled, archived and out-of-scope Providers alike. check says
+// where the Caller wrote the handle, for the hint.
+func (x *exchange) provider(caller gatewaykeys.Caller, handle, model, check string) (planner.Provider, *api.Error) {
 	rt, ok, err := x.g.providers.Routing(x.ctx, handle)
 	if err != nil {
 		return planner.Provider{}, api.AsError(err)
 	}
 	if !ok || !rt.Enabled || rt.Archived || !caller.AllowsProvider(rt.ID) {
 		return planner.Provider{}, api.Errorf(http.StatusForbidden, "provider_not_allowed",
-			"Check the handle in the URL; ask the Owner to add this Provider to your Gateway Key if you need it.",
+			check+"; ask the Owner to add this Provider to your Gateway Key if you need it.",
 			"This Gateway Key may not use a Provider named %q, or there is none.", handle)
 	}
 	x.rec.ProviderID, x.rec.Provider = rt.ID, rt.Handle

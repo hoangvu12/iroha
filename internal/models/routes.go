@@ -261,6 +261,7 @@ func Routes(tr *audit.Trail, s *Store) []api.Route {
 			Response: CallerModelList{},
 			Handle:   s.callerList,
 		},
+		s.globalRoute(),
 	}
 }
 

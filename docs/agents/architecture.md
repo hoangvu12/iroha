@@ -53,7 +53,7 @@ One Request runs through four seams, in this order. Change the seam that owns a 
 
 ### Ticket 13: translation
 
-- Routes: each provider-scoped inference route is `serveProvider(shape)`; the body is read by `readBody(r, shape)` into a `callerRequest` (Shape, model, stream, include_usage). Ticket 12's global `/v1/messages` reuses `serveScoped` once `handle/model` addressing exists.
+- Routes: each provider-scoped inference route is `serveProvider(shape)`; the body is read by `readBody(r, shape)` into a `callerRequest` (Shape, model, stream, include_usage). Global routes: see "Ticket 12: global routes".
 - Per Attempt, `exchange.prepare` picks passthrough (Endpoint Shape = Caller Shape: `preparePassthrough`, `passRelay`) or translation (`translate.New(...).Request`); the op path comes from `opFor(endpoint shape)`. Translated answers go through `translatedBody` or `relayTranslatedStream`. Usage is always read from the upstream answer in the Endpoint's Shape (`usage.Reader`).
 - Errors and keep-alives follow the Caller's Shape: `errorEnvelope(shape, ...)` in `exchange.go`, `streamShapes` in `stream.go` (Anthropic: `ping` events, `event: error`).
 - Adding a Shape (14, 15): a `codec` in `internal/translate` (DTOs, request fix-ups, upstream event reading, answer tidy-up, stream writer), golden cases, its `streamShape`, `errorEnvelope` branch, `opFor`, `bodyHints`, `usage.Reader` and `requests.reassemblers` entries, and its route via `serveProvider`.
@@ -74,6 +74,12 @@ Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `ech
 - **Lookups** (`models.Store.supplement`) run after every `Refresh` (skipped ones too) and after Owner changes commit, never inside a transaction holding the write lock across the network. The catalog comes from `modelmeta.Source`: off when `config.ModelsDev` is empty (`--models-dev none`; the zero `config.Config` and `testkit` default), so tests never reach models.dev; `testkit.NewModelsDev(t)` is a fake to pass as `testkit.Options{ModelsDev: md.URL}`. Failures only log `models_dev` events and leave stored facts as they were.
 - **Serving**: `models.Store.Metadata(ctx, providerID)` reads a Provider's entries in one query; `Metadata.Of(model)` gives the served facts (chat ok for unknown models). `models.CallerModel` embeds `modelmeta.Facts`; ticket 12's global `/v1/models` should emit the same type per `provider/model`.
 - The daily job (20) refreshes, and so re-looks up, every scheduled Provider; `discovery none` Providers are not scheduled, so theirs are looked up on Owner changes and on a refresh by hand.
+
+### Ticket 12: global routes
+
+- **Mounting**: each inference route is listed in `gateway.Routes` with its global variant beside it, `chat, g.globalRoute(shape.OpenAIChat, chat)`: the same route minus the `/providers/{handle}` prefix, its summary and description adapted, served with the `global` resolver. A new Shape (14, 15) adds its global route with that one line; `globalRoute` panics on a path outside the prefix.
+- **Resolvers**: `gateway.serve(w, r, sh, resolve)` runs every inference Request; a `resolver` turns the model the Caller named into the Provider (scope-checked, `models.Prepare` applied) and the model on that Provider. `(*exchange).scoped` takes the handle from the path; `(*exchange).global` (`gateway/global.go`) splits at the first slash (`splitModel`) and refuses an unqualified name with 400 `invalid_model_id`. That branch is the one place ticket 18 looks a Pool up (and will return several Providers). `cr.model` stays the name sent, so echoes (`passRelay`, `translate.Options.Model`) and `requests.model` carry the qualified name; planning, Key States and `wire_model` use the Provider's.
+- **`GET /v1/models`** (`models/global.go`, `Store.CallerModels(ctx, caller)`): one query over every enabled, unarchived Provider and its entries, filtered by the Caller's scope in Go (narrowed Providers list exactly their scope models minus hidden ones), metadata resolved per row like `Store.Metadata`. 2,000 models answer in ~15 ms (`TestGlobalModelListAnswersQuicklyWith2000Models`). Ticket 18 appends Pools there.
 
 ### Ticket 20: daily model refresh
 

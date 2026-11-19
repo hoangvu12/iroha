@@ -25,6 +25,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/session"
 	"github.com/hoangvu12/iroha/internal/settings"
+	"github.com/hoangvu12/iroha/internal/testchat"
 	"github.com/hoangvu12/iroha/internal/webui"
 )
 
@@ -52,6 +53,8 @@ func (s *Server) routes() []api.Route {
 		s.gateway().AdminRoutes(),
 		s.gateway().PreviewRoutes(),
 		providers.OverviewRoutes(s.db),
+		s.gateway().TestRoutes(),
+		testchat.Routes(s.models(), gatewaykeys.New(s.db)),
 		logos.Routes(s.logos(), logos.Lookups{
 			ProviderDomain: func(ctx context.Context, ref string) (string, error) { return providers.LogoDomain(ctx, s.db, ref) },
 			PoolMaker:      func(ctx context.Context, ref string) (string, error) { return pools.MakerOf(ctx, s.db, ref) },

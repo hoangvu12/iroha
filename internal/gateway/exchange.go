@@ -32,10 +32,12 @@ type exchange struct {
 	// applies across its members (budget.go).
 	pool *pools.Routing
 	// idempotencyKey is minted per Request when the Caller sent no
-	// Idempotency-Key, and sent on every Attempt (prepare), so a Provider
+	// Idempotency-Key, and sent on every Attempt (attempt), so a Provider
 	// that honours it never bills a replayed Attempt twice. Empty when the
 	// Caller's own value is forwarded.
 	idempotencyKey string
+	// test is set on a test send (testrun.go): its recorded Caller and pins.
+	test *testRun
 
 	// mu guards what follows and every write to w, since a stream's keeper
 	// (stream.go) writes alongside the relay.
@@ -59,10 +61,16 @@ func (g *Gateway) newExchange(w http.ResponseWriter, r *http.Request, sh shape.S
 }
 
 // begin records the Request once the Caller is known, and starts capturing
-// it when the Caller's Gateway Key asks for that.
+// it when the Caller's Gateway Key asks for that. Test sends are always
+// captured (the chat's tool check reads the answer; the Owner's own tests
+// carry nobody else's conversation).
 func (x *exchange) begin(c gatewaykeys.Caller) {
 	x.rec.Caller = requests.Caller{Kind: requests.CallerGatewayKey, GatewayKeyID: c.KeyID, Name: c.Name}
-	if c.Capture {
+	capture := c.Capture
+	if x.test != nil {
+		x.rec.Caller, capture = x.test.caller, true
+	}
+	if capture {
 		x.capture = requests.NewCapture(x.start)
 		x.r.Body = x.capture.Body(x.r)
 		x.w = x.capture.Writer(x.w)

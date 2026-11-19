@@ -305,6 +305,18 @@ func (s *Store) CallerOf(ctx context.Context, ref string) (Caller, error) {
 	return Caller{KeyID: k.ID, Name: k.Name, Capture: k.Capture, scope: k.scope}, nil
 }
 
+// SecretOf returns the secret of the unrevoked Gateway Key addressed by name
+// or ID (errors as CallerOf), for the test chat's snippets sending as it.
+func (s *Store) SecretOf(ctx context.Context, ref string) (string, error) {
+	c, err := s.CallerOf(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	var secret string
+	err = s.db.QueryRowContext(ctx, `SELECT secret FROM gateway_keys WHERE id = ?`, c.KeyID).Scan(&secret)
+	return secret, err
+}
+
 // ScopeModels returns the models the Caller's scope narrows the Provider
 // to, or nil when it allows every model of it (or the Provider not at all).
 func (c Caller) ScopeModels(providerID string) []string {

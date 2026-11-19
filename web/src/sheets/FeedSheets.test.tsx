@@ -19,21 +19,25 @@ routes["GET /api/requests"] = { requests: [req1, req2], cursor: 1 };
 routes["GET /api/requests/stats"] = { requests: 2, in_progress: 0, succeeded: 2, failed: 0, retried: 0, tokens: { input: 0, output: 0, cache_read: 0, reasoning: 0, total: 0 } };
 routes["GET /api/requests/filters"] = { callers: [], providers: [], pools: [], models: [] };
 
+/** A feed row (DataTable): the row holding the "Open Request <id>" button. */
+const feedRow = async (id: string) => (await screen.findByRole("button", { name: `Open Request ${id}` })).closest("tr")!;
+
 test("a feed row opens the Request sheet first; ↓ steps to the next row in place; a row click replaces the stack", async () => {
   const user = userEvent.setup();
   renderWithSheets(<RequestsFeed />, "/requests");
-  await user.click(await screen.findByRole("row", { name: "Request req_1" }));
+  await user.click(await feedRow("req_1"));
   const sheet = await screen.findByRole("dialog", { name: "Request fast" });
   expect(where()).toBe("/requests?sheet=request:req_1");
-  expect(screen.getByRole("row", { name: "Request req_1" }).getAttribute("aria-selected")).toBe("true");
+  expect((await feedRow("req_1")).getAttribute("aria-current")).toBe("true");
 
   await user.keyboard("{ArrowDown}");
   await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_2"));
   expect(await screen.findByRole("dialog", { name: "Request slow" })).toBeTruthy();
+  expect((await feedRow("req_2")).getAttribute("aria-current")).toBe("true");
 
   await user.click(await within(screen.getByRole("dialog", { name: "Request slow" })).findByRole("link", { name: "acme" }));
   await screen.findByRole("dialog", { name: "Provider acme" });
-  await user.click(screen.getByRole("row", { name: "Request req_1" }));
+  await user.click(await feedRow("req_1"));
   await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1"));
   await waitFor(() => expect(sheets()).toHaveLength(1));
   expect(sheet).toBeTruthy();

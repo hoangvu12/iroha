@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createAgent } from "@ui-sdk/react/agent";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -47,7 +47,10 @@ const bodyRows = () => within(screen.getByRole("table", { name: "Fruit" })).getA
 const names = () => bodyRows().map((r) => within(r).getAllByRole("cell").find((c) => c.textContent && !c.querySelector("[role=checkbox]"))?.textContent);
 
 beforeEach(() => localStorage.clear());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 test("a header sorts its column: aria-sort says which way, a second press turns it round", async () => {
   const user = userEvent.setup();
@@ -382,4 +385,107 @@ test("an agent sorts, selects, opens a row's menu and pages", async () => {
   const size = await agent.act({ steps: [{ ref: "Rows per page", action: "setValue", args: ["50"] }] });
   expect(size.ok, size.error?.message).toBe(true);
   expect(bodyRows()).toHaveLength(30);
+});
+
+// ---- Live rows (ticket 09) ----
+
+/** Lays rows out as a browser would: a 40 px header, 48 px rows, a 400 px scroller whose scrollTop moves them. */
+function layOut() {
+  const box = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 800, width: 800, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const scroller = this.closest("[role=region]") as HTMLElement | null;
+    if (this.hasAttribute("data-row-id") && scroller) {
+      const i = [...this.parentElement!.children].indexOf(this);
+      return box(40 + i * 48 - scroller.scrollTop, 48);
+    }
+    if (this.getAttribute("role") === "region") return box(0, 400);
+    if (this.tagName === "THEAD") return box(0, 40);
+    return box(0, 0);
+  });
+}
+const scroller = () => screen.getByRole("region", { name: "Fruit" });
+const live = (data: Fruit[]) => (
+  <Fruits data={data} defaultSorting={[]} paging={{ mode: "infinite", hasMore: false, loadingMore: false, onLoadMore: () => {}, newRowsLabel: (n) => `${n} new` }} />
+);
+/** The n newest arrivals, newest first: new-(n-1) … new-0. */
+const arrived = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `new-${n - 1 - i}`, name: `new-${n - 1 - i}`, colour: "blue", weight: 0 }));
+
+test("the open row is marked current", () => {
+  render(<Fruits activeRowId="2" />);
+  const current = bodyRows().filter((r) => r.getAttribute("aria-current") === "true");
+  expect(current).toHaveLength(1);
+  expect(within(current[0]).getByText("apple")).toBeTruthy();
+});
+
+test("live rows: scrolled down, rows arriving on top keep the view still, and a pill counts them and goes back to the top", async () => {
+  layOut();
+  const user = userEvent.setup();
+  const rows = many(40);
+  const { rerender } = render(live(rows));
+  scroller().scrollTop = 480; // fruit-011 at the top of the view
+  fireEvent.scroll(scroller());
+  rerender(live([...arrived(2), ...rows]));
+  expect(scroller().scrollTop).toBe(480 + 2 * 48);
+  expect(screen.getByRole("button", { name: "2 new" })).toBeTruthy();
+  rerender(live([...arrived(3), ...rows]));
+  expect(scroller().scrollTop).toBe(480 + 3 * 48);
+  await user.click(screen.getByRole("button", { name: "3 new" }));
+  expect(scroller().scrollTop).toBe(0);
+  expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
+});
+
+test("a row arriving on top keeps the rows under it as they are (no remount: hover, focus and flashes stay)", () => {
+  const rows = many(5);
+  const { rerender } = render(live(rows));
+  const before = bodyRows();
+  rerender(live([...arrived(1), ...rows]));
+  const after = bodyRows().slice(1);
+  expect(after).toHaveLength(before.length);
+  after.forEach((row, i) => expect(row, `row ${i} was drawn again`).toBe(before[i]));
+});
+
+test("live rows: at the top they come in on top; with the pointer over the rows they wait above the view", async () => {
+  layOut();
+  const user = userEvent.setup();
+  const rows = many(40);
+  const { rerender } = render(live(rows));
+  rerender(live([...arrived(1), ...rows]));
+  expect(scroller().scrollTop).toBe(0);
+  expect(names()[0]).toBe("new-0");
+  expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
+
+  await user.hover(screen.getByText("fruit-003"));
+  rerender(live([...arrived(2), ...rows]));
+  expect(scroller().scrollTop).toBe(48);
+  expect(screen.getByRole("button", { name: "1 new" })).toBeTruthy();
+  // Scrolling back to the top shows them: the pill goes.
+  scroller().scrollTop = 0;
+  fireEvent.scroll(scroller());
+  await waitFor(() => expect(screen.queryByRole("button", { name: "1 new" })).toBeNull());
+});
+
+test("infinite: a load that leaves the end in view loads again, until there is no more", () => {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      cb: (e: { isIntersecting: boolean }[]) => void;
+      constructor(cb: (e: { isIntersecting: boolean }[]) => void) {
+        this.cb = cb;
+      }
+      // A real observer reports where the target is as soon as it observes it: here, always in view.
+      observe() {
+        this.cb([{ isIntersecting: true }]);
+      }
+      disconnect() {}
+    },
+  );
+  const onLoadMore = vi.fn();
+  const paging = (loadingMore: boolean, hasMore = true) => ({ mode: "infinite" as const, hasMore, loadingMore, onLoadMore });
+  const { rerender } = render(<Fruits paging={paging(false)} />);
+  expect(onLoadMore).toHaveBeenCalledTimes(1);
+  rerender(<Fruits paging={paging(true)} />);
+  rerender(<Fruits paging={paging(false)} />);
+  expect(onLoadMore).toHaveBeenCalledTimes(2);
+  rerender(<Fruits paging={paging(false, false)} />);
+  expect(onLoadMore).toHaveBeenCalledTimes(2);
 });

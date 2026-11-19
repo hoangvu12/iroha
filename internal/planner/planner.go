@@ -10,7 +10,9 @@
 // nothing in an earlier one can serve. Today the one tier is the Endpoints
 // speaking the Caller's Shape; translation (ticket 13) appends the other
 // Endpoints as a second tier. Within a tier, Upstream Keys round-robin, each
-// key paired with every Endpoint of the tier it may use, in configured order.
+// key paired with every Endpoint of the tier it may use, in configured order;
+// then keys whose discovered list names the wire model (Key.Carries) move
+// ahead of the others, each group keeping that order.
 //
 // Excluded: disabled and invalid keys, keys cooling at Request.Now, keys
 // with a live Model Gap for the wire model of that Endpoint (ticket 08), keys
@@ -104,6 +106,10 @@ type Key struct {
 	// ModelGaps maps wire models the key was refused to when that Model Gap
 	// expires, which may be past.
 	ModelGaps map[string]time.Time
+	// Carries holds the wire models this key's own discovered model list
+	// names (per-key discovery, ticket 10). Within a tier, carriers of the
+	// wire model go first; a list never excludes a key.
+	Carries map[string]bool
 }
 
 // Allows reports whether the key may be sent to Endpoint id.
@@ -275,6 +281,17 @@ func planTier(req Request, p *Provider, eps []*Endpoint, start int) ([]Candidate
 			skipped = addSkip(skipped, Skip{Provider: p, Key: k, Reason: SkipRestricted})
 		}
 	}
+	// Known carriers first, keeping the round-robin order within each group.
+	slices.SortStableFunc(out, func(a, b Candidate) int {
+		ca, cb := a.Key.Carries[a.WireModel], b.Key.Carries[b.WireModel]
+		switch {
+		case ca && !cb:
+			return -1
+		case cb && !ca:
+			return 1
+		}
+		return 0
+	})
 	return out, skipped
 }
 

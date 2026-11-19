@@ -237,6 +237,17 @@ func (c Caller) AllowsModel(providerID, model string) bool {
 	return false
 }
 
+// ScopeModels returns the models the Caller's scope narrows the Provider
+// to, or nil when it allows every model of it (or the Provider not at all).
+func (c Caller) ScopeModels(providerID string) []string {
+	for _, p := range c.scope.Providers {
+		if p.ProviderID == providerID {
+			return slices.Clone(p.Models)
+		}
+	}
+	return nil
+}
+
 // Store authenticates Callers.
 type Store struct {
 	db    *store.DB

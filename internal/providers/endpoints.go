@@ -34,6 +34,7 @@ type endpointSnapshot struct {
 	AuthParam     string            `json:"auth_param,omitempty"`
 	StaticHeaders map[string]string `json:"static_headers,omitempty"`
 	Renames       map[string]string `json:"renames,omitempty"`
+	DiscoveryURL  string            `json:"discovery_url,omitempty"` // ticket 10; empty is the default
 	CreatedAt     time.Time         `json:"created_at"`
 }
 
@@ -46,9 +47,9 @@ var EndpointResource = audit.Register(&audit.Resource[endpointSnapshot]{
 		var s endpointSnapshot
 		var created int64
 		var headers, renames string
-		err := q.QueryRowContext(ctx, `SELECT e.id, e.provider_id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.created_at
+		err := q.QueryRowContext(ctx, `SELECT e.id, e.provider_id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.discovery_url, e.created_at
 			FROM endpoints e JOIN providers p ON p.id = e.provider_id WHERE e.id = ?`, id).
-			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Name, &s.URL, &s.Shape, &s.AuthStyle, &s.AuthParam, &headers, &renames, &created)
+			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Name, &s.URL, &s.Shape, &s.AuthStyle, &s.AuthParam, &headers, &renames, &s.DiscoveryURL, &created)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -85,11 +86,11 @@ var EndpointResource = audit.Register(&audit.Resource[endpointSnapshot]{
 		if style == "" {
 			style = planner.AuthBearer
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		_, err := tx.ExecContext(ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET name = excluded.name, url = excluded.url, shape = excluded.shape, auth_style = excluded.auth_style,
-			auth_param = excluded.auth_param, static_headers = excluded.static_headers, renames = excluded.renames`,
-			id, s.ProviderID, s.Name, s.URL, s.Shape, style, s.AuthParam, encodeMap(s.StaticHeaders), encodeMap(s.Renames), store.Millis(s.CreatedAt))
+			auth_param = excluded.auth_param, static_headers = excluded.static_headers, renames = excluded.renames, discovery_url = excluded.discovery_url`,
+			id, s.ProviderID, s.Name, s.URL, s.Shape, style, s.AuthParam, encodeMap(s.StaticHeaders), encodeMap(s.Renames), s.DiscoveryURL, store.Millis(s.CreatedAt))
 		return err
 	},
 })
@@ -117,6 +118,7 @@ type CreateEndpoint struct {
 	AuthParam     *string            `json:"auth_param,omitempty" doc:"The header name for auth_style header (e.g. api-key) or the query parameter name for auth_style query (e.g. key)."`
 	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Headers sent on every Attempt, e.g. {\"HTTP-Referer\": \"https://example.com\"}. Replaces the whole set; {} clears it."`
 	Renames       *map[string]string `json:"renames,omitempty" doc:"Model renames for this URL, Caller's name -> wire name, e.g. {\"glm-4.6\": \"glm-4.6-fp8\"}. Replaces the whole set; {} clears it."`
+	DiscoveryURL  *string            `json:"discovery_url,omitempty" doc:"Where the model list is read: \"\" (default) for <url>/models, \"none\" to never ask this Endpoint, or a full http(s) URL such as https://api.acme.example/api/coding/v4/models."`
 }
 
 // UpdateEndpoint is the body of PATCH /api/providers/{provider}/endpoints/{endpoint}.
@@ -128,6 +130,7 @@ type UpdateEndpoint struct {
 	AuthParam     *string            `json:"auth_param,omitempty"`
 	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Replaces the whole set; {} clears it."`
 	Renames       *map[string]string `json:"renames,omitempty" doc:"Replaces the whole set; {} clears it."`
+	DiscoveryURL  *string            `json:"discovery_url,omitempty" doc:"\"\" for <url>/models, \"none\" for no discovery, or a URL."`
 }
 
 // EndpointResult is the response of a single Endpoint change.
@@ -412,7 +415,7 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 	if err := api.CheckName("name", in.Name); err != nil {
 		return Endpoint{}, err
 	}
-	upd := UpdateEndpoint{URL: in.URL, Shape: in.Shape, AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames}
+	upd := UpdateEndpoint{URL: in.URL, Shape: in.Shape, AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames, DiscoveryURL: in.DiscoveryURL}
 	var id string
 	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM endpoints WHERE provider_id = ? AND name = ?`, p.id, in.Name).Scan(&id)
 	if err == nil {
@@ -435,9 +438,9 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 	if err := m.Track(EndpointResource, id); err != nil {
 		return Endpoint{}, err
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, p.id, e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), store.Millis(m.Now)); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, p.id, e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), e.DiscoveryURL, store.Millis(m.Now)); err != nil {
 		return Endpoint{}, err
 	}
 	return readEndpoint(m.Ctx, m.Tx, id)
@@ -480,7 +483,38 @@ func applyEndpoint(e *Endpoint, in UpdateEndpoint) error {
 	if in.Renames != nil {
 		e.Renames = *in.Renames
 	}
+	if in.DiscoveryURL != nil {
+		d, err := checkDiscoveryURL(*in.DiscoveryURL)
+		if err != nil {
+			return err
+		}
+		e.DiscoveryURL = d
+	}
 	return checkEndpoint(e)
+}
+
+// checkDiscoveryURL validates an Endpoint's discovery_url: "", "none" or an
+// http(s) URL (a query is allowed, a fragment or user:password is not).
+func checkDiscoveryURL(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, NoDiscovery) {
+		return strings.ToLower(s), nil
+	}
+	hint := "Send \"\" to read <url>/models, \"none\" to never ask this Endpoint, or a full URL such as https://api.acme.example/v1/models."
+	u, err := url.Parse(s)
+	switch {
+	case len(s) > 2048:
+		return "", api.BadRequest(hint, "discovery_url is longer than 2048 characters.")
+	case err != nil:
+		return "", api.BadRequest(hint, "discovery_url does not parse.")
+	case u.Scheme != "http" && u.Scheme != "https":
+		return "", api.BadRequest(hint, "discovery_url must start with http:// or https://.")
+	case u.Host == "":
+		return "", api.BadRequest(hint, "discovery_url has no host.")
+	case u.User != nil || u.Fragment != "":
+		return "", api.BadRequest(hint, "discovery_url must not contain user:password or a fragment; the key is sent per the Endpoint's auth style.")
+	}
+	return s, nil
 }
 
 func (h handlers) updateEndpoint(m *audit.Mutation, p ref, id string, in UpdateEndpoint) (Endpoint, error) {
@@ -499,8 +533,8 @@ func (h handlers) updateEndpoint(m *audit.Mutation, p ref, id string, in UpdateE
 			return Endpoint{}, err
 		}
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE endpoints SET name = ?, url = ?, shape = ?, auth_style = ?, auth_param = ?, static_headers = ?, renames = ? WHERE id = ?`,
-		e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), id); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE endpoints SET name = ?, url = ?, shape = ?, auth_style = ?, auth_param = ?, static_headers = ?, renames = ?, discovery_url = ? WHERE id = ?`,
+		e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), e.DiscoveryURL, id); err != nil {
 		return Endpoint{}, err
 	}
 	return readEndpoint(m.Ctx, m.Tx, id)

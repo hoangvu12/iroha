@@ -84,9 +84,8 @@ test("loading makes the button busy and unpressable; disabled is unpressable", a
 });
 
 test("buttons, icon buttons and button-styled links press down with the motion tokens, unless disabled or pending", () => {
-  // jsdom can't apply :active, so this pins the press recipe (architecture.md
-  // "UI motion system"); the browser check sees it move.
-  const press = "active:not-data-disabled:not-data-pending:scale-(--motion-scale-press)";
+  // jsdom can't apply :active, so this pins the `press` utility (styles/index.css,
+  // pinned in motion.test.ts); the browser check sees it move.
   render(
     <>
       <Button>Save</Button>
@@ -98,11 +97,10 @@ test("buttons, icon buttons and button-styled links press down with the motion t
     screen.getByRole("button", { name: "Delete key" }).className,
     buttonClass("primary"),
   ]) {
-    expect(cls.split(" ")).toContain(press);
-    expect(cls.split(" ")).toContain("transition-[scale,background-color,color]");
-    expect(cls.split(" ")).toContain("duration-press");
-    expect(cls.split(" ")).toContain("ease-out");
-    expect(cls.split(" "), "one transition list only").not.toContain("transition-colors");
+    const classes = cls.split(" ");
+    expect(classes).toContain("press");
+    const others = classes.filter((c) => /^(transition|duration-|ease-)/.test(c));
+    expect(others, "press owns the transition").toEqual([]);
   }
 });
 

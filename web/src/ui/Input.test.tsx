@@ -53,6 +53,14 @@ test("an error replaces the hint, marks the Input invalid and describes it", () 
   expect(screen.queryByText("Audit Entries show this name.")).toBeNull();
 });
 
+test("an error drops in from its field and fades, with the motion tokens", () => {
+  // jsdom can't run @starting-style; this pins the recipe, the browser check sees it move.
+  render(<Name error="Name taken." />);
+  const classes = screen.getByRole("alert").className.split(" ");
+  for (const c of ["transition-[opacity,translate]", "duration-list-in", "ease-out", "starting:opacity-0", "starting:-translate-y-(--motion-shift-sm)"])
+    expect(classes).toContain(c);
+});
+
 test("typing in a controlled Input reaches its onChange", async () => {
   const user = userEvent.setup();
   const onChange = vi.fn();

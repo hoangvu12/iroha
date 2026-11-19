@@ -88,8 +88,12 @@ export function Field({
       <FieldLabel className="text-sm font-medium text-fg">{label}</FieldLabel>
       <Control id={id} render={children} />
       {error ? (
-        // Fades in where the hint was: no shift, no shake.
-        <FieldError match role="alert" className="text-[13px] text-danger-text transition-opacity duration-list-in ease-out starting:opacity-0">
+        // Drops 4px out of its field and fades in where the hint was; no shake.
+        <FieldError
+          match
+          role="alert"
+          className="text-[13px] text-danger-text transition-[opacity,translate] duration-list-in ease-out starting:-translate-y-(--motion-shift-sm) starting:opacity-0"
+        >
           {error}
         </FieldError>
       ) : hint ? (

@@ -45,11 +45,10 @@ const sizes: Record<Size, string> = {
   lg: "h-11 px-4 text-[15px] gap-2",
 };
 
-// The press (architecture.md "UI motion system"): every button and icon
-// button scales down while held, except while disabled or pending. The same
-// transition carries the hover colours; reduced motion holds the scale at 1.
-const press =
-  "transition-[scale,background-color,color] duration-press ease-out active:not-data-disabled:not-data-pending:scale-(--motion-scale-press)";
+// The press (`@utility press` in styles/index.css): every button and icon
+// button scales down while held by a pointer and snaps back when let go; it
+// also carries the hover colours, so add no transition classes beside it.
+const press = "press";
 
 // disabled: for other elements styled with buttonClass; data-disabled for UI
 // SDK's Button, which also marks a focusable disabled button that way.

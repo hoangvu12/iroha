@@ -27,6 +27,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/models"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/retention"
 	"github.com/hoangvu12/iroha/internal/session"
@@ -68,6 +69,8 @@ type Server struct {
 	gw      *gateway.Gateway
 	rules   *failurerules.Store
 	started time.Time
+
+	modelStore *models.Store // model lists (ticket 10), built by models()
 
 	migrations store.MigrationResult
 	bootstrap  admintokens.Token // set only on the first start

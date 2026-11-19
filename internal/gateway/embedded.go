@@ -1,0 +1,104 @@
+package gateway
+
+import (
+	"bufio"
+	"bytes"
+	"io"
+	"net/http"
+
+	"github.com/hoangvu12/iroha/internal/requests"
+	"github.com/hoangvu12/iroha/internal/rules"
+)
+
+// Errors inside a 2xx answer. Some Providers answer a failure with 200: an
+// error event as the first event of a stream (OpenRouter, Anthropic-style
+// relays, Z.ai), or an error object in a 200 body (MiniMax's base_resp).
+// Before anything reaches the Caller, such an answer is a failed Attempt like
+// any other: the Failure Rules read it (rules.Classify reads a 2xx failure as
+// the status its error stands for) and the Request moves on. Errors after
+// the first chunk reached the Caller are ticket 17's (an error event in the
+// Caller's Shape).
+
+// maxPeekEvents bounds the comment-only events (": keep-alive") read past
+// while looking for a stream's first data event.
+const maxPeekEvents = 16
+
+// embeddedError returns the error a 2xx answer carries instead of an answer,
+// or nil, leaving resp.Body to read from the start either way.
+func embeddedError(resp *http.Response, stream bool) []byte {
+	switch {
+	case isEventStream(resp.Header):
+		if stream {
+			return streamError(resp)
+		}
+		return nil
+	default:
+		return bufferedError(resp)
+	}
+}
+
+// streamError reads a stream up to its first data event. When that event is
+// an error it returns the events read; otherwise it puts them back in front
+// of the body and returns nil.
+func streamError(resp *http.Response) []byte {
+	br := bufio.NewReaderSize(resp.Body, 32<<10)
+	var seen []byte
+	for range maxPeekEvents {
+		ev, err := readEvent(br)
+		seen = append(seen, ev...)
+		if payload, ok := firstData(ev); ok {
+			if rules.EmbeddedError(payload) {
+				return capFailure(seen)
+			}
+			break
+		}
+		if err != nil {
+			break
+		}
+	}
+	resp.Body = readCloser{io.MultiReader(bytes.NewReader(seen), br), resp.Body}
+	return nil
+}
+
+// bufferedError reads a whole 2xx body; it returns the body when it is an
+// error and otherwise puts it back.
+func bufferedError(resp *http.Response) []byte {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody))
+	if err == nil && rules.EmbeddedError(data) {
+		return capFailure(data)
+	}
+	var rest io.Reader = bytes.NewReader(data)
+	if err != nil {
+		rest = io.MultiReader(rest, errReader{err})
+	} else {
+		rest = io.MultiReader(rest, resp.Body) // anything past the limit
+	}
+	resp.Body = readCloser{rest, resp.Body}
+	return nil
+}
+
+// firstData is the payload of an event's first data line.
+func firstData(ev []byte) ([]byte, bool) {
+	for _, line := range bytes.Split(ev, []byte("\n")) {
+		if p, ok := bytes.CutPrefix(bytes.TrimRight(line, "\r"), []byte("data:")); ok {
+			return bytes.TrimSpace(p), true
+		}
+	}
+	return nil, false
+}
+
+func capFailure(b []byte) []byte {
+	if len(b) > requests.MaxFailureBody {
+		return b[:requests.MaxFailureBody]
+	}
+	return b
+}
+
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
+type errReader struct{ err error }
+
+func (e errReader) Read([]byte) (int, error) { return 0, e.err }

@@ -303,6 +303,13 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 	}
 	disarm() // the first byte arrived: the answer may now take its time
 
+	// An error sent as a 2xx answer (embedded.go) is a failure like any other.
+	if body := embeddedError(resp, cr.stream); body != nil {
+		f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), body
+		a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(body)
+		return a, f
+	}
+
 	// Usage is read from the Provider's own answer, before any translation.
 	ur := usage.NewReader(c.Endpoint.Shape)
 	var res relayResult

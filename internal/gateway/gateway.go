@@ -28,6 +28,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/models"
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
@@ -51,6 +52,9 @@ type Options struct {
 	Keys       *gatewaykeys.Store
 	Recorder   *requests.Recorder
 	KeyStates  *keystate.Store
+	// Models applies the Provider's model list before planning: hidden and
+	// (on strict Providers) unlisted models are refused, carriers marked.
+	Models *models.Store
 	// Rules gives the Failure Rules in force for the next Attempt; nil
 	// means the built-in rules. The server passes failurerules.Store.Set:
 	// the built-ins merged with the Owner's rules, reloaded on every change.
@@ -66,6 +70,7 @@ type Gateway struct {
 	keys      *gatewaykeys.Store
 	rec       *requests.Recorder
 	states    *keystate.Store
+	models    *models.Store
 	rules     func() *rules.Set
 	rotation  *planner.Counter
 	live      inflight // Requests being served (shutdown.go)
@@ -81,7 +86,7 @@ func New(o Options) *Gateway {
 		rs = func() *rules.Set { return rules.Default }
 	}
 	return &Gateway{clock: o.Clock, log: o.Log, http: &hc, providers: o.Providers, keys: o.Keys, rec: o.Recorder,
-		states: o.KeyStates, rules: rs, rotation: planner.NewCounter()}
+		states: o.KeyStates, models: o.Models, rules: rs, rotation: planner.NewCounter()}
 }
 
 // ChatCompletionRequest documents the body of the Chat Completions routes.
@@ -163,6 +168,10 @@ func (g *Gateway) serveScoped(w http.ResponseWriter, r *http.Request, sh shape.S
 	p, err := x.provider(caller, r.PathValue("handle"), cr.model)
 	if err != nil {
 		x.fail(err)
+		return
+	}
+	if err := g.models.Prepare(x.ctx, &p, cr.model); err != nil {
+		x.fail(api.AsError(err))
 		return
 	}
 	now := g.clock.Now()

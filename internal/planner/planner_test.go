@@ -244,3 +244,43 @@ func TestKeyStatesExcludeKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestKnownCarriersGoFirstAndOthersStay(t *testing.T) {
+	a := planner.Endpoint{ID: "ep_a", Name: "a", Shape: shape.OpenAIChat}
+	b := planner.Endpoint{ID: "ep_b", Name: "b", Shape: shape.OpenAIChat, Renames: map[string]string{"glm": "glm-b"}}
+	carrying := func(name string, models ...string) planner.Key {
+		k := planner.Key{ID: "uk_" + name, Name: name, Secret: "sk-test-" + name}
+		for _, m := range models {
+			if k.Carries == nil {
+				k.Carries = map[string]bool{}
+			}
+			k.Carries[m] = true
+		}
+		return k
+	}
+	cases := []struct {
+		name string
+		eps  []planner.Endpoint
+		keys []planner.Key
+		rot  planner.Rotation
+		want string
+	}{
+		{"no lists: round-robin order", []planner.Endpoint{a}, []planner.Key{carrying("k1"), carrying("k2"), carrying("k3")}, planner.Fixed(1),
+			"k2@a:glm k3@a:glm k1@a:glm"},
+		{"carriers first, rotation kept within each group", []planner.Endpoint{a},
+			[]planner.Key{carrying("k1", "glm"), carrying("k2", "other"), carrying("k3", "glm"), carrying("k4")}, planner.Fixed(2),
+			"k3@a:glm k1@a:glm k4@a:glm k2@a:glm"},
+		{"carrying is judged per Endpoint on the wire model", []planner.Endpoint{a, b},
+			[]planner.Key{carrying("k1", "glm"), carrying("k2", "glm-b")}, planner.Fixed(0),
+			"k1@a:glm k2@b:glm-b k1@b:glm-b k2@a:glm"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := []planner.Provider{{ID: "p", Handle: "p", Endpoints: tc.eps, Keys: tc.keys}}
+			r := planner.Plan(planner.Request{Shape: shape.OpenAIChat, Model: "glm", Now: now}, p, tc.rot)
+			if got := order(r); got != tc.want {
+				t.Fatalf("order = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -306,3 +306,33 @@ func TestKnownCarriersGoFirstAndOthersStay(t *testing.T) {
 		})
 	}
 }
+
+func TestAnEndpointGapSkipsTheKeyOnThatEndpointOnly(t *testing.T) {
+	a := planner.Endpoint{ID: "ep_a", Name: "a", Shape: shape.OpenAIChat}
+	b := planner.Endpoint{ID: "ep_b", Name: "b", Shape: shape.OpenAIChat}
+	ks := keys("k1", "k2")
+	ks[0].EndpointGaps = map[string]bool{"ep_b": true}
+	p := planner.Provider{ID: "p", Handle: "p", Endpoints: []planner.Endpoint{b, a}, Keys: ks}
+	r := planner.Plan(planner.Request{Shape: shape.OpenAIChat, Model: "m"}, []planner.Provider{p}, planner.Fixed(0))
+	if got := order(r); got != "k1@a:m k2@b:m k2@a:m" {
+		t.Fatalf("order = %q", got)
+	}
+	if len(r.Skipped) != 1 || r.Skipped[0].Reason != planner.SkipEndpointGap || r.Skipped[0].Key.Name != "k1" || r.Skipped[0].Endpoint.Name != "b" {
+		t.Fatalf("skipped = %+v", r.Skipped)
+	}
+
+	// Gapped on every Endpoint it may use, and nothing else to try.
+	ks = keys("k1")
+	ks[0].EndpointGaps = map[string]bool{"ep_b": true, "ep_a": true}
+	p.Keys = ks
+	r = planner.Plan(planner.Request{Shape: shape.OpenAIChat, Model: "m"}, []planner.Provider{p}, planner.Fixed(0))
+	if r.Empty == nil || r.Empty.Code != planner.NoUsableKey || !strings.Contains(r.Empty.Message, "Endpoint Gap") || len(r.Skipped) != 2 {
+		t.Fatalf("empty = %+v skipped %+v", r.Empty, r.Skipped)
+	}
+	// A disabled key reports disabled, not its gaps.
+	ks[0].Disabled = true
+	r = planner.Plan(planner.Request{Shape: shape.OpenAIChat, Model: "m", Now: time.Now()}, []planner.Provider{p}, planner.Fixed(0))
+	if len(r.Skipped) != 1 || r.Skipped[0].Reason != planner.SkipDisabled {
+		t.Fatalf("skipped = %+v", r.Skipped)
+	}
+}

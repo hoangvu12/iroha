@@ -49,6 +49,9 @@ export function explain(a: Attempt): Explanation {
   };
   const until = untilIn(a.action);
   const stays = /stays invalid/i.test(a.action ?? "");
+  // An invalid verdict on one Endpoint of a key that works on another is an
+  // Endpoint Gap there (ticket 40): the action names it, the key stays as it was.
+  const endpointGap = outcome === "invalid" && /Endpoint Gap on/i.test(a.action ?? "");
   switch (outcome) {
     case "cooling_key":
       e.keyState = { text: until ? `Cooling until ${until}` : "Cooling", tone: "amber" };
@@ -60,7 +63,7 @@ export function explain(a: Attempt): Explanation {
         : { text: until ? `Cooling for ${a.wire_model} until ${until}` : `Cooling for ${a.wire_model}`, tone: "amber" };
       break;
     case "invalid":
-      e.keyState = { text: stays ? "Still invalid" : "Invalid", tone: "red" };
+      e.keyState = endpointGap ? { text: `Endpoint Gap on ${a.endpoint}`, tone: "blue" } : { text: stays ? "Still invalid" : "Invalid", tone: "red" };
       break;
     case "model_gap":
       e.keyState = { text: `Model Gap for ${a.wire_model}`, tone: "blue" };
@@ -106,6 +109,7 @@ export function jumpLabel(a: Attempt, next: Attempt | undefined): { text: string
     case "model_gap":
       return { text: `Model Gap, ${lower}`, tone: "blue" };
     case "invalid":
+      if (/Endpoint Gap on/i.test(a.action ?? "")) return { text: `Endpoint Gap, ${lower}`, tone: "blue" };
       return { text: `Invalid key, ${lower}`, tone: "red" };
   }
   if (a.status === 0) return { text: `No response, ${lower}`, tone: "red" };

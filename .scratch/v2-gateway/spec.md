@@ -1,6 +1,6 @@
 # Iroha v2
 
-Status: implemented on branch `v2-integration` (all tickets done or closed by the Owner; ticket 40 needs a decision)
+Status: implemented on branch `v2-integration` (all tickets done or closed by the Owner; ticket 40, Endpoint Gaps, decided and implemented)
 
 ## Problem Statement
 

@@ -4,7 +4,7 @@ Every Upstream Key reports exactly one Key State with its reason in `GET /api/pr
 
 - `active`: usable.
 - `disabled`: the Owner turned it off. `POST /api/providers/<handle>/keys/<key>/disable` and `/enable`, or `POST /api/providers/<handle>/keys/bulk/disable` / `bulk/enable` with `{"items": ["key-1", "uk_..."]}`. Both are audited and revertible.
-- `invalid`: the Provider refused the key itself (a 401, or a 403 about the account). It stays out until a key test passes or its secret changes.
+- `invalid`: the Provider refused the key itself (a 401, or a 403 about the account). It stays out until a key test passes or its secret changes. A refusal on one Endpoint of a key that works on another is an Endpoint Gap instead (see "Endpoint Gaps").
 - `cooling`: the key is resting until `state.until`. A key can also cool for one model only; those are listed in `cooling_models` while the key stays `active` for other models.
 
 **Cooling** lasts 60 seconds by default. When the same key (or key and model) is refused again within an hour of its last cooling ending, the cooling doubles, up to 1 hour. A reset time the Provider sends (`Retry-After`, `Retry-After-Ms`, or a field a Failure Rule names) wins over the default, up to 7 days. A key cooled for 3 different models within 5 minutes cools as a whole. A key goes back to `active` by itself when its cooling ends.
@@ -13,7 +13,7 @@ Every Upstream Key reports exactly one Key State with its reason in `GET /api/pr
 
 | Outcome | Meaning |
 |---|---|
-| `invalid` | The key is invalid. |
+| `invalid` | The key is invalid (or, when it works on another Endpoint, gets an Endpoint Gap on this one). |
 | `cooling_key` | The whole key cools (e.g. 402: out of credit). |
 | `cooling_key_model` | The key cools for this model (e.g. 429). |
 | `model_gap` | The key cannot serve this model: it gets a Model Gap (below) and another key is tried. |
@@ -26,6 +26,6 @@ The built-in rules are generic: 401 → invalid; 403 → model_gap when the body
 
 **Model Gaps.** When a Provider refuses one key one model (outcome `model_gap`, e.g. a 404 `model_not_found` or a 403 naming the model), the key keeps its Key State and serves its other models; only that model (as sent upstream) is no longer sent to it. Each key lists its gaps in `model_gaps` (`model`, `reason`, `rule`, `request_id`, `created_at`, `expires_at`); `GET /api/providers/<handle>/model-gaps` (`?model=`, `?upstream_key=`) lists a Provider's, and the summary includes them. A gap ends by itself 24 hours after it was recorded, when a key test of the key passes, and when the key's name, secret or Endpoint restriction is edited (enabling or disabling does not clear it). Clear gaps by hand with `POST /api/providers/<handle>/keys/<key>/clear-model-gaps` or, for selected keys, `POST /api/providers/<handle>/keys/bulk/clear-model-gaps` `{"items": ["key-1", ...]}`; both take `?model=` to clear one model only and `dry_run`, and are audited, so reverting the Audit Entry restores the gaps. When every usable key has a gap for the model, Callers get `404 model_unavailable` at once. Creation, clearing and expiry are logged as `model_gap` (`op` created, cleared, expired).
 
-**Key test.** `POST /api/providers/<handle>/keys/<key>/test` sends a tiny real chat call ("Reply with the word OK.", at most 16 tokens) with the key on the first Endpoint it may use (or `?endpoint=<name>`), in that Endpoint's Shape and auth style and with its renames, using `?model=` or the model of the Provider's latest successful Request. A pass makes an invalid or cooling key active and clears its Model Gaps; a failure goes through the Failure Rules like any Attempt, and so does an error sent inside a 2xx answer (MiniMax's `base_resp`, an `error` object in a 200), which fails the test. `POST /api/providers/<handle>/keys/bulk/test` tests many keys (5 at a time). Both take `dry_run`.
+**Key test.** `POST /api/providers/<handle>/keys/<key>/test` sends a tiny real chat call ("Reply with the word OK.", at most 16 tokens) with the key on the first Endpoint it may use and has no Endpoint Gap on (or `?endpoint=<name>`), in that Endpoint's Shape and auth style and with its renames, using `?model=` or the model of the Provider's latest successful Request. A pass makes an invalid or cooling key active and clears its Model Gaps and its Endpoint Gap on that Endpoint; a failure goes through the Failure Rules like any Attempt, and so does an error sent inside a 2xx answer (MiniMax's `base_resp`, an `error` object in a 200), which fails the test. `POST /api/providers/<handle>/keys/bulk/test` tests many keys (5 at a time). Both take `dry_run`.
 
 **Provider summary.** `GET /api/providers/<handle>/summary` gives key counts per Key State, every cooling with its end time, every Model Gap, when the next key is usable, the effective budget, and the failure rate of the last hour's Attempts.

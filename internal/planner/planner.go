@@ -18,8 +18,9 @@
 //
 // Excluded: disabled and invalid keys, keys cooling at Request.Now, keys
 // with a live Model Gap for the wire model of that Endpoint (ticket 08), keys
-// cooling for that wire model, and keys restricted to other Endpoints (09).
-// Each exclusion is reported as a Skip. Later tickets add exclusions and key
+// cooling for that wire model, keys restricted to other Endpoints (09), and
+// keys with an Endpoint Gap on that Endpoint (40). Each exclusion is reported
+// as a Skip. Later tickets add exclusions and key
 // tiers (known carriers first) here, and nowhere else.
 package planner
 
@@ -114,6 +115,13 @@ type Key struct {
 	// names (per-key discovery, ticket 10). Within a tier, carriers of the
 	// wire model go first; a list never excludes a key.
 	Carries map[string]bool
+	// EndpointGaps holds the Endpoint IDs the key has an Endpoint Gap on
+	// (ticket 40): it is not sent there, and serves its other Endpoints.
+	EndpointGaps map[string]bool
+	// WorkedOn maps Endpoint IDs to the latest time the key worked there (a
+	// 2xx Attempt or a passing key test), so the Gateway writes it at most
+	// once a minute.
+	WorkedOn map[string]time.Time
 }
 
 // Allows reports whether the key may be sent to Endpoint id.
@@ -147,7 +155,7 @@ type EmptyCode string
 const (
 	NoEndpoint    EmptyCode = "no_endpoint"     // no Endpoint speaks the Caller's Shape
 	NoUpstreamKey EmptyCode = "no_upstream_key" // the Provider holds no Upstream Keys
-	NoUsableKey   EmptyCode = "no_usable_key"   // every Upstream Key is disabled, invalid or restricted to other Endpoints
+	NoUsableKey   EmptyCode = "no_usable_key"   // every Upstream Key is disabled, invalid, restricted to other Endpoints or has an Endpoint Gap on them
 	Cooling       EmptyCode = "cooling"         // every usable key is cooling; Empty.Until says until when
 	ModelGap      EmptyCode = "model_gap"       // every usable key has a Model Gap for the model; Empty.Until is the first expiry
 )
@@ -162,7 +170,8 @@ const (
 	SkipCooling      SkipReason = "cooling"
 	SkipCoolingModel SkipReason = "cooling_model"
 	SkipModelGap     SkipReason = "model_gap"
-	SkipRestricted   SkipReason = "restricted" // restricted to Endpoints outside the tier that served (or to none that could)
+	SkipRestricted   SkipReason = "restricted"   // restricted to Endpoints outside the tier that served (or to none that could)
+	SkipEndpointGap  SkipReason = "endpoint_gap" // refused on this Endpoint after working on another (Skip.Endpoint)
 )
 
 // Empty explains why nothing can serve the Request.
@@ -177,7 +186,8 @@ type Empty struct {
 type Skip struct {
 	Provider *Provider
 	Key      *Key
-	Model    string // the wire model, for SkipCoolingModel and SkipModelGap
+	Model    string    // the wire model, for SkipCoolingModel and SkipModelGap
+	Endpoint *Endpoint // for SkipEndpointGap
 	Reason   SkipReason
 	Until    time.Time // cooling end, or when the Model Gap expires
 }
@@ -294,7 +304,7 @@ func planTier(req Request, p *Provider, eps []*Endpoint, start int) ([]Candidate
 			}
 			allowed = true
 			wm := ep.WireModel(p.ModelFor(req))
-			if s := skip(k, wm, req.Now); s != nil {
+			if s := skip(k, ep, wm, req.Now); s != nil {
 				s.Provider = p
 				skipped = addSkip(skipped, *s)
 				continue
@@ -332,8 +342,8 @@ func cmpTrue(a, b bool) int {
 	return 0
 }
 
-// skip says why key k cannot serve wire model wm at now, or nil.
-func skip(k *Key, wm string, now time.Time) *Skip {
+// skip says why key k cannot serve wire model wm on ep at now, or nil.
+func skip(k *Key, ep *Endpoint, wm string, now time.Time) *Skip {
 	switch {
 	case k.Disabled:
 		return &Skip{Key: k, Reason: SkipDisabled}
@@ -341,6 +351,8 @@ func skip(k *Key, wm string, now time.Time) *Skip {
 		return &Skip{Key: k, Reason: SkipInvalid}
 	case k.CoolingUntil.After(now):
 		return &Skip{Key: k, Reason: SkipCooling, Until: k.CoolingUntil}
+	case k.EndpointGaps[ep.ID]:
+		return &Skip{Key: k, Reason: SkipEndpointGap, Endpoint: ep}
 	}
 	if until, ok := k.ModelGaps[wm]; ok && until.After(now) {
 		return &Skip{Key: k, Reason: SkipModelGap, Model: wm, Until: until}
@@ -353,7 +365,7 @@ func skip(k *Key, wm string, now time.Time) *Skip {
 
 func addSkip(list []Skip, s Skip) []Skip {
 	for _, x := range list {
-		if x.Key == s.Key && x.Reason == s.Reason && x.Model == s.Model {
+		if x.Key == s.Key && x.Reason == s.Reason && x.Model == s.Model && x.Endpoint == s.Endpoint {
 			return list
 		}
 	}
@@ -383,12 +395,19 @@ func emptyFromSkips(skipped []Skip) *Empty {
 			Message: fmt.Sprintf("Every usable Upstream Key of %s has a Model Gap for %s (the Provider refused them that model); the first expires at %s.",
 				gapHandle, gapModel, gapUntil.UTC().Format(time.RFC3339))}
 	}
-	what := "disabled or invalid"
+	restricted, gapped := false, false
 	for _, s := range skipped {
-		if s.Reason == SkipRestricted {
-			what = "disabled, invalid or restricted to Endpoints that cannot serve this Request"
-			break
-		}
+		restricted = restricted || s.Reason == SkipRestricted
+		gapped = gapped || s.Reason == SkipEndpointGap
+	}
+	what := "disabled or invalid"
+	switch {
+	case restricted && gapped:
+		what = "disabled, invalid, restricted to Endpoints that cannot serve this Request, or has an Endpoint Gap on those that can"
+	case restricted:
+		what = "disabled, invalid or restricted to Endpoints that cannot serve this Request"
+	case gapped:
+		what = "disabled, invalid or has an Endpoint Gap on the Endpoints that can serve this Request"
 	}
 	return &Empty{Code: NoUsableKey, Message: fmt.Sprintf("Every Upstream Key of %s is %s.", skipped[0].Provider.Handle, what), Provider: skipped[0].Provider.Handle}
 }

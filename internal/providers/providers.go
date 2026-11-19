@@ -98,17 +98,19 @@ const NoDiscovery = "none"
 
 // UpstreamKey is an Upstream Key as the API returns it, secret included.
 type UpstreamKey struct {
-	ID            string                  `json:"id"`
-	Provider      string                  `json:"provider" doc:"Handle of the Provider."`
-	Name          string                  `json:"name"`
-	Secret        string                  `json:"secret" doc:"The key itself; empty for a keyless slot (no auth header is sent)."`
-	Enabled       bool                    `json:"enabled" doc:"false: the Owner disabled the key; its state is disabled."`
-	State         keystate.State          `json:"state" doc:"The key's one Key State and why it is in it."`
-	CoolingModels []keystate.ModelCooling `json:"cooling_models" doc:"Models this key is cooling for while it serves the others."`
-	ModelGaps     []keystate.ModelGap     `json:"model_gaps" doc:"Models the Provider refused this key; they are not sent to it until each gap expires or is cleared. The key's Key State is unaffected."`
-	Endpoints     []string                `json:"endpoints" doc:"Names of the Endpoints this key is restricted to; empty: every Endpoint of the Provider."`
-	CreatedAt     time.Time               `json:"created_at"`
-	LastUsedAt    *time.Time              `json:"last_used_at,omitempty" doc:"Last Attempt with this key, to the minute; absent when never used."`
+	ID            string                     `json:"id"`
+	Provider      string                     `json:"provider" doc:"Handle of the Provider."`
+	Name          string                     `json:"name"`
+	Secret        string                     `json:"secret" doc:"The key itself; empty for a keyless slot (no auth header is sent)."`
+	Enabled       bool                       `json:"enabled" doc:"false: the Owner disabled the key; its state is disabled."`
+	State         keystate.State             `json:"state" doc:"The key's one Key State and why it is in it."`
+	CoolingModels []keystate.ModelCooling    `json:"cooling_models" doc:"Models this key is cooling for while it serves the others."`
+	ModelGaps     []keystate.ModelGap        `json:"model_gaps" doc:"Models the Provider refused this key; they are not sent to it until each gap expires or is cleared. The key's Key State is unaffected."`
+	Endpoints     []string                   `json:"endpoints" doc:"Names of the Endpoints this key is restricted to; empty: every Endpoint of the Provider."`
+	EndpointGaps  []keystate.EndpointGap     `json:"endpoint_gaps" doc:"Endpoints the Provider refused this key on (as invalid) after it had worked on another: it is not sent to them until each gap is cleared, and keeps serving its other Endpoints. The key's Key State is unaffected."`
+	WorkedOn      []keystate.EndpointSuccess `json:"worked_on" doc:"Endpoints this key has worked on (a 2xx Attempt or a passing key test), with the latest time. An invalid refusal elsewhere makes an Endpoint Gap only while one of these remains usable."`
+	CreatedAt     time.Time                  `json:"created_at"`
+	LastUsedAt    *time.Time                 `json:"last_used_at,omitempty" doc:"Last Attempt with this key, to the minute; absent when never used."`
 }
 
 // HandleMaxLen is the longest handle.
@@ -303,6 +305,13 @@ func scanKey(row interface{ Scan(...any) error }) (UpstreamKey, *keystate.OwnerD
 func withState(k UpstreamKey, d *keystate.OwnerDisabled, rec keystate.Record, now time.Time) UpstreamKey {
 	k.State, k.CoolingModels = keystate.View(d, rec, now)
 	k.ModelGaps = rec.LiveGaps(now)
+	k.EndpointGaps, k.WorkedOn = rec.EndpointGaps, rec.Worked
+	if k.EndpointGaps == nil {
+		k.EndpointGaps = []keystate.EndpointGap{}
+	}
+	if k.WorkedOn == nil {
+		k.WorkedOn = []keystate.EndpointSuccess{}
+	}
 	return k
 }
 
@@ -502,6 +511,7 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 			k.ModelCooling[m.Model] = m.Until
 		}
 		k.ModelGaps = rec.GapsByModel()
+		k.EndpointGaps, k.WorkedOn = rec.EndpointGapSet(), rec.WorkedOn()
 	}
 	return r, true, nil
 }

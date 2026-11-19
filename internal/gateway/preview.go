@@ -66,8 +66,9 @@ type PreviewCandidate struct {
 // PreviewSkip is a key left out of the plan.
 type PreviewSkip struct {
 	UpstreamKey string             `json:"upstream_key"`
-	Reason      planner.SkipReason `json:"reason" enum:"disabled,invalid,cooling,cooling_model,model_gap,restricted" doc:"cooling: the whole key; cooling_model: the key for this model; model_gap: the Provider refused this key the model; restricted: the key may not use the Endpoints that serve."`
+	Reason      planner.SkipReason `json:"reason" enum:"disabled,invalid,cooling,cooling_model,model_gap,restricted,endpoint_gap" doc:"cooling: the whole key; cooling_model: the key for this model; model_gap: the Provider refused this key the model; restricted: the key may not use the Endpoints that serve; endpoint_gap: the Provider refused this key on endpoint after it worked on another (the key may still serve on other Endpoints)."`
 	Model       string             `json:"model,omitempty" doc:"The wire model, for cooling_model and model_gap."`
+	Endpoint    string             `json:"endpoint,omitempty" doc:"The Endpoint, for endpoint_gap."`
 	Until       *time.Time         `json:"until,omitempty" doc:"When the cooling ends or the Model Gap expires."`
 	SecondsLeft int                `json:"seconds_left,omitempty" doc:"Whole seconds until then."`
 }
@@ -94,7 +95,7 @@ func (g *Gateway) PreviewRoutes() []api.Route {
 		Summary: "Show where a Request for a Pool or <provider>/<model> would go right now, without sending anything",
 		Description: "Plans exactly as live traffic does: members in Pool order (switched-off and unusable ones reported, not planned), " +
 			"within each the Endpoints and Upstream Keys in try order (the next Request's round-robin start), and every key left out with its reason " +
-			"and until-time (cooling, Model Gap...). With as=<Gateway Key> the key's scope applies, and a model outside it shows the refusal " +
+			"and until-time (cooling, Model Gap, Endpoint Gap...). With as=<Gateway Key> the key's scope applies, and a model outside it shows the refusal " +
 			"that key would get. Nothing is sent and no Key State changes.",
 		Query: []api.Param{
 			{Name: "model", Required: true, Description: "A Model Pool name, or <provider handle>/<model ID>, as a Caller would send it to the global routes."},
@@ -175,6 +176,9 @@ func (g *Gateway) preview(ctx context.Context, model, sh, as string) (RoutePrevi
 				continue
 			}
 			ps := PreviewSkip{UpstreamKey: s.Key.Name, Reason: s.Reason, Model: s.Model}
+			if s.Endpoint != nil {
+				ps.Endpoint = s.Endpoint.Name
+			}
 			if !s.Until.IsZero() {
 				u := s.Until.UTC()
 				ps.Until, ps.SecondsLeft = &u, retryAfter(s.Until, now)

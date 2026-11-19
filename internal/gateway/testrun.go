@@ -43,7 +43,7 @@ type testRun struct {
 // pin narrows rt to the pinned key and Endpoint. The pinned key is planned
 // whatever its Key State, as key tests do: disabled and invalid are ignored,
 // its coolings are treated as just ended (so a success clears them) and its
-// Model Gaps are left out. Failures still go through the Failure Rules.
+// Model Gaps and Endpoint Gaps are left out. Failures still go through the Failure Rules.
 func (t *testRun) pin(rt *route, now time.Time) *api.Error {
 	if t.keyID == "" && t.endpoint == "" {
 		return nil
@@ -57,7 +57,9 @@ func (t *testRun) pin(rt *route, now time.Time) *api.Error {
 		past := now.Add(-time.Millisecond)
 		for i := range p.Keys {
 			k := &p.Keys[i]
-			k.Disabled, k.Invalid, k.ModelGaps = false, false, nil
+			// Gaps are left out; WorkedOn is forgotten so a success writes,
+			// clearing the Endpoint Gap it disproves.
+			k.Disabled, k.Invalid, k.ModelGaps, k.EndpointGaps, k.WorkedOn = false, false, nil, nil, nil
 			if k.CoolingUntil.After(past) {
 				k.CoolingUntil = past
 			}

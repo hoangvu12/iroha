@@ -83,7 +83,7 @@ type CreateUpstreamKey struct {
 // UpdateUpstreamKey is the body of PATCH /api/providers/{provider}/keys/{key}.
 type UpdateUpstreamKey struct {
 	Name      *string   `json:"name,omitempty"`
-	Secret    *string   `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling. A new name, secret or Endpoint restriction clears the key's Model Gaps."`
+	Secret    *string   `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling, and forgets where the key worked. A new name, secret or Endpoint restriction clears the key's Model Gaps; a new secret or Endpoint restriction clears its Endpoint Gaps."`
 	Enabled   *bool     `json:"enabled,omitempty" doc:"false disables the key (no traffic until enabled); true enables it."`
 	Endpoints *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs); [] lifts the restriction."`
 }
@@ -507,6 +507,16 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 			return UpstreamKey{}, err
 		}
 	}
+	// A new secret or Endpoint restriction clears its Endpoint Gaps (40).
+	if restricted || (in.Secret != nil && *in.Secret != before.Secret) {
+		name := before.Name
+		if renamed {
+			name = *in.Name
+		}
+		if err := clearEndpointGaps(m, p, id, name, "", "The key's secret or Endpoint restriction was edited by "+m.Actor.Name+".", logs); err != nil {
+			return UpstreamKey{}, err
+		}
+	}
 	after, err := readKey(m.Ctx, m.Tx, id, m.Now)
 	if err == nil {
 		logs.add(before, after)
@@ -531,6 +541,7 @@ func setEnabled(m *audit.Mutation, id string, enabled bool) error {
 type stateLogs struct {
 	changes [][2]UpstreamKey
 	gaps    []keystate.GapEvent
+	egaps   []keystate.EndpointGapEvent
 }
 
 func (l *stateLogs) add(before, after UpstreamKey) {
@@ -544,6 +555,7 @@ func (l *stateLogs) emit(log *slog.Logger, handle string) {
 		keystate.LogChange(log, keystate.Key{ID: ch[1].ID, Name: ch[1].Name, Provider: handle}, ch[0].State.State, ch[1].State.State, ch[1].State.Reason)
 	}
 	keystate.LogGaps(log, l.gaps)
+	keystate.LogEndpointGaps(log, l.egaps)
 }
 
 func (h handlers) deleteKey(m *audit.Mutation, p ref, s string) (UpstreamKey, error) {

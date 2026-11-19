@@ -20,6 +20,7 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/admintokens"
 	"github.com/hoangvu12/iroha/internal/api"
+	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/config"
 	"github.com/hoangvu12/iroha/internal/logs"
@@ -47,6 +48,7 @@ type Server struct {
 	log     *slog.Logger
 	router  *api.Router
 	tokens  *admintokens.Store
+	audit   *audit.Trail
 	httpc   *http.Client
 	started time.Time
 
@@ -110,6 +112,7 @@ func New(ctx context.Context, o Options) (*Server, error) {
 		s.log.Info("bootstrap Admin Token created", logs.Kind(admintokens.KindBootstrap), "name", tok.Name)
 	}
 
+	s.audit = audit.New(db, s.log)
 	s.router = api.NewRouter(s.log, s.tokens.Authenticator())
 	s.router.Add(s.routes()...)
 	s.router.AddDocs(o.Version, logs.SkillSection)

@@ -6,7 +6,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/hoangvu12/iroha/internal/admintokens"
 	"github.com/hoangvu12/iroha/internal/api"
+	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/logs"
 )
 
@@ -18,6 +20,8 @@ func (s *Server) routes() []api.Route {
 	return slices.Concat(
 		s.coreRoutes(),
 		logs.Routes(s.logs),
+		audit.Routes(s.audit),
+		admintokens.Routes(s.audit, s.db),
 	)
 }
 

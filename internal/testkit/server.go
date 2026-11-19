@@ -183,6 +183,23 @@ func (s *Server) Logs(query string) []logs.Event {
 	return page.Events
 }
 
+// NewAdminToken creates an Admin Token named name through the admin API
+// (as the bootstrap token) and returns a client that sends it. Its Token
+// field is the secret.
+func (s *Server) NewAdminToken(name string) *Client {
+	s.t.Helper()
+	var out struct {
+		AdminToken struct {
+			Secret string `json:"secret"`
+		} `json:"admin_token"`
+	}
+	s.Admin.Post("/api/admin-tokens", map[string]any{"name": name}).OK().JSON(&out)
+	if out.AdminToken.Secret == "" {
+		s.t.Fatalf("creating Admin Token %q returned no secret", name)
+	}
+	return s.Client(out.AdminToken.Secret)
+}
+
 // Client returns a client sending "Authorization: Bearer token" (none when
 // token is empty).
 func (s *Server) Client(token string) *Client {

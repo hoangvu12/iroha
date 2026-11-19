@@ -13,12 +13,13 @@ One Go binary (`cmd/iroha`), one SQLite file (`<data-dir>/iroha.db`), pure-Go dr
 | `internal/store` | `Open`, `Tx`, `Migrate`, time helpers; every migration in `internal/store/migrations/`. Feature packages write their own SQL against `*store.DB`. |
 | `internal/logs` | slog handler (console + `log_events`), event kinds, `GET /api/logs`. |
 | `internal/clock` | `Clock` interface, `Real`, `Fake`, `WithTimeout`, `Sleep`. |
-| `internal/admintokens` | Admin Token storage, the admin authenticator, the bootstrap token. Ticket 02 adds its routes here. |
+| `internal/audit` | The conventions every admin resource shares: name-or-ID `Resolve`, audited `Mutate` with `dry_run`, `Bulk` with per-item results, Audit Entries (`/api/audit-entries`) and revert. See "Add an admin resource". |
+| `internal/admintokens` | Admin Token storage, the admin authenticator, the bootstrap token, `/api/admin-tokens` (the reference resource for the audit conventions). |
 | `internal/ids` | Record IDs (`at_xxxx`) and secrets. |
 | `internal/shape` | The four Shape names. |
 | `internal/testkit` | In-process server, clients, fake upstreams. |
 
-Suggested homes for later work (create when needed, one package per concern so parallel tickets do not collide): `audit` (02), `providers` (Providers, Endpoints, Upstream Keys; 04, 09), `gatewaykeys` (04, 12), `requests` (Request and Attempt history; 04), `gateway` (inference routes, passthrough, streaming; 04, 13–17), `planner` (candidate planning, pure; 05, 09, 18), `rules` (Failure Rules, pure matching; 05–07), `keystate` (Key States, Cooling, Model Gaps; 05, 08), `models` (lists, discovery, metadata; 10, 11), `pools` (18), `translate` and `normalise` (13–16), `jobs` (19, 20), `session` (Owner login; 21). The UI goes in `web/` (21), deploy files in `deploy/` (03).
+Suggested homes for later work (create when needed, one package per concern so parallel tickets do not collide): `providers` (Providers, Endpoints, Upstream Keys; 04, 09), `gatewaykeys` (04, 12), `requests` (Request and Attempt history; 04), `gateway` (inference routes, passthrough, streaming; 04, 13–17), `planner` (candidate planning, pure; 05, 09, 18), `rules` (Failure Rules, pure matching; 05–07), `keystate` (Key States, Cooling, Model Gaps; 05, 08), `models` (lists, discovery, metadata; 10, 11), `pools` (18), `translate` and `normalise` (13–16), `jobs` (19, 20), `session` (Owner login; 21). The UI goes in `web/` (21), deploy files in `deploy/` (03).
 
 ## Rules everyone follows
 
@@ -41,9 +42,50 @@ Suggested homes for later work (create when needed, one package per concern so p
     Handle: func(c *api.Call) (any, error) { ... c.Path("provider") ... }}
    ```
 
-   `Auth` defaults to `api.AuthAdmin` (Admin Token or, later, Owner session); `c.Actor` says who called. Use `api.AuthPublic` for health/login, `api.AuthCaller` for Gateway routes (the handler checks the Gateway Key). Use `Raw` instead of `Handle` for streams and non-JSON bodies. Decode bodies with `c.Decode(&v)` (rejects unknown fields). Use `c.SetStatus(201)` to change the success status. A second authenticator (Owner session, ticket 21) is passed to `api.NewRouter` in `server.New`.
+   `Auth` defaults to `api.AuthAdmin` (Admin Token or, later, Owner session); `c.Actor` says who called. Use `api.AuthPublic` for health/login, `api.AuthCaller` for Gateway routes (the handler checks the Gateway Key). Use `Raw` instead of `Handle` for streams and non-JSON bodies. Decode bodies with `c.Decode(&v)` (rejects unknown fields). Use `c.SetStatus(201)` to change the success status. A second authenticator (Owner session, ticket 21) is passed to `api.NewRouter` in `server.New`. A route that changes configuration must also follow "Add an admin resource" below.
 2. Add one line to `internal/server/routes.go`.
 3. Done: the route is served and appears in `/api/openapi.json` (schemas reflected from `Request`/`Response`; struct tags `json`, `doc:"..."`, `enum:"a,b"`) and in `/skill.md`. `TestDocumentsDescribeEveryRegisteredRoute` fails if anything drifts. Hand-written guidance for agents goes in a new file `internal/api/skill/NN_topic.md` (files are concatenated in name order before the generated route reference).
+
+## Add an admin resource
+
+Every configuration record the API changes (Provider, Endpoint, Upstream Key, Model Pool, Gateway Key, Failure Rule, setting) goes through `internal/audit`, so it gets name-or-ID addressing, `dry_run`, bulk, create-or-update, Audit Entries and revert without new machinery. `internal/admintokens/routes.go` is the worked example; copy its shape.
+
+1. **Snapshot type.** A struct of the record's *configuration* fields as JSON (`snapshot` in admintokens). Leave runtime state out (last used, Key State, counters, discovered lists): it changes without Audit Entries and would make every revert a conflict. When you later add a field, give it a zero value that means the old behaviour; old entries are compared only on the fields they have.
+2. **Register the resource** at package level:
+
+   ```go
+   var Resource = audit.Register(&audit.Resource[snapshot]{
+       Name: "provider", Label: "Provider", Plural: "Providers", Path: "/api/providers",
+       Table: "providers", NameColumn: "handle", Secrets: nil,   // Secrets: snapshot fields masked in Audit Entry views
+       NameOf:  func(s snapshot) string { return s.Handle },
+       Load:    func(ctx, q audit.Querier, id string) (*snapshot, error) { /* nil, nil when absent */ },
+       Restore: func(ctx, tx *sql.Tx, id string, s *snapshot) error { /* nil: delete; else upsert */ },
+   })
+   ```
+
+   `Restore` must update in place (`INSERT ... ON CONFLICT (id) DO UPDATE`), never delete and re-insert, or foreign-key cascades take children with it. Return an `*api.Error` (409) when the current state forbids the restore (name now taken, children present).
+3. **Read routes** address records with `Resource.Resolve(ctx, db, c.Path("provider"))` (ID or name; uniform 404 with a hint) or `Resource.Get`.
+4. **Mutating routes** put `audit.DryRun` in `Query` (`TestDocumentsDescribeTheConventionsOnce` fails otherwise) and run their writes inside the Trail:
+
+   ```go
+   var out Provider
+   res, err := tr.Mutate(c, "provider.update", "Edited", func(m *audit.Mutation) error {
+       id, err := Resource.Resolve(m.Ctx, m.Tx, c.Path("provider"))
+       if err != nil { return err }
+       if err := m.Track(Resource, id); err != nil { return err } // before every write, also before an insert of a new ID
+       // ... writes on m.Tx, using m.Now for times ...
+       out, err = read(m.Ctx, m.Tx, id)
+       return err
+   })
+   return ProviderResult{Result: res, Provider: out}, err   // type ProviderResult struct { audit.Result; Provider Provider `json:"provider"` }
+   ```
+
+   `Mutate` handles `dry_run` (runs everything, rolls back), computes `changes` and `outcome` from the first tracked record, writes one Audit Entry when anything changed, logs `config.change`, and answers 201 when the record was created. `Track` every record the change touches, children included (deleting a Provider tracks its Endpoints and keys), parents before children: revert re-creates in tracking order and deletes in reverse. Call `m.Irreversible(reason)` for changes that must not be undone (revoking a secret); `m.Summarize(text)` replaces the generated summary ("Edited Provider acme", "Disabled 3 Upstream Keys").
+5. **Create-or-update by name**: `POST /api/<resource>` looks the name up in `m.Tx`; if found, apply only the fields sent (pointer fields in the body) to that record, else insert. The second identical call is then `unchanged` with no Audit Entry.
+6. **Bulk**: `POST /api/<resource>/bulk` (create-or-update many) and `POST /api/<resource>/bulk/<action>`, body `audit.BulkRequest[T]`, response `audit.BulkResult[Out]`, implemented by reusing the single-item function: `return audit.Bulk(tr, c, "upstream_key.disable", "Disabled", in.Items, h.disable)`. Each item runs in a savepoint; an `*api.Error` rolls back that item only; any other error aborts the call. One Audit Entry covers the applied items.
+7. **Errors**: return `*api.Error` with a code and a hint (`api.BadRequest`, `api.NotFound`, `api.Conflict(code, hint, ...)`, `api.CheckName` for names). Add a new code to the list in `internal/api/skill/10_conventions.md` only if agents should branch on it.
+
+Do not describe these conventions again in your routes' text; `internal/api/skill/10_conventions.md` and the OpenAPI `info.description` say them once. Tests: drive the routes through `testkit` (`srv.NewAdminToken(name)` gives a second actor); assert outcomes, `changes`, `GET /api/audit-entries?record=...`, and that `POST /api/audit-entries/{id}/revert` restores the before-state.
 
 ## Add a migration
 

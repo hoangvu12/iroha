@@ -160,6 +160,16 @@ test("a row click, or its chevron, shows the before and after under the row", as
   expect(rows()[2].textContent).toMatch(/enabled/i);
 });
 
+test("opened details enter like a row (UI ticket 20): a row's shift and a fade, never their height", async () => {
+  const user = userEvent.setup();
+  renderTab(many(3));
+  await user.click(await screen.findByRole("button", { name: /^Show details of Upstream Key acme\/team-2 disabled/ }));
+  const details = rows()[2].querySelector("td > *")!;
+  const c = details.getAttribute("class")!.split(/\s+/);
+  for (const k of ["transition-[opacity,translate]", "duration-list-in", "ease-out", "starting:translate-y-(--motion-shift-sm)", "starting:opacity-0"]) expect(c).toContain(k);
+  expect(c.filter((x) => /transition-\[height|duration-\d/.test(x))).toEqual([]);
+});
+
 test("Revert in a row reverts it and shows the result, with Undo, in its place", async () => {
   const user = userEvent.setup();
   const fetch = renderTab(many(3));

@@ -26,7 +26,7 @@ export function Checkbox({
       onCheckedChange={(next, details) => onChange(next === true, details.event)}
       onClick={(e) => e.stopPropagation()}
       className={cn(
-        "inline-flex size-[18px] shrink-0 items-center justify-center rounded-[5px] border border-border-strong bg-bg transition-colors hover:border-fg-muted",
+        "inline-flex size-[18px] shrink-0 items-center justify-center rounded-[5px] border border-border-strong bg-bg transition-colors duration-hover ease-[ease] hover:border-fg-muted",
         "data-checked:border-primary data-checked:bg-primary data-checked:text-primary-fg",
         "data-indeterminate:border-primary data-indeterminate:bg-primary data-indeterminate:text-primary-fg data-disabled:opacity-50",
         className,

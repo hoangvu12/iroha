@@ -5,6 +5,7 @@ import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import { Button } from "./Button";
 import { cn } from "./cn";
+import { useLeaving } from "./presence";
 import { notify, notifyChange } from "./toast";
 
 // Results of inline changes show on the control that made them (spec:
@@ -159,15 +160,18 @@ export function useSave({ refresh, describe = describeError }: { refresh?: () =>
  * "✓ Renamed to team-6  Undo". Renders nothing when idle.
  */
 export function SaveStatus({ save, className, saving = true }: { save: Save; className?: string; saving?: boolean }) {
-  const d = save.done;
-  if (save.pending && saving && !d) return <span className={cn("whitespace-nowrap text-[13px] text-fg-subtle", className)}>Saving…</span>;
+  // A result whose time is up fades out where it was; "Saving…" replaces it at once.
+  const result = useLeaving<Done, HTMLSpanElement>(save.done);
+  if (save.pending && saving && !save.done) return <span className={cn("whitespace-nowrap text-[13px] text-fg-subtle", className)}>Saving…</span>;
+  const d = result.shown;
   if (!d) return null;
   const Icon = d.tone === "bad" ? CircleAlert : d.undone ? RotateCcw : CircleCheck;
   return (
     <span
+      ref={result.ref}
       className={cn(
         "inline-flex min-w-0 items-center gap-1.5 text-[13px] text-fg-muted",
-        "transition-opacity duration-200 ease-out starting:opacity-0 motion-reduce:transition-none",
+        "transition-opacity duration-fade ease-out starting:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-list-out",
         d.tone === "bad" && "text-danger-text",
         className,
       )}

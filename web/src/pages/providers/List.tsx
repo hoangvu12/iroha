@@ -55,7 +55,7 @@ export function ProvidersList() {
   const openPool = (p: Pool) => navigate(poolPath(p.name));
   const testButton = (label: string, onPress: () => void) => (
     <span className="inline-flex items-center gap-1">
-      <IconButton icon={MessageCircle} label={label} size="sm" className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" onClick={onPress} />
+      <IconButton icon={MessageCircle} label={label} size="sm" className="row-reveal" onClick={onPress} />
       <ChevronRight size={17} className="text-fg-muted" aria-hidden />
     </span>
   );

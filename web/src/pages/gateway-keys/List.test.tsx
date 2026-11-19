@@ -165,6 +165,14 @@ test("revoked keys fold under Revoked keys into their own table, newest revoke f
   await waitFor(() => expect(writes(fetch)).toEqual(["DELETE /api/gateway-keys/gk_7"]));
 });
 
+test("a row's copy button, shown on hover, is always shown where nothing hovers (touch)", async () => {
+  renderList([gk(1)]);
+  const copy = await screen.findByRole("button", { name: "Copy caller-1's key" });
+  const c = copy.getAttribute("class")!.split(/\s+/);
+  // row-reveal (styles/index.css): hidden until the row is hovered, always shown where nothing hovers.
+  expect(c).toContain("row-reveal");
+});
+
 test("no keys at all: the empty state offers New key", async () => {
   renderList([]);
   expect(await screen.findByText("No Gateway Keys yet")).toBeTruthy();

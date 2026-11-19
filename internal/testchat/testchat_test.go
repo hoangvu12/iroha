@@ -386,6 +386,97 @@ func TestModelSearchListsPoolsFirstWithinTheScope(t *testing.T) {
 	}
 }
 
+// TestModelSearchPutsThePreferredProviderOrPoolFirst: prefer=<provider>/
+// lists that Provider before the Pools (and fills limit with it first);
+// prefer=<pool> puts that Pool first among the Pools. Search filters both.
+func TestModelSearchPutsThePreferredProviderOrPoolFirst(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addProvider(t, srv, "acme", "openai-chat", up.URL(), "sk-test-1")
+	addProvider(t, srv, "zeta", "openai-chat", up.URL(), "sk-test-2")
+	for _, m := range []string{"a-1", "b-2"} {
+		srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": m}).Expect(201)
+	}
+	srv.Admin.Post("/api/providers/zeta/models", map[string]any{"model": "z-1"}).Expect(201)
+	for _, p := range []string{"alpha", "fast"} {
+		srv.Admin.Post("/api/pools", map[string]any{"name": p, "members": []any{map[string]any{"provider": "acme", "model": "b-2"}}}).Expect(201)
+	}
+
+	var got testchat.ModelChoices
+	get := func(query string) {
+		t.Helper()
+		got = testchat.ModelChoices{}
+		srv.Admin.Get("/api/test/models?" + query).OK().JSON(&got)
+	}
+	get("prefer=zeta/")
+	if len(got.Providers) != 2 || got.Providers[0].Provider != "zeta" || got.Providers[1].Provider != "acme" || len(got.Pools) != 2 || got.Pools[0].ID != "alpha" {
+		t.Fatalf("prefer zeta %+v", got)
+	}
+	// Any <provider>/<model> names its Provider; limit is filled with it first.
+	get("prefer=zeta/z-1&limit=1")
+	if !got.Truncated || got.Matched != 5 || len(got.Pools) != 0 || len(got.Providers[0].Models) != 1 || got.Providers[0].Models[0].ID != "zeta/z-1" {
+		t.Fatalf("prefer zeta, limit 1 %+v", got)
+	}
+	// Search filters the preferred Provider and everything else alike.
+	get("prefer=zeta/&q=1")
+	if got.Matched != 2 || len(got.Pools) != 0 || len(got.Providers) != 2 || got.Providers[0].Models[0].ID != "zeta/z-1" || got.Providers[1].Models[0].ID != "acme/a-1" {
+		t.Fatalf("prefer zeta, q=1 %+v", got)
+	}
+	get("prefer=fast")
+	if len(got.Pools) != 2 || got.Pools[0].ID != "fast" || got.Pools[1].ID != "alpha" || got.Providers[0].Provider != "acme" || got.Suggested != "" {
+		t.Fatalf("prefer fast %+v", got)
+	}
+	// A Provider the caller may not use, or that doesn't exist, changes nothing.
+	get("prefer=nope/")
+	if got.Providers[0].Provider != "acme" || got.Suggested != "" {
+		t.Fatalf("prefer nope %+v", got)
+	}
+}
+
+// TestModelSearchSuggestsTheModelAProviderServedMost: with prefer naming a
+// Provider, suggested is its model with the most 2xx Requests of the last
+// 7 days (direct, global or through a Pool), else its first listed model.
+func TestModelSearchSuggestsTheModelAProviderServedMost(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addProvider(t, srv, "acme", "openai-chat", up.URL(), "sk-test-1")
+	for _, m := range []string{"a-1", "b-2", "c-3"} {
+		srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": m}).Expect(201)
+	}
+	srv.Admin.Post("/api/pools", map[string]any{"name": "fast", "members": []any{map[string]any{"provider": "acme", "model": "c-3"}}}).Expect(201)
+	suggested := func(query string) string {
+		t.Helper()
+		var got testchat.ModelChoices
+		srv.Admin.Get("/api/test/models?" + query).OK().JSON(&got)
+		return got.Suggested
+	}
+	if s := suggested("prefer=acme/"); s != "acme/a-1" {
+		t.Fatalf("no traffic: suggested %q, want the first listed", s)
+	}
+
+	up.Default(up.Text("ok"))
+	for _, m := range []string{"acme/b-2", "acme/b-2", "fast", "fast", "fast"} {
+		srv.Admin.Post("/api/test", send(map[string]any{"model": m, "stream": false})).Expect(200)
+	}
+	// A failed Request served nothing.
+	up.Default(up.Error(400, "bad"))
+	for range 3 {
+		srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/a-1", "stream": false}))
+	}
+	if s := suggested("prefer=acme/&q=b&limit=1"); s != "acme/c-3" {
+		t.Fatalf("suggested %q, want acme/c-3 (3 through the Pool; q and limit don't matter)", s)
+	}
+	// A hidden model is not offered.
+	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "c-3", "hidden": true}).OK()
+	if s := suggested("prefer=acme/"); s != "acme/b-2" {
+		t.Fatalf("c-3 hidden: suggested %q", s)
+	}
+	srv.Clock.Advance(8 * 24 * time.Hour)
+	if s := suggested("prefer=acme/"); s != "acme/a-1" {
+		t.Fatalf("traffic older than 7 days: suggested %q", s)
+	}
+}
+
 // curlArgs splits a POSIX shell command (quotes, backslash-newline).
 func curlArgs(t *testing.T, cmd string) []string {
 	t.Helper()

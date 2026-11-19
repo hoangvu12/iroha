@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Eraser, Eye, EyeOff, ListPlus, ListX, MoreHorizontal, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eraser, Eye, EyeOff, ListPlus, ListX, MessageCircle, MoreHorizontal, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { useChatPanel } from "@/app/chat-panel";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
@@ -32,6 +33,7 @@ export function ModelsTab({ handle }: { handle: string }) {
   const [editing, setEditing] = useState<Model>();
   const [resetting, setResetting] = useState(false);
   const confirm = useConfirm();
+  const chat = useChatPanel();
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -69,6 +71,9 @@ export function ModelsTab({ handle }: { handle: string }) {
       <MenuContent>
         <MenuItem icon={SlidersHorizontal} onSelect={() => setEditing(m)}>
           Details…
+        </MenuItem>
+        <MenuItem icon={MessageCircle} onSelect={() => chat.open({ kind: "model", provider: handle, model: m.model })}>
+          Test in Chat
         </MenuItem>
         {m.hidden ? (
           <MenuItem icon={Eye} onSelect={() => void change(m, { hidden: false }, `${m.model} shown to Callers`)}>

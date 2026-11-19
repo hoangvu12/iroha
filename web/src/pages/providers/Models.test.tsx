@@ -1,8 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createAgent } from "@ui-sdk/react/agent";
 import { afterEach, expect, test, vi } from "vitest";
 import { ModelsTab } from "./Models";
+
+const agent = createAgent();
+const { openChat } = vi.hoisted(() => ({ openChat: vi.fn() }));
+vi.mock("@/app/chat-panel", () => ({ useChatPanel: () => ({ open: openChat }) }));
 
 const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 
@@ -47,7 +52,10 @@ function renderTab() {
   return fetch;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  openChat.mockClear();
+});
 
 const posts = (fetch: ReturnType<typeof renderTab>) => fetch.mock.calls.filter(([, init]) => init?.method === "POST");
 
@@ -81,4 +89,20 @@ test("unpinning a discovered model keeps it listed, so it acts at once", async (
   await user.click(item);
   await waitFor(() => expect(posts(fetch)).toHaveLength(1));
   expect(screen.queryByRole("alertdialog")).toBeNull();
+});
+
+test("Test in Chat on a model row opens the chat on that model of this Provider", async () => {
+  const user = userEvent.setup();
+  renderTab();
+  await user.click(await screen.findByRole("button", { name: "More for pinned-model" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Test in Chat" }));
+  expect(openChat).toHaveBeenCalledExactlyOnceWith({ kind: "model", provider: "acme", model: "pinned-model" });
+});
+
+test("an agent tests a model from its row menu", async () => {
+  renderTab();
+  await screen.findByRole("button", { name: "More for my-model" });
+  const run = await agent.act({ steps: [{ ref: "More for my-model", action: "press", args: ["Test in Chat"] }] });
+  expect(run.ok, run.error?.message).toBe(true);
+  expect(openChat).toHaveBeenCalledExactlyOnceWith({ kind: "model", provider: "acme", model: "my-model" });
 });

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { ArrowDown, ArrowUp, ExternalLink, GripVertical, Layers, MoreHorizontal, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ExternalLink, GripVertical, Layers, MessageCircle, MoreHorizontal, Trash2 } from "lucide-react";
 import { seg } from "@/api/client";
+import { useChatPanel } from "@/app/chat-panel";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Autocomplete } from "@/ui/Autocomplete";
@@ -43,6 +44,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
   const saveMembers = useSaveMembers(pool);
   const refresh = useRefresh();
   const navigate = useNavigate();
+  const chat = useChatPanel();
   const [order, setOrder] = useState<Member[]>([]);
   const [dragging, setDragging] = useState<number>();
   const [removing, setRemoving] = useState<Member>();
@@ -82,6 +84,9 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
         </MenuItem>
         <MenuItem icon={ArrowDown} disabled={i === order.length - 1} onSelect={() => move(i, i + 1)}>
           Move down
+        </MenuItem>
+        <MenuItem icon={MessageCircle} onSelect={() => chat.open({ kind: "model", provider: m.provider, model: m.model })}>
+          Test in Chat
         </MenuItem>
         <MenuItem icon={ExternalLink} onSelect={() => navigate(`/providers/${seg(m.provider)}/keys`)}>
           Open {m.provider}

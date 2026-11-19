@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { api, seg } from "@/api/client";
+import { api } from "@/api/client";
 import type { Shape } from "@/pages/requests/api";
 
 // The test chat's calls (ticket 23): POST /api/test streams one turn in the
@@ -58,15 +58,18 @@ export type ModelChoices = {
   pools: ModelChoice[];
   providers: { provider: string; matched: number; models: ModelChoice[] }[];
   truncated: boolean;
+  /** With prefer naming a Provider: the model to start a test of it with. */
+  suggested?: string;
 };
 
 export type Snippets = { url: string; curl: string; python: string; typescript: string; key_env: boolean; note?: string };
 
-export function useModelChoices(q: string, as: string | undefined, enabled = true) {
+/** Searches what can be picked; `prefer` (a `<handle>/` or a Pool) is listed first. */
+export function useModelChoices(q: string, as: string | undefined, prefer?: string, enabled = true) {
   return useQuery({
-    queryKey: ["test-models", q, as ?? ""],
+    queryKey: ["test-models", q, as ?? "", prefer ?? ""],
     enabled,
-    queryFn: ({ signal }) => api.get<ModelChoices>("/api/test/models", { signal, query: { q, as, limit: 300 } }),
+    queryFn: ({ signal }) => api.get<ModelChoices>("/api/test/models", { signal, query: { q, as, prefer, limit: 300 } }),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
@@ -94,10 +97,17 @@ export function useSnippets(s: Settings, prompt: string, enabled: boolean) {
   });
 }
 
-/** The first model a Provider lists, to start a chat opened from it. */
-export async function firstModelOf(handle: string): Promise<string | undefined> {
-  const r = await api.get<{ models: { model: string }[] }>(`/api/providers/${seg(handle)}/models`, { query: { filter: "visible", limit: 1 } });
-  return r.models[0] ? `${handle}/${r.models[0].model}` : undefined;
+/** The model to start a chat opened from a Provider with: the one it served most lately, else its first listed. */
+export async function suggestedModelOf(handle: string): Promise<string | undefined> {
+  const r = await api.get<ModelChoices>("/api/test/models", { query: { prefer: `${handle}/`, limit: 1 } });
+  return r.suggested || undefined;
+}
+
+/** What the model search lists first: the picked model's Provider (`<handle>/`) or Pool. */
+export function preferOf(model: string): string | undefined {
+  if (!model) return undefined;
+  const p = providerOf(model);
+  return p ? `${p}/` : model;
 }
 
 /** The first Pool or model a Gateway Key may use. */

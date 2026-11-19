@@ -8,13 +8,22 @@
 
 **Blocked by:** 03
 
-**Status:** open
+**Status:** done
 
 Owner request, 2026-11-19 (not in the original spec). Ticket 19 (chat panel motion) runs at the same time on the same folder: keep to picker contents, defaults and the new target, not motion; ticket 07 later moves the Models table onto DataTable and keeps the Test action.
 
-- [ ] Opened from a Provider or its key, the picker shows that Provider's models first; any other model can still be picked
-- [ ] Opening from a Provider selects a predictable model (most-served, else first), with tests
-- [ ] Test on a model row (Models tab, Pool members) opens the chat with that model; agent test for the action
-- [ ] Checked in headless Chrome, light, dark and phone width
+- [x] Opened from a Provider or its key, the picker shows that Provider's models first; any other model can still be picked
+- [x] Opening from a Provider selects a predictable model (most-served, else first), with tests
+- [x] Test on a model row (Models tab, Pool members) opens the chat with that model; agent test for the action
+- [x] Checked in headless Chrome, light, dark and phone width
 
 ## Comments
+
+Built (2026-11-19):
+- `GET /api/test/models` takes `prefer=<provider>/` (or `<provider>/<model>`) or `prefer=<pool>`: that Provider is listed before the Pools and fills `limit` first, or that Pool leads the Pools. With a Provider it also answers `suggested`: its most-served model over the last 7 days (2xx Requests incl. tests, direct or through a Pool, by the model on that Provider; `requests.ServedModels`), else its first listed model, within the `as` scope. Skill `31_test_chat.md` updated; OpenAPI is generated from the route.
+- Picker: sends `prefer` from the picked model and puts that Provider's group first under its name (logo + handle + count), then Pools, then the rest. Search filters all groups; any model can still be picked.
+- Defaults: Provider and Upstream Key targets start on `suggested`. The old "last model used in this browser" preference was dropped, because it made the default depend on history in this browser.
+- New target `{ kind: "model", provider, model }`: "Test in Chat" in the row menu of the Models tab (table and phone list) and of Pool members. Chat title "<model> test", header "Opened from <provider>". Neither table has hover actions, so the action is in the menu only (ticket 07 keeps it when Models moves to DataTable).
+- Test-first: the `tdd` skill wasn't loaded. I wrote failing tests first (Go: `TestModelSearchPutsThePreferredProviderOrPoolFirst`, `TestModelSearchSuggestsTheModelAProviderServedMost`; web: `chat/targets.test.ts`, two Picker tests, Models and PoolMembers "Test in Chat" tests with agent tests), then the code.
+- Browser check (headless Chrome, seeded testkit): desktop light (Provider Test, picker with dashscope first, Models row menu), desktop dark (Pool member Test opening openrouter's z-ai/glm-4.6 with openrouter first), phone 390 px light and dark (picker, Models menu). Screenshots: `iroha-v2-notes/v2-ui/shots/22/`.
+- Not touched: chat panel motion (ticket 19).

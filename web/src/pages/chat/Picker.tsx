@@ -13,13 +13,14 @@ import { cn } from "@/ui/cn";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { ScrollArea } from "@/ui/ScrollArea";
 import type { ModelChoice, Reasoning, Settings, Shape } from "./api";
-import { bareModel, providerOf, SHAPES, shapeLabel, useModelChoices } from "./api";
+import { bareModel, preferOf, providerOf, SHAPES, shapeLabel, useModelChoices } from "./api";
 import { recentModels } from "./store";
 
 // The composer's model button (C16, C27): the model, then Provider,
 // Upstream Key, Endpoint, Shape, Send as, Reasoning and the tool-call check.
 // Each row opens its own list in the same popover; the model list searches
-// on the server (GET /api/test/models), Pools first, and takes typed IDs.
+// on the server (GET /api/test/models), the picked model's Provider first
+// (else Pools first), and takes typed IDs.
 
 export type View = "main" | "models" | "keys" | "endpoints" | "shapes" | "as";
 
@@ -422,7 +423,10 @@ function ModelList({ settings, initialQuery, onPick, onBack }: { settings: Setti
   const [q, setQ] = useState(initialQuery);
   const [filter, setFilter] = useState<Filter>("all");
   const dq = useDebounced(q.trim(), 150);
-  const res = useModelChoices(dq, settings.as);
+  // The picked model's Provider (or Pool) comes first; it was set by where Test was pressed.
+  const prefer = preferOf(settings.model);
+  const preferred = providerOf(settings.model);
+  const res = useModelChoices(dq, settings.as, prefer);
   const recent = useMemo(() => recentModels(), []);
 
   const data = res.data;
@@ -438,7 +442,7 @@ function ModelList({ settings, initialQuery, onPick, onBack }: { settings: Setti
     if (data.pools.length) out.push({ key: "pools", label: "Model Pools", count: data.pools.length, items: data.pools });
     if (filter === "all")
       for (const p of data.providers)
-        out.push({
+        out[p.provider === preferred ? "unshift" : "push"]({
           key: p.provider,
           label: (
             <>
@@ -449,7 +453,7 @@ function ModelList({ settings, initialQuery, onPick, onBack }: { settings: Setti
           items: p.models,
         });
     return out;
-  }, [data, filter, recent, typed]);
+  }, [data, filter, recent, typed, preferred]);
 
   const shown = groups.reduce((n, g) => n + g.items.length, 0);
   const exact = groups.some((g) => g.items.some((c) => c.id === typed));

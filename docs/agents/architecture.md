@@ -15,6 +15,8 @@ One Go binary (`cmd/iroha`), one SQLite file (`<data-dir>/iroha.db`), pure-Go dr
 | `internal/clock` | `Clock` interface, `Real`, `Fake`, `WithTimeout`, `Sleep`. |
 | `internal/audit` | The conventions every admin resource shares: name-or-ID `Resolve`, audited `Mutate` with `dry_run`, `Bulk` with per-item results, Audit Entries (`/api/audit-entries`) and revert. See "Add an admin resource". |
 | `internal/admintokens` | Admin Token storage, the admin authenticator, the bootstrap token, `/api/admin-tokens` (the reference resource for the audit conventions). |
+| `internal/session` | The Owner password (PBKDF2), 30-day browser sessions (`iroha_session` cookie, SameSite=Strict, secrets stored as SHA-256), the session authenticator (actor kind `owner_session`, name `Owner`), `/api/session`, `/api/owner-password`, `/api/owner-sessions`. |
+| `internal/webui` | Serves the embedded UI: `dist/` (Vite output, built from `web/`) and `brand/` (Iroha art, committed). Unknown page loads get `index.html`; other misses the JSON 404. |
 | `internal/ids` | Record IDs (`at_xxxx`) and secrets. |
 | `internal/shape` | The four Shape names. |
 | `internal/testkit` | In-process server, clients, fake upstreams. |
@@ -29,7 +31,7 @@ One Go binary (`cmd/iroha`), one SQLite file (`<data-dir>/iroha.db`), pure-Go dr
 | `internal/usage` | Token usage parsing per Shape (OpenAI Chat today), for bodies and stream events. |
 | `deploy` | `deploy.sh` (run locally: build, copy, back up, swap, restart, readiness, rollback over SSH keys), `remote.sh` (its server half), `iroha.service` (systemd unit template), Go tests tying the unit's stop timeout to the drain limit and the runbook (`internal/api/skill/50_deploy.md`) to the script. `deploy/test/e2e.sh` runs the scripts against a local Docker container with systemd and sshd; run it after changing anything in `deploy/` (needs Docker; never point it at a real server). |
 
-Suggested homes for later work (create when needed, one package per concern so parallel tickets do not collide): `rules` (Failure Rules, pure matching; 05–07), `keystate` (Key States, Cooling, Model Gaps; 05, 08), `models` (lists, discovery, metadata; 10, 11), `pools` (18), `translate` and `normalise` (13–16), `session` (Owner login; 21). The daily model refresh (20) is a `jobs.Job` added in `server.New` next to `retention.Job`. The UI goes in `web/` (21), deploy files in `deploy/` (03).
+Suggested homes for later work (create when needed, one package per concern so parallel tickets do not collide): `rules` (Failure Rules, pure matching; 05–07), `keystate` (Key States, Cooling, Model Gaps; 05, 08), `models` (lists, discovery, metadata; 10, 11), `pools` (18), `translate` and `normalise` (13–16). The daily model refresh (20) is a `jobs.Job` added in `server.New` next to `retention.Job`. The UI is in `web/` (see "Frontend").
 
 ## The inference path
 
@@ -67,7 +69,7 @@ Nested admin resources (Endpoints and Upstream Keys under a Provider) resolve th
     Handle: func(c *api.Call) (any, error) { ... c.Path("provider") ... }}
    ```
 
-   `Auth` defaults to `api.AuthAdmin` (Admin Token or, later, Owner session); `c.Actor` says who called. Use `api.AuthPublic` for health/login, `api.AuthCaller` for Gateway routes (the handler checks the Gateway Key). Use `Raw` instead of `Handle` for streams and non-JSON bodies. Decode bodies with `c.Decode(&v)` (rejects unknown fields). Use `c.SetStatus(201)` to change the success status. A second authenticator (Owner session, ticket 21) is passed to `api.NewRouter` in `server.New`. A route that changes configuration must also follow "Add an admin resource" below.
+   `Auth` defaults to `api.AuthAdmin` (Admin Token or Owner session); `c.Actor` says who called. Use `api.AuthPublic` for health/login, `api.AuthCaller` for Gateway routes (the handler checks the Gateway Key). Use `Raw` instead of `Handle` for streams and non-JSON bodies. Decode bodies with `c.Decode(&v)` (rejects unknown fields). Use `c.SetStatus(201)` to change the success status. The Owner session authenticator is the second one passed to `api.NewRouter` in `server.New`; the UI calls your route with the cookie, so a route needs nothing UI-specific. A route that changes configuration must also follow "Add an admin resource" below.
 2. Add one line to `internal/server/routes.go`.
 3. Done: the route is served and appears in `/api/openapi.json` (schemas reflected from `Request`/`Response`; struct tags `json`, `doc:"..."`, `enum:"a,b"`) and in `/skill.md`. `TestDocumentsDescribeEveryRegisteredRoute` fails if anything drifts. Hand-written guidance for agents goes in a new file `internal/api/skill/NN_topic.md` (files are concatenated in name order before the generated route reference).
 
@@ -192,6 +194,40 @@ func TestSomething(t *testing.T) {
 
 Fake upstream replies: `up.Text` (streams automatically when the request asks; OpenAI Chat includes usage only with `stream_options.include_usage`), `up.Stream(pieces...)`, `up.Error` / `up.ErrorCode` (the Shape's error envelope), `up.SetModels`, `up.SetUsage`, `up.Handle(method, path, r)` for other routes, generic `testkit.JSON`, `Raw`, `SSE`, `Hang`, `Drop`, and modifiers `.Header`, `.After(d)`, `.HoldUntil(ch)` (with `up.Await(n)` to know the request arrived), `.ThenDisconnect()`. For finer control build a `testkit.Reply` with `Chunks` (each may `Delay` or `Wait`). `up.URL()` is the Endpoint URL including `/v1` (or `/v1beta` for Gemini). Use `srv.Clock.BlockUntil(ctx, n)` before `Advance` when the server must be waiting on a timer first. `srv.App.DB()` exists only for state no API can reach yet; prefer the API.
 
+`srv.OwnerSession()` sets the Owner password (`testkit.OwnerPassword`) if needed, signs in like the UI, and returns a client sending the session cookie; its changes are audited as the Owner. `client.WithCookie(c)` and `resp.Cookie(name)` handle other cookies.
+
 To test behaviour that needs a route production lacks (a deliberately slow handler, say), pass it in `server.Options.Routes` and drive `server.Run` directly; `internal/server/drain_test.go` does this to prove the SIGTERM drain.
 
 `go build ./... && go vet ./... && go test ./...` must pass. `go test -short` skips the binary build test in `cmd/iroha`.
+
+## Frontend
+
+React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarative `<Routes>`), TanStack Query for server state, Radix for dialogs and menus, Sonner for toasts, lucide-react icons, Inter bundled (no third-party requests). The design to build is `.scratch/v2-gateway/design/v2-clean/`; `/states` in the running UI shows every shared component in every state (C25).
+
+### Build and embed
+
+- `npm --prefix web ci && npm --prefix web run build` type-checks and writes the bundle to `internal/webui/dist/`, which `go:embed` puts in the binary on the next `go build`. Only `internal/webui/dist/.gitkeep` is committed, so a fresh clone builds and tests with Go alone; that binary serves a page saying the UI was not built, and `GET /healthz` reports `"ui": false`.
+- **Release builds** must run those two npm commands before the `go build` in `deploy/deploy.sh`, and should refuse to switch over when `/readyz` on the new binary says `"ui": false`. Node 22+ is needed on the build machine only. (Not wired into `deploy/deploy.sh` yet: ticket 21 left ticket 03's files alone.)
+- Development: run Iroha (`go run ./cmd/iroha --addr 127.0.0.1:8080`), then `npm --prefix web run dev`; Vite proxies `/api`, `/brand`, `/readyz`, `/healthz` and `/skill.md` to `IROHA_URL` (default `http://127.0.0.1:8080`).
+- If the ticket touches `web/`, `npm --prefix web run build` must pass (it runs `tsc` first). There are no DOM unit tests (spec); behaviour lives behind the API and is tested in Go.
+
+### Layout of `web/src`
+
+| Path | Owns |
+|---|---|
+| `app/` | The shell: `App.tsx` (providers and the route table, one line per page), `AuthGate` (setup, login, or the app), `Shell` (sidebar, phone tab bar, chat slot), `nav.ts` (items and shortcuts P, G, R, C), `shortcuts.ts`, `health.ts` (polls `/readyz`), `theme.tsx`, `chat-panel.tsx`, `PageHeader`, `brand.tsx`. |
+| `api/` | `client.ts` (the only `fetch`: JSON, 10 s timeout, `ApiError` with `code`, `hint` and `call`, signed-out detection), `types.ts` (shared shapes: `AuditResult`, `BulkResult`, `AuditEntry`...), `session.ts`, `audit.ts` (`revertEntry`). Add `api/<resource>.ts` for types and hooks other pages also need; otherwise keep them in your page folder. |
+| `ui/` | Shared components, no data fetching: `Button`/`IconButton`/`buttonClass`, `Input`/`PasswordInput`/`SearchInput`/`Field`, `Table` primitives and `TableSkeleton`, `Dialog`/`ConfirmDialog`/`TypeToConfirmDialog`, `Menu`, `toast` (`notify`, `notifyChange` with Undo), `LogoTile`, `States` (`EmptyState`, `NoResults`, `Chip`, `ErrorState`), `bits` (`StatusDot`, `Status`, `Kbd`, `Tabs`, `Mono`). |
+| `lib/` | `format.ts` (numbers, percents, durations, "4 min ago"), `media.ts` (`useIsPhone`). |
+| `pages/<page>/` | One folder per page, owned by its ticket: `providers` (22), `chat` (23), `gateway-keys` (24), `requests` (25), `settings` (28), plus `login`, `states`, `not-found`. Each `index.tsx` default-exports the page, mounted at `/<page>/*`; sub-pages go in a `<Routes>` inside the folder, so parallel tickets never edit the same file. |
+| `styles/index.css` | Design tokens (light and dark values of each colour) mapped to Tailwind colours: `bg-bg`, `bg-subtle`, `bg-muted`, `bg-elevated`, `text-fg`, `text-fg-muted`, `text-fg-subtle`, `border-border`, `border-border-strong`, `bg-primary`/`text-primary-fg`, `bg-danger`/`text-danger-text`/`bg-danger-tint`, `success`, `warning`, `info`, `bg-selected`. Never hard-code a colour. |
+
+### Conventions
+
+- UI addresses share the path space with the Gateway (`/providers/{handle}/v1/...`): registered routes always win, and the UI only gets GETs no route matched. Keep UI paths free of `v1`/`v1beta` segments (`/providers/acme/keys`, never `/providers/acme/v1`).
+- Only the public admin API: `api.get/post/put/patch/delete` from `@/api/client`, cached with TanStack Query (`useQuery`, `useMutation`). A 401 that means the session ended brings the login back automatically.
+- Loading shows `TableSkeleton` (no spinners), empty shows `EmptyState` with the one action, filtered-to-nothing shows `NoResults` with chips, failure shows `ErrorState` with Try again, inside the page (C25).
+- Confirm only deletes (`ConfirmDialog`, naming what goes) and revokes (`TypeToConfirmDialog`). Everything else acts at once and toasts `notifyChange(message, result)`, which offers Undo through `POST /api/audit-entries/{id}/revert`.
+- One primary button per page; status colour only from `StatusDot`; one fact per cell. Logos via `LogoTile` with a URL served by Iroha (round for Providers, square for Pools, first-letter fallback).
+- Chat: call `useChatPanel().open(target)` from Test buttons; ticket 23 renders the content in `pages/chat/ChatPanel.tsx` and reads `request`.
+- Phones (< 768 px): bottom tab bar, `PageHeader` shows the avatar linking to Settings; design tables as two-line rows there (C31, C32). Inputs use 16 px text on phones so focusing does not zoom.

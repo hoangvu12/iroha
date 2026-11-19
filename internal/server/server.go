@@ -27,7 +27,9 @@ import (
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/retention"
+	"github.com/hoangvu12/iroha/internal/session"
 	"github.com/hoangvu12/iroha/internal/store"
+	"github.com/hoangvu12/iroha/internal/webui"
 )
 
 // Options are everything the server takes from outside. Tests replace the
@@ -57,6 +59,7 @@ type Server struct {
 	log     *slog.Logger
 	router  *api.Router
 	tokens  *admintokens.Store
+	owner   *session.Store
 	audit   *audit.Trail
 	jobs    *jobs.Runner
 	httpc   *http.Client
@@ -130,14 +133,16 @@ func New(ctx context.Context, o Options) (*Server, error) {
 	}
 
 	s.audit = audit.New(db, s.log)
+	s.owner = session.New(db, s.log)
 	s.jobs = jobs.NewRunner(db, s.log)
 	s.jobs.Add(retention.Job(db))
 	for _, j := range o.Jobs {
 		s.jobs.Add(j)
 	}
-	s.router = api.NewRouter(s.log, s.tokens.Authenticator())
+	s.router = api.NewRouter(s.log, s.tokens.Authenticator(), s.owner.Authenticator())
 	s.router.Add(s.routes()...)
 	s.router.Add(o.Routes...)
+	s.router.Fallback(webui.Handler())
 	s.router.AddDocs(o.Version, logs.SkillSection)
 	return s, nil
 }

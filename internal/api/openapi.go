@@ -83,7 +83,7 @@ func OpenAPI(routes []Route, version string) map[string]any {
 		}
 		switch r.Auth {
 		case AuthAdmin:
-			op["security"] = []any{map[string]any{"adminToken": []string{}}}
+			op["security"] = []any{map[string]any{"adminToken": []string{}}, map[string]any{"ownerSession": []string{}}}
 		case AuthCaller:
 			op["security"] = []any{map[string]any{"gatewayKey": []string{}}}
 		}
@@ -100,8 +100,9 @@ func OpenAPI(routes []Route, version string) map[string]any {
 		"components": map[string]any{
 			"schemas": g.components,
 			"securitySchemes": map[string]any{
-				"adminToken": map[string]any{"type": "http", "scheme": "bearer", "description": "Admin Token"},
-				"gatewayKey": map[string]any{"type": "http", "scheme": "bearer", "description": "Gateway Key"},
+				"adminToken":   map[string]any{"type": "http", "scheme": "bearer", "description": "Admin Token"},
+				"ownerSession": map[string]any{"type": "apiKey", "in": "cookie", "name": "iroha_session", "description": "Owner session, set by POST /api/session (the UI)"},
+				"gatewayKey":   map[string]any{"type": "http", "scheme": "bearer", "description": "Gateway Key"},
 			},
 		},
 	}

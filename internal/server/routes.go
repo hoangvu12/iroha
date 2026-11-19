@@ -15,7 +15,9 @@ import (
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
+	"github.com/hoangvu12/iroha/internal/session"
 	"github.com/hoangvu12/iroha/internal/settings"
+	"github.com/hoangvu12/iroha/internal/webui"
 )
 
 // routes is the route table: one line per module. Each module package
@@ -28,6 +30,7 @@ func (s *Server) routes() []api.Route {
 		logs.Routes(s.logs),
 		audit.Routes(s.audit),
 		admintokens.Routes(s.audit, s.db),
+		session.Routes(s.owner, s.audit),
 		providers.Routes(s.audit, s.db),
 		gatewaykeys.Routes(s.audit, s.db),
 		requests.Routes(s.db),
@@ -41,6 +44,7 @@ func (s *Server) routes() []api.Route {
 type Health struct {
 	Status  string `json:"status" enum:"ok,ready"`
 	Version string `json:"version"`
+	UI      bool   `json:"ui" doc:"true when this binary includes the built web UI (false: it serves a page saying the UI was not built)."`
 }
 
 func (s *Server) coreRoutes() []api.Route {
@@ -50,7 +54,7 @@ func (s *Server) coreRoutes() []api.Route {
 			Summary:  "Liveness: answers 200 while the process is running",
 			Response: Health{},
 			Handle: func(c *api.Call) (any, error) {
-				return Health{Status: "ok", Version: s.opts.Version}, nil
+				return Health{Status: "ok", Version: s.opts.Version, UI: webui.Built()}, nil
 			},
 		},
 		{
@@ -68,7 +72,7 @@ func (s *Server) coreRoutes() []api.Route {
 					s.log.Error("readiness check failed", logs.Kind(logs.KindGeneric), "err", err.Error())
 					return nil, api.Errorf(http.StatusServiceUnavailable, "not_ready", "The database is not answering; read GET /api/logs?level=error.", "Iroha's database is not answering.")
 				}
-				return Health{Status: "ready", Version: s.opts.Version}, nil
+				return Health{Status: "ready", Version: s.opts.Version, UI: webui.Built()}, nil
 			},
 		},
 		{

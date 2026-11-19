@@ -15,10 +15,28 @@ import (
 // Client sends HTTP requests to the test server. Every method fails the
 // test on a transport error, so tests only deal with responses.
 type Client struct {
-	t     testing.TB
-	srv   *Server
-	Token string      // sent as a Bearer token when not empty
-	Hdr   http.Header // extra headers on every request
+	t       testing.TB
+	srv     *Server
+	Token   string         // sent as a Bearer token when not empty
+	Hdr     http.Header    // extra headers on every request
+	Cookies []*http.Cookie // sent on every request (an Owner session)
+}
+
+// WithCookie returns a copy of the client that also sends cookie c.
+func (c *Client) WithCookie(ck *http.Cookie) *Client {
+	cp := *c
+	cp.Cookies = append(append([]*http.Cookie(nil), c.Cookies...), ck)
+	return &cp
+}
+
+// Cookie returns the cookie named name that the response set, or nil.
+func (r *Response) Cookie(name string) *http.Cookie {
+	for _, c := range (&http.Response{Header: r.Header}).Cookies() {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
 }
 
 // WithHeader returns a copy of the client that also sends key: value
@@ -88,6 +106,9 @@ func (c *Client) Open(method, path string, body any) *http.Response {
 	}
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	for _, ck := range c.Cookies {
+		req.AddCookie(&http.Cookie{Name: ck.Name, Value: ck.Value})
 	}
 	for k, vs := range c.Hdr {
 		req.Header[k] = vs

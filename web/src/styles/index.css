@@ -1,0 +1,127 @@
+@import "@fontsource-variable/inter/index.css";
+@import "tailwindcss";
+
+/* Dark mode is the .dark class on <html> (src/app/theme.tsx), so the Owner
+   can override the system setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens (design/v2-clean/README.md). Every colour in the UI comes
+ * from one of these; each has a light and a dark value, so nothing is drawn
+ * twice. Use them through Tailwind: bg-bg, bg-subtle, text-fg, text-muted,
+ * border-border, bg-primary text-primary-fg, text-danger, bg-danger-tint...
+ */
+:root {
+  --bg: #ffffff;              /* page */
+  --bg-subtle: #fafafa;       /* sidebar, canvas, panels */
+  --bg-muted: #f2f2f3;        /* hover, selected nav, skeleton bars, chips */
+  --bg-elevated: #ffffff;     /* dialogs, menus, toasts */
+  --fg: #171717;
+  --fg-muted: #6b6b6f;
+  --fg-subtle: #9b9ba1;
+  --border: #ebebed;
+  --border-strong: #d6d6da;
+  --primary: #1a1a1a;         /* the one main button: near-black */
+  --primary-hover: #333335;
+  --primary-fg: #ffffff;
+  --danger: #c8291e;          /* red only on the button that does it */
+  --danger-hover: #ad2219;
+  --danger-text: #c8291e;
+  --danger-tint: #fdeceb;
+  --success: #16a34a;
+  --success-tint: #e8f6ed;
+  --warning: #d97706;
+  --warning-tint: #fef3e2;
+  --info: #1d63ed;            /* links, toast actions, focus ring */
+  --info-tint: #eaf1fe;
+  --selected: #eff4fe;        /* selected table rows */
+  --overlay: rgb(0 0 0 / 0.12);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.08);
+}
+
+.dark {
+  --bg: #0e0e10;
+  --bg-subtle: #151517;
+  --bg-muted: #232326;
+  --bg-elevated: #1a1a1d;
+  --fg: #ededee;
+  --fg-muted: #a1a1a8;
+  --fg-subtle: #6f6f77;
+  --border: #26262a;
+  --border-strong: #37373c;
+  --primary: #f2f2f2;         /* the primary button turns light */
+  --primary-hover: #ffffff;
+  --primary-fg: #111113;
+  --danger: #d23a2d;
+  --danger-hover: #e04a3d;
+  --danger-text: #f87171;
+  --danger-tint: #3a1614;
+  --success: #4ade80;
+  --success-tint: #11301d;
+  --warning: #fbbf24;
+  --warning-tint: #33270b;
+  --info: #60a5fa;
+  --info-tint: #13233f;
+  --selected: #15213a;
+  --overlay: rgb(0 0 0 / 0.55);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  --color-bg: var(--bg);
+  --color-subtle: var(--bg-subtle);
+  --color-muted: var(--bg-muted);
+  --color-elevated: var(--bg-elevated);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-text: var(--danger-text);
+  --color-danger-tint: var(--danger-tint);
+  --color-success: var(--success);
+  --color-success-tint: var(--success-tint);
+  --color-warning: var(--warning);
+  --color-warning-tint: var(--warning-tint);
+  --color-info: var(--info);
+  --color-info-tint: var(--info-tint);
+  --color-selected: var(--selected);
+  --color-overlay: var(--overlay);
+  --shadow-elevated: var(--shadow);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-size: 14px;
+    line-height: 1.45;
+    font-feature-settings: "cv11", "ss01";
+  }
+  :focus-visible {
+    outline: 2px solid var(--info);
+    outline-offset: 2px;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton { animation: shimmer 1.6s ease-in-out infinite; }
+}

@@ -26,6 +26,9 @@ type codec struct {
 	prepareRequest func(req map[string]any, t *Translation)
 	// upstream reads one stream event of this Shape from an Endpoint.
 	upstream func(data []byte) upstreamEvent
+	// fixUp, if set, corrects a decoded answer or stream event from an
+	// Endpoint (a DTO from answer or event) before it is converted.
+	fixUp func(v any)
 
 	// As the Caller's Shape:
 
@@ -34,6 +37,9 @@ type codec struct {
 	tidyAnswer func(m map[string]any, t *Translation, u *dto.Usage)
 	// newWriter writes a stream converted to this Shape to the Caller.
 	newWriter func(t *Translation, o StreamOptions) streamWriter
+	// streamID, if set, names a stream converted to this Shape (and the
+	// items the converter derives from it); otherwise the converter does.
+	streamID func(t *Translation) string
 	// noteRequest, when set, reads what the Caller's decoded request asks
 	// of the answer (Gemini: whether thoughts are wanted).
 	noteRequest func(req any, t *Translation)
@@ -48,7 +54,14 @@ type codec struct {
 var codecs = map[shape.Shape]*codec{
 	shape.OpenAIChat:        chatCodec,
 	shape.AnthropicMessages: anthropicCodec,
+	shape.OpenAIResponses:   responsesCodec,
 	shape.Gemini:            geminiCodec,
+}
+
+func (c *codec) fixUpstream(v any) {
+	if c.fixUp != nil {
+		c.fixUp(v)
+	}
 }
 
 // upstreamEvent is what one upstream stream event means.

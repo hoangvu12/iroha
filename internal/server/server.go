@@ -27,6 +27,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/modelrefresh"
 	"github.com/hoangvu12/iroha/internal/models"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/retention"
@@ -71,6 +72,7 @@ type Server struct {
 	started time.Time
 
 	modelStore *models.Store // model lists (ticket 10), built by models()
+	refresh    *modelrefresh.Scheduler
 
 	migrations store.MigrationResult
 	bootstrap  admintokens.Token // set only on the first start
@@ -144,6 +146,8 @@ func New(ctx context.Context, o Options) (*Server, error) {
 	s.owner = session.New(db, s.log)
 	s.jobs = jobs.NewRunner(db, s.log)
 	s.jobs.Add(retention.Job(db))
+	s.refresh = modelrefresh.New(db, s.models())
+	s.jobs.Add(s.refresh.Job())
 	for _, j := range o.Jobs {
 		s.jobs.Add(j)
 	}

@@ -13,12 +13,11 @@ import (
 )
 
 func TestTargetsAreTheShapesWithCodecs(t *testing.T) {
-	for _, sh := range []shape.Shape{shape.OpenAIChat, shape.AnthropicMessages, shape.Gemini} {
-		got := translate.Targets(sh)
-		for _, to := range []shape.Shape{shape.OpenAIChat, shape.AnthropicMessages, shape.Gemini} {
-			if slices.Contains(got, to) != (to != sh) {
-				t.Errorf("%s targets = %v", sh, got)
-			}
+	// Every Shape has a codec: each translates to every other, in shape.All order.
+	for _, sh := range shape.All {
+		want := slices.DeleteFunc(slices.Clone(shape.All), func(to shape.Shape) bool { return to == sh })
+		if got := translate.Targets(sh); !slices.Equal(got, want) {
+			t.Errorf("%s targets = %v, want %v", sh, got, want)
 		}
 	}
 	unknown := shape.Shape("unknown")

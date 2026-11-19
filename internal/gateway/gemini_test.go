@@ -363,6 +363,49 @@ func TestChatAndMessagesAreTranslatedForAGeminiEndpoint(t *testing.T) {
 	}
 }
 
+func TestGeminiAndResponsesTranslateBothWays(t *testing.T) {
+	srv := testkit.Start(t)
+	gem := testkit.NewGemini(t)
+	addGeminiProvider(t, srv, gem.URL(), nil)
+	oai := testkit.NewOpenAIResponses(t)
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "openai"}).Expect(201)
+	srv.Admin.Post("/api/providers/openai/endpoints", map[string]any{"url": oai.URL(), "shape": "openai-responses"}).Expect(201)
+	srv.Admin.Post("/api/providers/openai/keys", map[string]any{"secret": "sk-test-oai"}).Expect(201)
+	caller, _ := geminiCaller(t, srv)
+
+	// A Responses Caller on the Gemini Endpoint, streamed.
+	req := responsesReq("gemini-2.5-flash")
+	req["stream"] = true
+	resp := caller.Post(responsesPath, req).Expect(200)
+	if got := gem.Last(); got.Path != "/v1beta/models/gemini-2.5-flash:streamGenerateContent" || got.Query.Get("alt") != "sse" {
+		t.Fatalf("upstream got %s?%s", got.Path, got.Query.Encode())
+	}
+	evs, text := readResponses(t, resp.Events())
+	if evs[0].Type != "response.created" || evs[len(evs)-1].Type != "response.completed" || text != "Hello from the fake gemini upstream." {
+		t.Fatalf("events = %+v", evs)
+	}
+	r := readRequest(t, srv, resp.Header.Get("X-Request-Id"))
+	if r.ShapeIn != "openai-responses" || r.ShapeOut != "gemini" || r.Usage == nil || *r.Usage != (usage.Usage{Input: 10, Output: 5}) {
+		t.Fatalf("request = %+v usage %+v", r, r.Usage)
+	}
+
+	// A Gemini Caller on the Responses Endpoint, buffered and streamed.
+	resp = caller.Post("/providers/openai/v1beta/models/gpt-5:generateContent", generate("hi")).Expect(200)
+	if got := oai.Last(); got.Path != "/v1/responses" || got.Map(t)["model"] != "gpt-5" {
+		t.Fatalf("upstream got %s\n%s", got.Path, got.Body)
+	}
+	var ans geminiAnswer
+	resp.JSON(&ans)
+	if ans.ModelVersion != "gpt-5" || ans.text() != "Hello from the fake openai-responses upstream." {
+		t.Fatalf("answer = %s", resp.Body)
+	}
+	resp = caller.Post("/providers/openai/v1beta/models/gpt-5:streamGenerateContent?alt=sse", generate("hi")).Expect(200)
+	text, last := geminiChunks(t, resp.Events(), "gpt-5")
+	if text != "Hello from the fake openai-responses upstream." || last.UsageMetadata["promptTokenCount"] != float64(10) {
+		t.Fatalf("text %q, last chunk %+v", text, last)
+	}
+}
+
 func TestAGeminiStreamIsKeptAliveWithEmptyChunks(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewGemini(t)

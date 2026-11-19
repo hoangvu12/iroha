@@ -71,6 +71,7 @@ type RefreshResult struct {
 	Added       []string     `json:"added" doc:"Models discovered now that were not before."`
 	Removed     []string     `json:"removed" doc:"Models no longer discovered (entries the Owner added or hid stay)."`
 	GapsCleared int          `json:"model_gaps_cleared" doc:"Model Gaps cleared because the key's own list names the model (per-key discovery)."`
+	ModelsDev   string       `json:"models_dev,omitempty" enum:"ok,stale,unavailable,off" doc:"How the list's models were looked up in models.dev for metadata: ok; stale (models.dev unreachable, its last catalog used); unavailable (never read: earlier lookups kept); off. It never changes the outcome. Absent on a dry run."`
 }
 
 // listJob is one list to read.
@@ -103,6 +104,9 @@ func (s *Store) Refresh(ctx context.Context, provider string, dry bool) (Refresh
 			if err := s.saveSkipped(ctx, &rt, res); err != nil {
 				return res, err
 			}
+			if res.ModelsDev, err = s.supplement(context.WithoutCancel(ctx), rt.ID, nil); err != nil {
+				return res, err
+			}
 		}
 		return res, nil
 	}
@@ -121,6 +125,9 @@ func (s *Store) Refresh(ctx context.Context, provider string, dry bool) (Refresh
 		return res, err
 	}
 	keystate.LogGaps(s.log, gaps)
+	if res.ModelsDev, err = s.supplement(ctx, rt.ID, nil); err != nil {
+		return res, err
+	}
 	for _, j := range jobs {
 		attrs := []any{logs.Kind(logs.KindDiscovery), logs.Provider(rt.Handle), "endpoint", j.ep.Name, "outcome", j.res.Outcome, "found", j.res.Found}
 		if j.res.UpstreamKey != "" {

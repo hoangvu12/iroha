@@ -4,7 +4,7 @@ Gemini Callers (the Google GenAI SDKs, Gemini CLI) use `POST /providers/<handle>
 
 - **Gateway Key**: send it as `x-goog-api-key` (what the SDKs do), as `?key=<Gateway Key>`, or as `Authorization: Bearer`. None of them, the `key` parameter included, is ever forwarded to a Provider.
 - **Gemini Endpoints**: the body passes through unchanged and the wire model (after renames) goes in the upstream URL. Answers keep everything the Provider sent, with `modelVersion` set to the model you asked for.
-- **Other Endpoints**: contents, system instructions, tools and function calls, images, thinking (`thinkingConfig` <-> reasoning; thought parts come back when `includeThoughts` is true) and usage are translated both ways. OpenAI Chat and Anthropic Callers can be served by Gemini Endpoints the same way. Iroha downloads nothing: image URLs become Gemini `fileData`.
+- **Other Endpoints**: contents, system instructions, tools and function calls, images, thinking (`thinkingConfig` <-> reasoning; thought parts come back when `includeThoughts` is true) and usage are translated both ways. OpenAI Chat, OpenAI Responses and Anthropic Callers can be served by Gemini Endpoints the same way. Iroha downloads nothing: image URLs become Gemini `fileData`.
 - **Streams** are always server-sent events (as with `?alt=sse`). While Iroha waits on the Provider it sends chunks with one empty text part, which the SDKs read as no new text.
 - **Usage** is recorded as: input = `promptTokenCount` + `toolUsePromptTokenCount`, output = `candidatesTokenCount` + `thoughtsTokenCount`, reasoning = thoughts, cache read = `cachedContentTokenCount`.
 

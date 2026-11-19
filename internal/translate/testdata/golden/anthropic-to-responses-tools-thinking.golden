@@ -1,0 +1,138 @@
+== request sent upstream ==
+{
+  "input": [
+    {
+      "content": "Read /tmp/a.txt and file an issue about it.",
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Reading.",
+          "type": "output_text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "arguments": "{\"file_path\":\"/tmp/a.txt\"}",
+      "call_id": "toolu_1",
+      "name": "Read",
+      "type": "function_call"
+    },
+    {
+      "call_id": "toolu_1",
+      "output": "hello",
+      "type": "function_call_output"
+    }
+  ],
+  "instructions": "Be terse.",
+  "max_output_tokens": 4000,
+  "model": "gpt-5",
+  "reasoning": {
+    "effort": "medium",
+    "summary": "detailed"
+  },
+  "store": false,
+  "stream": true,
+  "tools": [
+    {
+      "description": "Read a file",
+      "name": "Read",
+      "parameters": {
+        "properties": {
+          "file_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "name": "mcp__github__create_issue",
+      "parameters": {
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "function"
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "content": [
+    {
+      "thinking": "File says hello.",
+      "type": "thinking"
+    },
+    {
+      "text": "Filing it.",
+      "type": "text"
+    },
+    {
+      "id": "call_7",
+      "input": {
+        "title": "hello"
+      },
+      "name": "mcp__github__create.issue",
+      "type": "tool_use"
+    }
+  ],
+  "id": "resp_2",
+  "model": "gpt-5",
+  "role": "assistant",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 128,
+    "input_tokens": 172,
+    "output_tokens": 60
+  }
+}
+== stream to the Caller ==
+event: message_start
+data: {"message":{"content":[],"id":"resp_2","model":"gpt-5","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":0,"output_tokens":0}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"thinking":"","type":"thinking"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"File says hello.","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"Filing it.","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":1,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"id":"call_7","input":{},"name":"mcp__github__create.issue","type":"tool_use"},"index":2,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"partial_json":"{\"title\":\"hello\"}","type":"input_json_delta"},"index":2,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":2,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"tool_use","stop_sequence":null},"type":"message_delta","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":128,"input_tokens":172,"output_tokens":60}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

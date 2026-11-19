@@ -41,6 +41,9 @@ type Options struct {
 	HTTPClient *http.Client
 	// Jobs are background jobs added to the built-in ones.
 	Jobs []jobs.Job
+	// ModelsDev is the base URL models.dev metadata is read from, usually
+	// a NewModelsDev fake's URL. Default: none, models.dev is never read.
+	ModelsDev string
 }
 
 // Server is a running in-process Iroha.
@@ -102,10 +105,14 @@ func Start(t testing.TB, opts ...Options) *Server {
 func (s *Server) start() {
 	s.t.Helper()
 	s.console = &syncBuffer{}
+	var modelsDev []string
+	if s.opts.ModelsDev != "" {
+		modelsDev = []string{s.opts.ModelsDev}
+	}
 	app, err := server.New(context.Background(), server.Options{
 		Config: config.Config{
 			DataDir: s.DataDir, Addr: "127.0.0.1:0", LogLevel: s.opts.LogLevel,
-			LogFormat: "json", DrainTimeout: 5 * time.Second,
+			LogFormat: "json", DrainTimeout: 5 * time.Second, ModelsDev: modelsDev,
 		},
 		Version:    s.opts.Version,
 		Clock:      s.Clock,

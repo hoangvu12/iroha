@@ -1,0 +1,61 @@
+{
+  "from": "openai-responses",
+  "to": "openai-chat",
+  "model": "deepseek-reasoner",
+  "wire_model": "deepseek-reasoner",
+  "request": {
+    "model": "deepseek-reasoner",
+    "instructions": "You are a coding agent.",
+    "stream": true,
+    "store": false,
+    "reasoning": {"effort": "medium", "summary": "auto"},
+    "max_output_tokens": 2048,
+    "parallel_tool_calls": false,
+    "input": [
+      {"type": "message", "role": "user", "content": [
+        {"type": "input_text", "text": "List the files, then read a.txt. What is in this image?"},
+        {"type": "input_image", "image_url": "https://example.com/cat.jpg"}
+      ]},
+      {"type": "function_call", "call_id": "call_1", "name": "shell.exec", "arguments": "{\"cmd\":\"ls\"}"},
+      {"type": "function_call_output", "call_id": "call_1", "output": "a.txt\nb.txt"},
+      {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "A cat. Reading a.txt next."}]}
+    ],
+    "tools": [
+      {"type": "function", "name": "shell.exec", "description": "Run a command", "strict": false,
+        "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}},
+      {"type": "function", "name": "read_file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}
+    ],
+    "tool_choice": "auto"
+  },
+  "answer": {
+    "id": "chatcmpl-ds1",
+    "object": "chat.completion",
+    "created": 1767225600,
+    "model": "deepseek-reasoner",
+    "choices": [{
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "reasoning_content": "The user wants a.txt read.",
+        "content": "Reading it.",
+        "tool_calls": [{"id": "call_2", "type": "function", "function": {"name": "shell_exec", "arguments": "{\"cmd\":\"cat a.txt\"}"}}]
+      },
+      "finish_reason": "tool_calls"
+    }],
+    "usage": {"prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200,
+      "prompt_tokens_details": {"cached_tokens": 64}, "completion_tokens_details": {"reasoning_tokens": 32}}
+  },
+  "stream": [
+    {"id": "chatcmpl-ds1", "object": "chat.completion.chunk", "created": 1767225600, "model": "deepseek-reasoner", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]},
+    {"id": "chatcmpl-ds1", "object": "chat.completion.chunk", "created": 1767225600, "model": "deepseek-reasoner", "choices": [{"index": 0, "delta": {"reasoning_content": "The user wants "}, "finish_reason": null}]},
+    {"id": "chatcmpl-ds1", "object": "chat.completion.chunk", "created": 1767225600, "model": "deepseek-reasoner", "choices": [{"index": 0, "delta": {"reasoning_content": "a.txt read."}, "finish_reason": null}]},
+    {"id": "chatcmpl-ds1", "object": "chat.completion.chunk", "created": 1767225600, "model": "deepseek-reasoner", "choices": [{"index": 0, "delta": {"content": "Reading it."}, "finish_reason": null}]},
+    {"id": "chatcmpl-ds1", "object": "chat.completion.chunk", "created": 1767225600, "model": "deepseek-reasoner", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_2", "type": "function", "function": {"name": "shell_exec", "arguments": ""}}]}, "finish_reason": null}]},
+    {"id": "chatcmpl-ds1", "object": "chat.completion.chunk", "created": 1767225600, "model": "deepseek-reasoner", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{\"cmd\":"}}]}, "finish_reason": null}]},
+    {"id": "chatcmpl-ds1", "object": "chat.completion.chunk", "created": 1767225600, "model": "deepseek-reasoner", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "\"cat a.txt\"}"}}]}, "finish_reason": null}]},
+    {"id": "chatcmpl-ds1", "object": "chat.completion.chunk", "created": 1767225600, "model": "deepseek-reasoner", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+    {"id": "chatcmpl-ds1", "object": "chat.completion.chunk", "created": 1767225600, "model": "deepseek-reasoner", "choices": [],
+      "usage": {"prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200, "prompt_tokens_details": {"cached_tokens": 64}, "completion_tokens_details": {"reasoning_tokens": 32}}},
+    "[DONE]"
+  ]
+}

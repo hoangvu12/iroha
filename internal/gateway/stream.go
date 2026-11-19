@@ -46,7 +46,8 @@ type streamShape interface {
 var streamShapes = map[shape.Shape]streamShape{
 	shape.OpenAIChat:        openAIChatStream{},
 	shape.AnthropicMessages: anthropicStream{},
-	shape.Gemini:            geminiStreamShape{},
+	shape.OpenAIResponses:   responsesStream{},   // responses.go
+	shape.Gemini:            geminiStreamShape{}, // gemini.go
 }
 
 // anthropicStream: Anthropic's own ping event keeps the stream alive (the

@@ -68,7 +68,9 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, up.URL())
 	alice, _ := keyNamed(t, srv, "alice")
-	bob, _ := keyNamed(t, srv, "bob")
+	// "bob0": q also matches Request IDs (a-z, 2-7), and a random ID may
+	// contain "bob" but never "bob0".
+	bob, _ := keyNamed(t, srv, "bob0")
 
 	if s := statsOf(t, srv, ""); s.Requests != 0 || s.MedianDurationMs != nil || s.MedianFirstByteMs != nil {
 		t.Fatalf("empty stats = %+v", s)
@@ -103,12 +105,12 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 		{"caller=alice", 3, 3, 2000},
 		{"caller=alice&model=gpt-x", 2, 2, 2000},
 		{"model=gpt-x&model=gpt-y&caller=alice", 3, 3, 2000},
-		{"caller=bob", 2, 1, 4000},
+		{"caller=bob0", 2, 1, 4000},
 		{"status=failed", 1, 0, 0},
 		{"status=2xx", 4, 4, 2500},
 		{"status=4xx&status=200", 5, 4, 2500},
 		{"q=gpt-y", 1, 1, 2000},
-		{"q=BOB", 2, 1, 4000},
+		{"q=BOB0", 2, 1, 4000},
 		{"provider=acme&since=1h", 5, 4, 2500},
 	} {
 		s := statsOf(t, srv, tc.q)

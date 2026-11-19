@@ -11,8 +11,8 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Usage is the token count of one answer (OpenAI Chat, Anthropic Messages,
-// Gemini).
+// Usage is the token count of one answer (OpenAI Chat, OpenAI Responses,
+// Anthropic Messages, Gemini).
 type Usage struct {
 	Input     int64 `json:"input" doc:"Prompt tokens, cached ones included."`
 	Output    int64 `json:"output" doc:"Completion tokens, reasoning included."`
@@ -35,6 +35,8 @@ func (r *Reader) Body(b []byte) {
 	switch r.sh {
 	case shape.OpenAIChat:
 		r.chat(b)
+	case shape.OpenAIResponses:
+		r.responses(b)
 	case shape.AnthropicMessages:
 		var v struct {
 			Usage *anthropicCounts `json:"usage"`
@@ -59,9 +61,10 @@ func (r *Reader) Event(data []byte) {
 	switch r.sh {
 	case shape.OpenAIChat:
 		r.chat(data)
+	case shape.OpenAIResponses:
+		r.responses(data)
 	case shape.Gemini:
 		r.gemini(data) // each chunk's counts are the stream's so far
-		return
 	case shape.AnthropicMessages:
 		var v struct {
 			Type    string `json:"type"`

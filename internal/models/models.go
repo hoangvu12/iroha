@@ -31,6 +31,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
+	"github.com/hoangvu12/iroha/internal/modelmeta"
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/store"
@@ -43,6 +44,7 @@ type Options struct {
 	HTTPClient *http.Client // discovery requests; redirects are never followed
 	Providers  *providers.Store
 	Keys       *gatewaykeys.Store // authenticates Callers of /providers/{handle}/v1/models
+	ModelsDev  *modelmeta.Source  // model metadata (ticket 11); nil: never read
 }
 
 // Store keeps model lists.
@@ -53,13 +55,14 @@ type Store struct {
 	http      *http.Client
 	providers *providers.Store
 	keys      *gatewaykeys.Store
+	meta      *modelmeta.Source
 }
 
 // New returns a Store.
 func New(o Options) *Store {
 	hc := *o.HTTPClient
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Store{db: o.DB, log: o.Log, clock: o.DB.Clock(), http: &hc, providers: o.Providers, keys: o.Keys}
+	return &Store{db: o.DB, log: o.Log, clock: o.DB.Clock(), http: &hc, providers: o.Providers, keys: o.Keys, meta: o.ModelsDev}
 }
 
 // entryID is the record ID of a Provider's entry for model: derived from
@@ -159,6 +162,11 @@ type Model struct {
 	UpstreamKeys []string   `json:"upstream_keys" doc:"Under per-key discovery: names of the keys whose own list names it; they are tried first for it."`
 	ModelGaps    []string   `json:"model_gaps" doc:"Names of the keys with a live Model Gap for it (the Provider refused them the model)."`
 	DiscoveredAt *time.Time `json:"discovered_at,omitempty" doc:"The last refresh whose lists named it."`
+	// Metadata (ticket 11).
+	Metadata  modelmeta.Facts `json:"metadata" doc:"What Callers' model lists say of it: each field from overrides, else reported, else models_dev; chat ok unless known not to chat."`
+	Overrides modelmeta.Facts `json:"overrides" doc:"The Owner's metadata overrides; set them with POST /api/providers/{provider}/models {\"model\": ..., \"metadata\": {...}}."`
+	Reported  modelmeta.Facts `json:"reported" doc:"What the Provider's own model list said of it at the last refresh."`
+	ModelsDev modelmeta.Facts `json:"models_dev" doc:"What models.dev said of it at the last lookup, under the Provider's models_dev_brand."`
 }
 
 // readEntries reads every entry of a Provider that some flag keeps, with
@@ -166,17 +174,22 @@ type Model struct {
 func readEntries(ctx context.Context, q querier, providerID string, now time.Time) ([]Model, error) {
 	byModel := map[string]*Model{}
 	var out []*Model
-	rows, err := q.QueryContext(ctx, `SELECT id, model, added, hidden, discovered_at FROM provider_models WHERE provider_id = ?`, providerID)
+	overridden := map[string]bool{}
+	rows, err := q.QueryContext(ctx, `SELECT m.id, m.model, m.added, m.hidden, m.discovered_at, m.reported, m.overrides, m.external, m.external_brand, p.models_dev_brand
+		FROM provider_models m JOIN providers p ON p.id = m.provider_id WHERE m.provider_id = ?`, providerID)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		m := &Model{Endpoints: []string{}, UpstreamKeys: []string{}, ModelGaps: []string{}}
 		var at sql.NullInt64
-		if err := rows.Scan(&m.ID, &m.Model, &m.Added, &m.Hidden, &at); err != nil {
+		var reported, overrides, external, externalBrand, brand string
+		if err := rows.Scan(&m.ID, &m.Model, &m.Added, &m.Hidden, &at, &reported, &overrides, &external, &externalBrand, &brand); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		m.setMetadata(entryLayers(brand, reported, overrides, external, externalBrand))
+		overridden[m.Model] = overrides != ""
 		if at.Valid {
 			t := store.FromMillis(at.Int64)
 			m.DiscoveredAt = &t
@@ -237,7 +250,7 @@ func readEntries(ctx context.Context, q querier, providerID string, now time.Tim
 	}
 	list := make([]Model, 0, len(out))
 	for _, m := range out {
-		if !m.Discovered && !m.Added && !m.Hidden {
+		if !m.Discovered && !m.Added && !m.Hidden && !overridden[m.Model] {
 			continue // its lists are gone (Endpoint or key deleted); the next refresh deletes it
 		}
 		m.Visible = (m.Discovered || m.Added) && !m.Hidden
@@ -258,7 +271,9 @@ func readEntry(ctx context.Context, q querier, providerID, model string, now tim
 			return m, true, nil
 		}
 	}
-	return Model{ID: entryID(providerID, model), Model: model, Endpoints: []string{}, UpstreamKeys: []string{}, ModelGaps: []string{}}, false, nil
+	out := Model{ID: entryID(providerID, model), Model: model, Endpoints: []string{}, UpstreamKeys: []string{}, ModelGaps: []string{}}
+	out.setMetadata(layers{})
+	return out, false, nil
 }
 
 // Visible lists the models Callers of a Provider see: discovered or added,
@@ -307,9 +322,10 @@ type querier interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-// pruneEntries deletes a Provider's entries that no flag keeps.
+// pruneEntries deletes a Provider's entries that no flag (nor an Owner
+// override) keeps.
 func pruneEntries(ctx context.Context, q querier, providerID string) error {
-	_, err := q.ExecContext(ctx, `DELETE FROM provider_models WHERE provider_id = ? AND added = 0 AND hidden = 0
+	_, err := q.ExecContext(ctx, `DELETE FROM provider_models WHERE provider_id = ? AND added = 0 AND hidden = 0 AND overrides = ''
 		AND NOT EXISTS (SELECT 1 FROM provider_model_sources src WHERE src.provider_id = provider_models.provider_id AND src.model = provider_models.model)`, providerID)
 	return err
 }

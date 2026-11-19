@@ -160,11 +160,27 @@ func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
 			seq++
 			return sse(typ, fields)
 		}
-		events = append(events, ev("response.created", map[string]any{"response": responsesObject(id, r.Model, "in_progress", "", us)}))
+		// The event sequence OpenAI sends for one message.
+		full := strings.Join(pieces, "")
+		item := func(status string, content []any) map[string]any {
+			return map[string]any{"type": "message", "id": "msg_" + id, "role": "assistant", "status": status, "content": content}
+		}
+		part := func(text string) map[string]any {
+			return map[string]any{"type": "output_text", "text": text, "annotations": []any{}}
+		}
+		events = append(events,
+			ev("response.created", map[string]any{"response": responsesObject(id, r.Model, "in_progress", "", us)}),
+			ev("response.in_progress", map[string]any{"response": responsesObject(id, r.Model, "in_progress", "", us)}),
+			ev("response.output_item.added", map[string]any{"output_index": 0, "item": item("in_progress", []any{})}),
+			ev("response.content_part.added", map[string]any{"item_id": "msg_" + id, "output_index": 0, "content_index": 0, "part": part("")}))
 		for _, p := range pieces {
 			events = append(events, ev("response.output_text.delta", map[string]any{"item_id": "msg_" + id, "output_index": 0, "content_index": 0, "delta": p}))
 		}
-		events = append(events, ev("response.completed", map[string]any{"response": responsesObject(id, r.Model, "completed", strings.Join(pieces, ""), us)}))
+		events = append(events,
+			ev("response.output_text.done", map[string]any{"item_id": "msg_" + id, "output_index": 0, "content_index": 0, "text": full}),
+			ev("response.content_part.done", map[string]any{"item_id": "msg_" + id, "output_index": 0, "content_index": 0, "part": part(full)}),
+			ev("response.output_item.done", map[string]any{"output_index": 0, "item": item("completed", []any{part(full)})}),
+			ev("response.completed", map[string]any{"response": responsesObject(id, r.Model, "completed", full, us)}))
 	case shape.AnthropicMessages:
 		events = append(events,
 			sse("message_start", map[string]any{"type": "message_start", "message": map[string]any{

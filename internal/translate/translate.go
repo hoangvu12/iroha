@@ -175,6 +175,7 @@ func (t *Translation) Response(ctx context.Context, body []byte) ([]byte, error)
 	if err := json.Unmarshal(body, in); err != nil {
 		return nil, fmt.Errorf("the Provider's answer is not a valid %s answer: %w", t.endpoint.shape, err)
 	}
+	t.endpoint.fixUpstream(in)
 	in, err := t.toChat(ctx, in) // hop.go
 	if err != nil {
 		return nil, err
@@ -216,7 +217,12 @@ type Stream struct {
 
 // Stream starts converting a streamed answer from the Endpoint.
 func (t *Translation) Stream(o StreamOptions) (*Stream, error) {
-	so := relayconvert.ResponseStreamOptions{Model: t.o.Model, Created: t.o.Now.Unix(), IncludeUsage: true}
+	// EmitSequenceNumber only changes streams written in Responses: the
+	// fields its current wire contract requires (text, arguments on .done).
+	so := relayconvert.ResponseStreamOptions{Model: t.o.Model, Created: t.o.Now.Unix(), IncludeUsage: true, EmitSequenceNumber: true}
+	if t.caller.streamID != nil {
+		so.ID = t.caller.streamID(t)
+	}
 	st, err := relayconvert.NewResponseStreamState(t.streamFrom(), t.caller.format, so)
 	if err != nil {
 		return nil, err
@@ -246,6 +252,7 @@ func (s *Stream) Event(ctx context.Context, data []byte) ([]byte, error) {
 	if err := json.Unmarshal(data, in); err != nil {
 		return nil, fmt.Errorf("the Provider sent a stream event that is not a valid %s event: %w", s.t.endpoint.shape, err)
 	}
+	s.t.endpoint.fixUpstream(in)
 	return s.convert(ctx, in) // hop.go
 }
 
@@ -256,9 +263,15 @@ func (s *Stream) End(ctx context.Context) ([]byte, error) {
 	if !s.complete {
 		return nil, ErrIncomplete
 	}
-	pre, err := s.endHop(ctx)
+	pre, err := s.endHop(ctx) // hop.go
 	if err != nil {
 		return nil, err
+	}
+	// The usage merged over every event and step: a converter that goes
+	// through Chat would otherwise close with the last chunk's counts only
+	// (Anthropic's input tokens arrive in message_start).
+	if u := s.st.Usage(); u != nil {
+		s.st.SetUsage(u)
 	}
 	res, err := relayconvert.FinalizeStreamResponse(ctx, s.t.metaOrEmpty(), s.st)
 	if err != nil {

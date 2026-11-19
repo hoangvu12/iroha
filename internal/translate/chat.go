@@ -37,6 +37,10 @@ var chatCodec = &codec{
 			}
 		}
 		rename(obj(obj(req["tool_choice"])["function"]), "name", t.names.safe)
+		// A Responses Caller's store (keep the response at the Provider)
+		// means something else in Chat, where it is off by default; strict
+		// Providers refuse the field.
+		delete(req, "store")
 		if req["stream"] == true {
 			// Usage is recorded for every Request, and the converter needs
 			// it to report usage in the Caller's Shape.

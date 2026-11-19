@@ -1,0 +1,109 @@
+== request sent upstream ==
+{
+  "input": [
+    {
+      "content": "Read /tmp/a.txt and file an issue about it.",
+      "role": "user"
+    },
+    {
+      "content": "Reading.",
+      "role": "assistant"
+    },
+    {
+      "arguments": "{\"path\":\"/tmp/a.txt\"}",
+      "call_id": "call_1",
+      "name": "fs_read",
+      "type": "function_call"
+    },
+    {
+      "call_id": "call_1",
+      "output": "{\"content\":\"hello\"}",
+      "type": "function_call_output"
+    }
+  ],
+  "instructions": "Be terse.",
+  "max_output_tokens": 4000,
+  "model": "gpt-5",
+  "reasoning": {
+    "effort": "medium",
+    "summary": "detailed"
+  },
+  "store": false,
+  "stream": true,
+  "tools": [
+    {
+      "description": "Read a file",
+      "name": "fs_read",
+      "parameters": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "name": "create_issue",
+      "parameters": {
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "function"
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "File says hello.",
+            "thought": true
+          },
+          {
+            "text": "Filing it."
+          },
+          {
+            "functionCall": {
+              "args": {
+                "title": "hello"
+              },
+              "id": "call_7",
+              "name": "create_issue"
+            }
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gpt-5",
+  "responseId": "req_golden",
+  "usageMetadata": {
+    "cachedContentTokenCount": 128,
+    "candidatesTokenCount": 40,
+    "promptTokenCount": 300,
+    "thoughtsTokenCount": 20,
+    "totalTokenCount": 360
+  }
+}
+== stream to the Caller ==
+data: {"candidates":[{"content":{"parts":[{"text":"File says hello.","thought":true}],"role":"model"},"index":0}],"modelVersion":"gpt-5","responseId":"req_golden"}
+
+data: {"candidates":[{"content":{"parts":[{"text":"Filing it."}],"role":"model"},"index":0}],"modelVersion":"gpt-5","responseId":"req_golden"}
+
+data: {"candidates":[{"content":{"parts":[{"functionCall":{"args":{"title":"hello"},"id":"call_7","name":"create_issue"}}],"role":"model"},"finishReason":"STOP","index":0}],"modelVersion":"gpt-5","responseId":"req_golden","usageMetadata":{"cachedContentTokenCount":128,"candidatesTokenCount":40,"promptTokenCount":300,"thoughtsTokenCount":20,"totalTokenCount":360}}
+

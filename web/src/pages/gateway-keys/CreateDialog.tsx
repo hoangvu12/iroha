@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { Check, RotateCcw } from "lucide-react";
+import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { Disclosure } from "@/ui/Disclosure";
 import { Field, Input } from "@/ui/Input";
-import { notifyChange } from "@/ui/toast";
+import { SaveError, useSave } from "@/ui/SaveStatus";
+import { notify } from "@/ui/toast";
 import { type GatewayKey, useCreateKey, useInvalidateKeys } from "./api";
 import { baseUrls, CopyBox } from "./bits";
 import { emptyDraft, toScope } from "./scope";
@@ -19,7 +21,8 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
   const [draft, setDraft] = useState(emptyDraft);
   const [error, setError] = useState<string>();
   const [scopeError, setScopeError] = useState<string>();
-  const [made, setMade] = useState<GatewayKey>();
+  const [made, setMade] = useState<{ key: GatewayKey; entry?: string }>();
+  const undo = useSave({ refresh: invalidate });
 
   const close = (o: boolean) => {
     onOpenChange(o);
@@ -29,6 +32,7 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
       setError(undefined);
       setScopeError(undefined);
       setMade(undefined);
+      undo.clear();
       create.reset();
     }
   };
@@ -48,13 +52,8 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
     create.mutate(
       { name: n, scope: toScope(draft) },
       {
-        onSuccess: (res) => {
-          setMade(res.gateway_key);
-          notifyChange(`Gateway Key ${res.gateway_key.name} created`, res, {
-            undoneMessage: `${res.gateway_key.name} deleted`,
-            onUndone: invalidate,
-          });
-        },
+        // The dialog stays open on the new key, which says it was created; Undo is in its footer.
+        onSuccess: (res) => setMade({ key: res.gateway_key, entry: res.audit_entry }),
         onError: (e) => setError(isApiError(e) ? `${e.message} ${e.hint}`.trim() : String(e)),
       },
     );
@@ -62,6 +61,14 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
 
   if (made) {
     const urls = baseUrls();
+    const { key, entry } = made;
+    // Undo deletes the key again and closes the dialog; with the dialog gone, a toast says so.
+    const undoCreate = async () => {
+      if (entry && (await undo.run(() => revertEntry(entry)))) {
+        close(false);
+        notify.success(`Gateway Key ${key.name} deleted`);
+      }
+    };
     return (
       <Dialog
         open={open}
@@ -78,15 +85,22 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
         }
         description="Copy it now and give it to the Caller. You can copy it again later from the key's page."
         footer={
-          <Button variant="primary" onClick={() => close(false)}>
-            Done
-          </Button>
+          <>
+            {entry && (
+              <Button variant="ghost" icon={RotateCcw} className="mr-auto" aria-label={`Undo: delete ${key.name}`} loading={undo.pending} onClick={() => void undoCreate()}>
+                Undo
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => close(false)}>
+              Done
+            </Button>
+          </>
         }
       >
         <div className="flex flex-col gap-4">
           <div>
-            <p className="mb-2 text-sm font-medium text-fg">Key for {made.name}</p>
-            <CopyBox value={made.secret} what="Gateway Key" />
+            <p className="mb-2 text-sm font-medium text-fg">Key for {key.name}</p>
+            <CopyBox value={key.secret} what="Gateway Key" />
           </div>
           <div>
             <p className="mb-2 text-sm font-medium text-fg">Base URL</p>
@@ -105,6 +119,7 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
               </div>
             </div>
           </Disclosure>
+          <SaveError save={undo} />
         </div>
       </Dialog>
     );

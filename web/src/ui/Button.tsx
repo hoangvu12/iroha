@@ -14,6 +14,11 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   loading?: boolean;
   // Keeps a disabled button focusable, so a tooltip can say why.
   focusableWhenDisabled?: boolean;
+  /**
+   * The danger tone: this button deletes, removes, revokes or clears something (UI ticket 21).
+   * `"hover"`: neutral at rest, red on hover and focus, for an action repeated on every row of a list.
+   */
+  danger?: boolean | "hover";
   children?: ReactNode;
 };
 
@@ -22,8 +27,16 @@ const variants: Record<Variant, string> = {
   primary: "bg-primary text-primary-fg hover:bg-primary-hover",
   secondary: "bg-bg text-fg border border-border-strong hover:bg-muted",
   ghost: "text-fg hover:bg-muted",
-  // Red appears only on the button that deletes or revokes.
+  // Solid red: only the button in a confirmation that does it.
   danger: "bg-danger text-white hover:bg-danger-hover",
+};
+
+// The danger tone of each variant: red text (and border), a red tint on hover.
+const dangerTones: Record<Variant, string> = {
+  primary: variants.danger,
+  secondary: "bg-bg text-danger-text border border-danger hover:bg-danger-tint",
+  ghost: "text-danger-text hover:bg-danger-tint",
+  danger: variants.danger,
 };
 
 const sizes: Record<Size, string> = {
@@ -32,21 +45,31 @@ const sizes: Record<Size, string> = {
   lg: "h-11 px-4 text-[15px] gap-2",
 };
 
+// The press (architecture.md "UI motion system"): every button and icon
+// button scales down while held, except while disabled or pending. The same
+// transition carries the hover colours; reduced motion holds the scale at 1.
+const press =
+  "transition-[scale,background-color,color] duration-press ease-out active:not-data-disabled:not-data-pending:scale-(--motion-scale-press)";
+
 // disabled: for other elements styled with buttonClass; data-disabled for UI
 // SDK's Button, which also marks a focusable disabled button that way.
 const base =
-  "inline-flex select-none items-center justify-center whitespace-nowrap rounded-lg font-medium transition-colors " +
+  `inline-flex select-none items-center justify-center whitespace-nowrap rounded-lg font-medium ${press} ` +
   "disabled:opacity-50 data-disabled:opacity-50 data-pending:cursor-progress";
 
 /** Button looks for a <Link> or <a> (never nest a button in a link). */
-export function buttonClass(variant: Variant = "secondary", size: Size = "md", className?: string) {
-  return cn(base, variants[variant], sizes[size], className);
+const dangerOnHover =
+  "hover:bg-danger-tint hover:text-danger-text hover:border-danger focus-visible:text-danger-text focus-visible:border-danger";
+
+export function buttonClass(variant: Variant = "secondary", size: Size = "md", className?: string, danger?: boolean | "hover") {
+  const tone = danger === "hover" ? cn(variants[variant], dangerOnHover) : danger ? dangerTones[variant] : variants[variant];
+  return cn(base, tone, sizes[size], className);
 }
 
 // `loading` is for a request the page tracks; an onClick that returns a
 // Promise keeps UI SDK's Button pending by itself until the Promise settles.
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = "secondary", size = "md", icon: Icon, loading, disabled, className, children, type = "button", onClick, ...rest },
+  { variant = "secondary", size = "md", icon: Icon, loading, disabled, danger, className, children, type = "button", onClick, ...rest },
   ref,
 ) {
   return (
@@ -55,7 +78,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={buttonClass(variant, size, className)}
+      data-danger={danger === "hover" ? "hover" : danger || undefined}
+      className={buttonClass(variant, size, className, danger)}
       onClick={onClick && ((e) => onClick(e as MouseEvent<HTMLButtonElement>))}
       {...rest}
     >
@@ -68,15 +92,26 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   icon: ComponentType<{ size?: number; className?: string }>;
   label: string; // accessible name and tooltip
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
   bordered?: boolean;
+  /** The danger tone (UI ticket 21): grey at rest like every icon button, red on hover and focus. */
+  danger?: boolean;
+  // A disabled icon button stays focusable, so its tooltip can still be reached.
+  focusableWhenDisabled?: boolean;
 };
 
-export function iconButtonClass(size: "sm" | "md" = "md", bordered?: boolean, className?: string) {
+// xs: the × inside a chip.
+const iconSizes = { xs: "size-5 rounded", sm: "size-7 rounded-lg", md: "size-9 rounded-lg" };
+const iconPx = { xs: 13, sm: 15, md: 17 };
+
+export function iconButtonClass(size: "xs" | "sm" | "md" = "md", bordered?: boolean, className?: string, danger?: boolean) {
   return cn(
-    "inline-flex shrink-0 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-muted hover:text-fg",
-    "disabled:opacity-50 data-disabled:opacity-50 data-open:bg-muted data-open:text-fg",
-    size === "sm" ? "size-7" : "size-9",
+    `inline-flex shrink-0 items-center justify-center text-fg-muted ${press}`,
+    danger
+      ? "hover:bg-danger-tint hover:text-danger-text focus-visible:text-danger-text data-open:bg-danger-tint data-open:text-danger-text"
+      : "hover:bg-muted hover:text-fg data-open:bg-muted data-open:text-fg",
+    "disabled:opacity-50 data-disabled:opacity-50",
+    iconSizes[size],
     bordered && "border border-border-strong text-fg",
     className,
   );
@@ -84,7 +119,7 @@ export function iconButtonClass(size: "sm" | "md" = "md", bordered?: boolean, cl
 
 // The label is the button's name and its tooltip.
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { icon: Icon, label, size = "md", bordered, className, type = "button", onClick, ...rest },
+  { icon: Icon, label, size = "md", bordered, danger, className, type = "button", onClick, ...rest },
   ref,
 ) {
   return (
@@ -92,11 +127,12 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       <SdkButton
         ref={ref}
         type={type}
-        className={iconButtonClass(size, bordered, className)}
+        data-danger={danger || undefined}
+        className={iconButtonClass(size, bordered, className, danger)}
         onClick={onClick && ((e) => onClick(e as MouseEvent<HTMLButtonElement>))}
         {...rest}
       >
-        <Icon size={size === "sm" ? 15 : 17} aria-hidden />
+        <Icon size={iconPx[size]} aria-hidden />
       </SdkButton>
     </Tip>
   );

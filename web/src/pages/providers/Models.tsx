@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Eraser, Eye, EyeOff, ListPlus, ListX, MoreHorizontal, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eraser, Eye, EyeOff, ListPlus, ListX, MessageCircle, MoreHorizontal, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { useChatPanel } from "@/app/chat-panel";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { useConfirm } from "@/ui/Confirm";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState, NoResults } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { notify, notifyChange } from "@/ui/toast";
 import type { Facts, Model, ModelFilter } from "./api";
 import { calls, errorText, MODEL_PAGE, useKeys, useModels, useRefresh } from "./api";
@@ -30,6 +33,8 @@ export function ModelsTab({ handle }: { handle: string }) {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Model>();
   const [resetting, setResetting] = useState(false);
+  const confirm = useConfirm();
+  const chat = useChatPanel();
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -42,6 +47,7 @@ export function ModelsTab({ handle }: { handle: string }) {
   const totalKeys = keys.data?.length ?? 0;
   const data = models.data;
 
+  // Toast (both): these run from the row's menu, which has closed, and the row may leave the filter.
   const change = async (m: Model, body: { hidden?: boolean; added?: boolean }, what: string) => {
     try {
       const res = await calls.saveModel(handle, { model: m.model, ...body });
@@ -55,7 +61,7 @@ export function ModelsTab({ handle }: { handle: string }) {
     try {
       const res = await calls.bulkKeys(handle, "clear-model-gaps", m.model_gaps, m.model);
       refresh();
-      notifyChange(`Model Gaps for ${m.model} cleared on ${res.succeeded} key${res.succeeded === 1 ? "" : "s"}`, res, { onUndone: refresh });
+      notifyChange(gapsCleared(m, res.succeeded), res, { onUndone: refresh });
     } catch (e) {
       notify.failure("Couldn't clear the Model Gaps", e);
     }
@@ -68,6 +74,9 @@ export function ModelsTab({ handle }: { handle: string }) {
         <MenuItem icon={SlidersHorizontal} onSelect={() => setEditing(m)}>
           Details…
         </MenuItem>
+        <MenuItem icon={MessageCircle} onSelect={() => chat.open({ kind: "model", provider: handle, model: m.model })}>
+          Test in Chat
+        </MenuItem>
         {m.hidden ? (
           <MenuItem icon={Eye} onSelect={() => void change(m, { hidden: false }, `${m.model} shown to Callers`)}>
             Show to Callers
@@ -77,9 +86,29 @@ export function ModelsTab({ handle }: { handle: string }) {
             Hide from Callers
           </MenuItem>
         )}
-        {m.added ? (
-          <MenuItem icon={ListX} onSelect={() => void change(m, { added: false }, m.discovered ? `${m.model} no longer pinned` : `${m.model} removed`)}>
-            {m.discovered ? "Unpin" : "Remove from the list"}
+        {m.added && m.discovered ? (
+          <MenuItem icon={ListX} onSelect={() => void change(m, { added: false }, `${m.model} no longer pinned`)}>
+            Unpin
+          </MenuItem>
+        ) : m.added ? (
+          <MenuItem
+            icon={ListX}
+            danger
+            onSelect={() =>
+              confirm.ask({
+                title: `Remove ${m.model} from ${handle}?`,
+                body: `Callers stop seeing ${m.model} in ${handle}'s model list. Undo brings it back.`,
+                confirmLabel: "Remove model",
+                onConfirm: async () => {
+                  const res = await calls.saveModel(handle, { model: m.model, added: false });
+                  refresh();
+                  // Toast: the menu and the confirm have closed, and the row leaves the list.
+                  notifyChange(`${m.model} removed`, res, { onUndone: refresh });
+                },
+              })
+            }
+          >
+            Remove from the list…
           </MenuItem>
         ) : (
           <MenuItem icon={ListPlus} onSelect={() => void change(m, { added: true }, `${m.model} pinned to the list`)}>
@@ -98,17 +127,8 @@ export function ModelsTab({ handle }: { handle: string }) {
     </Menu>
   );
 
-  const gapsCell = (m: Model) =>
-    m.model_gaps.length ? (
-      <span className="inline-flex items-center gap-2" title={m.model_gaps.join(", ")}>
-        <Pill tone="blue">{m.model_gaps.length === 1 ? "1 key" : `${m.model_gaps.length} keys`}</Pill>
-        <button type="button" className="text-[14px] text-info hover:underline" onClick={(e) => (e.stopPropagation(), void clearGaps(m))}>
-          Clear
-        </button>
-      </span>
-    ) : (
-      <span className="text-fg-muted">None</span>
-    );
+  // With "With Model Gaps" shown, a cleared row leaves the list: then the menu's toast is the only place left.
+  const gapsCell = (m: Model) => <GapsCell handle={handle} m={m} onLeaves={filter === "gaps" ? () => void clearGaps(m) : undefined} />;
 
   const tags = (m: Model) => (
     <>
@@ -267,6 +287,7 @@ export function ModelsTab({ handle }: { handle: string }) {
         </div>
       )}
 
+      {confirm.dialog}
       <AddModelDialog handle={handle} open={adding} onOpenChange={setAdding} />
       <ModelDialog handle={handle} model={editing} onClose={() => setEditing(undefined)} />
       <ConfirmDialog
@@ -278,10 +299,34 @@ export function ModelsTab({ handle }: { handle: string }) {
         onConfirm={async () => {
           const r = await calls.resetModels(handle);
           refresh();
+          // Toast: the confirm dialog has closed.
           notify.success(`${r.removed.length} discovered model${r.removed.length === 1 ? "" : "s"} forgotten; ${r.kept} kept`);
         }}
       />
     </section>
+  );
+}
+
+const gapsCleared = (m: Model, n: number) => `Model Gaps for ${m.model} cleared on ${n} key${n === 1 ? "" : "s"}`;
+
+/** A model's Model Gaps, with Clear: the result (and Undo) shows in the cell, a failure under it. */
+function GapsCell({ handle, m, onLeaves }: { handle: string; m: Model; onLeaves?: () => void }) {
+  const refresh = useRefresh();
+  const saving = useSave({ refresh, describe: errorText });
+  if (saving.done || saving.pending) return <SaveStatus save={saving} />;
+  if (!m.model_gaps.length) return <span className="text-fg-muted">None</span>;
+  const clear = () =>
+    onLeaves ? onLeaves() : void saving.run(() => calls.bulkKeys(handle, "clear-model-gaps", m.model_gaps, m.model), { message: (r) => `Cleared on ${r.succeeded} key${r.succeeded === 1 ? "" : "s"}` });
+  return (
+    <span className="inline-flex flex-col items-start gap-1">
+      <span className="inline-flex items-center gap-2" title={m.model_gaps.join(", ")}>
+        <Pill tone="blue">{m.model_gaps.length === 1 ? "1 key" : `${m.model_gaps.length} keys`}</Pill>
+        <button type="button" className="text-[14px] text-info hover:underline" onClick={clear}>
+          Clear
+        </button>
+      </span>
+      <SaveError save={saving} className="text-[12.5px]" />
+    </span>
   );
 }
 
@@ -304,6 +349,7 @@ function AddModelDialog({ handle, open, onOpenChange }: { handle: string; open: 
     try {
       const res = await calls.saveModel(handle, { model: m, added: true });
       refresh();
+      // Toast: the Add model dialog closes on success.
       notifyChange(`${m} added`, res, { onUndone: refresh });
       close(false);
     } catch (e) {
@@ -382,6 +428,7 @@ function ModelDialog({ handle, model, onClose }: { handle: string; model?: Model
     try {
       const res = await calls.saveModel(handle, { model: model.model, metadata });
       refresh();
+      // Toast: the Details dialog closes on Save.
       notifyChange(`${model.model} details saved`, res, { onUndone: refresh });
       onClose();
     } catch (e) {

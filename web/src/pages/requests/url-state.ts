@@ -1,10 +1,11 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router";
+import { useSheets } from "@/sheets/stack";
 import type { Query } from "./api";
 
 // Everything the Requests page shows is in its URL, so a view can be
 // bookmarked or sent to someone: filters, time range, hidden columns and
-// the open Request (/requests?caller=Test%20(as%20zeron-fleet)&status=failed&range=24h&hide=key,shape&request=req_...).
+// the open sheets (/requests?caller=Test%20(as%20zeron-fleet)&status=failed&range=24h&hide=key,shape&sheet=request:req_...).
 
 export const RANGES = [
   { id: "15m", label: "Last 15 minutes", since: "15m", phrase: "in the last 15 minutes" },
@@ -58,7 +59,10 @@ export function useRequestsUrl() {
     return f;
   }, [params]);
   const hidden = useMemo(() => new Set((params.get("hide") ?? "").split(",").filter(Boolean)), [params]);
-  const selected = params.get("request") ?? undefined;
+  // The open Request is the stack's first sheet (spec "Stacked sheets"); ?request=<id> still opens it.
+  const sheets = useSheets();
+  const first = sheets.stack[0]?.record;
+  const selected = first?.kind === "request" ? first.id : undefined;
 
   const query: Query = useMemo(() => ({ ...filters, since: rangeInfo.since }), [filters, rangeInfo.since]);
 
@@ -96,7 +100,7 @@ export function useRequestsUrl() {
       update({ hide: COLUMNS.filter((x) => n.has(x.id)).map((x) => x.id).join(",") || undefined });
     },
     resetColumns: () => update({ hide: undefined }),
-    select: (id: string | undefined) => update({ request: id }),
+    select: (id: string | undefined) => (id ? sheets.open({ kind: "request", id }) : sheets.close(0)),
   };
 }
 

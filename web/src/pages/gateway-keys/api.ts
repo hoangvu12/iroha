@@ -62,10 +62,8 @@ export function useGatewayKey(ref: string) {
 /** After any change (or its Undo) every list and key page refetches. */
 export function useInvalidateKeys() {
   const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: keys.all });
-    void qc.invalidateQueries({ queryKey: ["audit-entries"] });
-  };
+  // Resolves once the refetches are in, so an inline result shows on fresh data.
+  return () => Promise.all([qc.invalidateQueries({ queryKey: keys.all }), qc.invalidateQueries({ queryKey: ["audit-entries"] })]);
 }
 
 export function useCreateKey() {

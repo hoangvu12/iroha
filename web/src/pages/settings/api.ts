@@ -52,11 +52,12 @@ export function useAdminTokens() {
 /** Every write here also writes an Audit Entry, and a revert can touch any list, so all of them refetch. */
 export function useInvalidateAll() {
   const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: keys.tokens });
-    void qc.invalidateQueries({ queryKey: keys.entries });
-    void qc.invalidateQueries({ queryKey: keys.sessions });
-  };
+  return () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: keys.tokens }),
+      qc.invalidateQueries({ queryKey: keys.entries }),
+      qc.invalidateQueries({ queryKey: keys.sessions }),
+    ]);
 }
 
 export function useCreateAdminToken() {

@@ -59,6 +59,22 @@ test("a wrong password shows under the field, marks it invalid and is announced"
   expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(alert.id);
 });
 
+test("a phone keyboard's Enter key says what it does: next field, then go", () => {
+  renderPage(<SetupPage />);
+  const hint = (label: string) => screen.getByLabelText(label, { selector: "input" }).getAttribute("enterkeyhint");
+  expect([hint("Admin Token"), hint("Password"), hint("Confirm password")]).toEqual(["next", "next", "go"]);
+});
+
+test("Setup announces a failure that belongs to no field", async () => {
+  const user = userEvent.setup();
+  const fetch = renderPage(<SetupPage />);
+  fetch.mockResolvedValue(answer(500, { error: { code: "internal", message: "Iroha failed.", hint: "" } }));
+  await user.type(screen.getByLabelText("Admin Token", { selector: "input" }), "iroha_admin_x");
+  await user.type(screen.getByLabelText("Password", { selector: "input" }), "long enough");
+  await user.type(screen.getByLabelText("Confirm password", { selector: "input" }), "long enough{Enter}");
+  expect((await screen.findByRole("alert")).textContent).toBe("Iroha failed.");
+});
+
 test("Setup refuses empty fields, then sets the password with the Admin Token", async () => {
   const user = userEvent.setup();
   const fetch = renderPage(<SetupPage />);

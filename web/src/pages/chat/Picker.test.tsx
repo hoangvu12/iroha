@@ -11,19 +11,27 @@ const agent = createAgent();
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 
+let modelSearches: URL[] = [];
 beforeEach(() => {
+  modelSearches = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
       const u = new URL(url, "http://iroha.test");
       if (u.pathname === "/api/test/models") {
+        modelSearches.push(u);
         const q = u.searchParams.get("q") ?? "";
         const models = [
           { id: "openai/gpt-4o", model: "gpt-4o", context_length: 128000 },
           { id: "openai/o3", model: "o3", context_length: 200000 },
         ].filter((m) => m.id.includes(q));
+        const zai = [{ id: "zai/glm-4.6", model: "glm-4.6" }].filter((m) => m.id.includes(q));
         const pools = [{ id: "glm-4.6", model: "glm-4.6" }].filter((m) => m.id.includes(q));
-        return json({ total: 3, matched: models.length + pools.length, pools, providers: models.length ? [{ provider: "openai", matched: models.length, models }] : [], truncated: false });
+        const providers = [
+          ...(models.length ? [{ provider: "openai", matched: models.length, models }] : []),
+          ...(zai.length ? [{ provider: "zai", matched: zai.length, models: zai }] : []),
+        ];
+        return json({ total: 4, matched: models.length + zai.length + pools.length, pools, providers, truncated: false });
       }
       if (u.pathname === "/api/providers/openai/keys")
         return json({ upstream_keys: [{ id: "k1", name: "team-5", state: { state: "active" } }] });
@@ -76,6 +84,44 @@ test("with no model, the button opens the model search; arrows and Enter pick on
   expect(latest.model).toBe("openai/o3");
   // Back on the settings list, still open.
   await within(popover).findByRole("button", { name: /Shape/ });
+});
+
+/** Each model group's heading in order, without its logo and count. */
+const groupNames = (popover: HTMLElement) =>
+  within(popover)
+    .getAllByRole("group")
+    .map((g) => {
+      const label = document.getElementById(g.getAttribute("aria-labelledby") ?? "")!.cloneNode(true) as HTMLElement;
+      label.querySelectorAll("[aria-hidden], .tabular").forEach((n) => n.remove());
+      return label.textContent?.trim();
+    });
+
+test("with a Provider's model picked, its models come first under its name, then Pools and the rest; search filters both", async () => {
+  const user = userEvent.setup();
+  renderComposer({ ...DEFAULT_SETTINGS, model: "zai/glm-4.6" });
+  await user.click(screen.getByRole("button", { name: "Model zai/glm-4.6. Settings" }));
+  const popover = await screen.findByRole("dialog", { name: "Model and settings" });
+  await user.click(within(popover).getByRole("button", { name: /glm-4.6/ }));
+  await within(popover).findByRole("option", { name: /gpt-4o/ });
+  expect(groupNames(popover)).toEqual(["zai", "Model Pools", "openai"]);
+  expect(modelSearches.at(-1)?.searchParams.get("prefer")).toBe("zai/");
+  // The Owner can still pick any model.
+  await user.type(within(popover).getByRole("combobox", { name: "Search models" }), "glm");
+  await waitFor(() => expect(within(popover).queryByRole("option", { name: /gpt-4o/ })).toBeNull());
+  expect(groupNames(popover)).toEqual(["zai", "Model Pools"]);
+  await user.click(within(popover).getAllByRole("option", { name: /glm-4.6/ })[1]);
+  expect(latest.model).toBe("glm-4.6");
+});
+
+test("with a Pool picked, the search asks for that Pool first and Pools lead", async () => {
+  const user = userEvent.setup();
+  renderComposer({ ...DEFAULT_SETTINGS, model: "glm-4.6" });
+  await user.click(screen.getByRole("button", { name: "Model glm-4.6. Settings" }));
+  const popover = await screen.findByRole("dialog", { name: "Model and settings" });
+  await user.click(within(popover).getByRole("button", { name: /glm-4.6/ }));
+  await within(popover).findByRole("option", { name: /gpt-4o/ });
+  expect(modelSearches.at(-1)?.searchParams.get("prefer")).toBe("glm-4.6");
+  expect(groupNames(popover)).toEqual(["Model Pools", "openai", "zai"]);
 });
 
 test("a settings row opens its list; Escape there goes back, Escape again closes and focus returns", async () => {

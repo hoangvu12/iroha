@@ -21,15 +21,36 @@ function readPref(): ThemePref {
   }
 }
 
+/** The page background (--bg) of each theme: the phone's browser bar takes it (theme-color in index.html). */
+const BAR_COLOUR = { light: "#ffffff", dark: "#0e0e10" } as const;
+
+/**
+ * Flips the colours in one step. Hover-coloured parts have a colour
+ * transition, so without this they fade 150 ms behind the rest of the page.
+ * `theme-switching` (styles/index.css) turns every transition off; the
+ * forced style read applies the new colours with it on, and it comes off
+ * once a frame has been drawn in the new colours.
+ */
+function applyTheme(resolved: "light" | "dark") {
+  const html = document.documentElement;
+  html.classList.add("theme-switching");
+  html.classList.toggle("dark", resolved === "dark");
+  html.style.colorScheme = resolved;
+  for (const meta of document.head.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) meta.content = BAR_COLOUR[resolved];
+  void getComputedStyle(html).color;
+  cancelAnimationFrame(restoreFrame);
+  restoreFrame = requestAnimationFrame(() => {
+    restoreFrame = requestAnimationFrame(() => html.classList.remove("theme-switching"));
+  });
+}
+let restoreFrame = 0;
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [pref, setPrefState] = useState<ThemePref>(readPref);
   const systemDark = useMediaQuery("(prefers-color-scheme: dark)");
   const resolved = pref === "system" ? (systemDark ? "dark" : "light") : pref;
 
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", resolved === "dark");
-    document.documentElement.style.colorScheme = resolved;
-  }, [resolved]);
+  useEffect(() => applyTheme(resolved), [resolved]);
 
   const setPref = (p: ThemePref) => {
     setPrefState(p);

@@ -3,20 +3,21 @@ import type { ChatTarget } from "@/app/chat-panel";
 import type { Capture, RequestRecord } from "@/pages/requests/api";
 import { parseRequest } from "@/pages/requests/messages";
 import type { Settings } from "./api";
-import { DEFAULT_SETTINGS, firstModelFor, firstModelOf } from "./api";
+import { DEFAULT_SETTINGS, firstModelFor, suggestedModelOf } from "./api";
 import type { Turn } from "./store";
-import { newChat, recentModels } from "./store";
+import { newChat } from "./store";
 
 // What each Test button fills in (README "Chat"): a Provider, a Pool, an
-// Upstream Key (pinned), a Gateway Key (sent as), or a past Request (its
-// prompt, ready to send again). Each starts a new chat.
+// Upstream Key (pinned), one model of a Provider, a Gateway Key (sent as),
+// or a past Request (its prompt, ready to send again). Each starts a new chat.
 
-/** The model to start a Provider's chat with: the last one used here on it, else its first listed. */
+/**
+ * The model to start a Provider's chat with, the same every time: the one
+ * it served most lately, else its first listed (Iroha's `suggested`).
+ */
 async function providerModel(handle: string): Promise<string> {
-  const recent = recentModels().find((m) => m.startsWith(handle + "/"));
-  if (recent) return recent;
   try {
-    return (await firstModelOf(handle)) ?? "";
+    return (await suggestedModelOf(handle)) ?? "";
   } catch {
     return "";
   }
@@ -37,6 +38,9 @@ export async function startFor(target: ChatTarget): Promise<void> {
         origin: `${target.provider} / ${target.key}`,
         settings: { ...base, model: await providerModel(target.provider), upstreamKey: target.key },
       });
+      return;
+    case "model":
+      newChat({ title: `${target.model} test`, origin: target.provider, settings: { ...base, model: `${target.provider}/${target.model}` } });
       return;
     case "gateway_key": {
       let model = "";

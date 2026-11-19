@@ -7,11 +7,12 @@ import { timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { IconButton } from "@/ui/Button";
+import { useConfirm } from "@/ui/Confirm";
 import { cn } from "@/ui/cn";
+import { describeError } from "@/ui/SaveStatus";
 import { Disclosure } from "@/ui/Disclosure";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { createScrollAreaController, ScrollArea } from "@/ui/ScrollArea";
-import { notify } from "@/ui/toast";
 import { Tip } from "@/ui/Tooltip";
 import type { Settings } from "./api";
 import { bareModel } from "./api";
@@ -44,12 +45,16 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
   const phone = useIsPhone();
   const state = useChatState();
   const chat = currentChat(state);
+  // A Test button whose chat couldn't be set up: said at the top of the panel it opened.
+  const [setupError, setSetupError] = useState<string>();
+  const confirm = useConfirm();
 
   useEffect(() => {
     const { seq, target } = panel.request;
     if (!target || seq <= handledSeq) return;
     handledSeq = seq;
-    startFor(target).catch((e) => notify.failure("Couldn't set up the chat", e));
+    setSetupError(undefined);
+    startFor(target).catch((e) => setSetupError(`Couldn't set up the chat: ${describeError(e)}`));
   }, [panel.request]);
 
   useEffect(() => {
@@ -82,13 +87,25 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
             {chat.turns.length > 0 && (
               <>
                 <MenuSeparator />
-                <MenuItem icon={Trash2} danger onSelect={() => deleteChat(chat.id)}>
-                  Delete this chat
+                <MenuItem
+                  icon={Trash2}
+                  danger
+                  onSelect={() =>
+                    confirm.ask({
+                      title: `Delete ${chat.title}?`,
+                      body: "Its messages are removed from this browser. This can't be undone; Requests it sent stay in Requests.",
+                      confirmLabel: "Delete chat",
+                      onConfirm: () => deleteChat(chat.id),
+                    })
+                  }
+                >
+                  Delete this chat…
                 </MenuItem>
               </>
             )}
           </MenuContent>
         </Menu>
+        {confirm.dialog}
         <div className="flex-1" />
         <IconButton icon={SquarePen} label="New chat" size="sm" onClick={() => newChat()} />
         {mode === "sheet" ? (
@@ -119,6 +136,12 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
           )
         )}
       </header>
+      {setupError && (
+        <div role="alert" className="flex shrink-0 items-start gap-2 border-b border-border bg-danger-tint px-4 py-2.5 text-[13.5px] text-danger-text">
+          <span className="min-w-0 flex-1">{setupError}</span>
+          <IconButton icon={X} label="Dismiss" size="sm" className="-my-1 text-danger-text" onClick={() => setSetupError(undefined)} />
+        </div>
+      )}
       <ChatBody key={chat.id} chat={chat} running={state.running > 0 && isRunning(chat.id)} wide={mode === "page" && !phone} />
     </div>
   );

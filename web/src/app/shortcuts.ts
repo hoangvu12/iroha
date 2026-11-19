@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
-import { useChatPanel } from "./chat-panel";
+import { useChatActions } from "./chat-panel";
 import { NAV } from "./nav";
 import { popupOpen } from "@/ui/popup";
 
@@ -24,7 +24,7 @@ function typingInto(target: EventTarget | null): boolean {
  */
 export function useNavShortcuts() {
   const navigate = useNavigate();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;

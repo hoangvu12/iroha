@@ -1,6 +1,4 @@
-import { Copy } from "lucide-react";
-import { Button } from "@/ui/Button";
-import { copyText } from "@/pages/settings/format";
+import { CopyButton } from "@/ui/CopyButton";
 
 // The copyable value box of C12 and the base URLs.
 
@@ -9,9 +7,7 @@ export function CopyBox({ value, what, label }: { value: string; what: string; l
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-subtle p-1.5 pl-3">
       <span className="min-w-0 flex-1 break-all py-1 font-mono text-[13px] text-fg">{value}</span>
-      <Button size="sm" icon={Copy} onClick={() => void copyText(value, what)} aria-label={label ?? `Copy ${what.toLowerCase()}`}>
-        Copy
-      </Button>
+      <CopyButton value={value} what={what} label={label} />
     </div>
   );
 }

@@ -4,11 +4,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/models"
+	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/shape"
+	"github.com/hoangvu12/iroha/internal/store"
 )
 
 const tag = "Test"
@@ -20,6 +23,7 @@ type ModelChoices struct {
 	Pools     []ModelChoice    `json:"pools" doc:"Matching Model Pools, by name."`
 	Providers []ProviderChoice `json:"providers" doc:"Matching models grouped by Provider, by handle."`
 	Truncated bool             `json:"truncated" doc:"true when more matched than limit; the counts still cover them all."`
+	Suggested string           `json:"suggested,omitempty" doc:"With prefer naming a Provider: the model to start a test of it with (<provider>/<model>), the one it served most in the last 7 days, else its first listed. Ignores q and limit."`
 }
 
 // ModelChoice is one Pool or Provider model the chat can send to.
@@ -41,7 +45,7 @@ type ProviderChoice struct {
 
 // Routes are the test chat's read routes: the model picker's search and
 // the snippets. Sending is POST /api/test (the Gateway's TestRoutes).
-func Routes(ms *models.Store, keys *gatewaykeys.Store) []api.Route {
+func Routes(ms *models.Store, keys *gatewaykeys.Store, db *store.DB) []api.Route {
 	return []api.Route{
 		{
 			Method: http.MethodGet, Path: "/api/test/models", Tag: tag,
@@ -53,6 +57,7 @@ func Routes(ms *models.Store, keys *gatewaykeys.Store) []api.Route {
 				{Name: "q", Description: "Words every ID must contain."},
 				{Name: "as", Description: "A Gateway Key (name or ID): only what it may use."},
 				{Name: "limit", Type: "integer", Description: "Most entries to return, 1 to 2000. Default 300."},
+				{Name: "prefer", Description: "<provider>/ (or <provider>/<model>) or a Pool name to list first, as when a test starts from it."},
 			},
 			Response: ModelChoices{},
 			Handle: func(c *api.Call) (any, error) {
@@ -75,7 +80,16 @@ func Routes(ms *models.Store, keys *gatewaykeys.Store) []api.Route {
 				if err != nil {
 					return nil, err
 				}
-				return search(all, c.Query("q"), limit), nil
+				prefer := c.Query("prefer")
+				out := search(all, c.Query("q"), limit, prefer)
+				if handle, _, ok := strings.Cut(prefer, "/"); ok && handle != "" {
+					served, err := requests.ServedModels(c.R.Context(), db, handle, db.Clock().Now().Add(-suggestWindow))
+					if err != nil {
+						return nil, err
+					}
+					out.Suggested = suggest(all, handle, served)
+				}
+				return out, nil
 			},
 		},
 		{
@@ -161,12 +175,58 @@ func BaseURL(r *http.Request) string {
 	return scheme + "://" + host
 }
 
-// search filters the caller's models by q, Pools first.
-func search(all []models.CallerModel, q string, limit int) ModelChoices {
+// suggestWindow is how far back suggested counts what a Provider served.
+const suggestWindow = 7 * 24 * time.Hour
+
+// suggest is the model of handle (in all) served most, else its first; "" when the caller may use none of it.
+func suggest(all []models.CallerModel, handle string, served map[string]int) string {
+	best, most := "", 0
+	for _, m := range all {
+		h, model, ok := strings.Cut(m.ID, "/")
+		if !ok || h != handle {
+			continue
+		}
+		if best == "" || served[model] > most {
+			best, most = m.ID, served[model]
+		}
+	}
+	return best
+}
+
+// ordered is all with the preferred Provider's models (prefer "<handle>/...")
+// first, or the preferred Pool first; otherwise all as it is (Pools first).
+func ordered(all []models.CallerModel, prefer string) []models.CallerModel {
+	if prefer == "" {
+		return all
+	}
+	handle, _, provider := strings.Cut(prefer, "/")
+	first := func(m models.CallerModel) bool {
+		if provider {
+			return strings.HasPrefix(m.ID, handle+"/")
+		}
+		return m.ID == prefer
+	}
+	out := make([]models.CallerModel, 0, len(all))
+	for _, m := range all {
+		if first(m) {
+			out = append(out, m)
+		}
+	}
+	for _, m := range all {
+		if !first(m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// search filters the caller's models by q, Pools first unless prefer
+// names a Provider (see ordered).
+func search(all []models.CallerModel, q string, limit int, prefer string) ModelChoices {
 	words := strings.Fields(strings.ToLower(q))
 	out := ModelChoices{Total: len(all), Pools: []ModelChoice{}, Providers: []ProviderChoice{}}
 	n := 0
-	for _, m := range all {
+	for _, m := range ordered(all, prefer) {
 		id := strings.ToLower(m.ID)
 		match := true
 		for _, w := range words {

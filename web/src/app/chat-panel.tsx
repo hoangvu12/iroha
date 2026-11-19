@@ -14,6 +14,8 @@ export type ChatTarget =
   | { kind: "provider"; provider: string }
   | { kind: "pool"; pool: string }
   | { kind: "upstream_key"; provider: string; key: string }
+  /** One model of a Provider (`model` without the handle): a Models tab or Pool member row. */
+  | { kind: "model"; provider: string; model: string }
   | { kind: "gateway_key"; gatewayKey: string }
   | { kind: "request"; request: string };
 

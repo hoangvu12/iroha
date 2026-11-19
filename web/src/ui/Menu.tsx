@@ -18,6 +18,7 @@ import {
 } from "@ui-sdk/react/menu";
 import { iconButtonClass } from "./Button";
 import { cn } from "./cn";
+import { type CopyState, copyIcon } from "./CopyButton";
 import { popupClass } from "./popup";
 import { ScrollArea } from "./ScrollArea";
 import { Tip } from "./Tooltip";
@@ -31,23 +32,29 @@ export const MenuTrigger = SdkMenuTrigger;
 type Icon = ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
 
 // An icon-only trigger, named by its label, which is also its tooltip.
+// `copy` is the result of a copy from one of its items (useCopy): the menu has
+// closed back to this trigger, so its icon shows the result for a moment. The
+// name stays, so agents still find the row's menu; the result is announced.
 export function MenuIconTrigger({
-  icon: Icon,
+  icon,
   label,
   size = "md",
   bordered,
   className,
+  copy,
 }: {
   icon: Icon;
   label: string;
   size?: "sm" | "md";
   bordered?: boolean;
   className?: string;
+  copy?: CopyState;
 }) {
+  const Shown = copyIcon(copy, icon);
   return (
     <Tip label={label} type="label">
-      <SdkMenuTrigger className={iconButtonClass(size, bordered, className)}>
-        <Icon size={size === "sm" ? 15 : 17} aria-hidden />
+      <SdkMenuTrigger className={iconButtonClass(size, bordered, cn("data-[copy]:opacity-100", className))} data-copy={copy}>
+        <Shown size={size === "sm" ? 15 : 17} aria-hidden />
       </SdkMenuTrigger>
     </Tip>
   );
@@ -86,7 +93,7 @@ export function MenuContent({
 
 const itemClass =
   "flex h-8 select-none items-center gap-2 rounded-md px-2 text-fg outline-none " +
-  "data-highlighted:bg-muted data-open:bg-muted data-disabled:opacity-50 data-destructive:text-danger-text";
+  "data-highlighted:bg-muted data-open:bg-muted data-disabled:opacity-50 data-destructive:text-danger-text data-destructive:data-highlighted:bg-danger-tint";
 
 export function MenuItem({
   children,

@@ -586,7 +586,7 @@ Shared by motion tickets 13–20 (spec story 15), set by an `improve-animations`
 
 ### UI ticket 06: DataTable
 
-Every table is `DataTable` from `@/ui/DataTable` (spec "One data table"). It renders a semantic `<table>` driven by TanStack Table `9.3.1` (`@tanstack/react-table`, exact pin). Its controls are UI SDK parts: Checkbox, Menu, Select, and Pagination through `ui/Pagination.tsx` `Pager`, which is 1-based. The table sits in a `ScrollArea axis="both"` with a sticky header and loads through `Skeleton`. The Keys tab (`pages/providers/Keys.tsx`) is the worked example; copy its shape.
+Every table is `DataTable` from `@/ui/DataTable` (spec "One data table"). It renders a semantic `<table>` driven by TanStack Table `9.3.1` (`@tanstack/react-table`, exact pin). Its controls are UI SDK parts: Checkbox, Menu, Select, and Pagination through `ui/Pagination.tsx` `Pager`, which is 1-based. The table sits in a sideways-only `ScrollArea` (the page scrolls its rows, "UI ticket 25") and loads through `Skeleton`. The Keys tab (`pages/providers/Keys.tsx`) is the worked example; copy its shape.
 
 Tickets 07–09 moved every other table onto it; `ui/Table.tsx` is gone, so every table is a `DataTable`.
 
@@ -639,7 +639,8 @@ The rest are optional.
   A Select in a toolbar is `w-full`, and `cn` has no tailwind-merge, so a width class on it loses. Wrap it in a sized box instead: `<div className="w-28 shrink-0"><Select …/></div>`.
 - **Sorting:** `defaultSorting` lets the table keep the state. `sorting` + `onSortingChange` keep it in the URL: Keys maps `?sort=&dir=` to and from `[{ id, desc }]`. Add `manualSorting` when the server sorts.
 - **Selection and the bulk bar:** `bulk={(sel) => <>…buttons…</>}` turns selection on. That adds:
-  - A checkbox column, with Shift-click for a range.
+  - A checkbox column, with Shift-click for a range; the whole cell is the box's hit area.
+  - Select mode while anything is selected: a row click toggles the row instead of opening it (see "UI ticket 25").
   - The header box "Select all rows on this page", which shows mixed when some are selected.
   - A bar that replaces the toolbar while anything is selected. It is `role="group"` "N selected", and shows your buttons, "Select all N" when the whole page is selected and more rows match, and "Clear selection".
 
@@ -661,7 +662,7 @@ The rest are optional.
 - **Loading:**
   - The skeleton is built in: `id` `table:<id>` (`table:<id>:phone` on phones), label "Loading <label>".
   - When the page, sort or filter changes the query key, use `placeholderData: keepPreviousData` and pass `dimmed={query.isPlaceholderData}`. The old rows stay, dimmed, with no skeleton.
-- **Scrolling:** the table scrolls inside its own `ScrollArea` so the header sticks. The default limit is `max-h-[calc(100dvh-4rem)]`; change it with `maxHeight`. A long table scrolls within itself before the page does.
+- **Scrolling:** the page scrolls the rows; the table is as tall as its rows and its header stays at the top of the window (see "UI ticket 25"). There is no `maxHeight` any more.
 
 **Paging** (`paging`, spec "Pagination"):
 - **`{ mode: "pages" }`** (the default): numbered pages over the loaded rows.
@@ -714,11 +715,11 @@ The Providers and Model Pools lists (`pages/providers/List.tsx`), Endpoints, Mod
 - **Feed** (`pages/requests/Feed.tsx`): `DataTable id="requests"` in infinite mode over `useRequestFeed`'s rows (pages flattened, live rows first). Columns are display columns built from `url-state.ts` `COLUMNS`; `?hide=` is `columnVisibility`. The server filters (`manualFiltering`, `manualSorting`, no column sorting); the chips stay above the table. A row opens the Request sheet; its "Open Request <id>" button sits in the first shown plain-text column (Time unless hidden). The open Request is `activeRowId`, and stepping ↓ onto the last loaded row loads the older ones. "Load older Requests" is the load-more button. Arriving rows flash once (`useArrivals`, by `data-row-id`; ticket 18 owns that motion).
 - **Numbered pages instead**: the Owner picks "Numbered pages" under Load Requests in the feed's View menu (desktop) or filter menu (phone), remembered per browser (see "Code review fixes"); `<RequestsFeed paging="pages" />` forces it. That is DataTable server mode: the API pages by cursor, so a later page loads the older pages it needs first, and the shown rows stay dimmed meanwhile. `rowCount` comes from the stats.
 - **DataTable additions** (backwards compatible):
-  - `paging.newRowsLabel` makes an infinite table live, through `ui/hold-view.ts` `useHoldView`. Rows arriving on top don't move the view while the reader is scrolled down or the pointer is over the rows: the scroller moves by their height. The pill `newRowsLabel(n)` ("3 new") goes back to the top. The browser's own `overflow-anchor` is off there, since the hook does the anchoring.
+  - `paging.newRowsLabel` makes an infinite table live, through `ui/hold-view.ts` `useHoldView`. Rows arriving on top don't move the view while the reader is scrolled down or the pointer is over the rows: the page moves by their height (UI ticket 25; before, the table's own scroller). The pill `newRowsLabel(n)` ("3 new") goes back to the top. The browser's own `overflow-anchor` is off there, since the hook does the anchoring.
   - `activeRowId`: `aria-current="true"`, the selected tint, and the row scrolled into view when it changes.
   - Every row is marked `data-row-id`; the row container is `data-rows`.
   - Body rows are one flat keyed list, so a row added on top no longer redraws every row under it.
-  - Load-more observes again after each load, inside the table's scroller, so a short page keeps loading until there is no more.
+  - Load-more observes again after each load, so a short page keeps loading until there is no more. It watches the window (the page scrolls the rows, "UI ticket 25").
 - **Refs inside DataTable's `Skeleton` don't hold**: Skullet replaces them on what it renders, and a ref object read `null` after the first update. Find elements from a ref outside it (DataTable's root `div`) with `querySelector`.
 - Tests: `pages/requests/Feed.test.tsx` (load older until none, Load older for the keyboard, live rows on top, URL state after a reload, numbered pages, agent test) and `ui/DataTable.test.tsx` ("live rows", "no remount", "loads again"; `layOut()` fakes row geometry for jsdom).
 
@@ -811,6 +812,22 @@ Built into `DataTable` and the shared controls, so a page needs nothing:
 - **Pool Route**: the live bar over the canvas stays on one row (the note truncates; the Shape select's width is set by a box around it, because `Select` is `w-full` inside), so it never covers the Start card. Cards change only border and ring on hover and selection (`hover` timing).
 - **No motion**: polled numbers and Key States, the side panel's swap when a card is picked, a press scale on cards, sorting and filters.
 - **Checking**: `iroha-v2-notes/v2-ui/shots/17/check17.mjs <url> <password> <out>` takes the shots and probes each motion. `HEADED=1 TRACE=1 CPU=4` adds a frame trace that runs each step with motion and again with every transition off.
+
+### UI ticket 25: tables scroll with the page; select mode selects
+
+Reverses "each table scrolls inside itself" (Owner, 2026-11-20). Built into `DataTable`, so pages need nothing.
+
+- **The page scrolls the rows.** A table is as tall as its rows (numbered pages keep it bounded); `maxHeight` is gone. `TableScroller` (in `DataTable.tsx`) is a `ScrollArea axis="x"` named `label`: it only scrolls sideways, for tables wider than the page.
+- **Sticky header without `position: sticky`.** A sideways scroller would make a sticky header stick to it, not the page, so the header (`thead.table-head`) follows the page with a CSS scroll-driven animation (`styles/index.css`, "Table header"): `view-timeline` on the scroller (`.table-scroller`), and from where the table's top passes the window's top the header translates down with the scroll, at most `--table-stick-end` (the table's height less the header's, kept by a `ResizeObserver` in `TableScroller`). It runs off the main thread, stays aligned when the table is scrolled sideways (it is inside the same scroller), sits under the chat panel and sheets (fixed overlays), and is not motion (it holds under reduced motion). Browsers without scroll timelines (Firefox today) get a header that scrolls away. Anything at the top of the page later (a fixed bar) would need the range offset by its height. Phones' two-line lists have no header.
+- **The live feed on the page**: `ui/hold-view.ts` holds the view by moving the page (`document.scrollingElement`), counting the stuck header's height as the top of what the reader sees; the page's `overflow-anchor` is off while live. The "N new" pill sticks 48 px from the window's top, under the header. "Load more" sits under the table, outside its scroller, and its `IntersectionObserver` watches the window. `pages/requests/arrivals.ts` `inView` counts the window and the stuck header. Rows arriving above the window's top but with the table's top still in view count as seen (the pill only shows once the first row has gone under the header).
+- **Select mode** (`bulk` tables, while one or more rows are selected, i.e. the bulk bar is up):
+  - A click anywhere on a row that isn't one of its controls toggles its selection instead of `onRowClick` (or expanding); Shift+click selects the range from the last row picked (TanStack's range), and Shift+click doesn't select text.
+  - Space on any of the row's controls toggles the row, except where Space has its own meaning (checkboxes, switches, fields, menu triggers, popups); `SPACE_OWN` lists them. Enter still presses the control.
+  - Opening still works: the name column's "Open <name>" button (`meta.opens`), a `RecordLink`, or the row menu.
+  - The checkbox cell (`data-select-cell`) is the box's hit area, in or out of select mode, and the header's cell selects the page. Clicks there never open the row.
+  - Phones already worked this way (Select shows boxes; with any selected, a tap toggles).
+- **For tickets 26 and 30**: rows still render in one `tbody` with `data-rows`; selection state is TanStack's `rowSelection` (`selection`/`onSelectionChange` when the page owns it). `selectMode` and the handlers (`rowPress`, `spaceToggles`, `selectCell`) sit next to `toggleRow` in `DataTable`. A bulk-edit action belongs in the `bulk` render prop.
+- Tests: `ui/DataTable.test.tsx` (select mode, Shift range, Open in select mode, checkbox cell, Space, agent test; page-scroll live rows; load-more against the window; no height cap), `ui/new-rows-pill.test.tsx`. Browser checks: `iroha-v2-notes/v2-ui/shots/25/check25.mjs <url> <password>` (header position at scroll offsets on Keys, Models, Requests, Gateway Keys, Audit Entries; select mode; sideways Requests at 1100 px; live hold and pill; under a sheet and the chat; phones), `models25.mjs`, `older25.mjs`.
 
 ### UI ticket 28: tall dialogs scroll as a page
 

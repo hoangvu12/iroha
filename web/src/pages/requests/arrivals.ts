@@ -33,11 +33,12 @@ function tokens() {
 
 function inView(el: HTMLElement): boolean {
   const r = el.getBoundingClientRect();
+  // The page scrolls the rows (UI ticket 25); the table's region only scrolls sideways.
+  // Under the table's header (stuck to the window's top once the table's top has passed it), inside the table and the window.
   const scroller = el.closest<HTMLElement>("[role=region]");
-  // Under the scroller's sticky header, inside the scroller and the window.
   const box = scroller?.getBoundingClientRect();
   const header = scroller?.querySelector("thead")?.getBoundingClientRect().height ?? 0;
-  const top = Math.max(0, box ? box.top + header : 0);
+  const top = Math.max(0, box ? box.top : 0) + header;
   const bottom = Math.min(window.innerHeight, box ? box.bottom : Infinity);
   return r.top + r.height / 2 > top && r.top + r.height / 2 < bottom;
 }
@@ -79,7 +80,7 @@ export function useArrivals(box: RefObject<HTMLElement | null>, added: Set<strin
             flash(e.target);
           }
         },
-        // The implicit root clips by every scroller up the tree: the table's and the page's.
+        // The implicit root: the window, clipped by the table's sideways scroller.
         { threshold: 0.5 },
       );
       io.current.observe(el);

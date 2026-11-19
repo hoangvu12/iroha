@@ -398,6 +398,31 @@
   transition: none !important;
 }
 
+/* Table header (UI ticket 25): the page scrolls a DataTable's rows, and its
+   header stays at the top of the window while the table is in view. The table's
+   scroller (.table-scroller) scrolls only sideways, but that alone would make a
+   sticky header stick to it, so the header follows the page with a
+   scroll-driven animation instead, off the main thread: from where the table's
+   top passes the window's top it moves down with the scroll, at most
+   --table-stick-end (set by DataTable's TableScroller). Not motion: it holds
+   under reduced motion like sticky does. Browsers without scroll timelines get
+   a header that scrolls away with the table. */
+@keyframes table-head-stick {
+  to {
+    translate: 0 var(--table-stick-end, 0px);
+  }
+}
+@supports (animation-timeline: view()) {
+  .table-scroller {
+    view-timeline: --table-scroller block;
+  }
+  .table-head {
+    animation: table-head-stick linear both;
+    animation-timeline: --table-scroller;
+    animation-range: exit-crossing 0px exit-crossing var(--table-stick-end, 0px);
+  }
+}
+
 /*
  * Reduced motion: the one rule (architecture.md "UI motion system").
  * Holds still: anything that moves or changes size (slides, scales, presses,

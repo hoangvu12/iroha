@@ -29,19 +29,20 @@ function Live({ data }: { data: Fruit[] }) {
   );
 }
 
-/** A 40 px header, 48 px rows, a 400 px scroller whose scrollTop moves them. */
+/** The page scrolls the rows (UI ticket 25): a 40 px header stuck at the window's top, 48 px rows under it, moved by the page's scrollTop. */
 function layOut() {
   const box = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 800, width: 800, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const scroller = this.closest("[role=region]") as HTMLElement | null;
-    if (this.hasAttribute("data-row-id") && scroller) return box(40 + [...this.parentElement!.children].indexOf(this) * 48 - scroller.scrollTop, 48);
-    if (this.getAttribute("role") === "region") return box(0, 400);
+    if (this.hasAttribute("data-row-id")) return box(40 + [...this.parentElement!.children].indexOf(this) * 48 - document.documentElement.scrollTop, 48);
     if (this.tagName === "THEAD") return box(0, 40);
     return box(0, 0);
   });
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  document.documentElement.scrollTop = 0;
+});
 
 const classesOf = (el: Element) => el.getAttribute("class")!.split(/\s+/);
 const pill = () => document.querySelector<HTMLElement>("[data-new-rows]")!;
@@ -56,9 +57,8 @@ test("the pill rises in on the list tokens and fades out in place, keeping its c
   expect(pill().hasAttribute("inert")).toBe(true);
   expect(pill().getAttribute("aria-hidden")).toBe("true");
 
-  const scroller = screen.getByRole("region", { name: "Fruit" });
-  scroller.scrollTop = 480;
-  fireEvent.scroll(scroller);
+  document.documentElement.scrollTop = 480;
+  fireEvent.scroll(document);
   rerender(<Live data={[...many(2, "new"), ...rows]} />);
   const shown = screen.getByRole("button", { name: "2 new" });
   expect(pill().contains(shown)).toBe(true);

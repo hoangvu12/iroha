@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -204,6 +205,26 @@ func (u *Upstream) Origin() string { return u.srv.URL }
 // URL is the Endpoint URL to configure, including the version path:
 // .../v1 for OpenAI and Anthropic, .../v1beta for Gemini.
 func (u *Upstream) URL() string { return u.srv.URL + u.basePath() }
+
+// URLAt is the Endpoint URL on host (http://<host>/v1), for an Iroha
+// started with Options{HTTPClient: up.Client()}: the Endpoint carries a
+// Provider's real host name, which built-in Failure Rules match on, while
+// this fake answers.
+func (u *Upstream) URLAt(host string) string { return "http://" + host + u.basePath() }
+
+// Client is an HTTP client that sends every request, whatever its host, to
+// this fake. Pass it as Options.HTTPClient together with URLAt.
+func (u *Upstream) Client() *http.Client {
+	addr := strings.TrimPrefix(u.srv.URL, "http://")
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil
+	tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, addr)
+	}
+	u.t.Cleanup(tr.CloseIdleConnections)
+	return &http.Client{Transport: tr}
+}
 
 func (u *Upstream) basePath() string {
 	if u.Shape == shape.Gemini {

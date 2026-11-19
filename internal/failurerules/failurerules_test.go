@@ -118,23 +118,31 @@ func TestBuiltinRulesAreListedOverriddenByNameAndNeverDeleted(t *testing.T) {
 		t.Fatalf("repeat = %+v", again)
 	}
 
-	// A new rule is tried before the built-ins; a rule limited to a Provider first of all.
+	// A new rule is tried before the built-ins of its group; rules limited to
+	// a Provider or host (the Owner's first, then the built-in quirks) before
+	// global ones.
+	scoped := 0
+	for _, r := range rules.Builtin {
+		if r.Scoped() {
+			scoped++
+		}
+	}
 	var created failurerules.RuleResult
 	srv.Admin.Post("/api/rules", map[string]any{"name": "arrears", "code": []string{"Arrearage"}, "outcome": "invalid",
 		"description": "DashScope: account in arrears."}).Expect(201).JSON(&created)
-	if created.Outcome != "created" || created.Rule.Source != failurerules.SourceOwner || created.Rule.Overrides != nil || created.Rule.Order != 1 {
+	if created.Outcome != "created" || created.Rule.Source != failurerules.SourceOwner || created.Rule.Overrides != nil || created.Rule.Order != scoped+1 {
 		t.Fatalf("created = %+v", created)
 	}
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "dashscope"}).Expect(201)
 	srv.Admin.Post("/api/rules", map[string]any{"name": "dashscope-quota", "provider": "dashscope", "status": []string{"429"},
 		"body": "Throttling.RateQuota", "outcome": "cooling_key", "reset": []string{"json:reset_at"}}).Expect(201)
 	l = list(t, srv, "")
-	if l.Rules[0].Name != "dashscope-quota" || l.Rules[1].Name != "arrears" || l.Rules[0].KeyEffect != "Cool until reset" || len(l.Rules) != len(rules.Builtin)+2 {
+	if l.Rules[0].Name != "dashscope-quota" || l.Rules[scoped+1].Name != "arrears" || l.Rules[0].KeyEffect != "Cool until reset" || len(l.Rules) != len(rules.Builtin)+2 {
 		t.Fatalf("order = %+v", l.Rules[:3])
 	}
 	var one failurerules.RuleView
 	srv.Admin.Get("/api/rules/arrears").Expect(200).JSON(&one)
-	if one.Order != 2 || one.Description != "DashScope: account in arrears." {
+	if one.Order != scoped+2 || one.Description != "DashScope: account in arrears." {
 		t.Fatalf("read = %+v", one)
 	}
 

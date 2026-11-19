@@ -331,6 +331,10 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 		return a, f
 	}
 	disarm() // the first byte arrived: the answer may now take its time
+	if !cr.stream {
+		x.answerBegan() // pad.go: a late body still reaches the Caller in time
+		defer x.answerEnded()
+	}
 
 	// An error sent as a 2xx answer (embedded.go) is a failure like any other.
 	if body := embeddedError(resp, cr.stream); body != nil {
@@ -475,12 +479,13 @@ type relayResult struct {
 // (fallback def), plus Iroha's own headers. No other upstream header reaches
 // the Caller. When Iroha already committed the response (stream.go) the
 // Caller has its 200 and stream headers: a stream carries on in them, and
-// a non-stream answer cannot be sent, so writeHead reports false.
+// a non-stream answer cannot be sent, so writeHead reports false. After a
+// non-stream commit (pad.go) the answer's body follows the padding.
 func (x *exchange) writeHead(resp *http.Response, def string, stream bool) bool {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if x.committed {
-		return stream
+		return stream || x.padded
 	}
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
@@ -527,9 +532,10 @@ func (x *exchange) relayBuffered(resp *http.Response, transform func(status int,
 			"Provider %s did not stream its answer.", x.rec.Provider))
 		return res
 	}
-	if _, err := x.w.Write(data); err != nil {
+	if err := x.send(data); err != nil {
 		x.callerGone()
 	}
+	x.end()
 	return res
 }
 

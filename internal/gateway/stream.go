@@ -26,7 +26,8 @@ import (
 //     pauses mid-stream alike.
 //
 // Before commitment failures keep their HTTP status. Non-stream Requests
-// are never committed early; their first-byte budget stays under 100 s.
+// are committed only once an upstream answer began and its body is late
+// (pad.go); their first-byte budget stays under 100 s.
 const (
 	StreamCommitAfter = 10 * time.Second
 	KeepAliveEvery    = 15 * time.Second

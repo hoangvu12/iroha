@@ -44,9 +44,14 @@ type exchange struct {
 	mu        sync.Mutex
 	wrote     bool // the status line went to the Caller
 	streaming bool // what the Caller gets is an event stream
-	committed bool // Iroha sent 200 and stream headers before any upstream answer
+	committed bool // Iroha sent 200 before the answer: stream headers (stream.go) or JSON (pad.go)
 	ended     bool // the answer is complete; nothing more is written
 	lastWrite time.Time
+	// A non-stream Request's padder (pad.go): answering while an upstream
+	// 2xx answer is being read, padded once Iroha committed 200 + JSON.
+	answering bool
+	padded    bool
+	pad       *padder
 }
 
 func (g *Gateway) newExchange(w http.ResponseWriter, r *http.Request, sh shape.Shape) *exchange {
@@ -135,7 +140,8 @@ func (x *exchange) refuseUnrecorded(e *api.Error) {
 
 // writeError writes e in the Caller's Shape (errorEnvelope), extended with
 // Iroha's hint and the Request ID; on a stream under way, the Shape's error
-// event (stream.go). It returns the HTTP status sent, 0 when the status
+// event (stream.go); after a non-stream commit (pad.go), the envelope as
+// the body. It returns the HTTP status sent, 0 when the status
 // line had already gone out.
 func (x *exchange) writeError(e *api.Error) int {
 	x.mu.Lock()
@@ -148,6 +154,10 @@ func (x *exchange) writeError(e *api.Error) int {
 		if frame := streamShapes[x.rec.ShapeIn]; frame != nil {
 			_ = x.sendLocked(frame.errorEvent(e, x.rec.ID))
 		}
+		return 0
+	}
+	if x.padded { // committed 200 + JSON: the error is the body
+		_, _ = x.w.Write(append(compactJSON(errorEnvelope(x.rec.ShapeIn, e, x.rec.ID)), '\n'))
 		return 0
 	}
 	if x.wrote {

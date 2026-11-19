@@ -263,6 +263,8 @@ func (g *Gateway) run(x *exchange, caller gatewaykeys.Caller, resolve resolver) 
 	}
 	if cr.stream {
 		defer x.keepAlive()() // stream.go: commit early, keep-alives, error events
+	} else {
+		defer x.stopPadding() // pad.go: a late non-stream answer is padded
 	}
 	x.serve(plan.Candidates, body, cr)
 }

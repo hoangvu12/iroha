@@ -129,6 +129,8 @@ func CheckHandle(h string) error {
 		return api.BadRequest(handleHint, "handle %q is not valid.", h)
 	case h == "bulk":
 		return api.BadRequest("Pick another handle; \"bulk\" is a word of the admin API's paths.", "handle %q is reserved.", h)
+	case h == "pools":
+		return api.BadRequest("Pick another handle; \"pools\" is a word of the UI's paths (/providers/pools/<pool>).", "handle %q is reserved.", h)
 	}
 	return nil
 }

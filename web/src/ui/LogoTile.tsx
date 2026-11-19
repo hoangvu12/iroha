@@ -20,9 +20,10 @@ export function LogoTile({
   size?: number;
   className?: string;
 }) {
-  const [failed, setFailed] = useState(false);
+  // The src that failed, so a new src (another logo domain) is tried again.
+  const [failed, setFailed] = useState<string>();
   const letter = (name.trim()[0] ?? "?").toUpperCase();
-  const showImg = src && !failed;
+  const showImg = src && failed !== src;
   return (
     <span
       aria-hidden="true"
@@ -34,7 +35,14 @@ export function LogoTile({
       )}
     >
       {showImg ? (
-        <img src={src} alt="" className="size-[64%] object-contain" onError={() => setFailed(true)} draggable={false} />
+        <img
+          src={src}
+          alt=""
+          className="size-[64%] object-contain"
+          onError={() => setFailed(src)}
+          onLoad={(e) => e.currentTarget.naturalWidth === 0 && setFailed(src)}
+          draggable={false}
+        />
       ) : (
         letter
       )}

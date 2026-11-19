@@ -120,7 +120,9 @@ func TestFirstRefreshesAreSpreadOverTheFirstHourThenEachProviderRefreshesDailyAt
 			t.Fatalf("%s refreshed at %v", h, got)
 		}
 		for i, r := range got[1:] {
-			if d := timeOfDay(r) - at; d < 0 || d >= modelrefresh.Tick {
+			// The refresh runs at the first tick at or after daily_at, which
+			// may fall after midnight (daily_at 23:53 runs at 00:00).
+			if d := (timeOfDay(r) - at + 24*time.Hour) % (24 * time.Hour); d >= modelrefresh.Tick {
 				t.Fatalf("%s refresh %d at %v, daily_at %s", h, i+1, r, sched[h].DailyAt)
 			}
 			if i > 0 && r.Sub(got[i]) != 24*time.Hour {

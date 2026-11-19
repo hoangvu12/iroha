@@ -26,7 +26,8 @@ Spec story: 8.
 - Gateway Keys list and page, the model picker, the scope editor;
 - Requests stats and feed, drawer, Attempts, Captured, the Route view;
 - Admin Tokens, Audit Entries, Sign-in sessions;
-- Chat's Details, the `/states` Loading panel.
+- Chat's Details, the `/states` Loading panel;
+- the record sheets (ticket 10, merged later). The Request sheet is measured from `SAMPLE_REQUEST` under `request-drawer`. The other sheets show `SheetLoading`, a generic sheet drawn by Skullet, and their key lists show `LinkListLoading`. `SheetTitle` renders a plain `h2` inside a sample: the sample's `DialogTitle` would otherwise share the sheet's title id.
 
 The chat Picker's key, Endpoint and Send-as lists and the Requests Callers menu load as skeleton rows placed under their lists. Rows inside the list would join its keyboard navigation. Skeletons wait for every query their content needs, so numbers don't fill in after the reveal. The Requests feed and Audit Entries keep the previous rows, dimmed, when filters change (`keepPreviousData`), and the live poll pauses while those rows are placeholders. Sign-out forgets the remembered shapes in `useSignOut`, and also in `AuthGate` once the signed-out screen has replaced the pages. Skullet saves a skeleton's shape as it unmounts, so forgetting before that left shapes behind. The architecture note ("UI ticket 02") describes the pattern, including the one ticket 06's DataTable should follow.
 
@@ -36,7 +37,10 @@ The chat Picker's key, Endpoint and Send-as lists and the Requests Callers menu 
 - while loading, the label is read and the sample is hidden; sample logos request no image (`ui/Skeleton.test.tsx`);
 - an agent sees no sample controls while loading and presses the real ones after the data arrives (`ui/Skeleton.test.tsx`);
 - a sample with an inline `Tip` renders. Checked red again after the merge by removing the boundary (`ui/Skeleton.test.tsx`);
-- a filter change keeps the rows on screen with no skeleton, and a first load shows the label (`pages/requests/Feed.test.tsx`).
+- a filter change keeps the rows on screen with no skeleton, and a first load shows the label (`pages/requests/Feed.test.tsx`);
+- a loading sheet is named by its record, and a sheet's sample adds no second title (`sheets/SheetLoading.test.tsx`).
+
+Merging `v2-ui` meant small changes to other tickets' tests. `PoolMembers.test` now waits for the members, which show once the overview has loaded. `Feed.test` renders inside `SheetStackProvider`. `Models.test` mounts a `Toaster`: with the longer test, UI SDK's "no host" warning for the Remove toast fired during the run.
 
 Two fixes could not be tested in jsdom, because it has no layout and Skullet saves no shapes there: the 150 ms hold and the sign-out timing. The browser checks below cover them.
 
@@ -50,6 +54,7 @@ Two fixes could not be tested in jsdom, because it has no layout and Skullet sav
 - **First visit**: drawn from the sample, so a list moves by however many rows it has more or fewer than the sample. The Rules sample is the 18 built-in rules and shows no movement.
 - **Refetch and fast loads**: a filter change on Requests with slow answers keeps 9 rows, dimmed, with no skeleton. In-app navigation with instant answers (loads of 31, 76 and 319 ms) painted no skeleton bar before 140 ms.
 - **Reduced motion**: two screenshots 400 ms apart differ with motion allowed (shimmer) and match under reduce.
+- **Record sheets** (`sheets.mjs`, after the merge): the Request, Provider and Endpoint sheets were opened by link, in light, dark and phone. While loading, each sheet is named by its record ("Request req_…", "Provider dashscope") with one title, and no page threw. On reload the Request sheet body moves 3 px, as the drawer did. The other sheets replace their loading body rather than reveal it, so the overlay doesn't measure them.
 - **Sign-out**: `skullet:shapes` held `gateway-keys, admin-tokens, providers-list, pools-list` before signing out and is empty after.
 
 **Notes and deferred.**

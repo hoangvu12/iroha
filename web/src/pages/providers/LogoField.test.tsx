@@ -102,6 +102,22 @@ test("the Pool logo field previews what it finds as you type, debounced, and is 
   expect(document.querySelector("img")?.getAttribute("src")).toBe("/api/logos?maker=chatgpt.com");
 });
 
+// Motion (UI ticket 17): each logo the field finds fades into the tile (duration-fade); the tile it first drew doesn't.
+test("a logo found while typing fades into the tile; the tile first drawn doesn't", async () => {
+  const user = userEvent.setup();
+  renderWith(<PoolSettingsTab pool={pool} />, { "/api/logos?maker=chatgpt.com": image });
+  const FADE = ["transition-opacity", "duration-fade", "ease-out", "starting:opacity-0"];
+  const tile = () => document.querySelector("[data-logo-tile]")!;
+  await screen.findByText("No logo found for openai. The tile shows a letter.");
+  for (const c of FADE) expect(tile().className.split(" ")).not.toContain(c);
+  const input = screen.getByLabelText<HTMLInputElement>("Maker or website", { selector: "input" });
+  await user.clear(input);
+  await user.type(input, "chatgpt.com");
+  await screen.findByText("Logo found for chatgpt.com.", undefined, { timeout: 2000 });
+  expect(tile().querySelector("img")?.getAttribute("src")).toBe("/api/logos?maker=chatgpt.com");
+  expect(tile().className.split(" ")).toEqual(expect.arrayContaining(FADE));
+});
+
 test("a value Iroha refuses is said inline and marks the field invalid", async () => {
   const user = userEvent.setup();
   renderWith(<PoolSettingsTab pool={pool} />, {

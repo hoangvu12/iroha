@@ -177,3 +177,16 @@ test("Autocomplete takes its Field's label, suggests as you type and keeps text 
   await user.type(input, "glm-5{Escape}");
   expect(document.querySelector("output")!.textContent).toBe("glm-5");
 });
+
+// Motion (UI ticket 17): the thumb slides on the press token (0 under reduced
+// motion, so it jumps) and the track's colour fades on the hover token.
+test("a Switch's thumb slides on duration-press, its track fades on duration-hover; no typed values", () => {
+  render(<Switch label="Motion" checked={false} onChange={() => {}} />);
+  const track = screen.getByRole("switch", { name: "Motion" });
+  const thumb = track.querySelector('[data-slot="switch-thumb"]')!;
+  expect(thumb.className.split(" ")).toEqual(expect.arrayContaining(["transition-[translate]", "duration-press", "ease-out"]));
+  expect(track.className.split(" ")).toEqual(expect.arrayContaining(["transition-colors", "duration-hover", "ease-[ease]"]));
+  for (const el of [track, thumb]) {
+    expect(el.className).not.toMatch(/motion-reduce:transition-none|transition-transform|duration-\d/);
+  }
+});

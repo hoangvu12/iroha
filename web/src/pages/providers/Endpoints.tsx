@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pencil, Plug, Trash2 } from "lucide-react";
 import { Button } from "@/ui/Button";
+import { cn } from "@/ui/cn";
 import { useConfirm } from "@/ui/Confirm";
 import { useCopy } from "@/ui/CopyButton";
 import { DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
@@ -11,7 +12,7 @@ import { EmptyState } from "@/ui/States";
 import { notifyChange } from "@/ui/toast";
 import type { AuthStyle, Endpoint, Provider, Shape, UpstreamKey } from "./api";
 import { calls, errorText, natural, shapeLabel, SHAPES, useKeys, useRefresh } from "./api";
-import { Select } from "./controls";
+import { appearClass, Reveal, Select } from "./controls";
 import { SAMPLE_ENDPOINTS } from "./samples";
 
 /** The Endpoints tab (C07): where a Provider's API lives, in which Shape, and which keys go there. */
@@ -160,6 +161,22 @@ const linesToMap = (text: string, sep: RegExp) => {
 const HEADER_LINE = /^\s*([^:]+?)\s*:\s*(.*)$/;
 const RENAME_LINE = /^\s*(\S+)\s*(?:->|=>|→)\s*(\S+)\s*$/;
 
+/** The Endpoint dialog's fields for an Endpoint (none: a new one). */
+const endpointFields = (endpoint?: Endpoint) => ({
+  name: endpoint?.name ?? "",
+  url: endpoint?.url ?? "",
+  shape: endpoint?.shape ?? ("openai-chat" as Shape),
+  auth_style: endpoint?.auth_style ?? ("bearer" as AuthStyle),
+  auth_param: endpoint?.auth_param ?? "",
+  discovery_url: endpoint?.discovery_url ?? "",
+  headers: Object.entries(endpoint?.static_headers ?? {})
+    .map(([k, v]) => `${k}: ${v}`)
+    .join("\n"),
+  renames: Object.entries(endpoint?.renames ?? {})
+    .map(([k, v]) => `${k} -> ${v}`)
+    .join("\n"),
+});
+
 function EndpointDialog({
   handle,
   endpoint,
@@ -174,28 +191,21 @@ function EndpointDialog({
   onOpenChange: (o: boolean) => void;
 }) {
   const refresh = useRefresh();
-  const [f, setF] = useState({ name: "", url: "", shape: "openai-chat" as Shape, auth_style: "bearer" as AuthStyle, auth_param: "", discovery_url: "", headers: "", renames: "" });
+  const [f, setF] = useState(() => endpointFields(endpoint));
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    setError(undefined);
-    setF({
-      name: endpoint?.name ?? "",
-      url: endpoint?.url ?? "",
-      shape: endpoint?.shape ?? "openai-chat",
-      auth_style: endpoint?.auth_style ?? "bearer",
-      auth_param: endpoint?.auth_param ?? "",
-      discovery_url: endpoint?.discovery_url ?? "",
-      headers: Object.entries(endpoint?.static_headers ?? {})
-        .map(([k, v]) => `${k}: ${v}`)
-        .join("\n"),
-      renames: Object.entries(endpoint?.renames ?? {})
-        .map(([k, v]) => `${k} -> ${v}`)
-        .join("\n"),
-    });
-  }, [open, endpoint]);
+  // Opening (or the Endpoint changing) starts the form from it in the same
+  // render, so the dialog's first frame already shows its fields (a field
+  // that shows for this auth style arrives with the dialog, not after it).
+  const [startedFrom, setStartedFrom] = useState<{ open: boolean; endpoint?: Endpoint }>({ open: false });
+  if (startedFrom.open !== open || startedFrom.endpoint !== endpoint) {
+    setStartedFrom({ open, endpoint });
+    if (open) {
+      setError(undefined);
+      setF(endpointFields(endpoint));
+    }
+  }
 
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
 
@@ -268,11 +278,11 @@ function EndpointDialog({
           <Field label="Key sent as">
             {() => <Select value={f.auth_style} onValueChange={(v) => set("auth_style")({ target: { value: v } })} items={AUTH} />}
           </Field>
-          {(f.auth_style === "header" || f.auth_style === "query") && (
+          <Reveal show={f.auth_style === "header" || f.auth_style === "query"}>
             <Field label={f.auth_style === "header" ? "Header name" : "Parameter name"}>
               {(p) => <Input {...p} mono spellCheck={false} placeholder={f.auth_style === "header" ? "api-key" : "key"} value={f.auth_param} onChange={set("auth_param")} />}
             </Field>
-          )}
+          </Reveal>
         </div>
         <Field label="Model list URL" hint={'Empty reads <URL>/models; "none" never asks.'}>
           {(p) => <Input {...p} mono spellCheck={false} value={f.discovery_url} onChange={set("discovery_url")} />}
@@ -301,7 +311,7 @@ function EndpointDialog({
             />
           )}
         </Field>
-        {error && <p className="text-[13px] text-danger-text">{error}</p>}
+        {error && <p className={cn("text-[13px] text-danger-text", appearClass)}>{error}</p>}
       </form>
     </Dialog>
   );

@@ -65,6 +65,11 @@ export function LogoInput({
   // The tile keeps the last logo found while the next one is looked up.
   const lastFound = useRef<string | undefined>(undefined);
   if (!pending) lastFound.current = src && check.data === true ? src : undefined;
+  // Motion: each logo found after the first drawing fades into the tile (a new key mounts it).
+  const tileKey = lastFound.current ?? "letter";
+  const firstTile = useRef(tileKey);
+  const fades = useRef(false);
+  if (tileKey !== firstTile.current) fades.current = true;
 
   let text: string;
   if (pending) text = "Looking for a logo…";
@@ -77,8 +82,10 @@ export function LogoInput({
   return (
     <div className="min-w-0 flex-1">
       <div className="relative">
-        <span className="absolute left-2 top-1/2 -translate-y-1/2">
-          <LogoTile name={name} shape={shape} src={lastFound.current} size={22} />
+        <span className="absolute left-2 top-1/2 flex -translate-y-1/2">
+          <span key={tileKey} data-logo-tile="" className={cn("flex", fades.current && "transition-opacity duration-fade ease-out starting:opacity-0")}>
+            <LogoTile name={name} shape={shape} src={lastFound.current} size={22} />
+          </span>
         </span>
         <Input
           aria-label={label}

@@ -17,7 +17,7 @@ import { EmptyState, ErrorState } from "@/ui/States";
 import { notifyChange } from "@/ui/toast";
 import type { Pool, PoolOverview, Provider, ProviderOverview, Shape } from "./api";
 import { calls, errorText, natural, SHAPES, successRate, useOverview, usePools, useProviders, useRefresh } from "./api";
-import { Pill, PoolTile, ProviderTile, Select, Switch } from "./controls";
+import { Pill, PoolTile, ProviderTile, Reveal, Select, Switch } from "./controls";
 import { SAMPLE_POOLS, SAMPLE_PROVIDERS } from "./samples";
 
 /** /providers: every Provider, then every Model Pool (C05; phones C30). */
@@ -55,7 +55,8 @@ export function ProvidersList() {
   const openPool = (p: Pool) => navigate(poolPath(p.name));
   const testButton = (label: string, onPress: () => void) => (
     <span className="inline-flex items-center gap-1">
-      <IconButton icon={MessageCircle} label={label} size="sm" className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" onClick={onPress} />
+      {/* Shown on a row's hover or focus; always where nothing hovers (a touch tablet). */}
+      <IconButton icon={MessageCircle} label={label} size="sm" className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100" onClick={onPress} />
       <ChevronRight size={17} className="text-fg-muted" aria-hidden />
     </span>
   );
@@ -473,12 +474,11 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
             />
           )}
         </Field>
-        {url.trim() && (
+        {/* The URL's own settings drop in together once there is a URL. */}
+        <Reveal show={!!url.trim()} className="flex flex-col gap-4">
           <Field label="Shape" hint="The API format the URL speaks.">
             {() => <Select value={shape} onValueChange={(v) => setShape(v as Shape)} items={SHAPES} />}
           </Field>
-        )}
-        {url.trim() && (
           <label className="flex items-start gap-3 text-[15px]">
             <Switch checked={keyless} onChange={setKeyless} label="No key needed" />
             <span>
@@ -486,7 +486,7 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
               <span className="block text-[13px] text-fg-muted">For self-hosted servers and free relays. Iroha sends no credential and adds a keyless key for you.</span>
             </span>
           </label>
-        )}
+        </Reveal>
       </form>
     </Dialog>
   );

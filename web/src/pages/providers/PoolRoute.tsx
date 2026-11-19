@@ -202,7 +202,8 @@ function Card({
       aria-pressed={selected}
       aria-label={label}
       className={cn(
-        "flex w-[min(400px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-shadow",
+        // Selection and hover change colour and ring only (duration-hover); a card doesn't scale on press.
+        "flex w-[min(400px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-[box-shadow,border-color] duration-hover ease-[ease]",
         dashed && "border-dashed bg-bg/70 shadow-none",
         selected ? "border-info ring-2 ring-info/30" : "border-border hover:border-border-strong",
       )}

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { seg } from "@/api/client";
 import type { Tone } from "@/ui/bits";
@@ -110,6 +110,25 @@ export function SettingsRow({ title, hint, children }: { title: ReactNode; hint?
       {children && <div className="flex shrink-0 items-center gap-2 md:w-[min(420px,45%)] md:justify-end">{children}</div>}
     </div>
   );
+}
+
+/** The list recipe (architecture.md "UI motion system"): drops 4 px and fades in, as a Field error does. */
+export const appearClass = "transition-[opacity,translate] duration-list-in ease-out starting:-translate-y-(--motion-shift-sm) starting:opacity-0";
+
+/**
+ * Content that appears inside an open dialog because of a choice made there
+ * (a field for the picked option, a result): it drops in with the list
+ * recipe. What is already shown when the dialog opens arrives with the
+ * dialog, so it has no second entrance; hiding it is instant, so the gap
+ * closes at once. Under reduced motion the shift is 0: a plain fade.
+ */
+export function Reveal({ show, children, className }: { show: boolean; children: ReactNode; className?: string }) {
+  // Entrances only after the first render: one entrance per container.
+  const changed = useRef(false);
+  const first = useRef(show);
+  if (show !== first.current) changed.current = true;
+  if (!show) return null;
+  return <div className={cn(changed.current && appearClass, className)}>{children}</div>;
 }
 
 /** A small grey label pill: "Built-in", "Custom", "Hidden". */

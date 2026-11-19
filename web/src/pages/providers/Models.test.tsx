@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAgent } from "@ui-sdk/react/agent";
@@ -188,6 +188,31 @@ test("clicking a model's row, or its name, opens its details", async () => {
   renderTab();
   await user.click(await screen.findByRole("button", { name: "Open pinned-model" }));
   expect(await screen.findByRole("dialog", { name: "pinned-model" })).toBeTruthy();
+});
+
+// Motion (UI ticket 17): the details dialog stays mounted while it leaves, so its exit plays.
+test("closing a model's details plays the dialog's exit, still showing that model", async () => {
+  const user = userEvent.setup();
+  renderTab();
+  await user.click(await screen.findByRole("button", { name: "Open pinned-model" }));
+  const dialog = await screen.findByRole("dialog", { name: "pinned-model" });
+  let end = () => {};
+  const finished = new Promise<void>((r) => (end = r));
+  const running = { finished, effect: { getComputedTiming: () => ({ endTime: 60_000, localTime: 0 }) } } as unknown as Animation;
+  const before = Element.prototype.getAnimations;
+  Element.prototype.getAnimations = function (this: Element) {
+    return this === dialog ? [running] : [];
+  };
+  try {
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(dialog.isConnected).toBe(true);
+    expect(dialog.hasAttribute("data-ending-style")).toBe(true);
+    expect(within(dialog).getByText("pinned-model")).toBeTruthy();
+    await act(async () => end());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  } finally {
+    Element.prototype.getAnimations = before;
+  }
 });
 
 test("an agent finds the model controls, pages, and tests a model from its row menu", async () => {

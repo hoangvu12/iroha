@@ -36,11 +36,13 @@ export function Switch({
       }}
       onClick={(e) => e.stopPropagation()}
       className={
-        "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full bg-border-strong transition-colors " +
-        "data-checked:bg-primary data-disabled:cursor-not-allowed data-disabled:opacity-50 aria-busy:cursor-progress motion-reduce:transition-none"
+        // Motion: the track's colour fades (duration-hover, also under reduced motion); the thumb
+        // slides on duration-press, which reduced motion turns to 0, so it jumps.
+        "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full bg-border-strong transition-colors duration-hover ease-[ease] " +
+        "data-checked:bg-primary data-disabled:cursor-not-allowed data-disabled:opacity-50 aria-busy:cursor-progress"
       }
     >
-      <SwitchThumb className="inline-block size-[18px] translate-x-[3px] rounded-full bg-bg shadow-sm transition-transform data-checked:translate-x-[19px] motion-reduce:transition-none" />
+      <SwitchThumb className="inline-block size-[18px] translate-x-[3px] rounded-full bg-bg shadow-sm transition-[translate] duration-press ease-out data-checked:translate-x-[19px]" />
     </SdkSwitch>
   );
 }

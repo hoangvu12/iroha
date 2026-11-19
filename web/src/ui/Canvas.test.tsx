@@ -1,10 +1,12 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createAgent } from "@ui-sdk/react/agent";
-import { expect, test } from "vitest";
+import { beforeAll, expect, test } from "vitest";
 import { Canvas } from "./Canvas";
 
 const agent = createAgent();
+// jsdom loads no stylesheet: the motion token the glide times itself by.
+beforeAll(() => document.documentElement.style.setProperty("--duration-move", "250ms"));
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
 
 function Route() {
@@ -74,4 +76,39 @@ test("an agent finds every control by name and can zoom", async () => {
   expect(result.ok).toBe(true);
   await settle();
   expect(level()).toBe("120%");
+});
+
+// Motion (UI ticket 17): a press on a zoom button, or on a card, glides the
+// world (duration-move, ease-in-out); the wheel, a pan and the keys stay 1:1.
+test("a zoom button glides the world; the wheel and a pan drop the glide at once; + - 0 never glide", async () => {
+  const user = userEvent.setup();
+  render(<Route />);
+  await settle();
+  expect(world().className).toContain("data-glide:transition-[transform]");
+  expect(world().className).toContain("data-glide:duration-move");
+  expect(world().className).toContain("data-glide:ease-in-out");
+  expect(world().hasAttribute("data-glide")).toBe(false);
+  await user.click(screen.getByRole("button", { name: "Zoom in" }));
+  expect(world().hasAttribute("data-glide")).toBe(true);
+  const frame = screen.getByRole("group", { name: "Route of req_1" });
+  fireEvent.wheel(frame, { deltaY: 40 });
+  expect(world().hasAttribute("data-glide")).toBe(false);
+  await user.click(screen.getByRole("button", { name: "Reset the view" }));
+  expect(world().hasAttribute("data-glide")).toBe(true);
+  fireEvent.pointerDown(frame, { button: 0, pointerId: 1 });
+  expect(world().hasAttribute("data-glide")).toBe(false);
+  frame.focus();
+  fireEvent.keyDown(frame, { key: "+" });
+  await settle();
+  expect(world().hasAttribute("data-glide")).toBe(false);
+});
+
+test("a press on a card glides the pan that brings it into view; Tab to it doesn't", async () => {
+  render(<Route />);
+  await settle();
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Attempt 1" }), { button: 0, pointerId: 1 });
+  expect(world().hasAttribute("data-glide")).toBe(true);
+  fireEvent.wheel(screen.getByRole("group", { name: "Route of req_1" }), { deltaY: 40 });
+  screen.getByRole("button", { name: "Start" }).focus();
+  expect(world().hasAttribute("data-glide")).toBe(false);
 });

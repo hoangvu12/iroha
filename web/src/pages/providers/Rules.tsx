@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { api, isApiError, seg } from "@/api/client";
@@ -15,7 +15,7 @@ import { SaveError, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import type { Outcome, Replay, Rule, RuleFields } from "./api";
 import { calls, errorText, OUTCOMES, useRefresh, useRules } from "./api";
-import { Checkbox, Pill, Select, Switch } from "./controls";
+import { appearClass, Checkbox, Pill, Reveal, Select, Switch } from "./controls";
 import { SAMPLE_RULES } from "./samples";
 
 /** The Rules tab (C09): which Failure Rules decide this Provider's failures, in order, and how often each did today. */
@@ -206,26 +206,31 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState<"check" | "save">();
 
-  useEffect(() => {
-    if (!open) return;
-    setReplay(undefined);
-    setError(undefined);
-    setF(
-      rule
-        ? {
-            name: rule.name,
-            status: (rule.status ?? []).join(", "),
-            code: (rule.code ?? []).join(", "),
-            body: rule.body ?? "",
-            outcome: rule.outcome,
-            cooling: rule.cooling_seconds ? String(rule.cooling_seconds) : "",
-            description: rule.description ?? "",
-            only: rule.provider === handle,
-          }
-        : empty,
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, rule]);
+  // Opening (or the rule changing) starts the form from it in the same render,
+  // so the dialog's first frame already shows its fields (Cool for, for a
+  // cooling rule, arrives with the dialog, not after it).
+  const [startedFrom, setStartedFrom] = useState<{ open: boolean; rule?: Rule }>({ open: false });
+  if (startedFrom.open !== open || startedFrom.rule !== rule) {
+    setStartedFrom({ open, rule });
+    if (open) {
+      setReplay(undefined);
+      setError(undefined);
+      setF(
+        rule
+          ? {
+              name: rule.name,
+              status: (rule.status ?? []).join(", "),
+              code: (rule.code ?? []).join(", "),
+              body: rule.body ?? "",
+              outcome: rule.outcome,
+              cooling: rule.cooling_seconds ? String(rule.cooling_seconds) : "",
+              description: rule.description ?? "",
+              only: rule.provider === handle,
+            }
+          : empty,
+      );
+    }
+  }
 
   const fields = (): RuleFields => ({
     status: list(f.status),
@@ -327,11 +332,11 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
           <Field label="Then" hint={outcome?.hint}>
             {() => <Select value={f.outcome} onValueChange={(v) => set("outcome")({ target: { value: v } })} items={OUTCOMES} />}
           </Field>
-          {f.outcome.startsWith("cooling") && (
+          <Reveal show={f.outcome.startsWith("cooling")}>
             <Field label="Cool for" hint="Seconds, when the reply names no reset time.">
               {(p) => <Input {...p} inputMode="numeric" placeholder="60" value={f.cooling} onChange={set("cooling")} />}
             </Field>
-          )}
+          </Reveal>
         </div>
         <Field label="Description" hint="Optional: what it recognises and why.">
           {(p) => <Input {...p} value={f.description} onChange={set("description")} />}
@@ -348,7 +353,7 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
           Only for {handle}
         </label>
         {replay && (
-          <p className="rounded-lg bg-subtle px-4 py-3 text-[14px]">
+          <p className={cn("rounded-lg bg-subtle px-4 py-3 text-[14px]", appearClass)}>
             {replay.attempts === 0
               ? "No failed Attempts in the last 7 days to check it against."
               : replay.changed === 0
@@ -356,7 +361,7 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
                 : `${formatNumber(replay.changed)} of the last 7 days' ${formatNumber(replay.attempts)} failed Attempts would be decided differently.`}
           </p>
         )}
-        {error && <p className="text-[13px] text-danger-text">{error}</p>}
+        {error && <p className={cn("text-[13px] text-danger-text", appearClass)}>{error}</p>}
         <button type="submit" hidden />
       </form>
     </Dialog>

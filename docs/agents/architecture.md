@@ -121,6 +121,10 @@ Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `ech
 - **Route preview** (`gateway/preview.go`, `GET /api/route-preview?model=&shape=&as=`): runs `(*exchange).global` on an exchange that answers no one, then `planner.Plan` with `Counter.Peek()` (the next Request's round-robin start, without advancing it), and splits candidates and skips per member by `Candidate.Provider`/`Skip.Provider` pointer. `as` uses `gatewaykeys.Store.CallerOf`; no `as` is `gatewaykeys.Unrestricted`. `outcome` is the error a Caller would get before any Attempt. It does not expire gaps (planning already ignores expired ones), so it writes nothing. Last-used times per key are not in it (the Upstream Keys list has them).
 - **Maker**: `pools.maker` is the Owner's; empty means `GuessMaker` on the Pool name, then the members' models. Logos are ticket 22's.
 
+### Ticket 26: key order
+
+- **Health first** (FAIL-104): within an Endpoint tier, `planTier` orders candidates by key health, then known carriers, keeping round-robin within each of the four groups. A key is "back from cooling" when `Key.Recovering(wire model)`: its own cooling ended (`CoolingUntil` past) or its cooling for that wire model ended, with no success since (`keystate.Succeeded` and `TestPassed` clear both, so the routing view already holds the fact; no migration). Such keys go after keys with no recent refusal, so a Provider with dozens of keys just out of a 15 min billing cooling serves from its healthy key at the first Attempt; they stay in the plan and are tried when the healthy keys fail. There is still no single-trial claim (FAIL-103).
+
 Nested admin resources (Endpoints and Upstream Keys under a Provider) resolve their parent with the Provider resource and themselves by name or ID *within* that Provider (`resolveChild` in `internal/providers`); their audit names are `<handle>/<name>`, so `GET /api/audit-entries?record=acme/key-1` works.
 
 ## Rules everyone follows

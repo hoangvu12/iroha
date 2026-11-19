@@ -218,6 +218,16 @@ func TestKeyStatesExcludeKeys(t *testing.T) {
 			"", "off:disabled gap:model_gap:glm", planner.ModelGap, later},
 		{"cooling beats a Model Gap", []planner.Endpoint{chat}, []planner.Key{gap, modelCool},
 			"", "gap:model_gap:glm mc:cooling_model:glm", planner.Cooling, soon},
+		// FAIL-104: a cooling that ended with no success since puts the key
+		// after keys with no recent refusal; a past cooling for another
+		// model does not.
+		{"keys back from cooling go after the others", []planner.Endpoint{chat},
+			[]planner.Key{cooled, k("mcp", func(k *planner.Key) { k.ModelCooling = map[string]time.Time{"glm": now.Add(-time.Minute)} }), ok,
+				k("oth", func(k *planner.Key) { k.ModelCooling = map[string]time.Time{"other": now.Add(-time.Minute)} })},
+			"ok@a:glm oth@a:glm was@a:glm mcp@a:glm", "", "", time.Time{}},
+		{"a past cooling for one wire model ranks only that Endpoint later", []planner.Endpoint{chat, chatB},
+			[]planner.Key{k("mcp", func(k *planner.Key) { k.ModelCooling = map[string]time.Time{"glm": now.Add(-time.Minute)} }), ok},
+			"mcp@b:glm-b ok@a:glm ok@b:glm-b mcp@a:glm", "", "", time.Time{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -263,6 +273,7 @@ func TestKnownCarriersGoFirstAndOthersStay(t *testing.T) {
 		}
 		return k
 	}
+	back := func(k planner.Key) planner.Key { k.CoolingUntil = now.Add(-time.Second); return k }
 	cases := []struct {
 		name string
 		eps  []planner.Endpoint
@@ -278,6 +289,12 @@ func TestKnownCarriersGoFirstAndOthersStay(t *testing.T) {
 		{"carrying is judged per Endpoint on the wire model", []planner.Endpoint{a, b},
 			[]planner.Key{carrying("k1", "glm"), carrying("k2", "glm-b")}, planner.Fixed(0),
 			"k1@a:glm k2@b:glm-b k1@b:glm-b k2@a:glm"},
+		// FAIL-104: health first, carriers first within each health group,
+		// round-robin kept within each of the four groups.
+		{"healthy keys before carriers back from cooling", []planner.Endpoint{a},
+			[]planner.Key{back(carrying("k1", "glm")), carrying("k2"), carrying("k3", "glm"), back(carrying("k4")),
+				carrying("k5", "glm"), back(carrying("k6", "glm")), carrying("k7")}, planner.Fixed(2),
+			"k3@a:glm k5@a:glm k7@a:glm k2@a:glm k6@a:glm k1@a:glm k4@a:glm"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

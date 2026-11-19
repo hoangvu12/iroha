@@ -69,7 +69,7 @@ type Rule struct {
 	Host           string            `json:"host,omitempty" doc:"Endpoint hosts the rule applies to, separated by commas, each matching itself and its subdomains (aliyuncs.com matches dashscope-intl.aliyuncs.com); empty for any host. Built-in rules for one Provider's quirks are limited this way."`
 	Status         []string          `json:"status,omitempty" doc:"Upstream statuses, any of which matches: exact (429), a class (5xx), network (no response at all) or timeout (no response within the time budget). An error inside a 200 answer or at the start of a stream counts as the status it stands for (error.code 429, error.type overloaded_error is 529; 502 when it names none)."`
 	Code           []string          `json:"code,omitempty" doc:"Provider error codes, any of which matches, compared without case against error.code, error.type, error.status, code, type and base_resp.status_code of the JSON body (numbers as text). A code ending in * matches by prefix (billing_*)."`
-	Body           string            `json:"body,omitempty" doc:"Regular expression, case-insensitive, that must match somewhere in the response body."`
+	Body           string            `json:"body,omitempty" doc:"Regular expression, case-insensitive, that must match somewhere in the response body. A JSON body is read by its error fields only (error, message, code, type, detail, msg, status, the same fields of the error object, base_resp.status_msg), so a field the body merely echoes, such as model, never matches; any other body is read as text."`
 	Header         map[string]string `json:"header,omitempty" doc:"Response headers that must be present, each with a case-insensitive regular expression its value must match (empty: any value)."`
 	Outcome        Outcome           `json:"outcome" enum:"invalid,cooling_key,cooling_key_model,model_gap,retry_elsewhere,fail_request" doc:"What the failure means; see the Key States section of /skill.md."`
 	CoolingSeconds int               `json:"cooling_seconds,omitempty" doc:"For cooling outcomes: how long to cool when the response names no reset time. Default 60 s, doubling on each repeat up to 1 h."`
@@ -428,6 +428,9 @@ type input struct {
 	doc     any // the body as JSON (a stream's first JSON data payload), nil when it is not JSON
 	codes   []string
 	message string
+	// text is what a body condition reads: the error's own fields when the
+	// body is JSON (errorText), the body itself otherwise (FAIL-49).
+	text []byte
 }
 
 func newInput(f Failure) *input {
@@ -480,7 +483,48 @@ func newInput(f Failure) *input {
 	if in.message == "" && in.doc == nil {
 		in.message = strings.TrimSpace(string(trimmed))
 	}
+	in.text = in.body
+	if in.doc != nil {
+		in.text = []byte(errorText(obj))
+	}
 	return in
+}
+
+// errorText is the human- and machine-readable part of a JSON error body,
+// the only part a body condition reads (as v1 did): the top-level error,
+// message, code, type, detail, msg and status, the same fields of the error
+// (or errors) object, and MiniMax's base_resp.status_msg. So a body that
+// merely echoes the request's "model" field, or has a field named "quota",
+// does not read as a refusal naming a model or billing.
+func errorText(obj map[string]any) string {
+	if obj == nil {
+		return ""
+	}
+	fields := []string{"error", "message", "code", "type", "detail", "msg", "status"}
+	var parts []string
+	add := func(o map[string]any) {
+		for _, k := range fields {
+			if s := scalar(o[k]); s != "" {
+				parts = append(parts, s)
+			}
+		}
+	}
+	add(obj)
+	for _, k := range []string{"error", "errors"} {
+		e := obj[k]
+		if arr, ok := e.([]any); ok && len(arr) > 0 {
+			e = arr[0]
+		}
+		if o, ok := e.(map[string]any); ok {
+			add(o)
+		}
+	}
+	if br, ok := obj["base_resp"].(map[string]any); ok {
+		if s := scalar(br["status_msg"]); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // scalar renders a JSON string or number as text.
@@ -509,7 +553,7 @@ func (c *compiled) matches(f Failure, in *input) bool {
 	if len(c.codes) > 0 && !slices.ContainsFunc(c.codes, in.hasCode) {
 		return false
 	}
-	if c.body != nil && !c.body.Match(in.body) {
+	if c.body != nil && !c.body.Match(in.text) {
 		return false
 	}
 	for _, h := range c.header {

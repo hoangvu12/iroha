@@ -124,13 +124,13 @@ func TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself(t *testing.T) {
 		t.Fatalf("a key cooling for one model stopped serving others: %s", got)
 	}
 
-	// After the reset time the key serves gpt-x again, and success clears it.
+	// After the reset time the key serves gpt-x again, after the keys with no
+	// recent refusal (FAIL-104), and success clears it.
 	srv.Clock.Advance(31 * time.Second)
 	n = up.Count()
-	for range 3 {
-		caller.Post(chatPath, chat("gpt-x")).Expect(200)
-	}
-	if got := bearers(up, n); !strings.Contains(got, "b") {
+	up.Enqueue(up.Error(500, "boom"), up.Error(500, "boom"))
+	caller.Post(chatPath, chat("gpt-x")).Expect(200)
+	if got := bearers(up, n); !strings.HasSuffix(got, ",b") {
 		t.Fatalf("key-2 did not come back: %s", got)
 	}
 	if k2 := readKey(t, srv, "key-2"); len(k2.CoolingModels) != 0 || k2.State.State != "active" {

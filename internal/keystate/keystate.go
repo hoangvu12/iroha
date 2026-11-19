@@ -6,7 +6,8 @@
 //
 // The Gateway reports failed and successful Attempts here; candidate
 // planning reads the state through providers.Store.Routing; the admin API
-// shows it on every Upstream Key. Every change is logged as key.state.
+// shows it on every Upstream Key. Every change is logged as key.state
+// (logs.KindKeyState).
 package keystate
 
 import (
@@ -22,9 +23,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/rules"
 	"github.com/hoangvu12/iroha/internal/store"
 )
-
-// KindKeyState is logged on every Key State change.
-var KindKeyState = logs.NewKind("key.state", "An Upstream Key changed Key State (or cooling for one model): Provider, key, from, to, model, until, reason, rule and Request.")
 
 // The visible Key States.
 const (
@@ -367,8 +365,8 @@ type event struct {
 }
 
 func (s *Store) logEvent(k Key, requestID string, e event) {
-	attrs := []any{logs.Kind(KindKeyState), logs.Provider(k.Provider), "upstream_key", k.Name, "upstream_key_id", k.ID,
-		"from", e.from, "to", e.to, "reason", e.reason}
+	attrs := []any{logs.Kind(logs.KindKeyState), logs.Provider(k.Provider), "upstream_key", k.Name, "upstream_key_id", k.ID,
+		"from", e.from, "state", e.to, "reason", e.reason}
 	if requestID != "" {
 		attrs = append(attrs, logs.Request(requestID))
 	}
@@ -384,6 +382,10 @@ func (s *Store) logEvent(k Key, requestID string, e event) {
 	msg := "Upstream Key " + e.to
 	if e.model != "" {
 		msg = "Upstream Key " + e.to + " for one model"
+	}
+	if e.to == Invalid || e.to == Cooling {
+		s.log.Warn(msg, attrs...)
+		return
 	}
 	s.log.Info(msg, attrs...)
 }

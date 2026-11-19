@@ -28,6 +28,7 @@ type GatewayKey struct {
 	Name       string     `json:"name" doc:"Who the key was issued to; Requests are attributed to it."`
 	Secret     string     `json:"secret" doc:"The key itself. Callers send it as \"Authorization: Bearer <secret>\", \"x-api-key\" or \"api-key\"."`
 	Scope      Scope      `json:"scope"`
+	Capture    bool       `json:"capture" doc:"true: the full prompt and response of every Request made with this key are stored (GET /api/requests/{request}/capture), for retention.captures_days. false: neither is stored."`
 	Revoked    bool       `json:"revoked"`
 	CreatedAt  time.Time  `json:"created_at"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
@@ -165,7 +166,7 @@ func view(ctx context.Context, q queryer, s stored) (Scope, error) {
 	return out, nil
 }
 
-const keyColumns = `id, name, secret, scope, created_at, revoked_at, last_used_at`
+const keyColumns = `id, name, secret, scope, capture, created_at, revoked_at, last_used_at`
 
 type row struct {
 	GatewayKey
@@ -177,7 +178,7 @@ func scan(r interface{ Scan(...any) error }) (row, error) {
 	var scope string
 	var created int64
 	var revoked, used sql.NullInt64
-	if err := r.Scan(&k.ID, &k.Name, &k.Secret, &scope, &created, &revoked, &used); err != nil {
+	if err := r.Scan(&k.ID, &k.Name, &k.Secret, &scope, &k.Capture, &created, &revoked, &used); err != nil {
 		return k, err
 	}
 	var err error
@@ -210,7 +211,9 @@ func byID(ctx context.Context, q queryer, id string) (GatewayKey, error) {
 type Caller struct {
 	KeyID string
 	Name  string
-	scope stored
+	// Capture says the Request's prompt and response are to be stored.
+	Capture bool
+	scope   stored
 }
 
 // AllowsProvider reports whether the Caller may use the Provider at all.
@@ -292,5 +295,5 @@ func (s *Store) Authenticate(r *http.Request) (Caller, *api.Error) {
 	if k.LastUsedAt == nil || now.Sub(*k.LastUsedAt) >= lastUsedGranularity {
 		_, _ = s.db.ExecContext(r.Context(), `UPDATE gateway_keys SET last_used_at = ? WHERE id = ?`, store.Millis(now), k.ID)
 	}
-	return Caller{KeyID: k.ID, Name: k.Name, scope: k.scope}, nil
+	return Caller{KeyID: k.ID, Name: k.Name, Capture: k.Capture, scope: k.scope}, nil
 }

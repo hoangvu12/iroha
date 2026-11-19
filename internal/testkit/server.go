@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/config"
+	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/server"
 )
@@ -37,6 +39,8 @@ type Options struct {
 	LogLevel slog.Level  // default info, as in production
 	// HTTPClient makes Iroha's outbound calls; default a plain client.
 	HTTPClient *http.Client
+	// Jobs are background jobs added to the built-in ones.
+	Jobs []jobs.Job
 }
 
 // Server is a running in-process Iroha.
@@ -107,6 +111,7 @@ func (s *Server) start() {
 		Clock:      s.Clock,
 		Console:    s.console,
 		HTTPClient: s.opts.HTTPClient,
+		Jobs:       s.opts.Jobs,
 	})
 	if err != nil {
 		s.t.Fatalf("start Iroha: %v", err)
@@ -183,6 +188,54 @@ func (s *Server) Logs(query string) []logs.Event {
 	return page.Events
 }
 
+// SettleJobs waits (real time, up to 10 s) until no background job is
+// running and every job's next run is after the fake clock's now: call it
+// after Advance to let the runs that time triggered finish. It returns the
+// jobs as GET /api/jobs then reports them.
+func (s *Server) SettleJobs() []jobs.JobView {
+	s.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	read := func() (jobs.JobList, bool) {
+		var list jobs.JobList
+		s.Admin.Get("/api/jobs").Expect(http.StatusOK).JSON(&list)
+		for _, j := range list.Jobs {
+			if j.Running || j.NextRunAt == nil || !j.NextRunAt.After(s.Clock.Now()) {
+				return list, false
+			}
+		}
+		return list, true
+	}
+	for {
+		list, settled := read()
+		if settled {
+			// Read again a moment later: a goroutine woken by the last
+			// timer may not have marked its job running yet.
+			time.Sleep(10 * time.Millisecond)
+			again, still := read()
+			if still && reflect.DeepEqual(list, again) {
+				return list.Jobs
+			}
+		}
+		if time.Now().After(deadline) {
+			s.t.Fatalf("background jobs did not settle within 10s: %+v", list.Jobs)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// RunJob runs a background job now through POST /api/jobs/{job}/run and
+// returns the run. Pass query "dry_run=true" for a dry run.
+func (s *Server) RunJob(name string, query ...string) jobs.Run {
+	s.t.Helper()
+	path := "/api/jobs/" + name + "/run"
+	if len(query) > 0 {
+		path += "?" + query[0]
+	}
+	var run jobs.Run
+	s.Admin.Post(path, nil).Expect(http.StatusOK).JSON(&run)
+	return run
+}
+
 // NewAdminToken creates an Admin Token named name through the admin API
 // (as the bootstrap token) and returns a client that sends it. Its Token
 // field is the secret.
@@ -198,6 +251,30 @@ func (s *Server) NewAdminToken(name string) *Client {
 		s.t.Fatalf("creating Admin Token %q returned no secret", name)
 	}
 	return s.Client(out.AdminToken.Secret)
+}
+
+// OwnerPassword is the password OwnerSession sets.
+const OwnerPassword = "test-owner-password"
+
+// OwnerSession signs in as the Owner, as the UI does, and returns a client
+// that sends the session cookie. It first sets the Owner password to
+// OwnerPassword (as the bootstrap Admin Token) when none is set. Changes it
+// makes are recorded with the actor "Owner".
+func (s *Server) OwnerSession() *Client {
+	s.t.Helper()
+	var st struct {
+		PasswordSet bool `json:"password_set"`
+	}
+	s.Anon.Get("/api/session").Expect(http.StatusOK).JSON(&st)
+	if !st.PasswordSet {
+		s.Admin.Put("/api/owner-password", map[string]any{"password": OwnerPassword}).OK()
+	}
+	resp := s.Anon.Post("/api/session", map[string]any{"password": OwnerPassword}).Expect(http.StatusCreated)
+	ck := resp.Cookie("iroha_session")
+	if ck == nil {
+		s.t.Fatalf("sign-in set no iroha_session cookie; headers %v", resp.Header)
+	}
+	return (&Client{t: s.t, srv: s}).WithCookie(ck)
 }
 
 // Client returns a client sending "Authorization: Bearer token" (none when

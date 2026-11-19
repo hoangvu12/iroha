@@ -387,6 +387,38 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 	return r, true, nil
 }
 
+// ResolveRouting reads the routing view of the Provider addressed by handle
+// or ID, with the uniform 404 when there is none.
+func (s *Store) ResolveRouting(ctx context.Context, ref string) (Routing, error) {
+	p, err := resolveProvider(ctx, s.db, ref)
+	if err != nil {
+		return Routing{}, err
+	}
+	r, _, err := s.Routing(ctx, p.handle)
+	return r, err
+}
+
+// ResolveKey finds the Upstream Key addressed by name or ID in a routing
+// view, with the uniform 404 when there is none.
+func (s *Store) ResolveKey(ctx context.Context, r *Routing, keyRef string) (*planner.Key, error) {
+	id, err := resolveChild(ctx, s.db, "upstream_keys", "Upstream Key", "keys", ref{id: r.ID, handle: r.Handle}, keyRef)
+	if err != nil {
+		return nil, err
+	}
+	for i := range r.Keys {
+		if r.Keys[i].ID == id {
+			return &r.Keys[i], nil
+		}
+	}
+	return nil, fmt.Errorf("upstream key %s vanished while it was read", id)
+}
+
+// KeyState is the visible Key State of key id now.
+func (s *Store) KeyState(ctx context.Context, id string) (keystate.State, error) {
+	k, err := readKey(ctx, s.db, id, s.clock.Now())
+	return k.State, err
+}
+
 // lastUsedGranularity limits last_used_at writes to one per key per minute.
 const lastUsedGranularity = time.Minute
 

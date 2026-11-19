@@ -241,3 +241,14 @@ func TestTheLastActiveAdminTokenCannotBeRevoked(t *testing.T) {
 	}
 	srv.Admin.Get("/api/whoami").Expect(200)
 }
+
+func TestTheLastAdminTokenCanGoOnceTheOwnerCanSignIn(t *testing.T) {
+	srv := testkit.Start(t)
+	owner := srv.OwnerSession() // sets the Owner password
+	srv.Admin.Post("/api/admin-tokens/bootstrap/revoke", nil).Expect(200)
+	srv.Admin.Get("/api/whoami").Expect(401)
+	// The Owner is not locked out: the session issues a new token.
+	var created tokenResult
+	owner.Post("/api/admin-tokens", map[string]any{"name": "agent-2"}).Expect(201).JSON(&created)
+	srv.Client(created.AdminToken.Secret).Get("/api/whoami").Expect(200)
+}

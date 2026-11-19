@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/shape"
@@ -17,6 +18,9 @@ import (
 const (
 	StateInProgress = "in_progress"
 	StateCompleted  = "completed"
+	// StateInterrupted is a Request Iroha stopped serving without finishing
+	// it (a crash or a forced stop); it is set at the next startup.
+	StateInterrupted = "interrupted"
 )
 
 // Caller kinds.
@@ -29,7 +33,7 @@ type Request struct {
 	ID         string     `json:"id" doc:"Also returned to the Caller in the x-request-id header."`
 	StartedAt  time.Time  `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	State      string     `json:"state" enum:"in_progress,completed"`
+	State      string     `json:"state" enum:"in_progress,completed,interrupted" doc:"interrupted: Iroha stopped (crash or forced restart) before the Request finished; status, timings and usage may be missing."`
 	Status     int        `json:"status" doc:"HTTP status the Caller received; 0 while in progress."`
 	Error      *Failure   `json:"error,omitempty" doc:"Why the Request failed, when Iroha refused or failed it."`
 	Summary    string     `json:"summary,omitempty" doc:"One line saying what happened at each Attempt, for Requests with a failed Attempt or more than one Attempt."`
@@ -54,6 +58,7 @@ type Request struct {
 	DurationMs   *int64       `json:"duration_ms,omitempty" doc:"Time from arrival to the end of the answer."`
 	Usage        *usage.Usage `json:"usage,omitempty" doc:"Token usage, streamed answers included; absent when the Provider reported none."`
 	AttemptCount int          `json:"attempt_count"`
+	Captured     bool         `json:"captured" doc:"true when the prompt and response are stored: GET /api/requests/{request}/capture."`
 	Attempts     []Attempt    `json:"attempts,omitempty" doc:"Every Attempt in order (on GET /api/requests/{request} only)."`
 }
 
@@ -148,6 +153,28 @@ func (rc *Recorder) Attempt(ctx context.Context, id string, a Attempt) error {
 		_, err := tx.ExecContext(ctx, `UPDATE requests SET attempt_count = attempt_count + 1 WHERE id = ?`, id)
 		return err
 	})
+}
+
+// NoteProvider records the Provider a Request is being served by, as its
+// first Attempt starts, so an interrupted Request still names it.
+func (rc *Recorder) NoteProvider(ctx context.Context, id, providerID, handle string) error {
+	ctx = context.WithoutCancel(ctx)
+	return rc.db.Tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE requests SET provider_id = ?, provider_handle = ? WHERE id = ?`, providerID, handle, id)
+		return err
+	})
+}
+
+// LastServedModel is the model (as the Caller named it) of the latest
+// Request a Provider answered with a 2xx; "" when there is none.
+func (rc *Recorder) LastServedModel(ctx context.Context, providerID string) (string, error) {
+	var m string
+	err := rc.db.QueryRowContext(ctx, `SELECT model FROM requests WHERE provider_id = ? AND status >= 200 AND status < 300 AND model != ''
+		ORDER BY started_at DESC, rowid DESC LIMIT 1`, providerID).Scan(&m)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return m, err
 }
 
 // Finish records r as completed with everything it now says.

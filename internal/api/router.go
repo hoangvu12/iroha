@@ -14,10 +14,11 @@ import (
 
 // Router owns the route table and the ServeMux built from it.
 type Router struct {
-	mux    *http.ServeMux
-	routes []Route
-	auth   []Authenticator
-	log    *slog.Logger
+	mux      *http.ServeMux
+	routes   []Route
+	auth     []Authenticator
+	log      *slog.Logger
+	fallback http.Handler
 
 	mu sync.RWMutex // guards routes after startup (Add is normally startup-only)
 }
@@ -82,14 +83,34 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rt.mux.ServeHTTP(w, r)
 		return
 	}
-	if allowed := rt.allowedMethods(r); len(allowed) > 0 {
+	allowed := rt.allowedMethods(r)
+	if len(allowed) == 0 && rt.fallback != nil && (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		!strings.HasPrefix(r.URL.Path, "/api/") {
+		rt.fallback.ServeHTTP(w, r)
+		return
+	}
+	if len(allowed) > 0 {
 		w.Header().Set("Allow", strings.Join(allowed, ", "))
 		WriteError(w, Errorf(http.StatusMethodNotAllowed, "method_not_allowed",
 			fmt.Sprintf("Use %s; GET /api/openapi.json lists every route.", strings.Join(allowed, " or ")),
 			"%s is not allowed on %s.", r.Method, r.URL.Path))
 		return
 	}
+	NotFoundHandler(w, r)
+}
+
+// NotFoundHandler answers the JSON 404 of an unknown route.
+func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 	WriteError(w, NotFound("GET /api/openapi.json lists every route; GET /skill.md explains them.", "No route %s %s.", r.Method, r.URL.Path))
+}
+
+// Fallback sets the handler for GET and HEAD requests outside /api/ that
+// match no route: the embedded UI. It answers unknown paths itself (with
+// NotFoundHandler when they are not UI pages).
+func (rt *Router) Fallback(h http.Handler) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.fallback = h
 }
 
 func (rt *Router) allowedMethods(r *http.Request) []string {

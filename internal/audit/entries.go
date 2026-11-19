@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -122,6 +123,88 @@ func (tr *Trail) List(ctx context.Context, f Filter) ([]Entry, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// FilterOptions is the response of GET /api/audit-entries/filters: who has
+// made changes and what kinds of record they changed.
+type FilterOptions struct {
+	Actors    []ActorOption    `json:"actors" doc:"The Owner first, then Admin Tokens, most recently active first."`
+	Resources []ResourceOption `json:"resources" doc:"Kinds of record changed, by label."`
+}
+
+// ActorOption is one actor that has Audit Entries.
+type ActorOption struct {
+	Kind    string    `json:"kind" enum:"admin_token,owner_session"`
+	ID      string    `json:"id,omitempty" doc:"The Admin Token's ID; absent for the Owner, whose sessions count as one actor."`
+	Name    string    `json:"name" doc:"The Admin Token's name in its latest Audit Entry, or Owner."`
+	Filter  string    `json:"filter" doc:"The value to pass as actor= (the token's ID, so renames do not matter, or Owner)."`
+	Entries int       `json:"entries" doc:"How many Audit Entries this actor made."`
+	LastAt  time.Time `json:"last_at" doc:"Time of the actor's latest Audit Entry."`
+}
+
+// ResourceOption is one kind of record that appears in Audit Entries.
+type ResourceOption struct {
+	Name    string `json:"name" doc:"The value to pass as resource=, e.g. admin_token."`
+	Label   string `json:"label" doc:"e.g. Admin Token."`
+	Plural  string `json:"plural" doc:"e.g. Admin Tokens."`
+	Entries int    `json:"entries" doc:"How many Audit Entries changed a record of this kind."`
+}
+
+// ownerName is the actor name of every Owner session.
+const ownerName = "Owner"
+
+// Filters lists the actors and resources that appear in Audit Entries.
+func (tr *Trail) Filters(ctx context.Context) (FilterOptions, error) {
+	out := FilterOptions{Actors: []ActorOption{}, Resources: []ResourceOption{}}
+	// Owner sessions are one actor; each Admin Token is one actor by ID,
+	// named as in its latest entry.
+	rows, err := tr.db.QueryContext(ctx, `SELECT g.kind, g.who, e.actor_name, g.n, e.at FROM (
+			SELECT actor_kind AS kind, CASE WHEN actor_kind = ? THEN '' ELSE actor_id END AS who, count(*) AS n, max(rowid) AS last
+			FROM audit_entries GROUP BY kind, who
+		) g JOIN audit_entries e ON e.rowid = g.last
+		ORDER BY g.kind = ? DESC, g.last DESC`,
+		api.ActorOwnerSession, api.ActorOwnerSession)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var a ActorOption
+		var at int64
+		if err := rows.Scan(&a.Kind, &a.ID, &a.Name, &a.Entries, &at); err != nil {
+			rows.Close()
+			return out, err
+		}
+		a.LastAt, a.Filter = store.FromMillis(at), a.ID
+		if a.Kind == api.ActorOwnerSession {
+			a.Name, a.Filter = ownerName, ownerName
+		}
+		out.Actors = append(out.Actors, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	rows, err = tr.db.QueryContext(ctx, `SELECT resource, count(DISTINCT entry_id) FROM audit_changes GROUP BY resource`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r ResourceOption
+		if err := rows.Scan(&r.Name, &r.Entries); err != nil {
+			return out, err
+		}
+		r.Label, r.Plural = r.Name, r.Name
+		if t, ok := lookup(r.Name); ok {
+			if l, ok := t.(interface{ labels() (string, string) }); ok {
+				r.Label, r.Plural = l.labels()
+			}
+		}
+		out.Resources = append(out.Resources, r)
+	}
+	slices.SortFunc(out.Resources, func(a, b ResourceOption) int { return strings.Compare(a.Label, b.Label) })
+	return out, rows.Err()
 }
 
 // queryer is what read needs from *sql.Tx or *store.DB.
@@ -370,6 +453,15 @@ func Routes(tr *Trail) []api.Route {
 					p.NextBefore = entries[len(entries)-1].ID
 				}
 				return p, nil
+			},
+		},
+		{
+			Method: http.MethodGet, Path: "/api/audit-entries/filters", Tag: "Audit Entries",
+			Summary:     "List who made changes and what kinds of record they changed",
+			Description: "The values worth offering for actor= and resource= on GET /api/audit-entries, with how many entries each has.",
+			Response:    FilterOptions{},
+			Handle: func(c *api.Call) (any, error) {
+				return tr.Filters(c.R.Context())
 			},
 		},
 		{

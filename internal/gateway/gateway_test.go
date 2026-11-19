@@ -430,14 +430,14 @@ func TestUpstreamErrorsPassThroughAndFailuresAreExplained(t *testing.T) {
 	caller := srv.Client(issue(t, srv, "pi", all))
 	body := map[string]any{"model": "gpt-x", "messages": []any{}}
 
-	// An upstream error reaches the Caller as the Provider wrote it.
+	// A rate limit cools the only key; the Caller is told when to come back.
 	up.Enqueue(up.Error(429, "slow down").Header("Retry-After", "30"))
-	resp := caller.Post(chatPath, body).Expect(429)
-	if !strings.Contains(resp.Text(), "slow down") {
-		t.Fatalf("error body = %s", resp.Body)
+	resp := caller.Post(chatPath, body).Expect(503)
+	if !strings.Contains(resp.Text(), "slow down") || !strings.Contains(resp.Text(), `"upstream_unavailable"`) || resp.Header.Get("Retry-After") != "30" {
+		t.Fatalf("error = %s (Retry-After %q)", resp.Body, resp.Header.Get("Retry-After"))
 	}
 	r := readRequest(t, srv, resp.Header.Get("X-Request-Id"))
-	if r.Status != 429 || r.Error == nil || r.Error.Code != "upstream_error" || r.Attempts[0].Status != 429 {
+	if r.Status != 503 || r.Error == nil || r.Error.Code != "upstream_unavailable" || r.Attempts[0].Status != 429 || r.Attempts[0].Rule != "rate-limited" {
 		t.Fatalf("recorded = %+v", r)
 	}
 
@@ -445,12 +445,12 @@ func TestUpstreamErrorsPassThroughAndFailuresAreExplained(t *testing.T) {
 	resp = caller.Post("/providers/dead/v1/chat/completions", body).Expect(502)
 	var e struct {
 		Error struct {
-			Code, Hint string
-			RequestID  string `json:"request_id"`
+			Code, Hint, Message string
+			RequestID           string `json:"request_id"`
 		}
 	}
 	resp.JSON(&e)
-	if e.Error.Code != "upstream_unreachable" || e.Error.Hint == "" || e.Error.RequestID == "" {
+	if e.Error.Code != "upstream_failed" || e.Error.Hint == "" || e.Error.RequestID == "" || !strings.Contains(e.Error.Message, "network") {
 		t.Fatalf("unreachable: %s", resp.Body)
 	}
 	r = readRequest(t, srv, e.Error.RequestID)

@@ -11,9 +11,14 @@ import (
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
+	"github.com/hoangvu12/iroha/internal/jobs"
+	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
+	"github.com/hoangvu12/iroha/internal/session"
+	"github.com/hoangvu12/iroha/internal/settings"
+	"github.com/hoangvu12/iroha/internal/webui"
 )
 
 // routes is the route table: one line per module. Each module package
@@ -26,10 +31,14 @@ func (s *Server) routes() []api.Route {
 		logs.Routes(s.logs),
 		audit.Routes(s.audit),
 		admintokens.Routes(s.audit, s.db),
+		session.Routes(s.owner, s.audit),
 		providers.Routes(s.audit, s.db, s.log),
 		gatewaykeys.Routes(s.audit, s.db),
 		requests.Routes(s.db),
-		gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db)}).Routes(),
+		settings.Routes(s.audit, s.db),
+		jobs.Routes(s.jobs),
+		s.gateway().Routes(),
+		s.gateway().AdminRoutes(),
 	)
 }
 
@@ -37,6 +46,7 @@ func (s *Server) routes() []api.Route {
 type Health struct {
 	Status  string `json:"status" enum:"ok,ready"`
 	Version string `json:"version"`
+	UI      bool   `json:"ui" doc:"true when this binary includes the built web UI (false: it serves a page saying the UI was not built)."`
 }
 
 func (s *Server) coreRoutes() []api.Route {
@@ -46,7 +56,7 @@ func (s *Server) coreRoutes() []api.Route {
 			Summary:  "Liveness: answers 200 while the process is running",
 			Response: Health{},
 			Handle: func(c *api.Call) (any, error) {
-				return Health{Status: "ok", Version: s.opts.Version}, nil
+				return Health{Status: "ok", Version: s.opts.Version, UI: webui.Built()}, nil
 			},
 		},
 		{
@@ -64,7 +74,7 @@ func (s *Server) coreRoutes() []api.Route {
 					s.log.Error("readiness check failed", logs.Kind(logs.KindGeneric), "err", err.Error())
 					return nil, api.Errorf(http.StatusServiceUnavailable, "not_ready", "The database is not answering; read GET /api/logs?level=error.", "Iroha's database is not answering.")
 				}
-				return Health{Status: "ready", Version: s.opts.Version}, nil
+				return Health{Status: "ready", Version: s.opts.Version, UI: webui.Built()}, nil
 			},
 		},
 		{
@@ -76,4 +86,13 @@ func (s *Server) coreRoutes() []api.Route {
 			},
 		},
 	}
+}
+
+// gateway builds the Gateway once; its inference and admin routes share it.
+func (s *Server) gateway() *gateway.Gateway {
+	if s.gw == nil {
+		s.gw = gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db),
+			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log)})
+	}
+	return s.gw
 }

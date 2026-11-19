@@ -15,7 +15,7 @@ Every route under `/api/` (except `/api/openapi.json`) needs an Admin Token:
 Authorization: Bearer <Admin Token>
 ```
 
-The first start of Iroha prints a bootstrap Admin Token named `bootstrap` to its console, once. Ask the Owner for a token if you have none.
+The first start of Iroha prints a bootstrap Admin Token named `bootstrap` to its console, once. Ask the Owner for a token if you have none. (The Owner's browser session is the other way in; see "The Owner's login".)
 
 ## Conventions
 

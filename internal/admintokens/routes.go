@@ -10,6 +10,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/ids"
+	"github.com/hoangvu12/iroha/internal/session"
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
@@ -183,7 +184,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		{
 			Method: http.MethodPost, Path: "/api/admin-tokens/{token}/revoke", Tag: tag,
 			Summary:     "Revoke an Admin Token, by name or ID",
-			Description: "Permanent: the Audit Entry cannot be reverted. Revoking a revoked token changes nothing. The last active token cannot be revoked.",
+			Description: "Permanent: the Audit Entry cannot be reverted. Revoking a revoked token changes nothing. The last active token can be revoked only once an Owner password is set.",
 			Query:       []api.Param{audit.DryRun},
 			Response:    TokenResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -313,15 +314,22 @@ func (h handlers) revoke(m *audit.Mutation, ref string) (Token, error) {
 	if err != nil || t.Revoked {
 		return t, err
 	}
-	// Until the Owner can log in with a password, the last active token is
-	// the only way in; revoking it would lock everyone out.
+	// Without an Owner password the last active token is the only way in;
+	// revoking it would lock everyone out. Once a password is set the Owner
+	// can sign in and create a new token, so the last one may go.
 	var others int
 	if err := m.Tx.QueryRowContext(m.Ctx, `SELECT count(*) FROM admin_tokens WHERE revoked_at IS NULL AND id != ?`, id).Scan(&others); err != nil {
 		return t, err
 	}
 	if others == 0 {
-		return t, api.Conflict("last_admin_token", "Create another Admin Token first (POST /api/admin-tokens), then revoke this one.",
-			"%q is the last active Admin Token; revoking it would lock everyone out.", t.Name)
+		hasPassword, err := session.PasswordSet(m.Ctx, m.Tx)
+		if err != nil {
+			return t, err
+		}
+		if !hasPassword {
+			return t, api.Conflict("last_admin_token", "Create another Admin Token first (POST /api/admin-tokens), or set an Owner password (PUT /api/owner-password) so the Owner can still sign in, then revoke this one.",
+				"%q is the last active Admin Token and no Owner password is set; revoking it would lock everyone out.", t.Name)
+		}
 	}
 	if err := m.Track(Resource, id); err != nil {
 		return t, err

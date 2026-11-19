@@ -57,6 +57,6 @@ func BearerToken(r *http.Request) string {
 var ErrMissingCredentials = &Error{
 	Status:  http.StatusUnauthorized,
 	Code:    "admin_token_missing",
-	Message: "This admin route needs an Admin Token.",
+	Message: "This admin route needs an Admin Token (or the Owner's browser session).",
 	Hint:    "Send the header \"Authorization: Bearer <Admin Token>\". The first start of Iroha printed a bootstrap Admin Token to its console; ask the Owner for one if you have none.",
 }

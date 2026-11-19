@@ -85,6 +85,20 @@ var (
 	KindGeneric   = NewKind(DefaultKind, "An event logged without a specific kind.")
 )
 
+// Kinds shared by several packages, registered here so parallel work never
+// registers one twice. Emit them with the attributes their descriptions
+// name (docs/agents/architecture.md, "Log event kinds"):
+//
+//	log.Warn("Upstream Key cooling", logs.Kind(logs.KindKeyState), logs.Provider(handle), logs.Request(reqID),
+//		"upstream_key", key.Name, "state", "cooling", "model", model, "until", until, "reason", reason)
+var (
+	KindRuleMatch = NewKind("rule.match", "A Failure Rule matched a failed Attempt: rule, action, attempt (seq), upstream_key, model, status. Linked to the Request and Provider.")
+	KindKeyState  = NewKind("key.state", "An Upstream Key's Key State changed: upstream_key, from, state (active, disabled, invalid, cooling), model when only one model cools, until, reason. Linked to the Provider, and to the Request that caused it.")
+	KindModelGap  = NewKind("model_gap", "A Model Gap was created, cleared or expired: op (created, cleared, expired), upstream_key, model, reason, until. Linked to the Provider, and to the Request that caused it.")
+	KindDiscovery = NewKind("discovery", "A model discovery run finished for a Provider, or one of its Endpoints or keys: endpoint, upstream_key, outcome (ok, failed), found, added, removed, or the error. Linked to the Provider.")
+	KindJobRun    = NewKind("job.run", "A background job ran: job, trigger (schedule, manual), dry_run, outcome (ok, failed, canceled), duration_ms, summary and the job's own figures. Linked to a Provider when the run concerned one.")
+)
+
 // SkillSection lists the registered kinds for the served skill.
 func SkillSection() string {
 	var b strings.Builder

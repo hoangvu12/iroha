@@ -121,7 +121,7 @@ function SentSide({ c, r, raw }: { c: Capture; r: RequestRecord; raw: boolean })
         ]}
       />
       {c.request.truncated && <Truncated />}
-      {raw || !parsed ? <CodeBlock maxHeight={false}>{JSON.stringify(c.request.body, null, 2)}</CodeBlock> : <Blocks blocks={parsed.blocks} tools={parsed.tools} />}
+      {raw || !parsed ? <CodeBlock maxHeight={false} lang="json">{JSON.stringify(c.request.body, null, 2)}</CodeBlock> : <Blocks blocks={parsed.blocks} tools={parsed.tools} />}
     </>
   );
 }
@@ -141,11 +141,11 @@ function ResponseSide({ c, r, raw }: { c: Capture; r: RequestRecord; raw: boolea
       {c.response.truncated && <Truncated />}
       {raw || !parsed ? (
         <>
-          <CodeBlock maxHeight={false}>{JSON.stringify(c.response.body, null, 2)}</CodeBlock>
+          <CodeBlock maxHeight={false} lang="json">{JSON.stringify(c.response.body, null, 2)}</CodeBlock>
           {raw && c.response.stream && (
             <>
               <h4 className="mb-2 mt-5 text-[13px] text-fg-muted">As streamed</h4>
-              <CodeBlock>{c.response.stream}</CodeBlock>
+              <CodeBlock lang="sse">{c.response.stream}</CodeBlock>
             </>
           )}
         </>

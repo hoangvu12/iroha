@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { logoPreview } from "@/api/logos";
-import { PageBody } from "@/app/PageBody";
 import { Button } from "@/ui/Button";
 import { Mono } from "@/ui/bits";
 import { CopyButton } from "@/ui/CopyButton";
@@ -41,7 +40,7 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
   const logoChanged = logo.trim() !== (p.logo_domain_guessed ? "" : p.logo_domain);
   const base = `${window.location.origin}${p.caller_path}`;
   return (
-    <PageBody width="readable">
+    <>
       <SettingsCard title="General">
         <SettingsRow title="Name" hint="Shown in lists. Callers use the handle, which never changes.">
           <form
@@ -154,6 +153,6 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
           notifyChange(`${p.handle} archived`, res, { onUndone: refresh });
         }}
       />
-    </PageBody>
+    </>
   );
 }

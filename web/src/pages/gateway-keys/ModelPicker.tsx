@@ -95,7 +95,8 @@ export function ModelPicker({
       <Reveal open={only} label="Models to allow">
         <div className="pt-4">
           {picked.length > 0 && (
-            <ScrollArea className="mb-3" viewportClassName="max-h-24" contentClassName="flex flex-wrap gap-1.5">
+            // At most CHIPS chips, so they flow in the dialog, which scrolls as a page (UI ticket 28).
+            <div className="mb-3 flex flex-wrap gap-1.5">
               {picked.slice(0, CHIPS).map((m) => (
                 <span key={m} className="inline-flex h-7 max-w-full items-center gap-1 rounded-md bg-muted pl-2 pr-1 font-mono text-[12.5px] text-fg">
                   <span className="truncate">{m}</span>
@@ -106,7 +107,7 @@ export function ModelPicker({
               {picked.length > CHIPS && (
                 <span className="inline-flex h-7 items-center px-1 text-[13px] text-fg-muted">and {formatNumber(picked.length - CHIPS)} more</span>
               )}
-            </ScrollArea>
+            </div>
           )}
           <ModelList provider={provider!} q={q} typed={text.trim()} picked={picked} setPicked={setPicked} search={text} onSearch={setText} />
         </div>
@@ -143,6 +144,8 @@ function ModelList({
   const items = extra ? [...rows, extra] : rows;
 
   // The list scrolls in the shared Scroll Area (its viewport is `box`); a new search goes back to its top.
+  // It keeps its own scroll while the dialog scrolls as a page (UI ticket 28): it is virtualised, so it
+  // draws only the rows in its own view of a Provider's thousands of models, under its search field.
   const box = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
   useEffect(() => {

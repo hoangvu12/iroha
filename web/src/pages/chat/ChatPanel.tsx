@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowUp, ChevronDown, Code2, KeyRound, Link2, Maximize2, MessageCircle, Minimize2, Square, SquarePen, Trash2, Wrench, X } from "lucide-react";
+import { ArrowUp, ChevronDown, Code2, KeyRound, Link2, Maximize2, MessageCircle, Minimize2, Square, SquarePen, Trash2, X } from "lucide-react";
 import { useChatActions, useChatRequest } from "@/app/chat-panel";
 import { timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
@@ -15,13 +15,14 @@ import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } fr
 import { createScrollAreaController, ScrollArea } from "@/ui/ScrollArea";
 import { Tip } from "@/ui/Tooltip";
 import type { Settings } from "./api";
-import { bareModel } from "./api";
+import { bareModel, useTestTools } from "./api";
 import { createPickerController, ModelTile, PickerPopover, PickerTrigger } from "./Picker";
 import { Reply } from "./Reply";
 import { SnippetDialog } from "./SnippetDialog";
 import type { Chat } from "./store";
 import { currentChat, deleteChat, isRunning, newChat, openChat, send, setSettings, stop, useChatState } from "./store";
 import { startFor } from "./targets";
+import { callAToolChip, ToolsButton } from "./tools";
 
 // The shared test chat (C15-C17, C23, C27, C33): one chat at a time, no
 // tabs; earlier chats in the title's dropdown; every setting behind the
@@ -29,7 +30,7 @@ import { startFor } from "./targets";
 // the right and /chat renders <ChatPanel mode="page" /> (phones, Expand).
 
 // The press (`@utility press`, styles/index.css) for the panel's own buttons,
-// which aren't ui/Button: Tools and the starter chips.
+// which aren't ui/Button: the starter chips (the Tools button, tools.tsx, has it too).
 const pressClass = "press";
 // Send/Stop: the same press on the scale only (down on duration-press, back on
 // duration-release, never for a key). Its colour flips as the Owner types the
@@ -251,19 +252,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
                 <span className="truncate">{s.model ? bareModel(s.model) : "Pick a model"}</span>
                 <ChevronDown size={14} aria-hidden className="shrink-0 text-fg-muted" />
               </PickerTrigger>
-              <Tip label="Offer a test tool and check the call" type="description">
-                <SdkButton
-                  aria-pressed={s.toolCheck}
-                  onClick={() => change({ toolCheck: !s.toolCheck })}
-                  className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[14px]",
-                    pressClass,
-                    s.toolCheck ? "border-info/40 bg-info/10 text-info" : "border-border text-fg hover:bg-muted",
-                  )}
-                >
-                  <Wrench size={14} aria-hidden /> Tools
-                </SdkButton>
-              </Tip>
+              <ToolsButton tools={s.tools} onChange={(tools) => change({ tools })} />
               <IconButton icon={Code2} label="Use from code" size="sm" disabled={!s.model} onClick={() => setSnippets(true)} />
               <div className="flex-1" />
               {running ? (
@@ -298,6 +287,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
 function Empty({ chat, onPrompt }: { chat: Chat; onPrompt: (prompt: string, patch?: Partial<Settings>) => void }) {
   const s = chat.settings;
   const who = s.as ?? (s.model ? bareModel(s.model) : "a model");
+  const tools = useTestTools(!!s.model);
   return (
     <div className="m-auto flex max-w-[360px] flex-col items-center py-10 text-center">
       <span className="flex size-12 items-center justify-center rounded-full bg-muted text-fg-muted">{s.as ? <KeyRound size={20} /> : <MessageCircle size={20} />}</span>
@@ -310,7 +300,14 @@ function Empty({ chat, onPrompt }: { chat: Chat; onPrompt: (prompt: string, patc
       {s.model ? (
         <div className="mt-5 flex flex-wrap justify-center gap-2">
           <Chip onClick={() => onPrompt("Reply with one short sentence so I know you work.")}>Say hello</Chip>
-          <Chip onClick={() => onPrompt("What's the weather in Hanoi right now? Use the tool.", s.toolCheck ? undefined : { toolCheck: true })}>Call a tool</Chip>
+          <Chip
+            onClick={() => {
+              const { prompt, patch } = callAToolChip(s.tools, tools.data?.map((t) => t.name) ?? []);
+              onPrompt(prompt, patch);
+            }}
+          >
+            Call a tool
+          </Chip>
           <Chip onClick={() => onPrompt("Which is larger, 9.11 or 9.9? Think it through, then answer in one line.", s.reasoning === "off" ? { reasoning: "medium" } : undefined)}>
             Think it through
           </Chip>

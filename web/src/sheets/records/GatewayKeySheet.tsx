@@ -1,9 +1,9 @@
 import { KeyRound, MessageCircle } from "lucide-react";
-import { Link } from "react-router";
 import { seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
-import { formatDate, formatNumber, timeAgo } from "@/lib/format";
+import { formatDate, timeAgo } from "@/lib/format";
 import { useGatewayKey } from "@/pages/gateway-keys/api";
+import { RequestsCount } from "@/pages/gateway-keys/bits";
 import { maskSecret } from "@/pages/providers/api";
 import { Status } from "@/ui/bits";
 import { Button } from "@/ui/Button";
@@ -73,9 +73,7 @@ export default function GatewayKeySheet({ record }: SheetBodyProps<"gateway-key"
               </span>
             </Fact>
             <Fact label="Requests, last 24 hours">
-              <Link to={`/requests?caller=${encodeURIComponent(k.name)}&range=24h`} className="text-info hover:underline">
-                {formatNumber(k.recent_requests)}
-              </Link>
+              <RequestsCount k={k} />
             </Fact>
             <Fact label="Prompt capture">{k.capture ? "On" : "Off"}</Fact>
             <Fact label="Created">{formatDate(k.created_at)}</Fact>

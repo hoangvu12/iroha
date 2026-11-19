@@ -63,6 +63,14 @@ test("each record sheet shows its facts, links and Open page", async () => {
   expect(pool.textContent).toContain("gpt-fast");
 });
 
+test("the Gateway Key sheet's Requests count opens that key's Requests of the last 24 hours, by its ID", async () => {
+  renderWithSheets(null, "/x?sheet=gateway-key:gk_1");
+  const gk = await screen.findByRole("dialog", { name: "Gateway Key zeron" });
+  const count = within(gk).getByRole("link", { name: "Requests of zeron, last 24 h" });
+  expect(count.textContent).toBe("12");
+  expect(count.getAttribute("href")).toBe("/requests?caller=gk_1&range=24h");
+});
+
 test("the Endpoint sheet lists the keys sent there; a missing record says so", async () => {
   renderWithSheets(null, "/x?sheet=endpoint:acme/main&sheet=key:acme/nope");
   await screen.findByRole("dialog", { name: "No Upstream Key nope" });

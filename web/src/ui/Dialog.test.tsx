@@ -48,6 +48,116 @@ test("Dialog is UI SDK's dialog, named by its title; Close and Escape close it a
   expect(document.activeElement).toBe(opener);
 });
 
+// Ticket 28: the "scrollable overlay". The dialog part is a layer over the
+// whole window that scrolls; the visible dialog sits in it at its natural
+// height, so its body never scrolls in a box of its own.
+test("a dialog scrolls as a page: the dialog layer scrolls and its body has no scroll box of its own", async () => {
+  const user = userEvent.setup();
+  render(
+    <Opener>
+      {(open, set) => (
+        <Dialog open={open} onOpenChange={set} title="Upstream key" footer={<Button>Save key</Button>}>
+          {Array.from({ length: 60 }, (_, i) => (
+            <p key={i}>Line {i}</p>
+          ))}
+        </Dialog>
+      )}
+    </Opener>,
+  );
+  await user.click(screen.getByRole("button", { name: "Open it" }));
+  const dialog = await screen.findByRole("dialog", { name: "Upstream key" });
+  expect(dialog.className).toContain("overflow-y-auto");
+  expect(dialog.className).toContain("inset-0");
+  expect(dialog.querySelector("[data-slot^=scroll-area]"), "no inner Scroll Area").toBeNull();
+  expect(dialog.className, "no height limit on the dialog").not.toMatch(/max-h-\[/);
+  // The visible dialog holds the title, the body, the footer and the Close button.
+  const panel = dialog.querySelector("[data-dialog-panel]")!;
+  expect(panel.textContent).toContain("Line 59");
+  expect(panel.contains(screen.getByRole("button", { name: "Save key" }))).toBe(true);
+  expect(panel.contains(screen.getByRole("button", { name: "Close" }))).toBe(true);
+});
+
+test("a press on the space around the dialog closes it and focus returns to the opener; a press inside keeps it", async () => {
+  const user = userEvent.setup();
+  render(
+    <Opener>
+      {(open, set) => (
+        <Dialog open={open} onOpenChange={set} title="Add endpoint">
+          <p>Body text</p>
+        </Dialog>
+      )}
+    </Opener>,
+  );
+  const opener = screen.getByRole("button", { name: "Open it" });
+  await user.click(opener);
+  const dialog = await screen.findByRole("dialog", { name: "Add endpoint" });
+  await user.click(screen.getByText("Body text"));
+  await user.click(dialog.querySelector("[data-dialog-panel]")!);
+  expect(screen.getByRole("dialog", { name: "Add endpoint" })).toBeTruthy();
+
+  // The layer around the dialog (above, below and beside it) reads as outside.
+  await user.click(dialog.firstElementChild!);
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(opener);
+
+  await user.click(opener);
+  await user.click(await screen.findByRole("dialog", { name: "Add endpoint" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("a press that starts in a field and ends around the dialog keeps it open (a text selection)", async () => {
+  const user = userEvent.setup();
+  render(
+    <Opener>
+      {(open, set) => (
+        <Dialog open={open} onOpenChange={set} title="Rename">
+          <input aria-label="Name" defaultValue="team-5" />
+        </Dialog>
+      )}
+    </Opener>,
+  );
+  await user.click(screen.getByRole("button", { name: "Open it" }));
+  const dialog = await screen.findByRole("dialog", { name: "Rename" });
+  await user.pointer([{ keys: "[MouseLeft>]", target: screen.getByRole("textbox", { name: "Name" }) }, { target: dialog.firstElementChild! }, { keys: "[/MouseLeft]" }]);
+  expect(screen.getByRole("dialog", { name: "Rename" })).toBeTruthy();
+});
+
+test("a press around a nested dialog closes only the nested one", async () => {
+  const user = userEvent.setup();
+  function Nested() {
+    const [outer, setOuter] = useState(true);
+    const [inner, setInner] = useState(false);
+    return (
+      <Dialog open={outer} onOpenChange={setOuter} title="New Gateway Key">
+        <Button onClick={() => setInner(true)}>Pick models</Button>
+        <Dialog open={inner} onOpenChange={setInner} title="Models of acme">
+          <p>Models</p>
+        </Dialog>
+      </Dialog>
+    );
+  }
+  render(<Nested />);
+  await user.click(await screen.findByRole("button", { name: "Pick models" }));
+  const inner = await screen.findByRole("dialog", { name: "Models of acme" });
+  await user.click(inner.firstElementChild!);
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Models of acme" })).toBeNull());
+  expect(screen.getByRole("dialog", { name: "New Gateway Key" })).toBeTruthy();
+});
+
+test("an alert dialog wants an answer: a press around it keeps it open", async () => {
+  const user = userEvent.setup();
+  render(
+    <Opener>
+      {(open, set) => <ConfirmDialog open={open} onOpenChange={set} title="Delete key?" body="Gone." confirmLabel="Delete key" onConfirm={vi.fn()} />}
+    </Opener>,
+  );
+  await user.click(screen.getByRole("button", { name: "Open it" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Delete key?" });
+  expect(dialog.className).toContain("overflow-y-auto");
+  await user.click(dialog.firstElementChild!);
+  expect(screen.getByRole("alertdialog", { name: "Delete key?" })).toBeTruthy();
+});
+
 test("ConfirmDialog is an alert dialog: focus starts on Cancel, Cancel closes without confirming", async () => {
   const user = userEvent.setup();
   const onConfirm = vi.fn();

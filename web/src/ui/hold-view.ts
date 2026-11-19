@@ -4,10 +4,10 @@ import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useSta
 // (DataTable's infinite mode with `newRowsLabel`, the Requests feed).
 //
 // Under `root`, the element marked `data-rows` holds the rows, each with
-// `data-row-id`. The scroller is the Scroll Area viewport (`role=region`)
-// around them, or the page when there is none (phones). Elements are found when
-// needed, not kept in refs: the table sits inside a Skeleton, which replaces
-// refs on what it renders.
+// `data-row-id`. The scroller is the page: tables grow with their rows and the
+// page scrolls them (UI ticket 25), with a table's header stuck to the top of
+// the window. Elements are found when needed, not kept in refs: the table sits
+// inside a Skeleton, which replaces refs on what it renders.
 //
 // Held: the reader has scrolled away from the first row, or the pointer is over
 // the rows. Then, when new rows come in on top, the scroller moves by their
@@ -25,34 +25,31 @@ export function useHoldView({ enabled, ids, root }: { enabled: boolean; /** The 
 
   const parts = useCallback(() => {
     const rows = root.current?.querySelector<HTMLElement>("[data-rows]") ?? null;
-    const scroller = rows?.closest<HTMLElement>("[role=region]") ?? null;
     const els = [...(rows?.children ?? [])].filter((e): e is HTMLElement => e instanceof HTMLElement && e.hasAttribute("data-row-id"));
-    // The top of what the reader sees: under the scroller's sticky header, never above the window.
-    const inset = scroller ? (rows?.closest("table")?.tHead?.getBoundingClientRect().height ?? 0) : 0;
-    const visibleTop = Math.max(0, scroller ? scroller.getBoundingClientRect().top + inset : 0);
-    return { rows, scroller, els, visibleTop, target: scroller ?? (document.scrollingElement as HTMLElement | null) };
+    // The top of what the reader sees: under the table's header stuck to the top of the window (phones' lists have none).
+    const visibleTop = rows?.closest("table")?.tHead?.getBoundingClientRect().height ?? 0;
+    return { rows, els, visibleTop, target: (document.scrollingElement ?? document.documentElement) as HTMLElement };
   }, [root]);
 
   /** Remembers the first row in view and where it is. */
   const snapshot = useCallback(() => {
-    const { els, scroller, visibleTop } = parts();
+    const { els, visibleTop } = parts();
     if (!enabled || els.length === 0) {
       snap.current = null;
       return;
     }
-    const atTop = !(scroller && scroller.scrollTop > 1) && els[0].getBoundingClientRect().top >= visibleTop - 1;
+    const atTop = els[0].getBoundingClientRect().top >= visibleTop - 1;
     const el = els.find((e) => e.getBoundingClientRect().bottom > visibleTop) ?? els[0];
     snap.current = { id: el.getAttribute("data-row-id")!, top: el.getBoundingClientRect().top, held: !atTop || pointerIn.current };
     if (atTop) setNewAbove(0);
   }, [enabled, parts]);
 
-  // Follow the reader: any scroll (captured at the document, so the table's scroller too), the pointer, resizes.
+  // Follow the reader: the page's scroll, the pointer, resizes.
   useEffect(() => {
     if (!enabled) return;
     const box = root.current;
     const onScroll = (e: Event) => {
-      const { scroller } = parts();
-      if (e.target === scroller || e.target === document) snapshot();
+      if (e.target === document) snapshot();
     };
     const over = (e: PointerEvent) => {
       const inside = !!parts().rows?.contains(e.target as Node);
@@ -72,7 +69,7 @@ export function useHoldView({ enabled, ids, root }: { enabled: boolean; /** The 
     // We move the view ourselves; the browser's own anchoring would move it twice.
     const page = document.documentElement;
     const before = page.style.overflowAnchor;
-    if (!parts().scroller) page.style.overflowAnchor = "none";
+    page.style.overflowAnchor = "none";
     return () => {
       document.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("resize", snapshot);
@@ -105,14 +102,9 @@ export function useHoldView({ enabled, ids, root }: { enabled: boolean; /** The 
 
   /** Back to the first row (the pill). */
   const toTop = useCallback(() => {
-    const { scroller, els, target } = parts();
-    if (scroller) {
-      scroller.scrollTop = 0;
-      // The table itself may be above the page's view.
-      if (scroller.getBoundingClientRect().top < 0) scroller.scrollIntoView?.({ block: "start" });
-    } else if (els[0] && target) {
-      target.scrollTop += els[0].getBoundingClientRect().top - 16;
-    }
+    const { els, visibleTop, target } = parts();
+    // The first row just under the header (a table's top at the window's top), or 16 px down on a phone's list.
+    if (els[0]) target.scrollTop += els[0].getBoundingClientRect().top - (visibleTop || 16);
     setNewAbove(0);
     snapshot();
   }, [parts, snapshot]);

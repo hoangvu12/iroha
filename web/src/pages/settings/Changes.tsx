@@ -4,6 +4,7 @@ import type { AuditEntry, Change } from "@/api/types";
 import { formatNumber } from "@/lib/format";
 import { rec, RecordLink, type SheetRecord } from "@/sheets/RecordLink";
 import { cn } from "@/ui/cn";
+import { Code } from "@/ui/highlight";
 import { ScrollArea } from "@/ui/ScrollArea";
 import type { ResourceOption } from "./api";
 import { shortDate, clockTime } from "./format";
@@ -158,7 +159,9 @@ function Scalar({ v }: { v: unknown }): ReactNode {
   }
   return (
     <ScrollArea className="rounded-md bg-muted" viewportClassName="max-h-40">
-      <pre className="whitespace-pre-wrap break-all px-2 py-1 font-mono text-[12px] text-fg">{JSON.stringify(v, null, 2)}</pre>
+      <pre className="whitespace-pre-wrap break-all px-2 py-1 font-mono text-[12px] text-fg">
+        <Code text={JSON.stringify(v, null, 2)} lang="json" />
+      </pre>
     </ScrollArea>
   );
 }

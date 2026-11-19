@@ -1,14 +1,16 @@
 import type { ReactNode } from "react";
 import { cn } from "@/ui/cn";
 
-export type PageWidth = "wide" | "readable";
+export type PageWidth = "wide";
 
-// The two page widths. Shell puts every page in the wide frame (tables, the
-// route view, page headers and tabs), centred on big screens; forms and
-// settings sit in a readable column inside it, left-aligned under the header.
+// The page width. Shell puts every page in the wide frame, centred on big
+// screens, so nothing stretches across a wide monitor. Forms and settings use
+// it too (Owner, 2026-11-20: no narrower column under a full-width header);
+// their rows keep the label on the left and the control in a column of its
+// own width on the right (`SettingsRow`), so inputs never run the frame wide.
+// Login and Setup are centred forms, not pages, and size their own column.
 export const PAGE_WIDTH: Record<PageWidth, string> = {
   wide: "mx-auto w-full max-w-[1280px]",
-  readable: "w-full max-w-3xl",
 };
 
 export function PageBody({ width, className, children }: { width: PageWidth; className?: string; children: ReactNode }) {

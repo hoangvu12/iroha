@@ -70,7 +70,7 @@
   --info: #60a5fa;
   --info-tint: #13233f;
   --selected: #15213a;
-  --overlay: rgb(0 0 0 / 0.55);
+  --overlay: rgb(0 0 0 / 0.7);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
 }
 

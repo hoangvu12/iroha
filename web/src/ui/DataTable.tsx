@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { animateIn } from "@ui-sdk/core";
 import { ArrowDown, ArrowUp, ChevronRight, MoreHorizontal } from "lucide-react";
 import {
   type Cell,
@@ -41,6 +42,8 @@ import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "./Button";
 import { Checkbox } from "./Checkbox";
 import { useHoldView } from "./hold-view";
+import { useLeaving } from "./presence";
+import { useRowMotion } from "./row-motion";
 import { cn } from "./cn";
 import type { CopyState } from "./CopyButton";
 import { Menu, MenuContent, MenuIconTrigger } from "./Menu";
@@ -394,14 +397,9 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   // ---- Toolbar or bulk bar ----
   const selectedRows = bulk ? table.getSelectedRowModel().rows.map((r) => r.original) : [];
   const canSelectMore = bulk && paging.mode === "pages" && table.getIsAllPageRowsSelected() && filteredRows.some((r) => !r.getIsSelected());
-  const bar =
+  const barContent =
     bulk && selectedCount > 0 ? (
-      <div
-        key="bulk"
-        aria-label={`${selectedCount} selected`}
-        role="group"
-        className="flex min-h-9 flex-wrap items-center gap-2 transition-[opacity,translate] duration-list-in ease-out starting:translate-y-(--motion-shift) starting:opacity-0"
-      >
+      <>
         <span className="mr-2 text-[15px] font-medium tabular">{selectedCount} selected</span>
         {bulk({ ids: selectedIds, rows: selectedRows, clear })}
         {canSelectMore && (
@@ -413,13 +411,15 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
         <Button variant="ghost" size="sm" className="text-fg-muted" onClick={clear}>
           Clear selection
         </Button>
-      </div>
-    ) : props.toolbar || (phone && bulk) ? (
-      <div key="toolbar" className="flex flex-wrap items-center gap-2">
+      </>
+    ) : undefined;
+  const toolbarContent =
+    props.toolbar || (phone && bulk) ? (
+      <>
         {props.toolbar}
         {phone && bulk && data && data.length > 0 && <Button onClick={() => setSelecting((s) => !s)}>{selecting ? "Done" : "Select"}</Button>}
-      </div>
-    ) : null;
+      </>
+    ) : undefined;
 
   // ---- The table ----
   const extraCols = (bulk ? 1 : 0) + (renderExpanded ? 1 : 0) + (rowActions ? 1 : 0);
@@ -460,9 +460,14 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     el?.scrollIntoView?.({ block: "nearest" });
   }, [active, loading, phone]);
 
+  // Rows added or removed after an action enter and leave; only tables holding all their rows (server pages and the live feed don't).
+  const rowMotion = useRowMotion({ data, getRowId, enabled: (paging.mode === "pages" || paging.mode === "none") && !props.dimmed, root: rootRef });
+  const recordRow = (rowId: string, index: number, layout: "table" | "list", node: ReactElement) =>
+    loading || layout !== (phone ? "list" : "table") ? node : rowMotion.record(rowId, index, node, layout);
+
   const desktop = (
     <ScrollArea axis="both" label={label} className="w-full" viewportClassName={cn(props.maxHeight ?? "max-h-[calc(100dvh-4rem)]", newRowsLabel && "[overflow-anchor:none]")} contentClassName="min-w-full">
-      <table aria-label={label} className={cn("w-full border-collapse text-left text-sm", props.dimmed && "opacity-60")}>
+      <table aria-label={label} className={cn("w-full border-collapse text-left text-sm", props.dimmed && dimClass)}>
         <thead className="sticky top-0 z-[1] bg-bg shadow-[inset_0_-1px_0_var(--border)]">
           {table.getHeaderGroups().map((group) => (
             <tr key={group.id}>
@@ -492,8 +497,8 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
           ))}
         </thead>
         <tbody data-rows="">
-          {/* flatMap: one flat list keyed by row ID, so a row arriving on top doesn't remount the rows under it. */}
-          {pageRows.flatMap((row) => {
+          {/* One flat list keyed by row ID, so a row arriving on top doesn't remount the rows under it; rows leaving are put back where they were. */}
+          {rowMotion.withLeaving(pageRows.map((row, index) => {
             const r = row.original;
             const name = rowName(r);
             const selected = row.getIsSelected();
@@ -501,7 +506,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
             const click = rowClick(row);
             const current = active !== undefined && row.id === active;
             return [
-              <tr
+              recordRow(row.id, index, "table", <tr
                 key={row.id}
                 data-row-id={row.id}
                 aria-current={current ? "true" : undefined}
@@ -517,6 +522,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
                 }
                 className={cn(
                   "group border-b border-border last:border-b-0",
+                  rowClass,
                   click && "cursor-pointer hover:bg-subtle",
                   "data-[tone=danger]:bg-danger-tint/50",
                   "data-selected:bg-selected data-selected:hover:bg-selected",
@@ -534,16 +540,17 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
                   <BodyCell key={cell.id} cell={cell} name={name} onOpen={onRowClick && (() => onRowClick(r))} render={<table.FlexRender cell={cell} />} />
                 ))}
                 {rowActions && <td className={cn(tdClass, "w-10 text-right")}>{rowActions(r)}</td>}
-              </tr>,
+              </tr>),
               open && renderExpanded ? (
                 <tr key={`${row.id}:details`} data-selected={selected || undefined} className="border-b border-border last:border-b-0 data-selected:bg-selected">
-                  <td colSpan={colCount} className="px-1.5 pb-4">
+                  {/* Fades in as it opens; the rows under it move down at once (rows never animate height). */}
+                  <td colSpan={colCount} className="px-1.5 pb-4 transition-opacity duration-fade ease-out starting:opacity-0">
                     {renderExpanded(r)}
                   </td>
                 </tr>
               ) : null,
             ];
-          })}
+          }), "table")}
         </tbody>
       </table>
       {paging.mode === "infinite" && !loading && <LoadMore paging={paging} />}
@@ -555,22 +562,22 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     <>
       {/* Sticks to the top of the page while the list scrolls under it. */}
       {pill && <div className="pointer-events-none sticky top-3 z-[2] flex h-0 justify-center">{pill}</div>}
-      <ul data-rows="" aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && "opacity-60")}>
-        {pageRows.map((row) => {
+      <ul data-rows="" aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && dimClass)}>
+        {rowMotion.withLeaving(pageRows.map((row, index) => {
           const r = row.original;
           const name = rowName(r);
           const selected = row.getIsSelected();
           const content = phoneRow(r);
           const current = active !== undefined && row.id === active;
-          return (
-            <li
+          return [
+            recordRow(row.id, index, "list", <li
               key={row.id}
               data-row-id={row.id}
               aria-current={current ? "true" : undefined}
               data-active={current || undefined}
               data-selected={selected || undefined}
               data-tone={props.rowTone?.(r)}
-              className="flex flex-wrap items-center gap-3 py-3 data-active:bg-selected data-selected:bg-selected data-[tone=danger]:bg-danger-tint/50"
+              className={cn("flex flex-wrap items-center gap-3 py-3 data-active:bg-selected data-selected:bg-selected data-[tone=danger]:bg-danger-tint/50", rowClass)}
             >
               {showChecks && <Checkbox label={`Select ${name}`} checked={selected} onChange={(on, ev) => toggleRow(row, on, ev)} className="ml-1" />}
               {showChecks ? (
@@ -599,10 +606,10 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
               {!showChecks && props.phoneActions?.(r)}
               {!onRowClick && !showChecks && rowActions?.(r)}
               {renderExpanded && !onRowClick && !showChecks && expandButton(row, name)}
-              {renderExpanded && row.getIsExpanded() && <div className="min-w-0 basis-full">{renderExpanded(r)}</div>}
-            </li>
-          );
-        })}
+              {renderExpanded && row.getIsExpanded() && <div className="min-w-0 basis-full transition-opacity duration-fade ease-out starting:opacity-0">{renderExpanded(r)}</div>}
+            </li>),
+          ];
+        }), "list")}
       </ul>
       {paging.mode === "infinite" && !loading && <LoadMore paging={paging} />}
     </>
@@ -618,7 +625,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
 
   return (
     <div ref={rootRef} data-table={id}>
-      {showToolbar && bar && <div className="mb-4">{bar}</div>}
+      {(bulk || toolbarContent) && <BarSlot bar={showToolbar ? barContent : undefined} count={selectedCount} toolbar={showToolbar ? toolbarContent : undefined} />}
       {state !== undefined ? (
         state
       ) : (
@@ -666,8 +673,61 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   );
 }
 
+// A row entering after an action rises by shift-sm and fades in; one leaving fades only (architecture.md "UI motion system").
+const rowClass =
+  "transition-[opacity,translate] duration-list-in ease-out data-starting-style:translate-y-(--motion-shift-sm) data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-list-out";
+// The previous query's rows dim only once the next is slow, so a fast answer never flickers; they come back at once.
+const dimClass = "opacity-60 transition-opacity duration-fade ease-out delay-(--duration-fade)";
 const thClass = "h-10 px-1.5 text-[13px] font-normal text-fg-muted";
 const tdClass = "h-12 px-1.5 align-middle";
+
+/**
+ * The toolbar, or the bulk bar in its place while rows are selected. The bar
+ * rises in; when the selection clears it fades out where it was (showing what
+ * it said, inert) while the toolbar fades back in under it, in the same cell:
+ * one crossfade (architecture.md "UI ticket 16"). Its own component, so the
+ * exit ending re-renders only this, not the table.
+ */
+function BarSlot({ bar, count, toolbar }: { bar: ReactNode | undefined; count: number; toolbar: ReactNode | undefined }) {
+  const exit = useLeaving<ReactNode, HTMLDivElement>(bar);
+  const shownCount = useRef(count);
+  if (count > 0) shownCount.current = count;
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (exit.leaving && toolbarRef.current) return animateIn(toolbarRef.current);
+  }, [exit.leaving]);
+  const showToolbar = bar === undefined && toolbar !== undefined;
+  if (exit.shown === undefined && !showToolbar) return null;
+  return (
+    <div className="mb-4 grid">
+      {showToolbar && (
+        <div
+          ref={toolbarRef}
+          className="col-start-1 row-start-1 flex flex-wrap items-center gap-2 self-start transition-opacity duration-fade ease-out data-starting-style:opacity-0"
+        >
+          {toolbar}
+        </div>
+      )}
+      {exit.shown !== undefined && (
+        <div
+          ref={exit.ref}
+          data-bulk-bar=""
+          aria-label={`${shownCount.current} selected`}
+          aria-hidden={exit.leaving || undefined}
+          role="group"
+          className={cn(
+            // Both sit at the top of the shared cell: a taller (wrapped) bar leaving doesn't move the toolbar under it.
+            "col-start-1 row-start-1 flex min-h-9 flex-wrap items-center gap-2 self-start",
+            "transition-[opacity,translate] duration-list-in ease-out starting:translate-y-(--motion-shift) starting:opacity-0",
+            "data-ending-style:opacity-0 data-ending-style:duration-list-out",
+          )}
+        >
+          {exit.shown}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function HeaderCell<T extends RowData>({ header, render }: { header: Header<DataTableFeatures, T, unknown>; render: ReactNode }) {
   const col = header.column;

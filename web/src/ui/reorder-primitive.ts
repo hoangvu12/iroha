@@ -41,8 +41,9 @@ export const rowOrder = definePrimitive({
     };
   },
   slots: (slot) => ({
-    root: slot<{}, { order: string[]; moving: string | null }>({
-      state: (state) => ({ order: state.moving?.order ?? state.value, moving: state.moving?.key ?? null }),
+    root: slot<{}, { order: string[]; moving: string | null; dragging: boolean }>({
+      // `dragging`: a pointer holds the row (not the keyboard), so the rows glide (RowOrder).
+      state: (state) => ({ order: state.moving?.order ?? state.value, moving: state.moving?.key ?? null, dragging: !!state.moving?.pointer }),
     }),
     handle: slot<{ value: string }>({
       role: "button",

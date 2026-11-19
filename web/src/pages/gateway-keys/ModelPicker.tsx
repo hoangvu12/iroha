@@ -8,6 +8,7 @@ import { Dialog } from "@/ui/Dialog";
 import { SearchInput } from "@/ui/Input";
 import { ProviderTile } from "@/ui/LogoTile";
 import { RadioCards } from "@/ui/Radio";
+import { Reveal } from "@/ui/Reveal";
 import { useProviderModels } from "./api";
 import { Skeleton } from "@/ui/Skeleton";
 import { SAMPLE_MODEL_IDS } from "./samples";
@@ -89,8 +90,9 @@ export function ModelPicker({
           { value: "only", title: "Only these", description: "The models you tick below, exactly as Callers name them" },
         ]}
       />
-      {only && (
-        <div className="mt-4">
+      {/* Grows open under the choice and folds back (collapse recipe). */}
+      <Reveal open={only} label="Models to allow">
+        <div className="pt-4">
           {picked.length > 0 && (
             <div className="mb-3 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
               {picked.slice(0, CHIPS).map((m) => (
@@ -107,7 +109,7 @@ export function ModelPicker({
           )}
           <ModelList provider={provider!} q={q} typed={text.trim()} picked={picked} setPicked={setPicked} search={text} onSearch={setText} />
         </div>
-      )}
+      </Reveal>
     </Dialog>
   );
 }

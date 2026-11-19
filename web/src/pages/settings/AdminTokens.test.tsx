@@ -86,6 +86,28 @@ test("no tokens: the empty state", async () => {
   expect(screen.queryByRole("table")).toBeNull();
 });
 
+test("the new token, shown once, rises into place in the dialog with its title and text (UI ticket 20)", async () => {
+  const user = userEvent.setup();
+  renderTab([token(1)]);
+  await user.click(await screen.findByRole("button", { name: "New Admin Token" }));
+  await user.type(await screen.findByRole("textbox", { name: "Name" }), "deploy-script");
+  await user.click(screen.getByRole("button", { name: "Create token" }));
+  const dialog = await screen.findByRole("dialog", { name: "Admin Token created" });
+  const rising = [within(dialog).getByText(token(1).secret), within(dialog).getByText("Admin Token created"), within(dialog).getByText(/Give it to/)];
+  for (const el of rising) {
+    const c = el.closest(".starting\\:opacity-0")!.getAttribute("class")!.split(/\s+/);
+    for (const k of ["transition-[opacity,translate]", "duration-list-in", "ease-out", "starting:translate-y-(--motion-shift-sm)"]) expect(c).toContain(k);
+  }
+});
+
+test("a row's copy button, shown on hover, is always shown where nothing hovers (touch)", async () => {
+  renderTab([token(1)]);
+  const copy = await screen.findByRole("button", { name: "Copy script-1" });
+  const c = copy.getAttribute("class")!.split(/\s+/);
+  // row-reveal (styles/index.css): hidden until the row is hovered, always shown where nothing hovers.
+  expect(c).toContain("row-reveal");
+});
+
 test("an agent sorts the tokens and opens a menu, and needs a person to revoke one", async () => {
   const fetch = renderTab([token(1, { name: "zeron-agent" }), token(2, { name: "backup-cron" })]);
   await screen.findByRole("table", { name: "Admin Tokens" });

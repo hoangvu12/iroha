@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import {
   CircleCheck,
@@ -37,7 +37,8 @@ import { EmptyState } from "@/ui/States";
 import { notify, notifyChange } from "@/ui/toast";
 import type { KeyTestBulk, KeyTestResult, Provider, UpstreamKey } from "./api";
 import { calls, errorText, maskSecret, natural, useKeys, useRefresh } from "./api";
-import { Checkbox, KeyStateLabel, Pill, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
+import { Reveal } from "@/ui/Reveal";
+import { appearClass, Checkbox, KeyStateLabel, Pill, ringRoom, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
 import { SAMPLE_KEYS } from "./samples";
 
 // The Keys tab (C01, C11, C20; phones C31): one line per Upstream Key in the
@@ -474,7 +475,7 @@ function SecretCell({ k }: { k: UpstreamKey }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{maskSecret(k.secret)}</Mono>
-      {k.secret && <CopyButton icon value={k.secret} what="Key" label={`Copy ${k.name}`} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />}
+      {k.secret && <CopyButton icon value={k.secret} what="Key" label={`Copy ${k.name}`} className="row-reveal" />}
     </span>
   );
 }
@@ -804,8 +805,9 @@ function AddKeysDialog({
         rows={6}
         className="w-full resize-y rounded-lg border border-border-strong bg-subtle px-3 py-2.5 font-mono text-[13px] leading-6 text-fg outline-none placeholder:text-fg-subtle focus:border-info focus:ring-2 focus:ring-info/20"
       />
-      {secrets.length > 0 && (
-        <div className="mt-4 overflow-hidden rounded-lg border border-border">
+      <Reveal open={secrets.length > 0} label="Keys found">
+        <div className="pt-4">
+        <div className="overflow-hidden rounded-lg border border-border">
           <div className="flex items-center justify-between bg-subtle px-4 py-2.5 text-[14px]">
             <span className="font-medium">
               {secrets.length} key{secrets.length === 1 ? "" : "s"} found
@@ -832,7 +834,8 @@ function AddKeysDialog({
             </ScrollArea>
           )}
         </div>
-      )}
+        </div>
+      </Reveal>
       <label className="mt-5 flex items-center gap-3 text-[15px]">
         <Switch checked={testAfter} onChange={setTestAfter} label="Test each new key after adding" />
         Test each new key after adding
@@ -846,7 +849,7 @@ function AddKeysDialog({
           instead: Iroha then sends no credential.
         </p>
       )}
-      {error && <p className="mt-3 text-[13px] text-danger-text">{error}</p>}
+      {error && <p className={cn("mt-3 text-[13px] text-danger-text", appearClass)}>{error}</p>}
       <SaveError save={keylessSave} className="mt-3" />
     </Dialog>
   );
@@ -945,7 +948,7 @@ function EndpointsDialog({
         ))}
       </ul>
       {error && (
-        <p role="alert" className="mt-3 text-[13px] text-danger-text">
+        <p role="alert" className={cn("mt-3 text-[13px] text-danger-text", appearClass)}>
           {error}
         </p>
       )}
@@ -957,7 +960,7 @@ function EndpointsDialog({
 
 function KeyDialog({
   handle,
-  k,
+  k: current,
   missing,
   provider,
   onClose,
@@ -984,19 +987,29 @@ function KeyDialog({
   const secretSave = useSave({ refresh, describe: errorText });
   const actionSave = useSave({ describe: errorText });
 
+  // A key opened (not one closing): start from it.
   useEffect(() => {
-    setName(k?.name ?? "");
+    if (!current) return;
+    setName(current.name);
     setSecret(undefined);
     nameSave.clear();
     secretSave.clear();
     actionSave.clear();
     setShown(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [k?.id]);
+  }, [current?.id]);
 
-  if (missing)
+  // Motion: the dialog stays mounted while it leaves, still about the key (or
+  // missing name) it showed, so the dialog recipe's exit plays.
+  const open = !!missing || !!current;
+  const last = useRef<{ missing?: string; k?: UpstreamKey }>({});
+  if (open) last.current = { missing, k: current };
+  const gone = open ? missing : last.current.missing;
+  const k = open ? current : last.current.k;
+
+  if (gone)
     return (
-      <Dialog open onOpenChange={(o) => !o && onClose()} title={`No key ${missing}`} description={`${handle} has no Upstream Key named ${missing}. It may have been renamed or deleted.`} />
+      <Dialog open={open} onOpenChange={(o) => !o && onClose()} title={`No key ${gone}`} description={`${handle} has no Upstream Key named ${gone}. It may have been renamed or deleted.`} />
     );
   if (!k) return null;
 
@@ -1042,7 +1055,7 @@ function KeyDialog({
   const eps = provider?.endpoints ?? [];
   const s = k.state;
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()} title={k.name} description={`Upstream Key of ${handle}`} width={600}>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()} title={k.name} description={`Upstream Key of ${handle}`} width={600}>
       <div className="flex flex-col gap-6">
         <section>
           <h3 className="mb-2 text-[14px] font-semibold">State</h3>
@@ -1075,20 +1088,20 @@ function KeyDialog({
               {secret !== undefined ? "Cancel" : k.secret ? "Replace" : "Add a secret"}
             </Button>
           </div>
-          {secret !== undefined && (
+          <Reveal open={secret !== undefined} label="New key" className={ringRoom}>
             <form
-              className="mt-2 flex gap-2"
+              className="flex gap-2 pt-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                replace(secret.trim());
+                replace((secret ?? "").trim());
               }}
             >
-              <Input mono autoFocus placeholder="The new key" value={secret} onChange={(e) => setSecret(e.target.value)} aria-label="New key" aria-invalid={!!secretSave.error} />
-              <Button type="submit" variant="primary" loading={secretSave.pending} disabled={!secret.trim()}>
+              <Input mono autoFocus placeholder="The new key" value={secret ?? ""} onChange={(e) => setSecret(e.target.value)} aria-label="New key" aria-invalid={!!secretSave.error} />
+              <Button type="submit" variant="primary" loading={secretSave.pending} disabled={!secret?.trim()}>
                 Save
               </Button>
             </form>
-          )}
+          </Reveal>
           <SaveStatus save={secretSave} saving={false} className="mt-2" />
           <SaveError save={secretSave} className="mt-2" />
         </section>

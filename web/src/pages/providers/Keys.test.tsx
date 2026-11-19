@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAgent } from "@ui-sdk/react/agent";
@@ -180,4 +180,31 @@ test("an agent filters, selects and tests keys, and needs a person to delete one
   const remove = { steps: [{ ref: "More for team-3", action: "press", args: ["Delete…"] }, { ref: "Delete team-3?", action: "press", args: ["Delete key"] }] };
   expect((await agent.act(remove)).ok).toBe(false);
   expect(posts(fetch).some(([u]) => u.endsWith("/delete"))).toBe(false);
+});
+
+// Motion (UI ticket 17): the key dialog stays mounted while it leaves, so the
+// dialog recipe's exit plays (it used to vanish), showing the key it was about.
+test("closing a key's dialog plays its exit, still showing that key, then it goes", async () => {
+  let end = () => {};
+  const finished = new Promise<void>((r) => (end = r));
+  const running = { finished, effect: { getComputedTiming: () => ({ endTime: 60_000, localTime: 0 }) } } as unknown as Animation;
+  const before = Element.prototype.getAnimations;
+  try {
+    const user = userEvent.setup();
+    renderTab([key(1), key(2)], "/providers/acme/keys?key=team-1");
+    const dialog = await screen.findByRole("dialog", { name: "team-1" });
+    // From here on the dialog's exit runs until the test ends it (jsdom has no transitions).
+    Element.prototype.getAnimations = function (this: Element) {
+      return this === dialog ? [running] : [];
+    };
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(where()).not.toContain("key="));
+    expect(dialog.isConnected).toBe(true);
+    expect(dialog.hasAttribute("data-ending-style")).toBe(true);
+    expect(within(dialog).getByRole("heading", { name: "team-1" })).toBeTruthy();
+    await act(async () => end());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  } finally {
+    Element.prototype.getAnimations = before;
+  }
 });

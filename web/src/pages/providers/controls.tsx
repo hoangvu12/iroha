@@ -112,6 +112,15 @@ export function SettingsRow({ title, hint, children }: { title: ReactNode; hint?
   );
 }
 
+/** A dialog's error line: drops 4 px and fades in, as a Field error does (list recipe). */
+export const appearClass = "transition-[opacity,translate] duration-list-in ease-out starting:-translate-y-(--motion-shift-sm) starting:opacity-0";
+
+/**
+ * On a `Reveal` panel holding inputs: room for their 2 px focus ring, which the
+ * panel's `overflow-hidden` would clip at its sides and bottom.
+ */
+export const ringRoom = "-mx-1 px-1 -mb-1 pb-1";
+
 /** A small grey label pill: "Built-in", "Custom", "Hidden". */
 export function Pill({ children, tone = "gray" }: { children: ReactNode; tone?: "gray" | "blue" | "amber" | "green" | "red" }) {
   const tones = {

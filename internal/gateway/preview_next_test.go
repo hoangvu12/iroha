@@ -73,10 +73,14 @@ func TestTheRoutePreviewMatchesWhatTheNextRequestDoes(t *testing.T) {
 	// A key cooling for the model and one with a Model Gap are left out of
 	// both; the next key in the preview is the one used.
 	plan := preview("glm-4.6")
-	cool := func(u *testkit.Upstream) testkit.Responder { return u.Error(429, "slow down").Header("Retry-After", "60") }
+	cool := func(u *testkit.Upstream) testkit.Responder {
+		return u.Error(429, "slow down").Header("Retry-After", "60")
+	}
 	check("cooling", plan, send("glm-4.6", plan, 1, cool))
 	plan = preview("glm-4.6")
-	gap := func(u *testkit.Upstream) testkit.Responder { return u.ErrorCode(404, "model_not_found", "The model glm-4.6 does not exist") }
+	gap := func(u *testkit.Upstream) testkit.Responder {
+		return u.ErrorCode(404, "model_not_found", "The model glm-4.6 does not exist")
+	}
 	check("model gap", plan, send("glm-4.6", plan, 1, gap))
 	srv.Admin.Post("/api/providers/zai/keys/"+plan[0].key+"/disable", nil).OK()
 

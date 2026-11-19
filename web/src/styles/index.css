@@ -1,3 +1,8 @@
+/* UI SDK adds the little CSS its behaviours need in this layer; declared
+   first so every style below wins over it. No web.css: Iroha styles UI SDK
+   parts itself, from their data-slot and state attributes. */
+@layer ui-sdk;
+
 @import "@fontsource-variable/inter/index.css";
 @import "tailwindcss";
 
@@ -112,6 +117,18 @@
   :focus-visible {
     outline: 2px solid var(--info);
     outline-offset: 2px;
+  }
+  /* Tailwind 4 dropped the pointer on buttons: every control that acts on a
+     press shows it, and none does while disabled. */
+  :is(button, a[href], summary, select, input:is([type="checkbox"], [type="radio"], [type="file"]),
+    [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="menuitemradio"],
+    [role="menuitemcheckbox"], [role="option"], [role="switch"], [role="checkbox"], [role="radio"]) {
+    cursor: pointer;
+  }
+  :is(button, a, summary, select, input, [role="button"], [role="link"], [role="tab"], [role="menuitem"],
+    [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="switch"], [role="checkbox"],
+    [role="radio"]):is(:disabled, [aria-disabled="true"], [data-disabled]) {
+    cursor: not-allowed;
   }
   .tabular {
     font-variant-numeric: tabular-nums;

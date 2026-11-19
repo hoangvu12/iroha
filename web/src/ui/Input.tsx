@@ -1,6 +1,9 @@
 import type { InputHTMLAttributes, ReactNode } from "react";
-import { forwardRef, useId, useState } from "react";
+import { forwardRef } from "react";
 import { Eye, EyeOff, Search } from "lucide-react";
+import { Field as SdkField, FieldDescription, FieldError, FieldLabel, useFieldControl } from "@ui-sdk/react/field";
+import { Input as SdkInput } from "@ui-sdk/react/input";
+import { PasswordInput as SdkPasswordInput, PasswordInputControl, PasswordInputToggle } from "@ui-sdk/react/password-input";
 import { cn } from "./cn";
 
 const inputBase =
@@ -9,41 +12,64 @@ const inputBase =
   "outline-none transition-[border-color,box-shadow] focus:border-info focus:ring-2 focus:ring-info/20 " +
   "disabled:opacity-60 aria-[invalid=true]:border-danger-text";
 
-export type InputProps = InputHTMLAttributes<HTMLInputElement> & { mono?: boolean };
+export type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "defaultValue"> & {
+  value?: string;
+  defaultValue?: string;
+  mono?: boolean;
+};
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ className, mono, ...rest }, ref) {
-  return <input ref={ref} className={cn(inputBase, mono && "font-mono text-[13px]", className)} {...rest} />;
+// Inside a Field, UI SDK's controls take the label and notes from the Field;
+// the same references passed again by Field's children(props) would repeat them.
+function useWithoutFieldRefs<P extends InputProps>(props: P): P {
+  const field = useFieldControl();
+  if (!field) return props;
+  const { "aria-describedby": _describedBy, "aria-labelledby": _labelledBy, ...own } = props;
+  return own as P;
+}
+
+export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(props, ref) {
+  const { className, mono, ...rest } = useWithoutFieldRefs(props);
+  return <SdkInput ref={ref} className={cn(inputBase, mono && "font-mono text-[13px]", className)} {...rest} />;
 });
 
 /** A password field with a show/hide eye (C13). */
-export const PasswordInput = forwardRef<HTMLInputElement, InputProps>(function PasswordInput({ className, ...rest }, ref) {
-  const [shown, setShown] = useState(false);
+export const PasswordInput = forwardRef<HTMLInputElement, InputProps>(function PasswordInput(props, ref) {
+  const { className, mono, value, defaultValue, name, form, required, disabled, readOnly, autoComplete, ...rest } =
+    useWithoutFieldRefs(props);
   return (
-    <div className="relative">
-      <input ref={ref} type={shown ? "text" : "password"} className={cn(inputBase, "pr-10", className)} {...rest} />
-      <button
-        type="button"
-        onClick={() => setShown((s) => !s)}
-        aria-label={shown ? "Hide password" : "Show password"}
-        title={shown ? "Hide" : "Show"}
+    <SdkPasswordInput
+      className="relative block"
+      {...{ value, defaultValue, name, form, required, disabled, readOnly, autoComplete }}
+    >
+      <PasswordInputControl ref={ref} className={cn(inputBase, "pr-10", mono && "font-mono text-[13px]", className)} {...rest} />
+      <PasswordInputToggle
+        aria-label="Show password"
         className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-fg-muted hover:text-fg"
       >
-        {shown ? <EyeOff size={17} /> : <Eye size={17} />}
-      </button>
-    </div>
+        {(state) => (state.visible ? <EyeOff size={17} aria-hidden /> : <Eye size={17} aria-hidden />)}
+      </PasswordInputToggle>
+    </SdkPasswordInput>
   );
 });
 
-export const SearchInput = forwardRef<HTMLInputElement, InputProps>(function SearchInput({ className, ...rest }, ref) {
+export const SearchInput = forwardRef<HTMLInputElement, InputProps>(function SearchInput(props, ref) {
+  const { className, ...rest } = useWithoutFieldRefs(props);
   return (
     <div className={cn("relative", className)}>
       <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
-      <input ref={ref} type="search" className={cn(inputBase, "pl-9")} {...rest} />
+      <SdkInput ref={ref} type="search" className={cn(inputBase, "pl-9")} {...rest} />
     </div>
   );
 });
 
-/** Label, control, then a hint or an error under it. */
+type ControlProps = { id?: string; "aria-invalid"?: boolean; "aria-describedby"?: string };
+
+/**
+ * Label, control, then a hint or an error under it (UI SDK's Field). The
+ * control comes from `children(props)`: Input and PasswordInput join the
+ * Field by themselves, and `props` connects any other control (a native
+ * select or textarea) to the label, hint and error.
+ */
 export function Field({
   label,
   hint,
@@ -55,26 +81,25 @@ export function Field({
   hint?: ReactNode;
   error?: ReactNode;
   id?: string;
-  children: (props: { id: string; "aria-invalid"?: boolean; "aria-describedby"?: string }) => ReactNode;
+  children: (props: ControlProps) => ReactNode;
 }) {
-  const auto = useId();
-  const fid = id ?? auto;
-  const noteId = `${fid}-note`;
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={fid} className="text-sm font-medium text-fg">
-        {label}
-      </label>
-      {children({ id: fid, "aria-invalid": error ? true : undefined, "aria-describedby": error || hint ? noteId : undefined })}
+    <SdkField invalid={error ? true : undefined} className="flex flex-col gap-1.5">
+      <FieldLabel className="text-sm font-medium text-fg">{label}</FieldLabel>
+      <Control id={id} render={children} />
       {error ? (
-        <p id={noteId} role="alert" className="text-[13px] text-danger-text">
+        <FieldError match role="alert" className="text-[13px] text-danger-text">
           {error}
-        </p>
+        </FieldError>
       ) : hint ? (
-        <p id={noteId} className="text-[13px] text-fg-muted">
-          {hint}
-        </p>
+        <FieldDescription className="text-[13px] text-fg-muted">{hint}</FieldDescription>
       ) : null}
-    </div>
+    </SdkField>
   );
+}
+
+function Control({ id, render }: { id?: string; render: (props: ControlProps) => ReactNode }) {
+  const field = useFieldControl({ id });
+  const own = id ? { id } : {};
+  return render(field ? (field.props(own) as ControlProps) : own);
 }

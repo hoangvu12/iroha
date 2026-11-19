@@ -1,5 +1,6 @@
-import type { ButtonHTMLAttributes, ComponentType, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ComponentType, MouseEvent, ReactNode } from "react";
 import { forwardRef } from "react";
+import { Button as SdkButton } from "@ui-sdk/react/button";
 import { cn } from "./cn";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
@@ -28,31 +29,36 @@ const sizes: Record<Size, string> = {
   lg: "h-11 px-4 text-[15px] gap-2",
 };
 
+// disabled: for other elements styled with buttonClass; data-disabled for UI
+// SDK's Button, which also marks a focusable disabled button that way.
 const base =
   "inline-flex select-none items-center justify-center whitespace-nowrap rounded-lg font-medium transition-colors " +
-  "disabled:cursor-not-allowed disabled:opacity-50";
+  "disabled:opacity-50 data-disabled:opacity-50 data-pending:cursor-progress";
 
 /** Button looks for a <Link> or <a> (never nest a button in a link). */
 export function buttonClass(variant: Variant = "secondary", size: Size = "md", className?: string) {
   return cn(base, variants[variant], sizes[size], className);
 }
 
+// `loading` is for a request the page tracks; an onClick that returns a
+// Promise keeps UI SDK's Button pending by itself until the Promise settles.
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = "secondary", size = "md", icon: Icon, loading, disabled, className, children, type = "button", ...rest },
+  { variant = "secondary", size = "md", icon: Icon, loading, disabled, className, children, type = "button", onClick, ...rest },
   ref,
 ) {
   return (
-    <button
+    <SdkButton
       ref={ref}
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={buttonClass(variant, size, className)}
+      onClick={onClick && ((e) => onClick(e as MouseEvent<HTMLButtonElement>))}
       {...rest}
     >
       {Icon && <Icon size={size === "sm" ? 14 : 16} className="shrink-0" />}
       {children}
-    </button>
+    </SdkButton>
   );
 });
 
@@ -64,25 +70,26 @@ export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { icon: Icon, label, size = "md", bordered, className, type = "button", ...rest },
+  { icon: Icon, label, size = "md", bordered, className, type = "button", onClick, ...rest },
   ref,
 ) {
   return (
-    <button
+    <SdkButton
       ref={ref}
       type={type}
       aria-label={label}
       title={label}
       className={cn(
         "inline-flex shrink-0 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-muted hover:text-fg",
-        "disabled:cursor-not-allowed disabled:opacity-50",
+        "data-disabled:opacity-50",
         size === "sm" ? "size-7" : "size-9",
         bordered && "border border-border-strong text-fg",
         className,
       )}
+      onClick={onClick && ((e) => onClick(e as MouseEvent<HTMLButtonElement>))}
       {...rest}
     >
       <Icon size={size === "sm" ? 15 : 17} />
-    </button>
+    </SdkButton>
   );
 });

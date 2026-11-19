@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useParams } from "react-router";
 import { ArrowLeft, ArrowUpRight, Copy, CornerDownLeft, Maximize, MessageCircle, Minus, Plus, User, X } from "lucide-react";
 import { useChatPanel } from "@/app/chat-panel";
+import { PageBody } from "@/app/PageBody";
 import { CHAT_WIDTH, SIDEBAR_WIDTH } from "@/app/Shell";
 import { seg } from "@/api/client";
 import { formatNumber } from "@/lib/format";
@@ -47,20 +48,22 @@ export function RouteViewPage() {
         bottom: phone ? "calc(64px + env(safe-area-inset-bottom))" : 0,
       }}
     >
-      <TopBar id={id} r={r} tab={tab} phone={phone} onReplay={() => chat.open({ kind: "request", request: id })} />
-      {req.isError && !r ? (
-        <ErrorState title="Couldn't load this Request" error={req.error} onRetry={() => void req.refetch()} />
-      ) : !r ? (
-        <div className="flex-1 bg-subtle" aria-busy="true" />
-      ) : tab === "route" ? (
-        <RouteCanvas r={r} phone={phone} />
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[640px] px-4 py-8 md:px-6">
-            {tab === "details" ? <RequestDetails r={r} /> : <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />}
+      <PageBody width="wide" className="flex min-h-0 flex-1 flex-col">
+        <TopBar id={id} r={r} tab={tab} phone={phone} onReplay={() => chat.open({ kind: "request", request: id })} />
+        {req.isError && !r ? (
+          <ErrorState title="Couldn't load this Request" error={req.error} onRetry={() => void req.refetch()} />
+        ) : !r ? (
+          <div className="flex-1 bg-subtle" aria-busy="true" />
+        ) : tab === "route" ? (
+          <RouteCanvas r={r} phone={phone} />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-[640px] px-4 py-8 md:px-6">
+              {tab === "details" ? <RequestDetails r={r} /> : <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </PageBody>
     </div>
   );
 }

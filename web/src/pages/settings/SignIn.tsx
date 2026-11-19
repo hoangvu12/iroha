@@ -2,6 +2,7 @@ import { useState } from "react";
 import { LogOut, Monitor } from "lucide-react";
 import { isApiError } from "@/api/client";
 import { type OwnerSession, useSignOut } from "@/api/session";
+import { PageBody } from "@/app/PageBody";
 import { timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button } from "@/ui/Button";
@@ -19,7 +20,7 @@ import { shortDate } from "./format";
 export function SignInTab() {
   const [changing, setChanging] = useState(false);
   return (
-    <div className="flex flex-col gap-10">
+    <PageBody width="readable" className="flex flex-col gap-10">
       <section aria-labelledby="password-h">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -35,7 +36,7 @@ export function SignInTab() {
       </section>
       <Sessions />
       <PasswordDialog open={changing} onOpenChange={setChanging} />
-    </div>
+    </PageBody>
   );
 }
 

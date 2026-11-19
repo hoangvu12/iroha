@@ -13,6 +13,7 @@ import { useChatPanel } from "./chat-panel";
 import type { HealthState } from "./health";
 import { healthLabel, useHealth } from "./health";
 import { NAV, type NavItem } from "./nav";
+import { PageBody } from "./PageBody";
 import { useNavShortcuts } from "./shortcuts";
 import { type ThemePref, useTheme } from "./theme";
 
@@ -37,9 +38,15 @@ export function Shell() {
         className={cn("min-w-0", phone ? "pb-[calc(72px+env(safe-area-inset-bottom))]" : "")}
         style={phone ? undefined : { paddingLeft: SIDEBAR_WIDTH }}
       >
-        <div className={cn(chatPage ? "" : "px-4 pt-6 md:px-12 md:pb-12 md:pt-10")}>
+        {chatPage ? (
           <Outlet />
-        </div>
+        ) : (
+          <div className="px-4 pt-6 md:px-12 md:pb-12 md:pt-10">
+            <PageBody width="wide">
+              <Outlet />
+            </PageBody>
+          </div>
+        )}
       </main>
       {chat.isOpen && !chatPage && (
         <aside

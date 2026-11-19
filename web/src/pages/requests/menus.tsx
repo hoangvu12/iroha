@@ -7,7 +7,7 @@ import { cn } from "@/ui/cn";
 // src/ui/Menu.tsx (which has the plain items).
 
 const itemClass =
-  "flex h-8 cursor-default select-none items-center gap-2 rounded-md px-2 text-fg outline-none " +
+  "flex h-8 select-none items-center gap-2 rounded-md px-2 text-fg outline-none " +
   "data-[highlighted]:bg-muted data-[state=open]:bg-muted data-[disabled]:opacity-50";
 
 export function SubMenu({ label, value, children }: { label: ReactNode; value?: ReactNode; children: ReactNode }) {

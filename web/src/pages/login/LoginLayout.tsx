@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AVATAR_SRC, BANNER_SRC } from "@/app/brand";
+import { PageBody } from "@/app/PageBody";
 
 /** C13: the Iroha art on the left, the form on the right. Phones get the form only. */
 export function LoginLayout({ children }: { children: ReactNode }) {
@@ -9,10 +10,12 @@ export function LoginLayout({ children }: { children: ReactNode }) {
         <img src={BANNER_SRC} alt="" className="absolute inset-0 size-full object-cover object-[62%_50%]" draggable={false} />
       </div>
       <div className="flex flex-1 items-center justify-center px-4 py-12">
-        <div className="w-full max-w-[340px]">
-          <img src={AVATAR_SRC} alt="Iroha" width={52} height={52} className="mb-6 rounded-full" draggable={false} />
-          {children}
-        </div>
+        <PageBody width="readable">
+          <div className="mx-auto w-full max-w-[340px]">
+            <img src={AVATAR_SRC} alt="Iroha" width={52} height={52} className="mb-6 rounded-full" draggable={false} />
+            {children}
+          </div>
+        </PageBody>
       </div>
     </div>
   );

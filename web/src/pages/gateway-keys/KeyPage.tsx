@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { ArrowUpRight, Copy, KeyRound, MessageCircle, Pencil } from "lucide-react";
 import { isApiError } from "@/api/client";
 import { useChatPanel } from "@/app/chat-panel";
+import { PageBody } from "@/app/PageBody";
 import { PageHeader } from "@/app/PageHeader";
 import { formatDate, formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
@@ -40,7 +41,9 @@ export function KeyPage() {
     return (
       <>
         <PageHeader back={back} title={<span className="skeleton inline-block h-7 w-40 rounded-md bg-muted align-middle" />} />
-        <div className="skeleton h-48 max-w-[760px] rounded-xl bg-muted" aria-busy="true" />
+        <PageBody width="readable">
+          <div className="skeleton h-48 rounded-xl bg-muted" aria-busy="true" />
+        </PageBody>
       </>
     );
   }
@@ -100,7 +103,7 @@ export function KeyPage() {
         }
       />
 
-      <div className="flex max-w-[760px] flex-col gap-9 pb-10">
+      <PageBody width="readable" className="flex flex-col gap-9 pb-10">
         <General k={g} />
         <Access k={g} />
         <Capture k={g} />
@@ -133,7 +136,7 @@ export function KeyPage() {
             </Row>
           </div>
         </section>
-      </div>
+      </PageBody>
 
       <RevokeDialog k={revoking ? g : undefined} onClose={() => setRevoking(false)} />
       <DeleteDialog k={deleting ? g : undefined} onClose={() => setDeleting(false)} onDone={() => navigate("/gateway-keys")} />

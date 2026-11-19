@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { seg } from "@/api/client";
 import { logoPreview } from "@/api/logos";
+import { PageBody } from "@/app/PageBody";
 import { Button } from "@/ui/Button";
 import { TypeToConfirmDialog } from "@/ui/Dialog";
 import { Input } from "@/ui/Input";
@@ -47,7 +48,7 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
   const budgetChanged = attempts !== (pool.budget.max_attempts ? String(pool.budget.max_attempts) : "") || firstByte !== (pool.budget.first_byte_seconds ? String(pool.budget.first_byte_seconds) : "");
 
   return (
-    <div className="max-w-[760px]">
+    <PageBody width="readable">
       <SettingsCard title="General">
         <SettingsRow title="Name" hint="The model Callers ask for. Renaming breaks Callers still using the old name.">
           <form
@@ -136,6 +137,6 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
           navigate("/providers");
         }}
       />
-    </div>
+    </PageBody>
   );
 }

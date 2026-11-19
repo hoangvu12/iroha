@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Copy } from "lucide-react";
 import { logoPreview } from "@/api/logos";
+import { PageBody } from "@/app/PageBody";
 import { copyText } from "@/pages/settings/format";
 import { Button } from "@/ui/Button";
 import { Mono } from "@/ui/bits";
@@ -51,7 +52,7 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
   const logoChanged = logo.trim() !== (p.logo_domain_guessed ? "" : p.logo_domain);
   const base = `${window.location.origin}${p.caller_path}`;
   return (
-    <div className="max-w-[760px]">
+    <PageBody width="readable">
       <SettingsCard title="General">
         <SettingsRow title="Name" hint="Shown in lists. Callers use the handle, which never changes.">
           <form
@@ -156,6 +157,6 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
           notifyChange(`${p.handle} archived`, res, { onUndone: refresh });
         }}
       />
-    </div>
+    </PageBody>
   );
 }

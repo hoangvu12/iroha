@@ -21,11 +21,27 @@ import (
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/rules"
+	"github.com/hoangvu12/iroha/internal/shape"
+	"github.com/hoangvu12/iroha/internal/translate"
 	"github.com/hoangvu12/iroha/internal/usage"
 )
 
 // Operation paths appended to an Endpoint's base URL.
-const opChat = "/chat/completions"
+const (
+	opChat     = "/chat/completions"
+	opMessages = "/messages"
+)
+
+// opFor is the operation path of an inference call in Shape sh.
+func opFor(sh shape.Shape) string {
+	if sh == shape.AnthropicMessages {
+		return opMessages
+	}
+	return opChat
+}
+
+// anthropicVersion is sent to Anthropic Endpoints when the Caller sends none.
+const anthropicVersion = "2023-06-01"
 
 // maxUpstreamBody caps a buffered upstream answer.
 const maxUpstreamBody = 256 << 20
@@ -117,16 +133,17 @@ func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []b
 	return req, nil
 }
 
-// prepareChatBody returns the body to send upstream: the Caller's bytes,
-// with the wire model when an Endpoint renames it, and on streams with
-// stream_options.include_usage so usage can be recorded. injected reports
-// that Iroha asked for usage the Caller did not.
-func prepareChatBody(body []byte, cr chatRequest, wireModel string) (out []byte, injected bool) {
+// preparePassthrough returns the body to send to an Endpoint speaking the
+// Caller's Shape: the Caller's bytes, with the wire model when an Endpoint
+// renames it, and on OpenAI Chat streams with stream_options.include_usage
+// so usage can be recorded. injected reports that Iroha asked for usage the
+// Caller did not.
+func preparePassthrough(body []byte, cr callerRequest, wireModel string) (out []byte, injected bool) {
 	out = body
 	if wireModel != cr.bodyModel {
 		out, _ = setField(out, "model", jsonString(wireModel))
 	}
-	if cr.stream && !cr.includeUsage {
+	if cr.shape == shape.OpenAIChat && cr.stream && !cr.includeUsage {
 		opts := map[string]any{}
 		if raw, ok := field(out, "stream_options"); ok {
 			if json.Unmarshal(raw, &opts) != nil || opts == nil {
@@ -165,13 +182,61 @@ func deadlineContext(parent context.Context, c clock.Clock, deadline time.Time) 
 	return ctx, disarm, func() { disarm(); cancel(context.Canceled) }
 }
 
-// attemptChat makes one Attempt of a Chat Completions Request. A 2xx
-// answer is relayed to the Caller and the Request is answered (failure is
-// nil); so is a fault no other candidate can fix (a broken Endpoint, a
-// redirect) or the Caller going away. Any other outcome returns the failure
-// for the Failure Rules, with nothing sent to the Caller. The Attempt is
-// returned for recording; the caller records it.
-func (x *exchange) attemptChat(seq int, c planner.Candidate, body []byte, cr chatRequest, deadline time.Time) (a requests.Attempt, failure *rules.Failure) {
+// upstreamCall is what one Attempt sends and how its answer reaches the
+// Caller: passed through (the Endpoint speaks the Caller's Shape) or
+// translated.
+type upstreamCall struct {
+	body   []byte
+	header http.Header
+	tr     *translate.Translation // nil on passthrough
+	pass   *passRelay             // passthrough only
+}
+
+// prepare builds the upstream call of candidate c. A non-nil error answers
+// the Caller: no other candidate would do better.
+func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (upstreamCall, *api.Error) {
+	ep := c.Endpoint.Shape
+	call := upstreamCall{header: x.r.Header}
+	if ep == shape.AnthropicMessages && call.header.Get("Anthropic-Version") == "" {
+		call.header = call.header.Clone()
+		call.header.Set("Anthropic-Version", anthropicVersion)
+	}
+	if ep == cr.shape {
+		out, injected := preparePassthrough(body, cr, c.WireModel)
+		call.body = out
+		call.pass = &passRelay{shape: ep, model: cr.model, dropUsageChunk: injected}
+		return call, nil
+	}
+	if ep != shape.AnthropicMessages && call.header.Get("Anthropic-Version")+call.header.Get("Anthropic-Beta") != "" {
+		call.header = call.header.Clone() // the Caller's Anthropic headers mean nothing to another Shape
+		call.header.Del("Anthropic-Version")
+		call.header.Del("Anthropic-Beta")
+	}
+	tr, err := translate.New(cr.shape, ep, translate.Options{Model: cr.model, ID: x.rec.ID, Now: x.g.clock.Now()})
+	if err != nil {
+		return call, api.Errorf(http.StatusInternalServerError, "translation_failed", "Report this; the Request cannot be translated.", "%v", err)
+	}
+	out, err := tr.Request(x.ctx, body, c.WireModel)
+	var te *translate.Error
+	switch {
+	case errors.As(err, &te):
+		return call, api.Errorf(http.StatusBadRequest, "untranslatable_request",
+			"Fix the request body; Iroha had to translate it for Provider "+c.Provider.Handle+", whose usable Endpoints speak "+string(ep)+".", "%s", te.Message)
+	case err != nil:
+		return call, api.Errorf(http.StatusInternalServerError, "translation_failed", "Report this with the Request ID; the request could not be translated.", "%v", err)
+	}
+	call.body, call.tr = out, tr
+	return call, nil
+}
+
+// attempt makes one Attempt of a Request. A 2xx answer is relayed to the
+// Caller (passed through or translated) and the Request is answered
+// (failure is nil); so is a fault no other candidate can fix (a broken
+// Endpoint, a redirect, a request that cannot be translated) or the Caller
+// going away. Any other outcome returns the failure for the Failure Rules,
+// with nothing sent to the Caller. The Attempt is returned for recording;
+// the caller records it.
+func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerRequest, deadline time.Time) (a requests.Attempt, failure *rules.Failure) {
 	g := x.g
 	started := g.clock.Now()
 	a = requests.Attempt{Seq: seq, StartedAt: started.UTC(), ProviderID: c.Provider.ID, Provider: c.Provider.Handle,
@@ -185,10 +250,15 @@ func (x *exchange) attemptChat(seq int, c planner.Candidate, body []byte, cr cha
 	handle := c.Provider.Handle
 	f := &rules.Failure{Provider: handle, Host: hostOf(c.Endpoint.URL)}
 
+	call, perr := x.prepare(c, body, cr)
+	if perr != nil {
+		a.Error = perr.Message
+		x.fail(perr)
+		return a, nil
+	}
 	ctx, disarm, release := deadlineContext(x.ctx, g.clock, deadline)
 	defer release()
-	out, injected := prepareChatBody(body, cr, c.WireModel)
-	req, err := outbound(ctx, c, x.r.Header, out, opChat, cr.stream)
+	req, err := outbound(ctx, c, call.header, call.body, opFor(c.Endpoint.Shape), cr.stream)
 	if err != nil {
 		a.Error = err.Error()
 		x.fail(api.Errorf(http.StatusBadGateway, "endpoint_misconfigured",
@@ -240,15 +310,23 @@ func (x *exchange) attemptChat(seq int, c planner.Candidate, body []byte, cr cha
 		return a, f
 	}
 
-	t := &chatRelay{model: cr.model, dropUsageChunk: injected}
+	// Usage is read from the Provider's own answer, before any translation.
+	ur := usage.NewReader(c.Endpoint.Shape)
 	var res relayResult
-	if cr.stream && isEventStream(resp.Header) {
-		res = x.relayStream(resp, t.data)
-	} else {
-		res = x.relayBuffered(resp, t.body)
+	switch stream := cr.stream && isEventStream(resp.Header); {
+	case call.tr == nil && stream:
+		call.pass.usage = ur
+		res = x.relayStream(resp, call.pass.data)
+	case call.tr == nil:
+		call.pass.usage = ur
+		res = x.relayBuffered(resp, call.pass.body)
+	case stream:
+		res = x.relayTranslatedStream(resp, call.tr, cr, ur)
+	default:
+		res = x.relayBuffered(resp, translatedBody(x, call.tr, ur))
 	}
 	a.Error = res.err
-	a.Usage, x.rec.Usage = t.usage, t.usage
+	a.Usage, x.rec.Usage = ur.Usage(), ur.Usage()
 	if !res.firstByte.IsZero() {
 		a.FirstByteMs = ms(res.firstByte.Sub(started))
 		x.rec.FirstByteMs = ms(res.firstByte.Sub(x.start))
@@ -365,8 +443,9 @@ func (x *exchange) writeHead(resp *http.Response, def string, stream bool) bool 
 	return true
 }
 
-// relayBuffered reads the whole answer, lets transform adjust it and writes it.
-func (x *exchange) relayBuffered(resp *http.Response, transform func(status int, body []byte) []byte) relayResult {
+// relayBuffered reads the whole answer, lets transform adjust it and writes
+// it. An error from transform answers the Caller instead.
+func (x *exchange) relayBuffered(resp *http.Response, transform func(status int, body []byte) ([]byte, *api.Error)) relayResult {
 	res := relayResult{firstByte: x.g.clock.Now()}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody))
 	if err != nil {
@@ -379,7 +458,12 @@ func (x *exchange) relayBuffered(resp *http.Response, transform func(status int,
 			"Provider %s's answer broke off: %s", x.rec.Provider, res.err))
 		return res
 	}
-	data = transform(resp.StatusCode, data)
+	data, terr := transform(resp.StatusCode, data)
+	if terr != nil {
+		res.err = terr.Message
+		x.fail(terr)
+		return res
+	}
 	if !x.writeHead(resp, "application/json", false) {
 		res.err = "the Provider answered a stream request without a stream"
 		x.fail(api.Errorf(http.StatusBadGateway, "upstream_not_streamed", "Retry without stream: true, or ask the Owner to check the Endpoint; the Provider answered this stream request with a single "+
@@ -491,38 +575,151 @@ func mapData(ev []byte, f func([]byte) ([]byte, bool)) []byte {
 	return out
 }
 
-// chatRelay adjusts an OpenAI Chat Completions answer on its way to the
-// Caller: the model echoes the Caller's name, usage is read, and a usage
-// chunk the Caller did not ask for is dropped.
-type chatRelay struct {
+// passRelay adjusts a passed-through answer on its way to the Caller: the
+// model echoes the Caller's name, usage is read, and an OpenAI Chat usage
+// chunk the Caller did not ask for is dropped. Nothing else changes.
+type passRelay struct {
+	shape          shape.Shape
 	model          string
 	dropUsageChunk bool
-	usage          *usage.Usage
+	usage          *usage.Reader
 }
 
-func (c *chatRelay) body(status int, b []byte) []byte {
+func (c *passRelay) body(status int, b []byte) ([]byte, *api.Error) {
 	if status >= 300 {
-		return b
+		return b, nil
 	}
-	if u, ok := usage.FromOpenAIChat(b); ok {
-		c.usage = &u
-	}
-	return echoModel(b, c.model)
+	c.usage.Body(b)
+	return echoModel(b, c.model), nil
 }
 
-func (c *chatRelay) data(p []byte) ([]byte, bool) {
+func (c *passRelay) data(p []byte) ([]byte, bool) {
 	if len(p) == 0 || p[0] != '{' {
 		return p, false
 	}
-	if bytes.Contains(p, []byte(`"usage"`)) {
-		if u, ok := usage.FromOpenAIChat(p); ok {
-			c.usage = &u
-			if c.dropUsageChunk && noChoices(p) {
+	c.usage.Event(p)
+	switch c.shape {
+	case shape.OpenAIChat:
+		if c.dropUsageChunk && bytes.Contains(p, []byte(`"usage"`)) && noChoices(p) {
+			if _, ok := usage.FromOpenAIChat(p); ok {
 				return nil, true
 			}
 		}
+	case shape.AnthropicMessages:
+		// Only message_start names the model, inside its message.
+		if msg, ok := field(p, "message"); ok && bytes.Contains(p, []byte(`"message_start"`)) {
+			if out, ok := setField(p, "message", echoModel(msg, c.model)); ok {
+				return out, false
+			}
+		}
+		return p, false
 	}
 	return echoModel(p, c.model), false
+}
+
+// translatedBody converts a whole translated answer for the Caller.
+func translatedBody(x *exchange, tr *translate.Translation, ur *usage.Reader) func(int, []byte) ([]byte, *api.Error) {
+	return func(status int, b []byte) ([]byte, *api.Error) {
+		ur.Body(b)
+		out, err := tr.Response(x.ctx, b)
+		if err != nil {
+			return nil, api.Errorf(http.StatusBadGateway, "translation_failed",
+				"Retry, or use an Endpoint speaking your Shape; GET /api/requests/"+x.rec.ID+" (Admin Token) shows the Attempt.",
+				"Provider %s's answer could not be translated: %v", x.rec.Provider, err)
+		}
+		return out, nil
+	}
+}
+
+// relayTranslatedStream converts an upstream stream event by event into the
+// Caller's Shape and sends each result as it is ready. An error event from
+// the Provider, or a stream that ends before its answer did, ends the
+// Caller's stream with the Shape's error event.
+func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Translation, cr callerRequest, ur *usage.Reader) relayResult {
+	var res relayResult
+	defer x.end()
+	x.writeHead(resp, "text/event-stream", true)
+	st, err := tr.Stream(translate.StreamOptions{IncludeUsage: cr.includeUsage})
+	if err != nil {
+		res.err = err.Error()
+		x.fail(api.Errorf(http.StatusInternalServerError, "translation_failed", "Report this with the Request ID.", "%v", err))
+		return res
+	}
+	broken := func(code, msg string) {
+		res.err = msg
+		x.fail(api.Errorf(http.StatusBadGateway, code, "Retry; GET /api/requests/"+x.rec.ID+" (Admin Token) shows the Attempt.",
+			"Provider %s's stream failed: %s", x.rec.Provider, msg))
+	}
+	br := bufio.NewReaderSize(resp.Body, 32<<10)
+	for {
+		ev, rerr := readEvent(br)
+		if data, ok := eventData(ev); ok {
+			if res.firstByte.IsZero() {
+				res.firstByte = x.g.clock.Now()
+			}
+			ur.Event(data)
+			out, terr := st.Event(x.ctx, data)
+			var ue *translate.UpstreamError
+			switch {
+			case errors.As(terr, &ue):
+				broken("upstream_stream_error", "the Provider reported an error mid-stream: "+ue.Error())
+				return res
+			case terr != nil:
+				broken("translation_failed", terr.Error())
+				return res
+			}
+			if len(out) > 0 {
+				if werr := x.send(out); werr != nil {
+					res.err = "the Caller went away mid-stream"
+					x.callerGone()
+					return res
+				}
+			}
+		}
+		if rerr == nil {
+			continue
+		}
+		if !errors.Is(rerr, io.EOF) {
+			if x.ctx.Err() != nil {
+				res.err = "the Caller went away mid-stream"
+				if context.Cause(x.ctx) == ErrShuttingDown {
+					res.err = "Iroha shut down mid-stream"
+				}
+				x.stopped()
+				return res
+			}
+			broken("upstream_stream_broken", "the stream broke off: "+transportError(rerr))
+			return res
+		}
+		out, terr := st.End(x.ctx)
+		if terr != nil {
+			broken("upstream_stream_broken", terr.Error())
+			return res
+		}
+		if werr := x.send(out); werr != nil {
+			res.err = "the Caller went away mid-stream"
+			x.callerGone()
+		}
+		return res
+	}
+}
+
+// eventData returns the data of one server-sent event, multi-line data
+// joined with newlines; ok is false for an event without data (a comment).
+func eventData(ev []byte) (data []byte, ok bool) {
+	for _, line := range bytes.Split(ev, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		d, found := bytes.CutPrefix(line, []byte("data:"))
+		if !found {
+			continue
+		}
+		d = bytes.TrimPrefix(d, []byte(" "))
+		if ok {
+			data = append(data, '\n')
+		}
+		data, ok = append(data, d...), true
+	}
+	return data, ok
 }
 
 func noChoices(p []byte) bool {

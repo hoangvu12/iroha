@@ -47,9 +47,9 @@ type queued struct {
 	replay bool
 }
 
-// serve runs the budget loop over the plan's candidates for a Chat
-// Completions Request and answers the Caller.
-func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest) {
+// serve runs the budget loop over the plan's candidates and answers the
+// Caller, whatever its Shape.
+func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerRequest) {
 	g := x.g
 	first := cands[0].Provider
 	maxAttempts, _ := providers.EffectiveBudget(first.MaxAttempts, first.FirstByte)
@@ -90,7 +90,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest)
 		if seq == 1 {
 			x.noteProvider(c.Provider)
 		}
-		a, f := x.attemptChat(seq, c, body, cr, deadline)
+		a, f := x.attempt(seq, c, body, cr, deadline)
 		if f == nil { // answered
 			x.recordAttempt(a)
 			if a.Status >= 200 && a.Status < 300 && c.Key.Recovering(c.WireModel) {

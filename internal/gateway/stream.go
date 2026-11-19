@@ -44,7 +44,62 @@ type streamShape interface {
 }
 
 var streamShapes = map[shape.Shape]streamShape{
-	shape.OpenAIChat: openAIChatStream{},
+	shape.OpenAIChat:        openAIChatStream{},
+	shape.AnthropicMessages: anthropicStream{},
+}
+
+// anthropicStream: Anthropic's own ping event keeps the stream alive (the
+// SDKs ignore it); an error is Anthropic's error event, which the SDKs
+// raise as an API error. No message_stop follows it.
+type anthropicStream struct{}
+
+func (anthropicStream) keepAlive() []byte {
+	return []byte("event: ping\ndata: {\"type\":\"ping\"}\n\n")
+}
+
+func (anthropicStream) errorEvent(e *api.Error, requestID string) []byte {
+	return append(append([]byte("event: error\ndata: "), compactJSON(anthropicError(e, requestID))...), "\n\n"...)
+}
+
+// anthropicError is Anthropic's error envelope extended with Iroha's code,
+// hint, the Request ID and the details. error.type is Anthropic's type for
+// the status, which the SDKs map to their error classes.
+func anthropicError(e *api.Error, requestID string) map[string]any {
+	inner := map[string]any{
+		"type":       anthropicErrorType(e.Status),
+		"message":    e.Message,
+		"code":       e.Code,
+		"hint":       e.Hint,
+		"request_id": requestID,
+	}
+	if e.Details != nil {
+		inner["details"] = e.Details
+	}
+	return map[string]any{"type": "error", "error": inner, "request_id": requestID}
+}
+
+func anthropicErrorType(status int) string {
+	switch {
+	case status == http.StatusUnauthorized:
+		return "authentication_error"
+	case status == http.StatusPaymentRequired:
+		return "billing_error"
+	case status == http.StatusForbidden:
+		return "permission_error"
+	case status == http.StatusNotFound:
+		return "not_found_error"
+	case status == http.StatusRequestEntityTooLarge:
+		return "request_too_large"
+	case status == http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case status == http.StatusGatewayTimeout:
+		return "timeout_error"
+	case status == 529 || status == http.StatusServiceUnavailable:
+		return "overloaded_error"
+	case status >= 500:
+		return "api_error"
+	}
+	return "invalid_request_error"
 }
 
 // openAIChatStream: SSE comments keep the stream alive; an error is a data

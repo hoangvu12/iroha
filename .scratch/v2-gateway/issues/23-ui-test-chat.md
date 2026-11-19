@@ -4,11 +4,19 @@
 
 **Blocked by:** 22, 15
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Pinning one key or Endpoint sends every Attempt there only
-- [ ] Sending as a Gateway Key enforces its scope and records "Test (as <name>)"
-- [ ] Snippets run unchanged against Iroha
-- [ ] Multi-turn chat streams in all four Shapes; reasoning level is translated
-- [ ] Tool-call check reports pass or fail with the raw tool call shown
-- [ ] Each entry point fills in the panel as described
+- [x] Pinning one key or Endpoint sends every Attempt there only
+- [x] Sending as a Gateway Key enforces its scope and records "Test (as <name>)"
+- [x] Snippets run unchanged against Iroha
+- [x] Multi-turn chat streams in all four Shapes; reasoning level is translated
+- [x] Tool-call check reports pass or fail with the raw tool call shown
+- [x] Each entry point fills in the panel as described
+
+## Comments
+
+- Implemented on `agent/t23`. Backend: `POST /api/test` (`internal/gateway/testrun.go`) runs the built body through the normal Gateway path (`Gateway.run`), pins filter the route after resolve (a pinned key is tried whatever its Key State), `as` applies the Gateway Key's scope while `caller_kind` stays `test`. `internal/testchat` builds the body per Shape (reasoning: `reasoning_effort` / `reasoning.effort` / Anthropic `thinking` budget / Gemini `thinkingConfig`), checks the tool call, writes snippets, and serves `GET /api/test/models` and `/api/test/snippets`. Agent docs: `internal/api/skill/31_test_chat.md`.
+- Tests (`internal/testchat/testchat_test.go`): one per checkbox, plus the failed-test Attempt explanation and model search. `TestSnippetsRunUnchangedAgainstIroha` runs every Shape's curl snippet against testkit, and through a real `sh` + `curl` when both exist (they did here). The Python and TypeScript snippets were not run (SDKs not installed in tests).
+- Decision: chats are kept client-side in `localStorage` (`iroha.chats.v1`, newest 30 chats); every turn is also a captured test Request, which is the durable record. Recorded in `docs/agents/architecture.md` ("Ticket 23: test chat").
+- Tool-call verdict reaches the UI as a trailing SSE comment (`: iroha-tool-check {json}`) on streams and an `Iroha-Tool-Check` header on JSON answers; the answer itself stays byte for byte the Shape's.
+- Checked in headless Chrome (light, dark, phone): the Provider, Gateway Key and Replay entry points (Pool and key row use the same `startFor` path but were not clicked through), streamed reasoning, tool call with follow-up, failed reply with the Attempt list, model search over 400+ models, earlier chats after reload, snippet dialog.

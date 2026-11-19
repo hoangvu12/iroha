@@ -218,6 +218,13 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, sh shape.Shape, 
 		x.refuseUnrecorded(aerr)
 		return
 	}
+	g.run(x, caller, resolve)
+}
+
+// run serves the Request of x for caller once it is known: Gateway Key
+// traffic (serve) and test sends (testrun.go) alike.
+func (g *Gateway) run(x *exchange, caller gatewaykeys.Caller, resolve resolver) {
+	r, sh := x.r, x.rec.ShapeIn
 	x.begin(caller)
 	defer x.finish()
 
@@ -236,6 +243,12 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, sh shape.Shape, 
 		return
 	}
 	now := g.clock.Now()
+	if x.test != nil {
+		if err := x.test.pin(&rt, now); err != nil {
+			x.fail(err)
+			return
+		}
+	}
 	for i := range rt.providers {
 		g.expireGaps(x, &rt.providers[i], now)
 	}

@@ -132,7 +132,9 @@ export type Model = {
   discovered_at?: string;
 };
 
-export type ModelFilter = "all" | "gaps" | "hidden";
+/** The filters of GET /api/providers/{p}/models (`visible`: what Callers see). */
+export type ModelFilter = "all" | "visible" | "discovered" | "added" | "hidden" | "gaps";
+export const MODEL_FILTERS: ModelFilter[] = ["all", "visible", "discovered", "added", "hidden", "gaps"];
 
 export type ModelList = {
   provider: string;
@@ -295,15 +297,14 @@ export function useKeys(handle: string) {
   });
 }
 
-export const MODEL_PAGE = 50;
-
-export function useModels(handle: string, m: { q: string; filter: ModelFilter; offset: number }) {
+/** One page of a Provider's model list: the server searches, filters and cuts it (thousands of models cost one page). */
+export function useModels(handle: string, m: { q: string; filter: ModelFilter; offset: number; limit: number }) {
   return useQuery({
     queryKey: [...qk.models(handle), m],
     queryFn: ({ signal }) =>
       api.get<ModelList>(`/api/providers/${seg(handle)}/models`, {
         signal,
-        query: { q: m.q, filter: m.filter, offset: m.offset, limit: MODEL_PAGE },
+        query: { q: m.q, filter: m.filter, offset: m.offset, limit: m.limit },
       }),
     placeholderData: keepPreviousData,
   });
@@ -409,6 +410,8 @@ export const calls = {
   restrictToWorking: (h: string, key: string) => api.post<KeyResult>(`${P(h)}/keys/${seg(key)}/restrict-to-working-endpoints`),
 
   saveModel: (h: string, body: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts }) => api.post<ModelResult>(`${P(h)}/models`, body),
+  /** Many models' changes in one call and one Audit Entry; each item applies or fails on its own. */
+  saveModels: (h: string, items: { model: string; added?: boolean; hidden?: boolean }[]) => api.post<BulkResult<Model>>(`${P(h)}/models/bulk`, { items }),
   refreshModels: (h: string) => api.post<RefreshResult>(`${P(h)}/models/refresh`, {}, { timeoutMs: 120_000 }),
   resetModels: (h: string) => api.post<{ removed: string[]; kept: number }>(`${P(h)}/models/reset`),
 

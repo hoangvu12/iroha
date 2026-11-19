@@ -13,7 +13,7 @@ Every case of kind **a** (essential) or **b** (provider quirk) in `docs/research
   - `ui (#NN)`: a UI behaviour, owned by UI ticket NN (no DOM tests; the API behind it is mapped where it exists).
 - **Note**: what is asserted, and `deviation:` where v2 deliberately behaves differently from v1. The deviations worth an Owner decision are collected below.
 
-**Totals:** 521 cases (418 of kind a, 103 of kind b): 387 covered, 95 n/a, 17 ui, 13 partial, 9 open.
+**Totals:** 521 cases (418 of kind a, 103 of kind b): 388 covered, 95 n/a, 17 ui, 13 partial, 8 open.
 
 ## Fixed by ticket 26
 
@@ -44,11 +44,10 @@ Tests written for this checklist found these behaviours wrong; each is fixed and
 | 33 | MOD-67 | Model display names on the model lists (needs decision) |
 | 34 | SCR-11 | Duplicate Endpoint URLs within a Provider (ticket 27's re-runnable import needs it) |
 | 35 | PRV-86 | Mask static header values in Endpoint Audit Entries (needs decision) |
-| 36 | KEY-14 | Delete revoked Gateway Keys, or drop delete from ticket 24 (needs decision) |
-| 37 | REQ-105, RUN-08 | Response compression, or record that Cloudflare compresses (needs decision) |
-| 38 | KEY-11 | Optimistic concurrency on admin edits, or accept last-write-wins with audit (needs decision) |
-| 39 | MET-01, MET-02 | Prometheus metrics (optional; needs decision) |
-| 40 | REQ-68, TIME-10 | Test that a slow Caller slows the upstream read (behaviour right by construction) |
+| 36 | REQ-105, RUN-08 | Response compression, or record that Cloudflare compresses (needs decision) |
+| 37 | KEY-11 | Optimistic concurrency on admin edits, or accept last-write-wins with audit (needs decision) |
+| 38 | MET-01, MET-02 | Prometheus metrics (optional; needs decision) |
+| 39 | REQ-68, TIME-10 | Test that a slow Caller slows the upstream read (behaviour right by construction) |
 
 ## Deviations for the Owner to decide on
 
@@ -93,6 +92,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 - AUTH-13, AUTH-14: no CSRF token; SameSite=Strict plus refusal of `Sec-Fetch-Site: cross-site`.
 - KEY-01, KEY-02, PER-05, PER-08: Gateway Keys, Admin Tokens and Upstream Keys are stored readable (ADR-0006) and reads are not audited.
 - MGMT-01, MGMT-04: Admin Tokens never expire and can create other Admin Tokens.
+- KEY-14: an active Gateway Key can be deleted without revoking it first (v1: 409 `gateway_key_active`), and the delete is revertible (ticket 24); history keeps its name and ID.
 
 ## Part 1: Request Shapes and translation (REQ)
 
@@ -230,7 +230,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | REQ-65 | a | covered | `normalise TestStreamPassesOtherEventsUntouched`; `gateway TestStreamUsageReachesCallersWhoAskForItAndModelsAreEchoed` | comments, errors, non-JSON verbatim; `[DONE]` once |
 | REQ-66 | a | covered | `gateway TestAStreamBrokenMidwayEndsWithAnErrorEvent`; `gateway TestStreamsEndingWithoutAFinishReasonAreClosed` | no `[DONE]` invented on a break; deviation (spec 21): an error event is sent after the first byte |
 | REQ-67 | a | covered | `gateway TestCRLFFramedStreamsFlowEventByEvent` | v1 GAP, correct today. With CRLF framing the first piece reaches the Caller before the Provider sends the next. Covers passthrough (Chat) and translated (Messages Caller) |
-| REQ-68 | a | open (#40) |  | relay reads one event then blocks on the write (attempt.go:519-536); no test |
+| REQ-68 | a | open (#39) |  | relay reads one event then blocks on the write (attempt.go:519-536); no test |
 | REQ-69 | a | covered | `gateway TestACallerThatGoesAwayEndsTheUpstreamCallAndIsRecordedCallerGone` | Subtests: "buffered", "translated", "stream before its first byte", "mid-stream". In each, the upstream sees its request context end, the Request is recorded `caller_gone` with one Attempt and no rule, and the key stays active. The test uses its own httptest upstream so it can see the upstream context end. including a translated (Chat to Anthropic) Request |
 | REQ-70 | a | covered | `gateway TestStreamFailuresBeforeCommitmentKeepTheirHTTPStatus`; `gateway TestAStreamRefusedBeforeItsFirstByteMovesToTheNextKey`; `gateway TestAMessagesCallerGetsTheProvidersRefusalInAnthropicsEnvelope`; `gateway TestAMessagesCallerWhoseKeysAreAllRateLimitedGets503WithRetryAfter` | A streamed Messages Request that fails before its first byte keeps the HTTP status (400 / 503) and gets an `application/json` Anthropic envelope |
 | REQ-71 | a | covered | `translate TestGolden/"chat-to-anthropic-text"`; `translate TestGolden/"chat-to-anthropic-tools-images-reasoning"` | role chunk, text, tool_calls start/args, finish, usage, `[DONE]`, pings dropped |
@@ -267,7 +267,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | REQ-102 | a | covered | `gateway TestGlobalRoutesRefuseUnqualifiedNamesWithAHint`; `gateway TestGlobalRoutesRefuseEveryProviderOutOfReachAlike` | v1 inconsistency fixed: full envelope with hint and request ID |
 | REQ-103 | a | covered | `gateway TestMessagesErrorsUseTheAnthropicEnvelope`; `gateway TestStatefulResponsesCannotBeTranslated`; `translate TestARequestThatCannotBeTranslatedIsTheCallersError` | 400 `untranslatable_request`, no Attempt |
 | REQ-104 | a | covered | `gateway TestUpstreamErrorsPassThroughAndFailuresAreExplained`; `gateway TestAnEmptyPlanSaysWhetherAnythingCanEverServe`; `gateway TestUnknownOrOutOfScopeProvidersGetTheUniformRefusal`; `gateway TestAModelEveryKeyIsRefusedIsAnsweredWithoutAnAttempt`; `server TestStreamsOutlivingTheDrainLimitEndWithAnErrorEvent` | deviation: v2 codes (`no_candidate`, `keys_cooling`, `model_unavailable`, `shutting_down`); disabled/archived fold into 403 `provider_not_allowed`; `stored_key_unreadable` n/a (ADR-0006) |
-| REQ-105 | a | open (#37) |  | v2 has no response compression (no gzip code in `internal/`) |
+| REQ-105 | a | open (#36) |  | v2 has no response compression (no gzip code in `internal/`) |
 | REQ-106 | a | n/a |  | CORS origins out of scope (spec); v2 sends no CORS headers, so browsers refuse every cross-origin call (same as an empty allow-list) |
 
 ## Part 3: Failure classification, Key States, budget, planning, key tests (FAIL)
@@ -546,10 +546,10 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | KEY-08 | a | covered | `gatewaykeys TestGatewayKeysAreIssuedReadableScopedAndRevoked` | unknown Provider gets 404, models are trimmed and deduped, blank lists and bad names get 400. Deviation: the first problem only (not all together); models may be 256 chars (v1: 128) |
 | KEY-09 | a | covered | `gateway TestUnknownOrOutOfScopeProvidersGetTheUniformRefusal`; `models TestGlobalModelListShowsExactlyWhatTheKeyMayUseQualified` | a model in scope but not listed is still attempted (`zz-unlisted`); out of scope gets 403 `model_not_allowed` |
 | KEY-10 | a | covered | `gateway TestUnknownOrOutOfScopeProvidersGetTheUniformRefusal`; `gateway TestGlobalRoutesRefuseEveryProviderOutOfReachAlike`; `gateway TestGatewayKeyScopesNamePoolsAndRefuseOthersUniformly` |  |
-| KEY-11 | a | open (#38) |  | v2 has no revision check: PATCH `/api/gateway-keys/{key}` is last-write-wins (audit and revert only). The edit does keep the secret (same test as KEY-01) |
+| KEY-11 | a | open (#37) |  | v2 has no revision check: PATCH `/api/gateway-keys/{key}` is last-write-wins (audit and revert only). The edit does keep the secret (same test as KEY-01) |
 | KEY-12 | a | covered | `gateway TestRevokingAGatewayKeyMidStreamLetsTheStreamFinish` | The key is revoked while the stream is held. The stream finishes "Hello" + `[DONE]` and is recorded 200. The next Request gets 401 `gateway_key_invalid`. |
 | KEY-13 | a | covered | `gatewaykeys TestGatewayKeysAreIssuedReadableScopedAndRevoked`; `gatewaykeys TestARevokedGatewayKeyStaysRevokedAndCannotBeEdited` | second revoke `unchanged`, no Audit Entry (2 entries total); PATCH name/scope/capture → 409 `gateway_key_revoked`; key unchanged and still refused on `/v1/models` |
-| KEY-14 | a | open (#36) |  | v2 has no Gateway Key delete route: revoked keys stay forever (`gatewaykeys/routes.go:273`), but ticket 24 asks for delete in the danger zone. History is safe: `requests` keeps `gateway_key_id` and `caller_name` with no foreign key |
+| KEY-14 | a | covered | `gatewaykeys TestDeletingAGatewayKeyIsRevertible`; `requests TestDeletingAGatewayKeyKeepsItsRequests` | Delete removes the key and frees its name; Requests keep the Caller name and key ID and `caller=<id>` finds them. Deviation (ticket 24): an active key can be deleted too (v1: 409 `gateway_key_active`), and the delete is revertible |
 | KEY-15 | a | covered | `gatewaykeys TestLastUsedIsRecordedOnSuccessfulUseToTheMinute` | absent before use; wrong key leaves it; set to the clock on use; not rewritten within 59 s; rewritten at 60 s (via `x-api-key`); a revoked key's refused use does not update it |
 | KEY-16 | a | n/a |  | CORS origins on Gateway Keys are out of scope (spec) |
 | KEY-17 | a | n/a |  | browser CORS on inference is out of scope (spec); v2 sends no CORS headers |
@@ -609,7 +609,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | TIME-07 | a | covered | `gateway TestTheTimeBudgetEndsASilentAttemptWithoutReplayingIt`; `gateway TestMaxAttemptsOverrideLimitsTheAttempts`; `gateway TestAPoolSharesOneBudgetAcrossItsMembers` | precedence: Pool, then Provider, then default |
 | TIME-08 | a | covered | `gateway TestACallerThatGoesAwayEndsTheUpstreamCallAndIsRecordedCallerGone/"mid-stream"` | Buffered and streaming are both covered (see the other subtests). |
 | TIME-09 | a | partial (#31) | `gateway TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself` | deviation: no backoff sleeps; the next Attempt goes at once to another key, and Retry-After becomes the cooling time |
-| TIME-10 | a | partial (#40) | `gateway TestStreamsFlowChunkByChunkAndUsageIsRecorded` | relay is synchronous event by event with flush (so it is pull-bound); no test with a slow reader |
+| TIME-10 | a | partial (#39) | `gateway TestStreamsFlowChunkByChunkAndUsageIsRecorded` | relay is synchronous event by event with flush (so it is pull-bound); no test with a slow reader |
 | TIME-11 | a | covered | `rules TestBuiltinRulesClassifyTheGenericFailures/"302 matches nothing"`; `gateway TestUpstreamRedirectsAreNeverFollowedAndRefusalsKeepTheirStatus` | The redirect target receives nothing. The code is `upstream_redirect`, not `upstream_rejected` as part-6 guessed. |
 | TIME-12 | b | n/a |  | Bun-specific; v2 is a Go binary |
 | RUN-01 | a | covered | `server TestMigrationsApplyOnStartAndOnlyOnce`; `cmd/iroha TestBinaryStartsWithOnlyADataDir`; `server TestRunFailsBeforeListeningWhenTheDataDirectoryIsUnusable/"data dir is a file"`; `server TestRunFailsBeforeListeningWhenTheDataDirectoryIsUnusable/"iroha.db is a directory"`; `cmd/iroha TestBinaryRefusesBadStartupValuesWithExitCodes` | `server.Run` returns an error, no startup event, the address stays free; binary: unknown flag and bad values exit 2 without creating the data dir, a data dir that is a file exits 1 |
@@ -619,7 +619,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | RUN-05 | a | covered | `server TestShuttingDownTwiceIsHarmless`; `server TestASecondSignalDuringTheDrainIsAbsorbed` | second `Shutdown` returns nil and logs nothing (one `shutdown` event after restart); two cancels of Run's context during a drain give one drained shutdown |
 | RUN-06 | a | covered | `server TestUnknownRoutesAndWrongMethodsAnswerWithHints`; `webui TestTheUIAndItsBrandArtAreServedByIroha` |  |
 | RUN-07 | a | covered | `webui TestTheUIAndItsBrandArtAreServedByIroha`; `webui TestUICachingAndPathsThatClimbOutOfTheBundle` | `/`, `/index.html`, app pages: `no-cache` + `X-Frame-Options: DENY`; brand art `public, max-age=86400`; when the UI is built, the first `/assets/...` named in index.html gets `public, max-age=31536000, immutable` (dist is not built in this tree, so that branch did not run here); 11 climbing paths (`/../iroha.db`, `%2e%2e`, `..%2f`, `..%5c`, the data dir's absolute path, ...) give the app page or the JSON 404, never SQLite, Go source or go.mod |
-| RUN-08 | a | open (#37) |  | v2 has no gzip at all |
+| RUN-08 | a | open (#36) |  | v2 has no gzip at all |
 | RUN-09 | a | covered | `server TestDocumentsDescribeEveryRegisteredRoute`; `audit TestDocumentsDescribeTheConventionsOnce` | `/api/openapi.json` and `/skill.md`. Deviation: no Scalar page at `/docs` and no capability-matrix page |
 | PER-04 | a | covered | `retention TestRetentionSettingsAreAuditedAndRevertible` | `settings` table through `settings.NewInt`; audited and revertible |
 | PER-05 | a | n/a |  | ADR-0006: Upstream Keys are stored readable, with no encryption or master key |
@@ -632,8 +632,8 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | CFG-02 | a | n/a |  | no Owner-supplied secret env vars; Iroha generates every secret |
 | CFG-03 | a | covered | `config TestEveryBadStartupValueIsReportedTogether`; `cmd/iroha TestBinaryRefusesBadStartupValuesWithExitCodes/"bad values"` | FIX. bad log-level, log-format, models-dev (flags) and drain-timeout (env) all in one error; the binary prints one `iroha:` line per value and exits 2 |
 | CFG-04 | a | covered | `deploy TestUnitStopTimeoutCoversTheDrainLimit`; `deploy TestUnitRestartsOnlyOnFailureAndWritesOnlyTheInstallDirectory` | the need is met by the systemd unit: `iroha.db` lives in the install dir (no containers) |
-| MET-01 | a | open (#39) |  | v2 has no Prometheus endpoint; the spec neither asks for it nor rules it out |
-| MET-02 | a | open (#39) |  | as MET-01 |
+| MET-01 | a | open (#38) |  | v2 has no Prometheus endpoint; the spec neither asks for it nor rules it out |
+| MET-02 | a | open (#38) |  | as MET-01 |
 | UI-01 | a | ui (#21) |  | ticket 21 (TanStack Query in `web/src/api/client.ts`) |
 | UI-02 | a | ui (#22, #24) |  | tickets 22, 24. v2 acts at once and offers Undo through Audit revert (architecture "Conventions") |
 | UI-03 | a | n/a |  | ADR-0006: Gateway Keys can be read any time, so nothing needs hiding from the cache |

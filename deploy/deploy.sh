@@ -42,6 +42,8 @@ Release:
                        --version, which must match its --version output)
   --timeout SECONDS    how long to wait for readiness, default 60
   --keep N             database backups to keep on the server, default 5
+  --no-ui              skip the UI build (npm in web/); the binary then serves
+                       a "UI not built" page. Ignored with --binary
 
 Modes:
   --install-unit       also install or update the systemd unit (needs root
@@ -74,7 +76,7 @@ ADDR=${IROHA_DEPLOY_ADDR:-127.0.0.1:8080}
 READY_URL=${IROHA_DEPLOY_READY_URL:-}
 RUN_AS=${IROHA_DEPLOY_RUN_AS:-iroha}
 VERSION="" ARCH="" BINARY="" TIMEOUT=60 KEEP=5
-INSTALL_UNIT=0 MODE=deploy DRY_RUN=0
+INSTALL_UNIT=0 MODE=deploy DRY_RUN=0 NO_UI=0
 
 die() { # die CODE MESSAGE
 	printf 'deploy: %s\n' "$2" >&2
@@ -88,6 +90,7 @@ while [ $# -gt 0 ]; do
 	case $opt in
 	-h | --help) usage; exit 0 ;;
 	--install-unit) INSTALL_UNIT=1; shift; continue ;;
+	--no-ui) NO_UI=1; shift; continue ;;
 	--check) MODE=check; shift; continue ;;
 	--print-unit) MODE=print-unit; shift; continue ;;
 	--dry-run) DRY_RUN=1; shift; continue ;;
@@ -243,6 +246,14 @@ if [ -n "$BINARY" ]; then
 	say "using $BINARY as version $VERSION"
 	run cp "$BINARY" "$STAGE/iroha.new"
 else
+	if [ "$NO_UI" = 0 ]; then
+		say "building the UI (web/ into internal/webui/dist)"
+		command -v npm >/dev/null 2>&1 || die 1 "npm not found: the UI build needs Node 22+ (or pass --no-ui to ship without the UI)"
+		(cd "$ROOT" && run npm --prefix web ci --no-audit --no-fund && run npm --prefix web run build) ||
+			die 1 "UI build failed; nothing was sent to the server"
+		[ "$DRY_RUN" = 1 ] || [ -f "$ROOT/internal/webui/dist/index.html" ] ||
+			die 1 "UI build produced no internal/webui/dist/index.html; nothing was sent to the server"
+	fi
 	say "building $VERSION for linux/$ARCH"
 	(cd "$ROOT" && run env CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath \
 		-ldflags "-s -w -X main.version=$VERSION" -o "$(native_path "$STAGE/iroha.new")" ./cmd/iroha) ||

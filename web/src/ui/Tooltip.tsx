@@ -4,8 +4,12 @@ import { cn } from "./cn";
 
 export const tooltipClass = cn(
   "max-w-72 whitespace-pre-line rounded-md bg-primary px-2 py-1 text-[12.5px] font-medium leading-snug text-primary-fg shadow-elevated",
-  "origin-(--transform-origin) transition-[opacity,scale] duration-100 data-starting-style:scale-96 data-starting-style:opacity-0",
-  "data-ending-style:opacity-0 data-instant:transition-none motion-reduce:transition-none",
+  // The popup motion at tooltip speed, the same in and out. One that opens at
+  // once because another was just open (data-instant) doesn't animate, so
+  // moving along a toolbar reads as one tip following the pointer.
+  "origin-(--transform-origin) transition-[opacity,scale] duration-tooltip ease-out data-instant:duration-0",
+  "data-starting-style:scale-(--motion-scale-popup) data-starting-style:opacity-0",
+  "data-ending-style:scale-(--motion-scale-popup) data-ending-style:opacity-0",
 );
 
 // `children` is the trigger and must forward props and ref. The tip names a

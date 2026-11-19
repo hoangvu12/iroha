@@ -1,10 +1,13 @@
 import { cn } from "./cn";
 
-// The surface of menus, selects and popovers: grows from its trigger.
+// The surface of menus, selects and popovers: grows from its trigger and
+// shrinks back into it, faster out than in (architecture.md "UI motion
+// system"). Under reduced motion the scale token is 1, so it only fades.
 export const popupClass = cn(
   "rounded-lg border border-border bg-elevated p-1 text-sm text-fg shadow-elevated outline-none",
-  "origin-(--transform-origin) transition-[opacity,scale] duration-150 ease-out",
-  "data-starting-style:scale-96 data-starting-style:opacity-0 data-ending-style:scale-96 data-ending-style:opacity-0 motion-reduce:transition-none",
+  "origin-(--transform-origin) transition-[opacity,scale] duration-popup-in ease-out",
+  "data-starting-style:scale-(--motion-scale-popup) data-starting-style:opacity-0",
+  "data-ending-style:scale-(--motion-scale-popup) data-ending-style:opacity-0 data-ending-style:duration-popup-out",
 );
 
 // Page shortcuts stand down while a dialog, menu or list popup is open

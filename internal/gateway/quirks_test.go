@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/failurerules"
+	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
@@ -176,6 +177,41 @@ func TestStreamedErrorBodiesAreClassifiedLikeBufferedOnes(t *testing.T) {
 	resp = caller.Post("/providers/or/v1/chat/completions", stream("x/y")).Expect(200)
 	if txt := resp.Text(); !strings.HasPrefix(txt, ": OPENROUTER PROCESSING\n\n") || !strings.Contains(txt, `"Hi"`) || !strings.Contains(txt, `" there"`) {
 		t.Fatalf("healthy stream = %q", txt)
+	}
+}
+
+// FAIL-27: a key test reads an error sent inside a 2xx answer as real
+// traffic does, so a dead MiniMax key answering 200 with base_resp 2049 is
+// not reported healthy, keeps its Key State and keeps its Model Gaps.
+func TestAKeyTestReadsAnErrorInsideA200AsAFailure(t *testing.T) {
+	up := testkit.NewOpenAIChat(t)
+	srv := testkit.Start(t, testkit.Options{HTTPClient: up.Client()})
+	addProviderAt(t, srv, "acme", up.URLAt("api.minimax.io"), "sk-test-m1")
+	refusal := testkit.Raw(200, "application/json", `{"id":"","choices":null,"model":"MiniMax-M2","base_resp":{"status_code":2049,"status_msg":"invalid api key"}}`)
+
+	// A Model Gap first, so a false pass would show by clearing it.
+	up.Enqueue(up.ErrorCode(404, "model_not_found", "The model gpt-x does not exist."))
+	srv.Admin.Post("/api/providers/acme/keys/key-1/test?model=gpt-x", nil).Expect(200)
+	if g := gapsOf(readKey(t, srv, "key-1")); g != "gpt-x" {
+		t.Fatalf("gaps = %q", g)
+	}
+
+	up.Enqueue(refusal)
+	var res gateway.KeyTestResult
+	srv.Admin.Post("/api/providers/acme/keys/key-1/test?model=MiniMax-M2", nil).Expect(200).JSON(&res)
+	if res.Passed || res.Status != 200 || res.Rule != "minimax-base-resp-auth" || res.Outcome != "invalid" || res.State.State != "invalid" {
+		t.Fatalf("test = %+v", res)
+	}
+	up.Enqueue(refusal)
+	srv.Admin.Post("/api/providers/acme/keys/key-1/test?model=MiniMax-M2", nil).Expect(200).JSON(&res)
+	if k := readKey(t, srv, "key-1"); res.Passed || k.State.State != "invalid" || gapsOf(k) != "gpt-x" {
+		t.Fatalf("second test = %+v, key %+v", res, k)
+	}
+
+	// A real answer still passes.
+	srv.Admin.Post("/api/providers/acme/keys/key-1/test?model=MiniMax-M2", nil).Expect(200).JSON(&res)
+	if !res.Passed || res.State.State != "active" {
+		t.Fatalf("healthy test = %+v", res)
 	}
 }
 

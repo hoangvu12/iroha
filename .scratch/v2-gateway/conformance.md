@@ -364,7 +364,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | FAIL-24 | b | covered | `T/"429 rate limit with Retry-After"` |  |
 | FAIL-25 | b | covered | `T/"bare 402"`; `T/"empty 429"`; `T/"402 envelope on a 400"` |  |
 | FAIL-26 | a | n/a |  | Usage reconciliation; balance polling is out of scope (spec) |
-| FAIL-27 | b | covered | `T/"base_resp 1008 in a 200 answer"`; `T/"base_resp 1002 in a 200 answer"`; `T/"base_resp 2049 in a 200 answer"`; `T/"base_resp 1027 in a 200 answer"`; `gateway TestStreamedErrorBodiesAreClassifiedLikeBufferedOnes` | v1 gap, now handled |
+| FAIL-27 | b | covered | `T/"base_resp 1008 in a 200 answer"`; `T/"base_resp 1002 in a 200 answer"`; `T/"base_resp 2049 in a 200 answer"`; `T/"base_resp 1027 in a 200 answer"`; `gateway TestStreamedErrorBodiesAreClassifiedLikeBufferedOnes`; `gateway TestAKeyTestReadsAnErrorInsideA200AsAFailure` | v1 gap, now handled; a key test reads it too (2049 in a 200 fails the test, the key goes invalid and keeps its Model Gaps) |
 | FAIL-29 | b | covered | `T/"402 monthly spending limit"` |  |
 | FAIL-30 | b | covered | `T/"402 monthly spending limit"`; `T/"402 spending limit as a 200 error body"` |  |
 | FAIL-31 | b | covered | `T/"bare 402" (Mistral, `bare_402#01`)`; `T/"billing type on a 429"` |  |

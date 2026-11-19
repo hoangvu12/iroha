@@ -39,7 +39,7 @@ type KeyTestResult struct {
 	UpstreamKey string         `json:"upstream_key"`
 	Endpoint    string         `json:"endpoint"`
 	Model       string         `json:"model" doc:"The model sent upstream."`
-	Passed      bool           `json:"passed" doc:"true when the Provider answered the chat call with a 2xx."`
+	Passed      bool           `json:"passed" doc:"true when the Provider answered the chat call with a 2xx that is not an error (an error inside a 200, such as MiniMax's base_resp, fails the test)."`
 	Status      int            `json:"status" doc:"Upstream status; 0 when no answer arrived (or on a dry run)."`
 	Rule        string         `json:"rule,omitempty" doc:"The Failure Rule a failed test matched."`
 	Outcome     string         `json:"outcome,omitempty" enum:"invalid,cooling_key,cooling_key_model,model_gap,retry_elsewhere,fail_request"`
@@ -225,7 +225,9 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 	res.Status = f.Status
 	res.DurationMs = g.clock.Now().Sub(started).Milliseconds()
 	key := keystate.Key{ID: k.ID, Name: k.Name, Provider: rt.Handle}
-	if f.Status >= 200 && f.Status < 300 {
+	// An error sent inside a 2xx answer (MiniMax's base_resp) fails the test
+	// as it fails an Attempt: rules.Classify reads it as the status it stands for.
+	if f.Status >= 200 && f.Status < 300 && !rules.EmbeddedError(f.Body) {
 		res.Passed = true
 		res.Action = "Key State is active: the Provider answered the chat call."
 		if err := g.states.TestPassed(ctx, key, wire); err != nil {

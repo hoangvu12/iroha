@@ -109,7 +109,6 @@ func (s *Store) Bootstrap(ctx context.Context) (tok Token, created bool, err err
 	return tok, created, err
 }
 
-
 // Authenticator recognises "Authorization: Bearer iroha_admin_...".
 func (s *Store) Authenticator() api.Authenticator {
 	return api.AuthenticatorFunc(func(r *http.Request) (*api.Actor, error) {

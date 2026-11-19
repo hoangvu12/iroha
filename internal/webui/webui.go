@@ -43,7 +43,6 @@ func Handler() http.Handler {
 	if err != nil {
 		index = []byte(placeholder)
 	}
-	start := time.Now()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if rest, ok := strings.CutPrefix(p, "brand/"); ok {
@@ -63,7 +62,9 @@ func Handler() http.Handler {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("X-Frame-Options", "DENY")
-			http.ServeContent(w, r, "index.html", start, bytes.NewReader(index))
+			// No modification time: index.html is never cached (no-cache)
+			// and its assets carry content hashes, so Last-Modified buys nothing.
+			http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(index))
 			return
 		}
 		api.NotFoundHandler(w, r)

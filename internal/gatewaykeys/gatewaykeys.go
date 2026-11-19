@@ -357,7 +357,6 @@ func Credential(r *http.Request) string {
 // credential; the Gateway never forwards them.
 var CredentialHeaders = []string{"authorization", "x-api-key", "api-key", "x-goog-api-key"}
 
-
 var errInvalid = &api.Error{
 	Status: http.StatusUnauthorized, Code: "gateway_key_invalid",
 	Message: "The Gateway Key is not valid.",

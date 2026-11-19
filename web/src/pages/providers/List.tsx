@@ -427,7 +427,7 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
             <Input {...p} mono autoFocus autoComplete="off" spellCheck={false} placeholder="dashscope" value={handle} onChange={(e) => setHandle(e.target.value)} />
           )}
         </Field>
-        <Field label="Base URL" hint="Optional: the API's URL with its version path. You can add more Endpoints later." error={error.url}>
+        <Field label="Endpoint URL" hint="Optional: the API's URL with its version path. You can add more Endpoints later." error={error.url}>
           {(p) => (
             <Input
               {...p}

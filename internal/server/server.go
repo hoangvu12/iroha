@@ -225,7 +225,7 @@ func (s *Server) Shutdown(ctx context.Context, reason string) error {
 				// saying so (an error event on streams) and are recorded,
 				// then the remaining connections are closed.
 				if s.gw != nil {
-					actx, cancel := context.WithTimeout(context.Background(), abortGrace)
+					actx, cancel := clock.WithTimeout(context.Background(), s.clock, abortGrace)
 					ended = s.gw.Abort(actx)
 					cancel()
 				}
@@ -278,7 +278,7 @@ func Run(ctx context.Context, o Options) error {
 		_ = s.Shutdown(context.Background(), reason)
 		return err
 	}
-	dctx, cancel := context.WithTimeout(context.Background(), o.Config.DrainTimeout)
+	dctx, cancel := clock.WithTimeout(context.Background(), s.clock, o.Config.DrainTimeout)
 	defer cancel()
 	return s.Shutdown(dctx, reason)
 }

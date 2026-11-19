@@ -26,7 +26,7 @@ type Options struct {
 	URL       string // v2 base URL, e.g. http://127.0.0.1:8080
 	Token     string // v2 Admin Token
 	Apply     bool   // false: dry run, only GET requests are sent
-	HTTP      *http.Client
+	HTTP      *http.Client // required: the client talking to v2
 	Out       io.Writer
 }
 
@@ -84,15 +84,15 @@ func (r Report) Line() string {
 // It never prints a secret.
 func Run(ctx context.Context, o Options) (Report, error) {
 	rep := Report{DryRun: !o.Apply}
+	if o.HTTP == nil {
+		return rep, errors.New("v1import: Options.HTTP is required")
+	}
 	v, err := Read(ctx, o.V1DB, o.MasterKey)
 	if err != nil {
 		return rep, err
 	}
 	pl := MakePlan(v)
 	r := &run{ctx: ctx, o: o, plan: pl, rep: &rep, c: client{http: o.HTTP, base: strings.TrimRight(o.URL, "/"), token: o.Token}}
-	if r.c.http == nil {
-		r.c.http = http.DefaultClient
-	}
 	for _, p := range pl.Providers {
 		for _, k := range p.Keys {
 			r.secrets = append(r.secrets, k.Secret)

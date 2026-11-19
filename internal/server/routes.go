@@ -10,6 +10,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/admintokens"
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
+	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/failurerules"
 	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
@@ -95,7 +96,7 @@ func (s *Server) coreRoutes() []api.Route {
 				if !s.ready.Load() {
 					return nil, api.Errorf(http.StatusServiceUnavailable, "not_ready", "Iroha is starting or shutting down; retry in a few seconds.", "Iroha is not ready.")
 				}
-				ctx, cancel := context.WithTimeout(c.R.Context(), 2*time.Second)
+				ctx, cancel := clock.WithTimeout(c.R.Context(), s.clock, 2*time.Second)
 				defer cancel()
 				if err := s.db.PingContext(ctx); err != nil {
 					s.log.Error("readiness check failed", logs.Kind(logs.KindGeneric), "err", err.Error())

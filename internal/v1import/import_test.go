@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -164,7 +165,7 @@ func nullable(s string) string {
 func importV1(t *testing.T, srv *testkit.Server, path string, apply bool) (v1import.Report, string) {
 	t.Helper()
 	var out bytes.Buffer
-	rep, err := v1import.Run(context.Background(), v1import.Options{V1DB: path, MasterKey: masterKey, URL: srv.URL, Token: srv.AdminToken, Apply: apply, Out: &out})
+	rep, err := v1import.Run(context.Background(), v1import.Options{V1DB: path, MasterKey: masterKey, URL: srv.URL, Token: srv.AdminToken, Apply: apply, HTTP: &http.Client{}, Out: &out})
 	if err != nil {
 		t.Fatalf("import: %v\n%s", err, out.String())
 	}
@@ -431,7 +432,7 @@ func TestImportRefusesAWrongMasterKey(t *testing.T) {
 	srv, f := start(t)
 	path := newV1(t, f)
 	var out bytes.Buffer
-	_, err := v1import.Run(context.Background(), v1import.Options{V1DB: path, MasterKey: "another-master-key-0123456789abcdef0123", URL: srv.URL, Token: srv.AdminToken, Apply: true, Out: &out})
+	_, err := v1import.Run(context.Background(), v1import.Options{V1DB: path, MasterKey: "another-master-key-0123456789abcdef0123", URL: srv.URL, Token: srv.AdminToken, Apply: true, HTTP: &http.Client{}, Out: &out})
 	if err == nil || !strings.Contains(err.Error(), "cannot be read with this master key") {
 		t.Fatalf("err = %v", err)
 	}

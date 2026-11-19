@@ -119,7 +119,6 @@ func (s *Store) fromCookie(r *http.Request) (OwnerSession, error) {
 		`SELECT `+sessionColumns+` FROM owner_sessions WHERE secret_hash = ?`, secretHash(c.Value)), s.clock.Now())
 }
 
-
 // Authenticator recognises the session cookie. A session acts as the Owner
 // (actor kind owner_session, name "Owner"). A changing call from another
 // site is refused, so a page elsewhere cannot use the Owner's cookie.

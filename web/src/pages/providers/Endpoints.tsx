@@ -199,7 +199,7 @@ function EndpointDialog({
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
 
   const submit = async () => {
-    if (!f.url.trim()) return setError("The URL is required: the API's base URL with its version path.");
+    if (!f.url.trim()) return setError("The URL is required: the Endpoint's URL with its version path.");
     // Creating with a taken name would update that Endpoint instead.
     const clash = existing.find((e) => e.name === f.name.trim() && e.id !== endpoint?.id);
     if (f.name.trim() && clash) return setError(`${handle} already has an Endpoint named ${clash.name}. Pick another name${endpoint ? "" : ", or edit that one"}.`);
@@ -251,7 +251,7 @@ function EndpointDialog({
           void submit();
         }}
       >
-        <Field label="URL" hint="The base URL including its version path; Iroha appends /chat/completions and the like.">
+        <Field label="URL" hint="The Endpoint's URL including its version path; Iroha appends /chat/completions and the like.">
           {(p) => <Input {...p} mono autoFocus={!endpoint} spellCheck={false} placeholder="https://api.example.com/v1" value={f.url} onChange={set("url")} />}
         </Field>
         <div className="grid gap-4 md:grid-cols-2">

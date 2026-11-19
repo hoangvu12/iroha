@@ -67,12 +67,13 @@ type KeyTestBulk struct {
 
 var (
 	testModelParam    = api.Param{Name: "model", Description: "The model to ask for. Default: the model of the Provider's latest successful Request."}
-	testEndpointParam = api.Param{Name: "endpoint", Description: "The Endpoint (name or ID) to test on. Default: the first Endpoint the key may use."}
+	testEndpointParam = api.Param{Name: "endpoint", Description: "The Endpoint (name or ID) to test on. Default: the first Endpoint the key may use and has no Endpoint Gap on (else the first it may use)."}
 )
 
 const keyTestDescription = "Sends a tiny real chat call (\"" + keyTestPrompt + "\", at most 16 tokens) with the key, in the Endpoint's Shape and auth style, " +
-	"on the first Endpoint the key may use (or ?endpoint=). " +
-	"A pass makes an invalid or cooling key active again and clears its Model Gaps. A failure is read by the Failure Rules like any Attempt, so a 401 makes the key invalid and a 429 cools it; " +
+	"on the first Endpoint the key may use and has no Endpoint Gap on (or ?endpoint=). " +
+	"A pass makes an invalid or cooling key active again, clears its Model Gaps and its Endpoint Gap on that Endpoint. A failure is read by the Failure Rules like any Attempt, so a 401 makes the key invalid " +
+	"(or, when the key works on another Endpoint, gives it an Endpoint Gap on this one) and a 429 cools it; " +
 	"a keyless test (empty secret or auth style none) sends no credential, so a 401 then leaves the key as it is. " +
 	"Disabled keys are tested too and stay disabled. The test is not recorded as a Request."
 
@@ -230,7 +231,7 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 	if f.Status >= 200 && f.Status < 300 && !rules.EmbeddedError(f.Body) {
 		res.Passed = true
 		res.Action = "Key State is active: the Provider answered the chat call."
-		if err := g.states.TestPassed(ctx, key, wire); err != nil {
+		if err := g.states.TestPassed(ctx, key, keystate.Endpoint{ID: ep.ID, Name: ep.Name}, wire); err != nil {
 			return res, err
 		}
 	} else {
@@ -239,7 +240,7 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 		res.Action = "Key State unchanged."
 		switch d.Outcome {
 		case rules.Invalid, rules.CoolingKey, rules.CoolingKeyModel, rules.ModelGap:
-			eff, err := g.states.Fail(ctx, keystate.Failure{Key: key, Model: wire, Decision: d})
+			eff, err := g.states.Fail(ctx, keystate.Failure{Key: key, Endpoint: keystate.Endpoint{ID: ep.ID, Name: ep.Name}, Model: wire, Decision: d})
 			if err != nil {
 				return res, err
 			}
@@ -280,6 +281,11 @@ func testEndpoint(rt *providers.Routing, k *planner.Key, ref string) (*planner.E
 				"Upstream Key %s is restricted to other Endpoints than %s.", k.Name, ep.Name)
 		}
 		return ep, nil
+	}
+	for i := range rt.Endpoints {
+		if k.Allows(rt.Endpoints[i].ID) && !k.EndpointGaps[rt.Endpoints[i].ID] {
+			return &rt.Endpoints[i], nil
+		}
 	}
 	for i := range rt.Endpoints {
 		if k.Allows(rt.Endpoints[i].ID) {

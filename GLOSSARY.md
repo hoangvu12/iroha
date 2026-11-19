@@ -60,6 +60,10 @@ _Avoid_: Rate-limited, exhausted, parked
 A remembered fact that one Upstream Key was refused one model, so that model is not sent to that key until the gap expires or is cleared.
 _Avoid_: Allow-list, deny-list, key model availability, entitlement
 
+**Endpoint Gap**:
+A remembered fact that one Upstream Key was refused on one Endpoint after it had worked on another of its Provider's, so it is not sent to that Endpoint until the gap is cleared, and keeps its Key State and its other Endpoints.
+_Avoid_: Invalid on an Endpoint, partial invalid, region block, Endpoint ban
+
 **Failure Rule**:
 A named rule that recognises a Provider's failed response and says what it means for the Upstream Key, the model, and the Request; built-in or added by the Owner.
 _Avoid_: Adapter, classifier, error mapping, quirk

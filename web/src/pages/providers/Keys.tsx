@@ -17,6 +17,7 @@ import {
   Play,
   Plug,
   Trash2,
+  Waypoints,
 } from "lucide-react";
 import { useChatPanel } from "@/app/chat-panel";
 import { seg } from "@/api/client";
@@ -104,7 +105,7 @@ export function KeysTab({
     const needle = q.trim().toLowerCase();
     const list = all.filter((k) => {
       if (needle && !k.name.toLowerCase().includes(needle) && !k.secret.toLowerCase().includes(needle)) return false;
-      if (filter === "gaps") return k.model_gaps.length > 0;
+      if (filter === "gaps") return hasGaps(k);
       if (filter !== "all") return k.state.state === filter;
       return true;
     });
@@ -139,7 +140,11 @@ export function KeysTab({
   };
 
   // Runs a bulk action; toasts Undo, and shows per-key results when any failed.
-  const bulk = async (action: "enable" | "disable" | "delete" | "clear-model-gaps", items: string[], past: string) => {
+  const bulk = async (
+    action: "enable" | "disable" | "delete" | "clear-model-gaps" | "clear-endpoint-gaps" | "restrict-to-working-endpoints",
+    items: string[],
+    past: string,
+  ) => {
     setBusy(action);
     try {
       const res = await calls.bulkKeys(handle, action, items);
@@ -191,6 +196,8 @@ export function KeysTab({
     chat: (k) => chat.open({ kind: "upstream_key", provider: handle, key: k.name }),
     toggle: (k) => void bulk(k.enabled ? "disable" : "enable", [k.name], k.enabled ? "disabled" : "enabled"),
     clearGaps: (k) => void bulk("clear-model-gaps", [k.name], "cleared of Model Gaps"),
+    clearEndpointGaps: (k) => void bulk("clear-endpoint-gaps", [k.name], "cleared of Endpoint Gaps"),
+    restrictToWorking: (k) => void bulk("restrict-to-working-endpoints", [k.name], "restricted to the Endpoints it works on"),
     endpoints: (k) => setRestricting([k.name]),
     remove: (k) => setDeleting([k.name]),
   };
@@ -228,6 +235,25 @@ export function KeysTab({
             <MenuItem icon={Eraser} onSelect={() => void bulk("clear-model-gaps", names, "cleared of Model Gaps")}>
               Clear Model Gaps
             </MenuItem>
+            {names.some((n) => (byName.get(n)?.endpoint_gaps.length ?? 0) > 0) && (
+              <>
+                <MenuItem
+                  icon={Waypoints}
+                  onSelect={() =>
+                    void bulk(
+                      "restrict-to-working-endpoints",
+                      names.filter((n) => (byName.get(n)?.endpoint_gaps.length ?? 0) > 0),
+                      "restricted to the Endpoints they work on",
+                    )
+                  }
+                >
+                  Restrict to working Endpoints
+                </MenuItem>
+                <MenuItem icon={Eraser} onSelect={() => void bulk("clear-endpoint-gaps", names, "cleared of Endpoint Gaps")}>
+                  Clear Endpoint Gaps
+                </MenuItem>
+              </>
+            )}
             <MenuItem
               icon={Copy}
               onSelect={() => void copyText(names.map((n) => byName.get(n)?.secret ?? "").filter(Boolean).join("\n"), `${names.length} key${names.length === 1 ? "" : "s"}`)}
@@ -458,15 +484,18 @@ const filterLabel: Record<StateFilter, string> = {
   cooling: "Cooling",
   invalid: "Invalid",
   disabled: "Disabled",
-  gaps: "Model Gaps",
+  gaps: "Gaps",
 };
+
+/** A Model Gap or an Endpoint Gap: the key serves, but not everything. */
+const hasGaps = (k: UpstreamKey) => k.model_gaps.length > 0 || k.endpoint_gaps.length > 0;
 
 const counts: Record<Exclude<StateFilter, "all">, (k: UpstreamKey[]) => number> = {
   active: (k) => k.filter((x) => x.state.state === "active").length,
   cooling: (k) => k.filter((x) => x.state.state === "cooling").length,
   invalid: (k) => k.filter((x) => x.state.state === "invalid").length,
   disabled: (k) => k.filter((x) => x.state.state === "disabled").length,
-  gaps: (k) => k.filter((x) => x.model_gaps.length > 0).length,
+  gaps: (k) => k.filter(hasGaps).length,
 };
 
 function setSortParams(setParams: ReturnType<typeof useSearchParams>[1], sort: Sort, desc: boolean) {
@@ -527,13 +556,17 @@ function SecretCell({ k }: { k: UpstreamKey }) {
 }
 
 function GapsPill({ k }: { k: UpstreamKey }) {
-  if (!k.model_gaps.length && !k.cooling_models.length) return null;
+  if (!k.model_gaps.length && !k.cooling_models.length && !k.endpoint_gaps.length) return null;
   const title = [
+    ...k.endpoint_gaps.map((g) => `Endpoint Gap: not sent to ${g.endpoint} (${g.reason})`),
     ...k.model_gaps.map((g) => `Model Gap: ${g.model} (${g.reason})`),
     ...k.cooling_models.map((c) => `Cooling for ${c.model} until ${new Date(c.until).toLocaleTimeString()}`),
   ].join("\n");
   return (
     <span title={title} className="inline-flex gap-1">
+      {k.endpoint_gaps.length > 0 && (
+        <Pill tone="blue">{k.endpoint_gaps.length === 1 ? `Endpoint Gap: ${k.endpoint_gaps[0].endpoint}` : `${k.endpoint_gaps.length} Endpoint Gaps`}</Pill>
+      )}
       {k.model_gaps.length > 0 && <Pill tone="blue">{k.model_gaps.length === 1 ? "1 Model Gap" : `${k.model_gaps.length} Model Gaps`}</Pill>}
       {k.cooling_models.length > 0 && <Pill tone="amber">{k.cooling_models.length} cooling</Pill>}
     </span>
@@ -546,6 +579,8 @@ type KeyActions = {
   chat: (k: UpstreamKey) => void;
   toggle: (k: UpstreamKey) => void;
   clearGaps: (k: UpstreamKey) => void;
+  clearEndpointGaps: (k: UpstreamKey) => void;
+  restrictToWorking: (k: UpstreamKey) => void;
   endpoints: (k: UpstreamKey) => void;
   remove: (k: UpstreamKey) => void;
 };
@@ -576,6 +611,16 @@ function KeyMenu({ k, actions, multipleEndpoints }: { k: UpstreamKey; actions: K
           <MenuItem icon={Eraser} onSelect={() => actions.clearGaps(k)}>
             Clear Model Gaps
           </MenuItem>
+        )}
+        {k.endpoint_gaps.length > 0 && (
+          <>
+            <MenuItem icon={Waypoints} onSelect={() => actions.restrictToWorking(k)}>
+              Restrict to working Endpoints
+            </MenuItem>
+            <MenuItem icon={Eraser} onSelect={() => actions.clearEndpointGaps(k)}>
+              Clear Endpoint Gaps
+            </MenuItem>
+          </>
         )}
         {multipleEndpoints && (
           <MenuItem icon={Plug} onSelect={() => actions.endpoints(k)}>
@@ -1050,6 +1095,16 @@ function KeyDialog({
     }
   };
 
+  const clearEndpointGap = async (endpoint?: string) => {
+    try {
+      const res = await calls.clearEndpointGaps(handle, k.name, endpoint);
+      refresh();
+      notifyChange(endpoint ? `Endpoint Gap on ${endpoint} cleared on ${k.name}` : `Endpoint Gaps cleared on ${k.name}`, res, { onUndone: refresh });
+    } catch (e) {
+      notify.failure("Couldn't clear the Endpoint Gap", e);
+    }
+  };
+
   const eps = provider?.endpoints ?? [];
   const s = k.state;
   return (
@@ -1154,7 +1209,7 @@ function KeyDialog({
           </section>
         )}
 
-        {eps.length > 1 && (
+        {(eps.length > 1 || k.endpoint_gaps.length > 0) && (
           <section>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-[14px] font-semibold">Endpoints</h3>
@@ -1162,7 +1217,33 @@ function KeyDialog({
                 Change
               </button>
             </div>
-            <p className="text-[14px] text-fg-muted">{k.endpoints.length ? `Only ${k.endpoints.join(", ")}` : "Every Endpoint"}</p>
+            <p className="text-[14px] text-fg-muted">
+              {k.endpoints.length ? `Only ${k.endpoints.join(", ")}` : "Every Endpoint"}
+              {k.worked_on.length > 0 && `. Worked on ${k.worked_on.map((w) => w.endpoint).join(", ")}.`}
+            </p>
+            {k.endpoint_gaps.length > 0 && (
+              <>
+                <ul className="mt-2 divide-y divide-border rounded-lg border border-border text-[14px]">
+                  {k.endpoint_gaps.map((g) => (
+                    <li key={g.endpoint_id} className="flex items-start gap-3 px-4 py-2.5">
+                      <StatusDot tone="blue" className="mt-1.5" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium">{g.endpoint}</span>
+                        <span className="block text-fg-muted">Endpoint Gap: {g.reason}. Not sent there until cleared; a passing test there clears it.</span>
+                      </span>
+                      <button type="button" className="shrink-0 text-info hover:underline" onClick={() => void clearEndpointGap(g.endpoint)}>
+                        Clear
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2 flex justify-end">
+                  <Button size="sm" icon={Waypoints} onClick={() => actions.restrictToWorking(k)}>
+                    Restrict to working Endpoints
+                  </Button>
+                </div>
+              </>
+            )}
           </section>
         )}
 

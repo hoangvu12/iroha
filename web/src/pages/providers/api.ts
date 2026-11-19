@@ -62,6 +62,9 @@ export type KeyState = {
 
 export type ModelCooling = { model: string; reason: string; rule?: string; request_id?: string; since: string; until: string };
 export type ModelGap = { model: string; reason: string; rule?: string; request_id?: string; created_at: string; expires_at: string };
+/** The key was refused on this Endpoint after it worked on another (ticket 40); no expiry. */
+export type EndpointGap = { endpoint_id: string; endpoint: string; reason: string; rule?: string; request_id?: string; created_at: string };
+export type EndpointSuccess = { endpoint_id: string; endpoint: string; succeeded_at: string };
 
 export type UpstreamKey = {
   id: string;
@@ -73,6 +76,8 @@ export type UpstreamKey = {
   cooling_models: ModelCooling[];
   model_gaps: ModelGap[];
   endpoints: string[];
+  endpoint_gaps: EndpointGap[];
+  worked_on: EndpointSuccess[];
   created_at: string;
   last_used_at?: string;
 };
@@ -199,8 +204,8 @@ export type ProviderOverview = { provider: string; keys: KeyCounts; models: numb
 export type PoolOverview = { pool: string; served_by: { provider: string; requests: number; succeeded: number }[] } & Traffic;
 export type Overview = { since: string; providers: ProviderOverview[]; pools: PoolOverview[] };
 
-export type SkipReason = "disabled" | "invalid" | "cooling" | "cooling_model" | "model_gap" | "restricted";
-export type PreviewSkip = { upstream_key: string; reason: SkipReason; model?: string; until?: string; seconds_left?: number };
+export type SkipReason = "disabled" | "invalid" | "cooling" | "cooling_model" | "model_gap" | "restricted" | "endpoint_gap";
+export type PreviewSkip = { upstream_key: string; reason: SkipReason; model?: string; endpoint?: string; until?: string; seconds_left?: number };
 
 export type PreviewMember = {
   position: number;
@@ -386,10 +391,19 @@ export const calls = {
   restrictKeys: (h: string, items: { name: string; endpoints: string[] }[]) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }),
   updateKey: (h: string, key: string, body: Partial<Pick<UpstreamKey, "name" | "secret" | "enabled" | "endpoints">>) =>
     api.patch<KeyResult>(`${P(h)}/keys/${seg(key)}`, body),
-  bulkKeys: (h: string, action: "enable" | "disable" | "delete" | "clear-model-gaps", items: string[], model?: string) =>
+  bulkKeys: (
+    h: string,
+    action: "enable" | "disable" | "delete" | "clear-model-gaps" | "clear-endpoint-gaps" | "restrict-to-working-endpoints",
+    items: string[],
+    model?: string,
+  ) =>
     api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk/${action}`, { items }, { query: { model } }),
   testKeys: (h: string, items: string[]) => api.post<KeyTestBulk>(`${P(h)}/keys/bulk/test`, { items }, { timeoutMs: 180_000 }),
   clearKeyGaps: (h: string, key: string, model?: string) => api.post<KeyResult>(`${P(h)}/keys/${seg(key)}/clear-model-gaps`, {}, { query: { model } }),
+  clearEndpointGaps: (h: string, key: string, endpoint?: string) =>
+    api.post<KeyResult>(`${P(h)}/keys/${seg(key)}/clear-endpoint-gaps`, {}, { query: { endpoint } }),
+  /** Restricts the key to the Endpoints it may use minus those it has an Endpoint Gap on (which clears the gaps). */
+  restrictToWorking: (h: string, key: string) => api.post<KeyResult>(`${P(h)}/keys/${seg(key)}/restrict-to-working-endpoints`),
 
   saveModel: (h: string, body: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts }) => api.post<ModelResult>(`${P(h)}/models`, body),
   refreshModels: (h: string) => api.post<RefreshResult>(`${P(h)}/models/refresh`, {}, { timeoutMs: 120_000 }),

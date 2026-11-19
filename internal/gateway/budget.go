@@ -16,6 +16,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/rules"
+	"github.com/hoangvu12/iroha/internal/store"
 )
 
 // The Request budget: at most MaxAttempts Attempts, and the first upstream
@@ -27,7 +28,9 @@ import (
 // to move on. A key that was refused (invalid, cooling) is not tried again
 // in this Request; a refusal of one key and model (model cooling, Model Gap)
 // keeps that key out for that wire model only, so it still serves the
-// Request on an Endpoint or Pool member sending another model; a 5xx may be replayed once on the same key
+// Request on an Endpoint or Pool member sending another model; an invalid
+// outcome that became an Endpoint Gap (ticket 40) keeps the key out of that
+// Endpoint only, as retry_elsewhere would; a 5xx may be replayed once on the same key
 // and Endpoint after every other candidate, once a pause has passed
 // (replayPause), but a timeout never is.
 
@@ -159,11 +162,8 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 		a, f := x.attempt(seq, c, body, cr, deadline)
 		if f == nil { // answered
 			x.recordAttempt(a)
-			if a.Status >= 200 && a.Status < 300 && c.Key.Recovering(c.WireModel) {
-				k := keystate.Key{ID: c.Key.ID, Name: c.Key.Name, Provider: c.Provider.Handle}
-				if err := g.states.Succeeded(x.ctx, k, c.WireModel, x.rec.ID); err != nil {
-					g.log.Error("clearing a Key State failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
-				}
+			if a.Status >= 200 && a.Status < 300 {
+				x.worked(c)
 			}
 			x.summarize(failed, &a, "")
 			return
@@ -185,6 +185,12 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 				replayed[pair] = true
 				now := g.clock.Now()
 				queue = append(queue, queued{c: c, replay: true, notBefore: now.Add(replayPause(len(replayed), t.failure.Header, now))})
+			}
+		case rules.Invalid:
+			if t.effect.EndpointGap != "" { // this key is out for this Endpoint
+				pairOut[pair] = true
+			} else {
+				keyOut[c.Key.ID] = true
 			}
 		case rules.CoolingKeyModel, rules.ModelGap: // this key is out for this wire model
 			modelOut[keyModel] = true
@@ -230,7 +236,8 @@ func (x *exchange) classify(set *rules.Set, c planner.Candidate, a requests.Atte
 	k := keystate.Key{ID: c.Key.ID, Name: c.Key.Name, Provider: c.Provider.Handle}
 	switch d.Outcome {
 	case rules.Invalid, rules.CoolingKey, rules.CoolingKeyModel, rules.ModelGap:
-		eff, err := g.states.Fail(x.ctx, keystate.Failure{Key: k, Model: c.WireModel, RequestID: x.rec.ID, Decision: d})
+		eff, err := g.states.Fail(x.ctx, keystate.Failure{Key: k, Endpoint: keystate.Endpoint{ID: c.Endpoint.ID, Name: c.Endpoint.Name},
+			Model: c.WireModel, RequestID: x.rec.ID, Decision: d})
 		if err != nil {
 			g.log.Error("recording a Key State failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
 		}
@@ -247,6 +254,26 @@ func (x *exchange) classify(set *rules.Set, c planner.Candidate, a requests.Atte
 		"upstream_key", c.Key.Name, "model", c.WireModel, "status", f.Status, "reason", d.Reason}
 	g.log.Info("Failure Rule matched", attrs...)
 	return t
+}
+
+// worked records what a 2xx Attempt with candidate c proves: a cooling it
+// ends, and that the key works on c's Endpoint (written at most once a
+// minute per key and Endpoint, and at once when it clears an Endpoint Gap).
+func (x *exchange) worked(c planner.Candidate) {
+	g := x.g
+	k := keystate.Key{ID: c.Key.ID, Name: c.Key.Name, Provider: c.Provider.Handle}
+	if c.Key.Recovering(c.WireModel) {
+		if err := g.states.Succeeded(x.ctx, k, c.WireModel, x.rec.ID); err != nil {
+			g.log.Error("clearing a Key State failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
+		}
+	}
+	last, ok := c.Key.WorkedOn[c.Endpoint.ID]
+	if ok && g.clock.Now().Sub(last) < store.TouchEvery && !c.Key.EndpointGaps[c.Endpoint.ID] {
+		return
+	}
+	if err := g.states.Worked(x.ctx, k, keystate.Endpoint{ID: c.Endpoint.ID, Name: c.Endpoint.Name}, x.rec.ID); err != nil {
+		g.log.Error("recording where a key works failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
+	}
 }
 
 // noCredential keeps a keyless Attempt (empty secret, or auth style none)

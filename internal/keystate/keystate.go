@@ -69,6 +69,10 @@ type Record struct {
 	Key    *row       // nil: active since added
 	Models []row      // every key-and-model cooling row, current or past
 	Gaps   []ModelGap // every stored Model Gap, live or expired, soonest expiry first
+	// EndpointGaps are the key's Endpoint Gaps and Worked the Endpoints it
+	// has worked on (ticket 40), both in Endpoint order.
+	EndpointGaps []EndpointGap
+	Worked       []EndpointSuccess
 }
 
 type row struct {
@@ -146,7 +150,10 @@ func read(ctx context.Context, q Querier, keysQuery string, arg string) (map[str
 		return nil, err
 	}
 	rows.Close()
-	return out, readGaps(ctx, q, keysQuery, arg, out)
+	if err := readGaps(ctx, q, keysQuery, arg, out); err != nil {
+		return nil, err
+	}
+	return out, readEndpointGaps(ctx, q, keysQuery, arg, out)
 }
 
 // Invalid reports whether the key is invalid.
@@ -243,7 +250,8 @@ type Key struct {
 // Failure is a failed Attempt the rules decided changes the key.
 type Failure struct {
 	Key       Key
-	Model     string // wire model of the Attempt
+	Endpoint  Endpoint // the Endpoint of the Attempt; empty: an invalid outcome never becomes an Endpoint Gap
+	Model     string   // wire model of the Attempt
 	RequestID string
 	Decision  rules.Decision
 }
@@ -255,12 +263,18 @@ type Effect struct {
 	Until     time.Time // cooling end
 	Escalated bool      // a model cooling escalated to the whole key
 	GapUntil  time.Time // model_gap: when the Model Gap for Model expires
-	Action    string    // one line for the Attempt's record
+	// EndpointGap names the Endpoint an invalid outcome became an Endpoint
+	// Gap on: the key keeps its Key State and serves its other Endpoints.
+	EndpointGap string
+	Action      string // one line for the Attempt's record
 }
 
 // Fail applies a decision with outcome invalid, cooling_key,
 // cooling_key_model or model_gap (which records a Model Gap and leaves the
-// Key State alone). Other outcomes change nothing.
+// Key State alone). Other outcomes change nothing. An invalid outcome on an
+// Endpoint, for a key that has worked on another Endpoint it may still use,
+// records an Endpoint Gap instead (endpointgaps.go); whatever the rule, the
+// Owner's included.
 func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 	ctx = context.WithoutCancel(ctx)
 	now := s.db.Clock().Now().UTC()
@@ -272,8 +286,9 @@ func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 	var eff Effect
 	var events []event
 	var gaps []GapEvent
+	var egaps []EndpointGapEvent
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
-		events, gaps = nil, nil
+		events, gaps, egaps = nil, nil, nil
 		cur, err := ForKey(ctx, tx, f.Key.ID)
 		if err != nil {
 			return err
@@ -292,9 +307,36 @@ func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 				eff = Effect{Action: "Upstream Key " + f.Key.Name + " stays invalid."}
 				return nil
 			}
+			if f.Endpoint.ID != "" {
+				worked, err := workedElsewhere(ctx, tx, f.Key.ID, f.Endpoint.ID)
+				if err != nil {
+					return err
+				}
+				if worked != "" {
+					why := reason + "; it works on " + worked
+					if err := putEndpointGap(ctx, tx, f.Key.ID, f.Endpoint.ID, why, d.Rule, f.RequestID, now); err != nil {
+						return err
+					}
+					eff = Effect{EndpointGap: f.Endpoint.Name,
+						Action: fmt.Sprintf("Upstream Key %s has an Endpoint Gap on %s: refused there but it works on %s, so it is not invalid; it is not sent to %s until the gap is cleared and keeps serving its other Endpoints.",
+							f.Key.Name, f.Endpoint.Name, worked, f.Endpoint.Name)}
+					egaps = append(egaps, EndpointGapEvent{Op: GapCreated, Key: f.Key, Endpoint: f.Endpoint.Name, Reason: why, RequestID: f.RequestID})
+					return nil
+				}
+			}
 			if err := putKey(ctx, tx, f.Key.ID, row{State: Invalid, Reason: reason, Rule: d.Rule, RequestID: f.RequestID, Since: now}); err != nil {
 				return err
 			}
+			// Refused where it last worked too: the refusal is the key's,
+			// so its Endpoint Gaps were symptoms of it.
+			cleared, err := ClearEndpointGaps(ctx, tx, f.Key, "", "The key became invalid (refused on every Endpoint it had worked on).", nil)
+			if err != nil {
+				return err
+			}
+			for i := range cleared {
+				cleared[i].RequestID = f.RequestID
+			}
+			egaps = append(egaps, cleared...)
 			eff = Effect{State: Invalid, Action: "Upstream Key " + f.Key.Name + " is now invalid until a test passes or its secret changes."}
 			events = append(events, event{from: visible(cur, now), to: Invalid, reason: reason, rule: d.Rule})
 		case rules.CoolingKey:
@@ -373,6 +415,7 @@ func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 		s.logEvent(f.Key, f.RequestID, e)
 	}
 	LogGaps(s.log, gaps)
+	LogEndpointGaps(s.log, egaps)
 	return eff, nil
 }
 
@@ -513,14 +556,16 @@ func (s *Store) Succeeded(ctx context.Context, k Key, model, requestID string) e
 	return nil
 }
 
-// TestPassed makes the key active after a passing key test: invalid and
-// cooling end, the tested model's cooling is cleared, and every Model Gap of
-// the key is cleared (the Provider may have upgraded the key's plan).
-func (s *Store) TestPassed(ctx context.Context, k Key, model string) error {
+// TestPassed makes the key active after a passing key test on ep: invalid
+// and cooling end, the tested model's cooling is cleared, every Model Gap of
+// the key is cleared (the Provider may have upgraded the key's plan), the key
+// has worked on ep, and its Endpoint Gap on ep is cleared.
+func (s *Store) TestPassed(ctx context.Context, k Key, ep Endpoint, model string) error {
 	ctx = context.WithoutCancel(ctx)
 	now := s.db.Clock().Now().UTC()
 	var from string
 	var gaps []GapEvent
+	var egaps []EndpointGapEvent
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
 		cur, err := ForKey(ctx, tx, k.ID)
 		if err != nil {
@@ -533,6 +578,15 @@ func (s *Store) TestPassed(ctx context.Context, k Key, model string) error {
 		if gaps, err = ClearGaps(ctx, tx, k, "", "A key test passed ("+model+").", now, nil); err != nil {
 			return err
 		}
+		if ep.ID != "" {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO key_endpoint_successes (key_id, endpoint_id, succeeded_at) VALUES (?, ?, ?)
+				ON CONFLICT (key_id, endpoint_id) DO UPDATE SET succeeded_at = excluded.succeeded_at`, k.ID, ep.ID, store.Millis(now)); err != nil {
+				return err
+			}
+			if egaps, err = ClearEndpointGaps(ctx, tx, k, ep.ID, "A key test passed on "+ep.Name+".", nil); err != nil {
+				return err
+			}
+		}
 		return putKey(ctx, tx, k.ID, row{State: Active, Reason: "A key test passed (" + model + ").", Since: now})
 	})
 	if err == nil && from != Active {
@@ -540,14 +594,18 @@ func (s *Store) TestPassed(ctx context.Context, k Key, model string) error {
 	}
 	if err == nil {
 		LogGaps(s.log, gaps)
+		LogEndpointGaps(s.log, egaps)
 	}
 	return err
 }
 
 // Reset clears every runtime state of a key inside tx: its secret changed,
-// so it is a new credential. The caller logs the change after commit
-// (LogChange).
+// so it is a new credential that has worked nowhere yet. The caller logs the
+// change after commit (LogChange) and clears the key's gaps itself, tracked.
 func Reset(ctx context.Context, tx *sql.Tx, keyID string, now time.Time) error {
+	if err := forgetSuccesses(ctx, tx, keyID); err != nil {
+		return err
+	}
 	cur, err := ForKey(ctx, tx, keyID)
 	if err != nil {
 		return err

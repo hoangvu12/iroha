@@ -190,6 +190,8 @@ export const skipText = (s: PreviewSkip): { text: string; tone: Tone } => {
       return { text: "Disabled", tone: "gray" };
     case "restricted":
       return { text: "Not on this Endpoint", tone: "gray" };
+    case "endpoint_gap":
+      return { text: s.endpoint ? `Endpoint Gap on ${s.endpoint}` : "Endpoint Gap", tone: "blue" };
   }
 };
 

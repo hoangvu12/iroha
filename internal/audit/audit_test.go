@@ -175,6 +175,76 @@ func TestRevertRestoresTheBeforeStateAndIsItselfAudited(t *testing.T) {
 	}
 }
 
+func TestAuditEntryFiltersListTheActorsAndResourcesInUse(t *testing.T) {
+	srv := testkit.Start(t)
+	var empty audit.FilterOptions
+	srv.Admin.Get("/api/audit-entries/filters").Expect(200).JSON(&empty)
+	if len(empty.Actors) != 0 || len(empty.Resources) != 0 {
+		t.Fatalf("no entries yet, filters = %+v", empty)
+	}
+
+	agent := srv.NewAdminToken("agent-1")                                                         // bootstrap: 1 entry
+	create(t, agent, map[string]any{"name": "worker"})                                            // agent-1: 1 entry
+	owner := srv.OwnerSession()                                                                   // bootstrap sets the password: 2 entries
+	srv.Clock.Advance(time.Minute)                                                                //
+	create(t, owner, map[string]any{"name": "from-ui"})                                           // Owner: 1 entry
+	owner.Patch("/api/admin-tokens/agent-1", map[string]any{"name": "agent-renamed"}).Expect(200) // Owner: 2 entries
+	create(t, agent, map[string]any{"name": "worker-2"})                                          // agent, now named agent-renamed: 2 entries
+
+	var f audit.FilterOptions
+	srv.Admin.Get("/api/audit-entries/filters").Expect(200).JSON(&f)
+	if len(f.Actors) != 3 {
+		t.Fatalf("actors = %+v", f.Actors)
+	}
+	// The Owner comes first, then Admin Tokens by most recent change; a
+	// renamed token shows its newest name and filters by ID.
+	o, a, b := f.Actors[0], f.Actors[1], f.Actors[2]
+	if o.Kind != api.ActorOwnerSession || o.Name != "Owner" || o.ID != "" || o.Filter != "Owner" || o.Entries != 2 {
+		t.Fatalf("Owner = %+v", o)
+	}
+	if a.Kind != api.ActorAdminToken || a.Name != "agent-renamed" || a.Filter != a.ID || a.Entries != 2 {
+		t.Fatalf("agent = %+v", a)
+	}
+	if b.Name != "bootstrap" || b.Entries != 2 {
+		t.Fatalf("bootstrap = %+v", b)
+	}
+	for _, actor := range f.Actors {
+		if got := entries(t, srv.Admin, "actor="+actor.Filter); len(got) != actor.Entries {
+			t.Errorf("actor=%s gives %d entries, want %d", actor.Filter, len(got), actor.Entries)
+		}
+	}
+
+	want := []audit.ResourceOption{
+		{Name: "admin_token", Label: "Admin Token", Plural: "Admin Tokens", Entries: 5},
+		{Name: "owner_password", Label: "Owner password", Plural: "Owner passwords", Entries: 1},
+	}
+	if !slices.Equal(f.Resources, want) {
+		t.Fatalf("resources = %+v, want %+v", f.Resources, want)
+	}
+	for _, r := range f.Resources {
+		if got := entries(t, srv.Admin, "resource="+r.Name); len(got) != r.Entries {
+			t.Errorf("resource=%s gives %d entries, want %d", r.Name, len(got), r.Entries)
+		}
+	}
+}
+
+func TestRevertFromTheOwnerSessionIsRecordedAsTheOwner(t *testing.T) {
+	srv := testkit.Start(t)
+	created := create(t, srv.Admin, map[string]any{"name": "worker"})
+	owner := srv.OwnerSession()
+
+	var undo audit.RevertResult
+	revert(t, owner, created.AuditEntry, 200).JSON(&undo)
+	var e audit.Entry
+	srv.Admin.Get("/api/audit-entries/" + undo.AuditEntry).Expect(200).JSON(&e)
+	if e.Action != "audit_entry.revert" || e.RevertOf != created.AuditEntry || e.Actor.Kind != api.ActorOwnerSession || e.Actor.Name != "Owner" {
+		t.Fatalf("revert entry = %+v", e)
+	}
+	if got := ids(entries(t, srv.Admin, "actor=Owner&action=audit_entry.revert")); !slices.Equal(got, []string{undo.AuditEntry}) {
+		t.Fatalf("the Owner's reverts = %v", got)
+	}
+}
+
 func TestRevertingACreateDeletesTheRecordAndRedoBringsItBack(t *testing.T) {
 	srv := testkit.Start(t)
 	created := create(t, srv.Admin, map[string]any{"name": "worker"})

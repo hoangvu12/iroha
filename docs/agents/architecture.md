@@ -13,7 +13,7 @@ One Go binary (`cmd/iroha`), one SQLite file (`<data-dir>/iroha.db`), pure-Go dr
 | `internal/store` | `Open`, `Tx`, `Migrate`, time helpers; every migration in `internal/store/migrations/`. Feature packages write their own SQL against `*store.DB`. |
 | `internal/logs` | slog handler (console + `log_events`), event kinds, `GET /api/logs`. |
 | `internal/clock` | `Clock` interface, `Real`, `Fake`, `WithTimeout`, `Sleep`. |
-| `internal/audit` | The conventions every admin resource shares: name-or-ID `Resolve`, audited `Mutate` with `dry_run`, `Bulk` with per-item results, Audit Entries (`/api/audit-entries`) and revert. See "Add an admin resource". |
+| `internal/audit` | The conventions every admin resource shares: name-or-ID `Resolve`, audited `Mutate` with `dry_run`, `Bulk` with per-item results, Audit Entries (`/api/audit-entries`, with `/api/audit-entries/filters` listing the actors and resources in use) and revert. See "Add an admin resource". |
 | `internal/admintokens` | Admin Token storage, the admin authenticator, the bootstrap token, `/api/admin-tokens` (the reference resource for the audit conventions). |
 | `internal/session` | The Owner password (PBKDF2), 30-day browser sessions (`iroha_session` cookie, SameSite=Strict, secrets stored as SHA-256), the session authenticator (actor kind `owner_session`, name `Owner`), `/api/session`, `/api/owner-password`, `/api/owner-sessions`. |
 | `internal/webui` | Serves the embedded UI: `dist/` (Vite output, built from `web/`) and `brand/` (Iroha art, committed). Unknown page loads get `index.html`; other misses the JSON 404. |
@@ -187,4 +187,6 @@ React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarativ
 - Confirm only deletes (`ConfirmDialog`, naming what goes) and revokes (`TypeToConfirmDialog`). Everything else acts at once and toasts `notifyChange(message, result)`, which offers Undo through `POST /api/audit-entries/{id}/revert`.
 - One primary button per page; status colour only from `StatusDot`; one fact per cell. Logos via `LogoTile` with a URL served by Iroha (round for Providers, square for Pools, first-letter fallback).
 - Chat: call `useChatPanel().open(target)` from Test buttons; ticket 23 renders the content in `pages/chat/ChatPanel.tsx` and reads `request`.
+- Settings (`pages/settings`, ticket 28) has three tabs, each a route: Admin Tokens, Audit Entries and Sign-in (Owner password and signed-in browsers). Audit Entry filters live in the URL (`/settings/audit-entries?actor=Owner&resource=admin_token&q=...`), so other pages can link to a filtered history.
+- Checking pages in a headless browser: `iroha-v2-notes/ui-screenshots/` (outside the repo) has a seed test template (testkit with a fake clock near real time) and a Chrome-over-CDP screenshot script.
 - Phones (< 768 px): bottom tab bar, `PageHeader` shows the avatar linking to Settings; design tables as two-line rows there (C31, C32). Inputs use 16 px text on phones so focusing does not zoom.

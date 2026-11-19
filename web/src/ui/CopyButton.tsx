@@ -48,14 +48,15 @@ export function useCopy() {
 
 type Icon = ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
 
-/** The icon of a control showing a copy's result, swapped in with a short scale-in. */
+/** The icon of a control showing a copy's result, crossfaded in. */
 export function copyIcon(state: CopyState, idle: Icon): Icon {
   if (state === "copied") return CopiedIcon;
   if (state === "failed") return FailedIcon;
   return idle;
 }
 
-const swapIn = "transition-[scale,opacity] duration-150 ease-out starting:scale-50 starting:opacity-0 motion-reduce:transition-none";
+// A short crossfade on the motion tokens; a plain fade under reduced motion (the scale token is 1 there).
+const swapIn = "transition-[scale,opacity] duration-fade ease-out starting:scale-(--motion-scale-popup) starting:opacity-0";
 
 function CopiedIcon({ size, className }: { size?: number; className?: string }) {
   return <Check size={size} aria-hidden className={cn("text-success", swapIn, className)} />;

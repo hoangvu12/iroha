@@ -200,6 +200,27 @@
   }
 }
 
+/* row-reveal: a row's quiet button (copy a secret, Test in Chat) in a
+   DataTable row (the row is the `group`). Hidden until the row is hovered,
+   where there is hover; shown while focused or showing a copy's result; always
+   shown where there is no hover (touch), which would otherwise never see it.
+   Instant: row hover is high-frequency (architecture.md "UI motion system"). */
+@utility row-reveal {
+  opacity: 0;
+  @media (hover: hover) {
+    &:is(:where(.group):hover *) {
+      opacity: 1;
+    }
+  }
+  &:focus-visible,
+  &[data-copy] {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    opacity: 1;
+  }
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;

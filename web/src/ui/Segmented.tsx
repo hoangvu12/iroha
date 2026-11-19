@@ -22,16 +22,17 @@ export function Segmented<T extends string>({
     >
       <SegmentedControlIndicator
         className={
-          "absolute -z-10 left-(--segmented-control-indicator-left) top-(--segmented-control-indicator-top) " +
+          // Moved by translate, not left (no layout each frame); no slide into its first place.
+          "absolute left-0 top-0 -z-10 translate-x-(--segmented-control-indicator-left) translate-y-(--segmented-control-indicator-top) " +
           "h-(--segmented-control-indicator-height) w-(--segmented-control-indicator-width) rounded-md bg-bg shadow-sm " +
-          "transition-[left,width] duration-200 ease-out data-[activation-direction=none]:transition-none motion-reduce:transition-none"
+          "transition-[translate,width] duration-indicator ease-out data-[activation-direction=none]:transition-none"
         }
       />
       {items.map((it) => (
         <SegmentedControlItem
           key={it.value}
           value={it.value}
-          className="flex items-center whitespace-nowrap rounded-md px-3 text-[14px] text-fg-muted transition-colors hover:text-fg data-checked:font-medium data-checked:text-fg"
+          className="flex items-center whitespace-nowrap rounded-md px-3 text-[14px] text-fg-muted transition-colors duration-hover hover:text-fg data-checked:font-medium data-checked:text-fg"
         >
           {it.label}
         </SegmentedControlItem>

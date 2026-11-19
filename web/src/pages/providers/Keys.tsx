@@ -474,7 +474,7 @@ function SecretCell({ k }: { k: UpstreamKey }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{maskSecret(k.secret)}</Mono>
-      {k.secret && <CopyButton icon value={k.secret} what="Key" label={`Copy ${k.name}`} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />}
+      {k.secret && <CopyButton icon value={k.secret} what="Key" label={`Copy ${k.name}`} className="row-reveal" />}
     </span>
   );
 }

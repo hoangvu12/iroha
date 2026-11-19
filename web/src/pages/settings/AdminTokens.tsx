@@ -142,7 +142,7 @@ function SecretCell({ t }: { t: AdminToken }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{shortSecret(t.secret)}</Mono>
-      <CopyButton icon value={t.secret} what="Admin Token" label={`Copy ${t.name}`} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />
+      <CopyButton icon value={t.secret} what="Admin Token" label={`Copy ${t.name}`} className="row-reveal" />
     </span>
   );
 }

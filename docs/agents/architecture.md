@@ -20,8 +20,30 @@ One Go binary (`cmd/iroha`), one SQLite file (`<data-dir>/iroha.db`), pure-Go dr
 | `internal/ids` | Record IDs (`at_xxxx`) and secrets. |
 | `internal/shape` | The four Shape names. |
 | `internal/testkit` | In-process server, clients, fake upstreams. |
+| `internal/providers` | Providers, Endpoints, Upstream Keys: tables, audited admin routes (`/api/providers`, `.../{provider}/endpoints`, `.../{provider}/keys`), and `Store.Routing(handle)`, the routing view the Gateway plans over. |
+| `internal/gatewaykeys` | Gateway Keys and their scope: `/api/gateway-keys`, `Store.Authenticate(r)` (Bearer, `x-api-key`, `api-key`) returning a `Caller` with `AllowsProvider` / `AllowsModel`. |
+| `internal/planner` | Candidate planning, pure: `Plan(Request, []Provider, Rotation)` gives the ordered (Provider, Endpoint, key, wire model) list or why there is none. `Counter` is live round-robin, `Fixed` is for previews. Table-tested. |
+| `internal/gateway` | Inference routes. Orchestrates one Request across the seams below; owns Attempt execution (outbound request, header filtering, passthrough relay buffered or streamed, model echo) and the Caller-facing error envelope. |
+| `internal/requests` | Request and Attempt history: `Recorder` (Begin, Attempt, Finish) and `/api/requests`. |
+| `internal/usage` | Token usage parsing per Shape (OpenAI Chat today), for bodies and stream events. |
+| `deploy` | `deploy.sh` (run locally: build, copy, back up, swap, restart, readiness, rollback over SSH keys), `remote.sh` (its server half), `iroha.service` (systemd unit template), Go tests tying the unit's stop timeout to the drain limit and the runbook (`internal/api/skill/50_deploy.md`) to the script. `deploy/test/e2e.sh` runs the scripts against a local Docker container with systemd and sshd; run it after changing anything in `deploy/` (needs Docker; never point it at a real server). |
 
-Suggested homes for later work (create when needed, one package per concern so parallel tickets do not collide): `providers` (Providers, Endpoints, Upstream Keys; 04, 09), `gatewaykeys` (04, 12), `requests` (Request and Attempt history; 04), `gateway` (inference routes, passthrough, streaming; 04, 13–17), `planner` (candidate planning, pure; 05, 09, 18), `rules` (Failure Rules, pure matching; 05–07), `keystate` (Key States, Cooling, Model Gaps; 05, 08), `models` (lists, discovery, metadata; 10, 11), `pools` (18), `translate` and `normalise` (13–16), `jobs` (19, 20). The UI is in `web/` (see "Frontend"), deploy files in `deploy/` (03).
+Suggested homes for later work (create when needed, one package per concern so parallel tickets do not collide): `rules` (Failure Rules, pure matching; 05–07), `keystate` (Key States, Cooling, Model Gaps; 05, 08), `models` (lists, discovery, metadata; 10, 11), `pools` (18), `translate` and `normalise` (13–16), `jobs` (19, 20). The UI is in `web/` (see "Frontend").
+
+## The inference path
+
+One Request runs through four seams, in this order. Change the seam that owns a behaviour; keep `internal/gateway` an orchestrator.
+
+| Step | Owner | Today (04) | Who extends it |
+|---|---|---|---|
+| 1. Caller auth and scope | `gatewaykeys.Store.Authenticate`, `Caller.AllowsProvider/AllowsModel` | Gateway Key from Bearer, `x-api-key`, `api-key`; scope `all` or Providers each optionally narrowed to models. Unknown, disabled, archived and out-of-scope Providers get one 403 `provider_not_allowed`. | 12 (global routes, `/v1/models`), 15 (`x-goog-api-key`, `key=`), 18 (Pools in scope), 23 (Test caller) |
+| 2. Candidate planning | `planner.Plan` over `providers.Store.Routing` | Endpoints of the Caller's Shape only; keys round-robin (`Counter` per Provider ID), each key on every such Endpoint; renames applied per Endpoint. Empty plan says why (`no_endpoint`, `no_upstream_key`). | 05 (exclude invalid/cooling keys, "cooling until T"), 08 (Model Gaps), 09 (key-to-Endpoint restrictions), 10 (carriers first), 13 (other-Shape Endpoints after same-Shape), 18 (Pool members) |
+| 3. Attempt execution | `gateway/attempt.go` | One Attempt: `outbound` builds URL + op path, forwards Caller headers except credentials/hop-by-hop/`x-forwarded-*`/`cf-*`/`iroha-*`, applies static headers then bearer auth (empty secret = no header). Redirects are never followed. `relayStream` forwards SSE event by event with flush; `relayBuffered` otherwise. `chatRelay` echoes the requested model, reads usage, drops the usage chunk Iroha injected. | 05 (budget loop + Failure Rules decide retry), 09 (auth styles in `outbound`), 13–16 (translate/normalise between relay and Caller), 17 (keep-alives, error events after commit) |
+| 4. Recording | `requests.Recorder`, log kinds `request` and `attempt` | Request inserted `in_progress` once the Caller is known (401s are not recorded), one row per Attempt, completed with status, error code, serving Provider/Endpoint/key/wire model, Shapes, first byte, duration, usage. Writes ignore the Caller's cancellation. | 05 (matched rule, action, failure body and headers on Attempts), 19 (capture, retention), 25 (stats) |
+
+Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `echoModel`) replaces one top-level value in place, so passthrough never re-serialises a body. Streams of OpenAI Chat get `stream_options.include_usage` added when the Caller did not ask, so usage is recorded for every stream.
+
+Nested admin resources (Endpoints and Upstream Keys under a Provider) resolve their parent with the Provider resource and themselves by name or ID *within* that Provider (`resolveChild` in `internal/providers`); their audit names are `<handle>/<name>`, so `GET /api/audit-entries?record=acme/key-1` works.
 
 ## Rules everyone follows
 
@@ -116,7 +138,7 @@ func TestSomething(t *testing.T) {
     up.Enqueue(up.Error(429, "slow down").Header("Retry-After", "30"), up.Text("hi"))
 
     srv.Admin.Post("/api/providers", body).Expect(201)        // Admin = bootstrap Admin Token
-    caller := srv.Client("sk-iroha-...")                       // Bearer; .WithHeader("x-api-key", k) for others
+    caller := srv.Client(gatewayKeySecret)                     // Bearer; srv.Anon.WithHeader("x-api-key", k) for others
     resp := caller.Post("/providers/acme/v1/chat/completions", req).OK()
     resp.JSON(&out); resp.Events()                             // SSE parsed; srv.Anon has no credentials
 
@@ -131,6 +153,8 @@ Fake upstream replies: `up.Text` (streams automatically when the request asks; O
 
 `srv.OwnerSession()` sets the Owner password (`testkit.OwnerPassword`) if needed, signs in like the UI, and returns a client sending the session cookie; its changes are audited as the Owner. `client.WithCookie(c)` and `resp.Cookie(name)` handle other cookies.
 
+To test behaviour that needs a route production lacks (a deliberately slow handler, say), pass it in `server.Options.Routes` and drive `server.Run` directly; `internal/server/drain_test.go` does this to prove the SIGTERM drain.
+
 `go build ./... && go vet ./... && go test ./...` must pass. `go test -short` skips the binary build test in `cmd/iroha`.
 
 ## Frontend
@@ -140,7 +164,7 @@ React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarativ
 ### Build and embed
 
 - `npm --prefix web ci && npm --prefix web run build` type-checks and writes the bundle to `internal/webui/dist/`, which `go:embed` puts in the binary on the next `go build`. Only `internal/webui/dist/.gitkeep` is committed, so a fresh clone builds and tests with Go alone; that binary serves a page saying the UI was not built, and `GET /healthz` reports `"ui": false`.
-- **Release builds** (deploy script, ticket 03) must run those two npm commands before `GOOS=linux GOARCH=amd64 go build ./cmd/iroha`, and should refuse to ship when `/healthz` on the new binary says `"ui": false`. Node 22+ is needed on the build machine only.
+- **Release builds** must run those two npm commands before the `go build` in `deploy/deploy.sh`, and should refuse to switch over when `/readyz` on the new binary says `"ui": false`. Node 22+ is needed on the build machine only. (Not wired into `deploy/deploy.sh` yet: ticket 21 left ticket 03's files alone.)
 - Development: run Iroha (`go run ./cmd/iroha --addr 127.0.0.1:8080`), then `npm --prefix web run dev`; Vite proxies `/api`, `/brand`, `/readyz`, `/healthz` and `/skill.md` to `IROHA_URL` (default `http://127.0.0.1:8080`).
 - If the ticket touches `web/`, `npm --prefix web run build` must pass (it runs `tsc` first). There are no DOM unit tests (spec); behaviour lives behind the API and is tested in Go.
 
@@ -157,6 +181,7 @@ React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarativ
 
 ### Conventions
 
+- UI addresses share the path space with the Gateway (`/providers/{handle}/v1/...`): registered routes always win, and the UI only gets GETs no route matched. Keep UI paths free of `v1`/`v1beta` segments (`/providers/acme/keys`, never `/providers/acme/v1`).
 - Only the public admin API: `api.get/post/put/patch/delete` from `@/api/client`, cached with TanStack Query (`useQuery`, `useMutation`). A 401 that means the session ended brings the login back automatically.
 - Loading shows `TableSkeleton` (no spinners), empty shows `EmptyState` with the one action, filtered-to-nothing shows `NoResults` with chips, failure shows `ErrorState` with Try again, inside the page (C25).
 - Confirm only deletes (`ConfirmDialog`, naming what goes) and revokes (`TypeToConfirmDialog`). Everything else acts at once and toasts `notifyChange(message, result)`, which offers Undo through `POST /api/audit-entries/{id}/revert`.

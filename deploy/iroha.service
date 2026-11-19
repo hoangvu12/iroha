@@ -1,0 +1,41 @@
+# systemd unit for Iroha. deploy.sh renders the @NAME@ values
+# (--print-unit shows the result; --install-unit installs it as
+# /etc/systemd/system/<service>.service).
+[Unit]
+Description=Iroha Gateway
+Documentation=http://@ADDR@/skill.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_AS@
+Group=@RUN_AS@
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/iroha --data-dir @DIR@ --addr @ADDR@
+Environment=IROHA_LOG_FORMAT=json
+
+# Shutdown: SIGTERM goes to Iroha only; it stops accepting requests and lets
+# in-flight ones finish for at most IROHA_DRAIN_TIMEOUT. systemd sends SIGKILL
+# after TimeoutStopSec, so TimeoutStopSec must stay above the drain limit
+# (deploy/unit_test.go checks this).
+Environment=IROHA_DRAIN_TIMEOUT=30s
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=40s
+TimeoutStartSec=30s
+
+Restart=on-failure
+RestartSec=2s
+
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=@DIR@
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

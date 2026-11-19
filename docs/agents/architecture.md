@@ -126,6 +126,13 @@ Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `ech
 - **Health first** (FAIL-104): within an Endpoint tier, `planTier` orders candidates by key health, then known carriers, keeping round-robin within each of the four groups. A key is "back from cooling" when `Key.Recovering(wire model)`: its own cooling ended (`CoolingUntil` past) or its cooling for that wire model ended, with no success since (`keystate.Succeeded` and `TestPassed` clear both, so the routing view already holds the fact; no migration). Such keys go after keys with no recent refusal, so a Provider with dozens of keys just out of a 15 min billing cooling serves from its healthy key at the first Attempt; they stay in the plan and are tried when the healthy keys fail. There is still no single-trial claim (FAIL-103).
 - **Conformance**: `.scratch/v2-gateway/conformance.md` maps every essential and provider-quirk case of the v1 catalog to the test that covers it. A ticket that changes a mapped behaviour updates its rows; new conformance tests name their catalog IDs at the start of their doc comment (`// PRV-54, REQ-20: ...`).
 
+### Tickets 32, 34, 39
+
+- **Endpoint URLs are unique per Shape** (34): within a Provider, one URL and Shape is one Endpoint. A create without a name matches by URL and Shape (like keys by secret); any other duplicate (named create, bulk, `PATCH`, revert) is 409 `endpoint_duplicate` (`endpointURLFree` in `providers/endpoints.go`). `checkURL` lowercases scheme and host.
+- **Reported model** (32): `gateway/reported.go` reads the model the upstream's answer names (in the Endpoint's Shape, next to `usage.Reader`, before echo or translation) into `attempts.reported_model`. Fakes answer with `up.SetServedModel(m)`.
+- **Backpressure** (39): `up.Written()` counts reply bytes a fake has flushed; `gateway TestASlowCallerSlowsTheUpstreamRead` keeps the relay pull-bound.
+- **Fake clock**: `srv.Clock.BlockUntilDue(ctx, t)` waits until some timer fires at or before `t`. Use it when code re-arms a timer after one fires (the stream keeper does), where `BlockUntil(n)` cannot tell the re-armed timer from others.
+
 Nested admin resources (Endpoints and Upstream Keys under a Provider) resolve their parent with the Provider resource and themselves by name or ID *within* that Provider (`resolveChild` in `internal/providers`); their audit names are `<handle>/<name>`, so `GET /api/audit-entries?record=acme/key-1` works.
 
 ## Rules everyone follows

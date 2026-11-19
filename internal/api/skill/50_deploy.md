@@ -42,7 +42,7 @@ The server needs systemd, `curl` or `wget`, and `flock`. Only the binary is copi
 
 ### Restarts and draining
 
-On SIGTERM Iroha stops accepting new connections (so `GET /readyz` stops answering) and lets in-flight requests finish for at most `IROHA_DRAIN_TIMEOUT` (30 s in the unit); then it cuts what is left and logs a `shutdown` event with `drained: true` or `false`. systemd waits `TimeoutStopSec` (40 s) before killing it, so keep that above the drain limit if either changes (`deploy/unit_test.go` checks). A deploy therefore waits up to 30 s for long streams before the swap.
+On SIGTERM Iroha stops accepting new connections (so `GET /readyz` stops answering) and lets in-flight requests finish for at most `IROHA_DRAIN_TIMEOUT` (30 s in the unit); streams keep getting keep-alives meanwhile. Then Gateway Requests still in flight are answered `503 shutting_down` (an error event on a stream under way) and recorded, within 2 s, and the remaining connections are cut; the `shutdown` event says `drained: true` or `false` and `requests_ended` (how many were answered that way). systemd waits `TimeoutStopSec` (40 s) before killing it, so keep that above the drain limit if either changes (`deploy/unit_test.go` checks). A deploy therefore waits up to 30 s for long streams before the swap.
 
 ### Backups and restoring by hand
 

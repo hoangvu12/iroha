@@ -14,7 +14,10 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/config"
+	"github.com/hoangvu12/iroha/internal/gateway"
+	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/server"
+	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
 // These tests drive server.Run, the path a SIGTERM takes in production:
@@ -195,6 +198,145 @@ func TestShutdownCutsRequestsThatOutliveTheDrainLimit(t *testing.T) {
 	sd := srv.event("shutdown")
 	if sd == nil || sd["drained"] != false || sd["level"] != "WARN" {
 		t.Fatalf("shutdown event = %v, want a warning with drained false", sd)
+	}
+}
+
+// gatewayStream sets up a Provider on a fake upstream whose stream sends
+// "Hel", then waits for gate before "lo". It opens the stream and returns
+// it once "Hel" arrived.
+func gatewayStream(t *testing.T, srv *testkit.Server, gate <-chan struct{}) (*http.Response, *bufio.Reader) {
+	t.Helper()
+	up := testkit.NewOpenAIChat(t)
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
+	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"url": up.URL(), "shape": "openai-chat"}).Expect(201)
+	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": "sk-test-a"}).Expect(201)
+	var key struct {
+		GatewayKey struct{ Secret string } `json:"gateway_key"`
+	}
+	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "pi", "scope": map[string]any{"all": true}}).Expect(201).JSON(&key)
+
+	stream := up.Stream("Hel", "lo")
+	up.Enqueue(func(r *testkit.Received) testkit.Reply {
+		rep := stream(r)
+		rep.Chunks[2].Wait = gate // chunk 0 is the role, 1 is "Hel"
+		return rep
+	})
+	resp := srv.Client(key.GatewayKey.Secret).Open(http.MethodPost, "/providers/acme/v1/chat/completions",
+		map[string]any{"model": "gpt-x", "stream": true, "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
+	t.Cleanup(func() { resp.Body.Close() })
+	body := bufio.NewReader(resp.Body)
+	readUntil(t, body, `"Hel"`)
+	return resp, body
+}
+
+// readUntil reads lines until one contains want.
+func readUntil(t *testing.T, body *bufio.Reader, want string) {
+	t.Helper()
+	got := make(chan error, 1)
+	go func() {
+		for {
+			line, err := body.ReadString('\n')
+			if strings.Contains(line, want) {
+				got <- nil
+				return
+			}
+			if err != nil {
+				got <- err
+				return
+			}
+		}
+	}()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatalf("stream ended before %q: %v", want, err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("no %q within 10s", want)
+	}
+}
+
+// stopInBackground starts a shutdown draining for at most limit, as a
+// SIGTERM does, and returns a channel closed when it has finished.
+func stopInBackground(srv *testkit.Server, limit time.Duration) <-chan struct{} {
+	stopped := make(chan struct{})
+	go func() { srv.StopWithin(limit); close(stopped) }()
+	return stopped
+}
+
+func waitStopped(t *testing.T, stopped <-chan struct{}, within time.Duration) {
+	t.Helper()
+	select {
+	case <-stopped:
+	case <-time.After(within):
+		t.Fatalf("shutdown did not finish within %v", within)
+	}
+}
+
+func TestShutdownKeepsInFlightStreamsAliveUntilTheyFinish(t *testing.T) {
+	srv := testkit.Start(t)
+	gate := make(chan struct{})
+	resp, body := gatewayStream(t, srv, gate)
+	id := resp.Header.Get("X-Request-Id")
+
+	stopped := stopInBackground(srv, 10*time.Second)
+	select {
+	case <-stopped:
+		t.Fatal("shutdown finished while a stream was in flight")
+	case <-time.After(200 * time.Millisecond):
+	}
+	// The model pauses during the drain: the stream is kept alive.
+	srv.Clock.Advance(gateway.KeepAliveEvery)
+	readUntil(t, body, ": keep-alive")
+
+	close(gate)
+	rest, err := io.ReadAll(body)
+	if err != nil || !strings.Contains(string(rest), `"lo"`) || !strings.Contains(string(rest), "[DONE]") {
+		t.Fatalf("the stream was cut: %q, %v", rest, err)
+	}
+	waitStopped(t, stopped, 5*time.Second)
+
+	srv.Restart()
+	var r requests.Request
+	srv.Admin.Get("/api/requests/" + id).Expect(200).JSON(&r)
+	if r.State != "completed" || r.Status != 200 || r.Error != nil {
+		t.Fatalf("request = %+v", r)
+	}
+	if ev := srv.Logs("kind=shutdown"); len(ev) != 1 || ev[0].Attrs["drained"] != true {
+		t.Fatalf("shutdown events = %+v", ev)
+	}
+}
+
+func TestStreamsOutlivingTheDrainLimitEndWithAnErrorEvent(t *testing.T) {
+	const limit = 300 * time.Millisecond
+	srv := testkit.Start(t)
+	resp, body := gatewayStream(t, srv, make(chan struct{})) // never finishes
+	id := resp.Header.Get("X-Request-Id")
+
+	begin := time.Now()
+	stopped := stopInBackground(srv, limit)
+	rest, _ := io.ReadAll(body)
+	events := testkit.ParseSSE(rest)
+	var e struct {
+		Error struct{ Code, Hint string }
+	}
+	if len(events) == 0 || json.Unmarshal([]byte(events[len(events)-1].Data), &e) != nil || e.Error.Code != "shutting_down" || e.Error.Hint == "" {
+		t.Fatalf("the stream ended without a shutting_down error event: %q", rest)
+	}
+	waitStopped(t, stopped, 5*time.Second)
+	if took := time.Since(begin); took < limit || took > limit+3*time.Second {
+		t.Fatalf("shutdown took %v with a drain limit of %v", took, limit)
+	}
+
+	// The Request is recorded as ended by the shutdown, not left interrupted.
+	srv.Restart()
+	var r requests.Request
+	srv.Admin.Get("/api/requests/" + id).Expect(200).JSON(&r)
+	if r.State != "completed" || r.Status != 200 || r.Error == nil || r.Error.Code != "shutting_down" {
+		t.Fatalf("request = %+v", r)
+	}
+	if ev := srv.Logs("kind=shutdown"); len(ev) != 1 || ev[0].Attrs["drained"] != false || ev[0].Attrs["requests_ended"] != float64(1) {
+		t.Fatalf("shutdown events = %+v", ev)
 	}
 }
 

@@ -106,7 +106,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest)
 		x.recordAttempt(t.attempt)
 		failed = append(failed, t)
 		if x.ctx.Err() != nil {
-			x.callerGone()
+			x.stopped()
 			x.summarize(failed, nil, "")
 			return
 		}
@@ -267,7 +267,7 @@ func (x *exchange) failAll(failed []tried, stop string, maxAttempts int) {
 	default:
 		retry := earliestCooling(failed, x.g.clock.Now())
 		if retry > 0 {
-			x.w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
+			x.setHeader("Retry-After", strconv.Itoa(int(retry.Seconds())))
 			e = api.Errorf(http.StatusServiceUnavailable, "upstream_unavailable", fmt.Sprintf("Retry after %d seconds (Retry-After), when the first key cools down. %s", int(retry.Seconds()), reqHint),
 				"Every Attempt on %s failed (%d %s): %s", handle, n, plural, x.rec.Summary)
 		} else {

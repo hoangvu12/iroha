@@ -2,8 +2,8 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
@@ -24,10 +24,18 @@ type exchange struct {
 	start time.Time
 	rec   requests.Request
 	begun bool // the Request is recorded (the Caller is known)
-	wrote bool // the status line went to the Caller
 	// capture collects the prompt and response when the Gateway Key has
 	// capture on; it wraps r.Body and w, so nothing else needs to know.
 	capture *requests.Capture
+
+	// mu guards what follows and every write to w, since a stream's keeper
+	// (stream.go) writes alongside the relay.
+	mu        sync.Mutex
+	wrote     bool // the status line went to the Caller
+	streaming bool // what the Caller gets is an event stream
+	committed bool // Iroha sent 200 and stream headers before any upstream answer
+	ended     bool // the answer is complete; nothing more is written
+	lastWrite time.Time
 }
 
 func (g *Gateway) newExchange(w http.ResponseWriter, r *http.Request, sh shape.Shape) *exchange {
@@ -60,6 +68,9 @@ func (x *exchange) finish() {
 	at := now.UTC()
 	x.rec.FinishedAt = &at
 	x.rec.DurationMs = ms(now.Sub(x.start))
+	if x.rec.Status == 0 && x.isCommitted() {
+		x.rec.Status = http.StatusOK
+	}
 	if x.rec.Status == 0 {
 		x.rec.Status = http.StatusOK
 	}
@@ -84,11 +95,16 @@ func (x *exchange) finish() {
 	x.g.log.Info("request finished", attrs...)
 }
 
-// fail answers the Caller with e in its Shape and records why.
+// fail answers the Caller with e in its Shape and records why. On a stream
+// already under way the status stays what the Caller got and e goes out as
+// the stream's last event.
 func (x *exchange) fail(e *api.Error) {
-	x.rec.Status = e.Status
 	x.rec.Error = &requests.Failure{Code: e.Code, Message: e.Message}
-	x.writeError(e)
+	if status := x.writeError(e); status != 0 {
+		x.rec.Status = status
+	} else if x.rec.Status == 0 {
+		x.rec.Status = http.StatusOK // committed by Iroha
+	}
 }
 
 // refuseUnrecorded answers a Caller that could not be identified; there is
@@ -98,28 +114,30 @@ func (x *exchange) refuseUnrecorded(e *api.Error) {
 }
 
 // writeError writes e in the Caller's Shape: for OpenAI Shapes the OpenAI
-// error envelope, extended with Iroha's hint and the Request ID.
-func (x *exchange) writeError(e *api.Error) {
+// error envelope, extended with Iroha's hint and the Request ID; on a
+// stream under way, the Shape's error event (stream.go). It returns the
+// HTTP status sent, 0 when the status line had already gone out.
+func (x *exchange) writeError(e *api.Error) int {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.ended {
+		return 0
+	}
+	x.ended = true
+	if x.streaming {
+		if frame := streamShapes[x.rec.ShapeIn]; frame != nil {
+			_ = x.sendLocked(frame.errorEvent(e, x.rec.ID))
+		}
+		return 0
+	}
 	if x.wrote {
-		return
+		return 0
 	}
 	x.wrote = true
-	body := map[string]any{"error": map[string]any{
-		"message":    e.Message,
-		"type":       errorType(e.Status),
-		"param":      nil,
-		"code":       e.Code,
-		"hint":       e.Hint,
-		"request_id": x.rec.ID,
-	}}
-	if e.Details != nil {
-		body["error"].(map[string]any)["details"] = e.Details
-	}
 	x.w.Header().Set("Content-Type", "application/json")
 	x.w.WriteHeader(e.Status)
-	enc := json.NewEncoder(x.w)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(body)
+	_, _ = x.w.Write(append(compactJSON(openAIError(e, x.rec.ID)), '\n'))
+	return e.Status
 }
 
 func errorType(status int) string {

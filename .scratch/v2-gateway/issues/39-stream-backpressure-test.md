@@ -4,6 +4,10 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Test passes reliably (run with `-count=20`), passthrough and translated
+- [x] Test passes reliably (run with `-count=20`), passthrough and translated
+
+## Comments
+
+`testkit.Upstream.Written()` counts reply body bytes the fake has flushed to its connections. `gateway TestASlowCallerSlowsTheUpstreamRead`: an OpenAI Chat fake streams 1,538 events (48 MiB); the Caller (a raw `http.Client`, so nothing reads the body) gets its 200 and reads nothing; the test polls `Written` until it has not changed for 300 ms (at most 10 s) and asserts it is under a third of the total (it stalls at 0.5 to 1 MB, about 1%, the socket buffers); then the Caller reads everything (every piece, the stream's last event) and the fake has written it all. Passthrough (`/v1/chat/completions`) and translated (`/v1/messages` to the Chat Endpoint). `-count=20`: 20/20 pass, about 1.8 s per run.

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +41,8 @@ type Upstream struct {
 	received []*Received
 	arrived  chan struct{} // closed and replaced on every request
 	seq      int
+
+	written atomic.Int64 // reply body bytes written so far (Written)
 }
 
 // Usage is the token usage a fake reports.
@@ -352,8 +355,14 @@ func (u *Upstream) serve(w http.ResponseWriter, req *http.Request) {
 	responder := u.pick(rec)
 	u.mu.Unlock()
 
-	write(w, req.Context(), responder(rec))
+	write(w, req.Context(), responder(rec), &u.written)
 }
+
+// Written is how many bytes of reply bodies (Body and Chunks, every request
+// together) the fake has handed to its connections so far. A write returns
+// once the connection accepts the bytes, so a reader that stops reading
+// stops this count growing once the buffers between them are full.
+func (u *Upstream) Written() int64 { return u.written.Load() }
 
 // pick chooses the Responder; u.mu is held.
 func (u *Upstream) pick(r *Received) Responder {
@@ -431,7 +440,7 @@ func (u *Upstream) inspect(r *Received) (model string, stream bool) {
 	return b.Model, b.Stream
 }
 
-func write(w http.ResponseWriter, ctx context.Context, rep Reply) {
+func write(w http.ResponseWriter, ctx context.Context, rep Reply, written *atomic.Int64) {
 	if !pause(ctx, rep.Delay, rep.Wait) {
 		return
 	}
@@ -450,7 +459,8 @@ func write(w http.ResponseWriter, ctx context.Context, rep Reply) {
 	w.WriteHeader(status)
 	flusher, _ := w.(http.Flusher)
 	if len(rep.Body) > 0 {
-		_, _ = w.Write(rep.Body)
+		n, _ := w.Write(rep.Body)
+		written.Add(int64(n))
 	}
 	if flusher != nil {
 		flusher.Flush()
@@ -465,6 +475,7 @@ func write(w http.ResponseWriter, ctx context.Context, rep Reply) {
 		if flusher != nil {
 			flusher.Flush()
 		}
+		written.Add(int64(len(c.Data))) // counted once flushed to the connection
 	}
 	if rep.Disconnect {
 		panic(http.ErrAbortHandler)

@@ -13,7 +13,7 @@ Every case of kind **a** (essential) or **b** (provider quirk) in `docs/research
   - `ui (#NN)`: a UI behaviour, owned by UI ticket NN (no DOM tests; the API behind it is mapped where it exists).
 - **Note**: what is asserted, and `deviation:` where v2 deliberately behaves differently from v1. The deviations worth an Owner decision are collected below.
 
-**Totals:** 521 cases (418 of kind a, 103 of kind b): 388 covered, 95 n/a, 17 ui, 13 partial, 8 open.
+**Totals:** 521 cases (418 of kind a, 103 of kind b): 392 covered, 95 n/a, 17 ui, 10 partial, 7 open.
 
 ## Fixed by ticket 26
 
@@ -45,7 +45,6 @@ Tests written for this checklist found these behaviours wrong; each is fixed and
 | 36 | REQ-105, RUN-08 | Response compression, or record that Cloudflare compresses (needs decision) |
 | 37 | KEY-11 | Optimistic concurrency on admin edits, or accept last-write-wins with audit (needs decision) |
 | 38 | MET-01, MET-02 | Prometheus metrics (optional; needs decision) |
-| 39 | REQ-68, TIME-10 | Test that a slow Caller slows the upstream read (behaviour right by construction) |
 
 ## Deviations for the Owner to decide on
 
@@ -228,7 +227,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | REQ-65 | a | covered | `normalise TestStreamPassesOtherEventsUntouched`; `gateway TestStreamUsageReachesCallersWhoAskForItAndModelsAreEchoed` | comments, errors, non-JSON verbatim; `[DONE]` once |
 | REQ-66 | a | covered | `gateway TestAStreamBrokenMidwayEndsWithAnErrorEvent`; `gateway TestStreamsEndingWithoutAFinishReasonAreClosed` | no `[DONE]` invented on a break; deviation (spec 21): an error event is sent after the first byte |
 | REQ-67 | a | covered | `gateway TestCRLFFramedStreamsFlowEventByEvent` | v1 GAP, correct today. With CRLF framing the first piece reaches the Caller before the Provider sends the next. Covers passthrough (Chat) and translated (Messages Caller) |
-| REQ-68 | a | open (#39) |  | relay reads one event then blocks on the write (attempt.go:519-536); no test |
+| REQ-68 | a | covered | `gateway TestASlowCallerSlowsTheUpstreamRead` | relay reads one event then blocks on the write; with a Caller reading nothing the fake's 48 MiB stream stalls at about 1% (socket buffers), then the Caller gets all of it; passthrough and translated (ticket 39) |
 | REQ-69 | a | covered | `gateway TestACallerThatGoesAwayEndsTheUpstreamCallAndIsRecordedCallerGone` | Subtests: "buffered", "translated", "stream before its first byte", "mid-stream". In each, the upstream sees its request context end, the Request is recorded `caller_gone` with one Attempt and no rule, and the key stays active. The test uses its own httptest upstream so it can see the upstream context end. including a translated (Chat to Anthropic) Request |
 | REQ-70 | a | covered | `gateway TestStreamFailuresBeforeCommitmentKeepTheirHTTPStatus`; `gateway TestAStreamRefusedBeforeItsFirstByteMovesToTheNextKey`; `gateway TestAMessagesCallerGetsTheProvidersRefusalInAnthropicsEnvelope`; `gateway TestAMessagesCallerWhoseKeysAreAllRateLimitedGets503WithRetryAfter` | A streamed Messages Request that fails before its first byte keeps the HTTP status (400 / 503) and gets an `application/json` Anthropic envelope |
 | REQ-71 | a | covered | `translate TestGolden/"chat-to-anthropic-text"`; `translate TestGolden/"chat-to-anthropic-tools-images-reasoning"` | role chunk, text, tool_calls start/args, finish, usage, `[DONE]`, pings dropped |
@@ -607,7 +606,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | TIME-07 | a | covered | `gateway TestTheTimeBudgetEndsASilentAttemptWithoutReplayingIt`; `gateway TestMaxAttemptsOverrideLimitsTheAttempts`; `gateway TestAPoolSharesOneBudgetAcrossItsMembers` | precedence: Pool, then Provider, then default |
 | TIME-08 | a | covered | `gateway TestACallerThatGoesAwayEndsTheUpstreamCallAndIsRecordedCallerGone/"mid-stream"` | Buffered and streaming are both covered (see the other subtests). |
 | TIME-09 | a | partial (#31) | `gateway TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself` | deviation: no backoff sleeps; the next Attempt goes at once to another key, and Retry-After becomes the cooling time |
-| TIME-10 | a | partial (#39) | `gateway TestStreamsFlowChunkByChunkAndUsageIsRecorded` | relay is synchronous event by event with flush (so it is pull-bound); no test with a slow reader |
+| TIME-10 | a | covered | `gateway TestStreamsFlowChunkByChunkAndUsageIsRecorded`; `gateway TestASlowCallerSlowsTheUpstreamRead` | relay is synchronous event by event with flush, so it is pull-bound: a slow Caller slows the upstream read and memory stays bounded (ticket 39) |
 | TIME-11 | a | covered | `rules TestBuiltinRulesClassifyTheGenericFailures/"302 matches nothing"`; `gateway TestUpstreamRedirectsAreNeverFollowedAndRefusalsKeepTheirStatus` | The redirect target receives nothing. The code is `upstream_redirect`, not `upstream_rejected` as part-6 guessed. |
 | TIME-12 | b | n/a |  | Bun-specific; v2 is a Go binary |
 | RUN-01 | a | covered | `server TestMigrationsApplyOnStartAndOnlyOnce`; `cmd/iroha TestBinaryStartsWithOnlyADataDir`; `server TestRunFailsBeforeListeningWhenTheDataDirectoryIsUnusable/"data dir is a file"`; `server TestRunFailsBeforeListeningWhenTheDataDirectoryIsUnusable/"iroha.db is a directory"`; `cmd/iroha TestBinaryRefusesBadStartupValuesWithExitCodes` | `server.Run` returns an error, no startup event, the address stays free; binary: unknown flag and bad values exit 2 without creating the data dir, a data dir that is a file exits 1 |

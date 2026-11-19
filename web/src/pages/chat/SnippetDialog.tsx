@@ -35,7 +35,8 @@ export function SnippetDialog({ open, onOpenChange, settings, prompt }: { open: 
       {sn.isError ? (
         <ErrorState title="Couldn't write the snippet" error={sn.error} onRetry={() => void sn.refetch()} />
       ) : (
-        <CodeBlock maxHeight="max-h-[50dvh]" nowrap>{code ?? "…"}</CodeBlock>
+        // All of it: the dialog scrolls as a page (UI ticket 28); long lines still scroll sideways.
+        <CodeBlock maxHeight={false} nowrap>{code ?? "…"}</CodeBlock>
       )}
       {sn.data?.note && <p className="mt-3 text-[13.5px] text-fg-muted">{sn.data.note}</p>}
       {lang !== "curl" && (

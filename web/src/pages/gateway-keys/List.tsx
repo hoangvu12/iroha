@@ -1,39 +1,148 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router";
-import { ChevronRight, Copy, KeyRound, MessageCircle, MoreHorizontal, Plus, Settings2, Trash2, Ban } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { Copy, KeyRound, MessageCircle, Plus, Settings2, Trash2, Ban } from "lucide-react";
+import { Button as SdkButton } from "@ui-sdk/react/button";
 import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { shortDate, shortSecret } from "@/pages/settings/format";
 import { Button, IconButton } from "@/ui/Button";
-import { cn } from "@/ui/cn";
+import { useConfirm } from "@/ui/Confirm";
 import { CopyButton, useCopy } from "@/ui/CopyButton";
+import { type SortingState, DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
+import { Disclosure } from "@/ui/Disclosure";
 import { Mono } from "@/ui/bits";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
-import { EmptyState, ErrorState } from "@/ui/States";
+import { SearchInput } from "@/ui/Input";
+import { MenuItem, MenuSeparator } from "@/ui/Menu";
+import { EmptyState } from "@/ui/States";
 import { Tip } from "@/ui/Tooltip";
-import { Skeleton } from "@/ui/Skeleton";
-import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { type GatewayKey, useGatewayKeys } from "./api";
 import { SAMPLE_GATEWAY_KEYS } from "./samples";
-import { DeleteDialog, RevokeDialog } from "./confirm";
+import { useKeyQuestions } from "./confirm";
 import { CreateDialog } from "./CreateDialog";
 import { scopeDetail, scopeSummary } from "./scope";
 
+// Gateway Keys (C02, C12) on the shared DataTable (UI ticket 08): name,
+// readable key, access, last use and recent Requests; ?q= searches by name or
+// key, ?sort=&dir= sorts. A row opens the key's page. Revoke… and Delete… ask
+// first (UI ticket 21). Revoked keys fold under the table into their own.
+
 /** Where a key's Requests of the last 24 hours are listed. */
 export const requestsHref = (k: GatewayKey) => `/requests?caller=${encodeURIComponent(k.name)}&range=24h`;
+
+const keyHref = (k: GatewayKey) => `/gateway-keys/${encodeURIComponent(k.id)}`;
+
+type Sort = "name" | "access" | "used" | "requests";
+
+const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+// Most recent first, then by name.
+const byUse = (a: GatewayKey, b: GatewayKey) => (b.last_used_at ?? "").localeCompare(a.last_used_at ?? "") || natural(a.name, b.name);
+
+const col = columnsFor<GatewayKey>();
+const columns = col.columns([
+  col.accessor("name", {
+    header: "Name",
+    sortFn: (a, b) => natural(a.original.name, b.original.name),
+    meta: { width: "w-[24%]", className: "max-w-0 text-[15px] font-medium" },
+    cell: ({ row }) => <OpenLink k={row.original} />,
+  }),
+  col.display({ id: "key", header: "Key", meta: { width: "w-[20%]" }, cell: ({ row }) => <SecretCell k={row.original} /> }),
+  col.accessor((k) => scopeSummary(k.scope), {
+    id: "access",
+    header: "Access",
+    sortFn: (a, b) => natural(scopeSummary(a.original.scope), scopeSummary(b.original.scope)) || natural(a.original.name, b.original.name),
+    meta: { width: "w-[22%]", className: "max-w-0" },
+    cell: ({ row }) => (
+      <span className="block truncate" title={scopeDetail(row.original.scope)}>
+        {scopeSummary(row.original.scope)}
+      </span>
+    ),
+  }),
+  col.accessor((k) => k.last_used_at ?? "", {
+    id: "used",
+    header: "Last used",
+    sortFn: (a, b) => byUse(a.original, b.original),
+    meta: { className: "whitespace-nowrap tabular" },
+    cell: ({ row }) => <LastUsed k={row.original} />,
+  }),
+  col.accessor("recent_requests", {
+    id: "requests",
+    header: "Requests, 24 h",
+    // The busiest first, then by name.
+    sortFn: (a, b) => b.original.recent_requests - a.original.recent_requests || natural(a.original.name, b.original.name),
+    meta: { align: "right" },
+    cell: ({ row }) => <Recent k={row.original} />,
+  }),
+]);
+
+const revokedColumns = col.columns([
+  col.accessor("name", {
+    header: "Name",
+    sortFn: (a, b) => natural(a.original.name, b.original.name),
+    meta: { width: "w-[24%]", className: "max-w-0 text-fg-muted" },
+    cell: ({ row }) => <OpenLink k={row.original} />,
+  }),
+  col.display({
+    id: "key",
+    header: "Key",
+    meta: { width: "w-[20%]", className: "text-fg-muted" },
+    cell: ({ row }) => <Mono>{shortSecret(row.original.secret)}</Mono>,
+  }),
+  col.accessor((k) => k.revoked_at ?? "", {
+    id: "revoked",
+    header: "Revoked",
+    // The newest revoke first.
+    sortFn: (a, b) => (b.original.revoked_at ?? "").localeCompare(a.original.revoked_at ?? "") || natural(a.original.name, b.original.name),
+    meta: { width: "w-[22%]", className: "tabular text-fg-muted" },
+    cell: ({ row }) => (row.original.revoked_at ? shortDate(row.original.revoked_at) : ""),
+  }),
+  col.accessor((k) => k.last_used_at ?? "", {
+    id: "used",
+    header: "Last used",
+    sortFn: (a, b) => byUse(a.original, b.original),
+    meta: { className: "whitespace-nowrap tabular text-fg-muted" },
+    cell: ({ row }) => <LastUsed k={row.original} />,
+  }),
+]);
+
+const searchKeys = (k: GatewayKey, needle: string) => !needle || k.name.toLowerCase().includes(needle) || k.secret.toLowerCase().includes(needle);
+const REVOKED_SORT: SortingState = [{ id: "revoked", desc: false }];
 
 /** Gateway Keys (C02, C12): name, readable key, access, last use and recent Requests. */
 export function KeysList() {
   const list = useGatewayKeys();
   const phone = useIsPhone();
+  const navigate = useNavigate();
+  const confirm = useConfirm();
+  const ask = useKeyQuestions();
   const [creating, setCreating] = useState(false);
-  const [revoking, setRevoking] = useState<GatewayKey>();
-  const [deleting, setDeleting] = useState<GatewayKey>();
-  const [showRevoked, setShowRevoked] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const q = params.get("q") ?? "";
+  const sort = (params.get("sort") as Sort) || "name";
+  const desc = params.get("dir") === "desc";
 
-  const act = { onRevoke: setRevoking, onDelete: setDeleting };
+  const setParam = (k: string, v?: string) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (v) n.set(k, v);
+        else n.delete(k);
+        return n;
+      },
+      { replace: true },
+    );
+
+  const active = useMemo(() => list.data?.filter((k) => !k.revoked), [list.data]);
+  const revoked = useMemo(() => list.data?.filter((k) => k.revoked) ?? [], [list.data]);
+  const sorting = useMemo<SortingState>(() => [{ id: sort, desc }], [sort, desc]);
+  const act: Actions = { onRevoke: (k) => confirm.ask(ask.revoke(k)), onDelete: (k) => confirm.ask(ask.remove(k)) };
+
+  const newKey = (
+    <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>
+      New key
+    </Button>
+  );
 
   return (
     <>
@@ -41,68 +150,109 @@ export function KeysList() {
         title="Gateway Keys"
         description="Keys your Callers use to reach Iroha"
         actions={
-          <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>
+          <Button variant="primary" icon={Plus} aria-label="New key" onClick={() => setCreating(true)}>
             {phone ? "New" : "New key"}
           </Button>
         }
       />
 
-      {list.isError ? (
-        <ErrorState title="Couldn't load Gateway Keys" error={list.error} onRetry={() => void list.refetch()} />
-      ) : (
-      <Skeleton data={list.data} sample={SAMPLE_GATEWAY_KEYS} id={phone ? "gateway-keys:phone" : "gateway-keys"} label="Loading Gateway Keys">
-      {(keys) => {
-        const active = keys.filter((k) => !k.revoked);
-        const revoked = keys.filter((k) => k.revoked);
-        return active.length === 0 && revoked.length === 0 ? (
-        <EmptyState
-          icon={KeyRound}
-          title="No Gateway Keys yet"
-          description="Issue a key to each Caller, so every Request is attributed to it."
-          action={
-            <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>
-              New key
-            </Button>
-          }
-        />
-      ) : (
-        <>
-          {active.length === 0 ? (
-            <EmptyState icon={KeyRound} title="No active Gateway Keys" description="Every key is revoked. Issue a new one for each Caller." />
-          ) : phone ? (
-            <KeyRows keys={active} {...act} />
+      <DataTable<GatewayKey>
+        id="gateway-keys"
+        label="Gateway Keys"
+        columns={columns}
+        data={active}
+        sample={SAMPLE_GATEWAY_KEYS}
+        getRowId={(k) => k.id}
+        rowName={(k) => k.name}
+        error={list.isError ? list.error : undefined}
+        onRetry={() => void list.refetch()}
+        toolbar={
+          <SearchInput
+            className="min-w-0 flex-1 md:max-w-[320px] md:flex-none"
+            placeholder="Search keys"
+            aria-label="Search Gateway Keys by name or key"
+            value={q}
+            onChange={(e) => setParam("q", e.target.value)}
+          />
+        }
+        search={q}
+        searchFn={searchKeys}
+        filterChips={q ? [{ label: `Search: ${q}`, onRemove: () => setParam("q") }] : []}
+        noResultsTitle="No Gateway Keys match"
+        onClearFilters={() => setParam("q")}
+        sorting={sorting}
+        onSortingChange={(s) => setSortParams(setParams, (s[0]?.id as Sort) ?? "name", s[0]?.desc ?? false)}
+        rowActions={(k) => <KeyMenu k={k} {...act} />}
+        onRowClick={(k) => navigate(keyHref(k))}
+        phoneRow={(k) => <KeyLine k={k} />}
+        empty={
+          revoked.length > 0 ? (
+            <EmptyState icon={KeyRound} title="No active Gateway Keys" description="Every key is revoked. Issue a new one for each Caller." action={newKey} />
           ) : (
-            <KeyTable keys={active} {...act} />
-          )}
-          {revoked.length > 0 && (
-            <div className="mt-8">
-              <button
-                type="button"
-                onClick={() => setShowRevoked((s) => !s)}
-                aria-expanded={showRevoked}
-                className="inline-flex items-center gap-1 text-sm text-fg-muted hover:text-fg"
-              >
-                <ChevronRight size={15} className={cn("transition-transform", showRevoked && "rotate-90")} />
-                Revoked keys
-                <span className="tabular">{revoked.length}</span>
-              </button>
-              {showRevoked && <RevokedTable keys={revoked} onDelete={setDeleting} />}
-            </div>
-          )}
-        </>
-      );
-      }}
-      </Skeleton>
+            <EmptyState icon={KeyRound} title="No Gateway Keys yet" description="Issue a key to each Caller, so every Request is attributed to it." action={newKey} />
+          )
+        }
+        footer={({ shown, total }) => (shown === total ? `${total} Gateway Key${total === 1 ? "" : "s"}` : `${shown} of ${total} Gateway Keys`)}
+      />
+
+      {revoked.length > 0 && (
+        <Disclosure
+          className="mt-8"
+          triggerClassName="text-sm"
+          summary={
+            <>
+              Revoked keys
+              <span className="ml-1 tabular">{revoked.length}</span>
+            </>
+          }
+        >
+          <div className="pt-3">
+            <DataTable<GatewayKey>
+              id="gateway-keys-revoked"
+              label="Revoked Gateway Keys"
+              columns={revokedColumns}
+              data={revoked}
+              sample={SAMPLE_GATEWAY_KEYS}
+              getRowId={(k) => k.id}
+              rowName={(k) => k.name}
+              defaultSorting={REVOKED_SORT}
+              rowActions={(k) => <IconButton icon={Trash2} label={`Delete ${k.name}…`} size="sm" danger onClick={() => act.onDelete(k)} />}
+              phoneRow={(k) => <RevokedLine k={k} />}
+            />
+          </div>
+        </Disclosure>
       )}
 
+      {confirm.dialog}
       <CreateDialog open={creating} onOpenChange={setCreating} existing={list.data ?? []} />
-      <RevokeDialog k={revoking} onClose={() => setRevoking(undefined)} />
-      <DeleteDialog k={deleting} onClose={() => setDeleting(undefined)} />
     </>
   );
 }
 
+function setSortParams(setParams: ReturnType<typeof useSearchParams>[1], sort: Sort, desc: boolean) {
+  setParams(
+    (p) => {
+      const n = new URLSearchParams(p);
+      if (sort === "name") n.delete("sort");
+      else n.set("sort", sort);
+      if (desc) n.set("dir", "desc");
+      else n.delete("dir");
+      return n;
+    },
+    { replace: true },
+  );
+}
+
 type Actions = { onRevoke: (k: GatewayKey) => void; onDelete: (k: GatewayKey) => void };
+
+/** The key's name, a real link to its page (Ctrl/⌘-click opens a new tab), named "Open <name>" for the keyboard and agents. */
+function OpenLink({ k }: { k: GatewayKey }) {
+  return (
+    <SdkButton render={<Link to={keyHref(k)} />} aria-label={`Open ${k.name}`} className="block max-w-full truncate rounded outline-none hover:underline focus-visible:underline">
+      {k.name}
+    </SdkButton>
+  );
+}
 
 function LastUsed({ k }: { k: GatewayKey }) {
   return <span title={k.last_used_at ? new Date(k.last_used_at).toLocaleString() : undefined}>{k.last_used_at ? timeAgo(k.last_used_at) : "Never"}</span>;
@@ -112,7 +262,7 @@ function Recent({ k }: { k: GatewayKey }) {
   if (k.recent_requests === 0) return <span className="text-fg-muted">0</span>;
   return (
     <Tip label={`Open ${k.name}'s Requests of the last 24 hours`} type="description">
-      <Link to={requestsHref(k)} onClick={(e) => e.stopPropagation()} className="hover:underline">
+      <Link to={requestsHref(k)} className="hover:underline">
         {formatNumber(k.recent_requests)}
       </Link>
     </Tip>
@@ -125,27 +275,24 @@ function KeyMenu({ k, onRevoke, onDelete }: { k: GatewayKey } & Actions) {
   // "Copy key" closes the menu, so the trigger it closes back to shows the result.
   const copied = useCopy();
   return (
-    <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" copy={copied.state} />
-      <MenuContent>
-        <MenuItem icon={Settings2} onSelect={() => navigate(`/gateway-keys/${encodeURIComponent(k.id)}`)}>
-          Open settings
-        </MenuItem>
-        <MenuItem icon={Copy} onSelect={() => void copied.copy(k.secret, "Gateway Key")}>
-          Copy key
-        </MenuItem>
-        <MenuItem icon={MessageCircle} onSelect={() => chat.open({ kind: "gateway_key", gatewayKey: k.name })}>
-          Test as {k.name}
-        </MenuItem>
-        <MenuSeparator />
-        <MenuItem icon={Ban} danger onSelect={() => onRevoke(k)}>
-          Revoke…
-        </MenuItem>
-        <MenuItem icon={Trash2} danger onSelect={() => onDelete(k)}>
-          Delete…
-        </MenuItem>
-      </MenuContent>
-    </Menu>
+    <RowMenu name={k.name} copy={copied.state}>
+      <MenuItem icon={Settings2} onSelect={() => navigate(keyHref(k))}>
+        Open settings
+      </MenuItem>
+      <MenuItem icon={Copy} onSelect={() => void copied.copy(k.secret, "Gateway Key")}>
+        Copy key
+      </MenuItem>
+      <MenuItem icon={MessageCircle} onSelect={() => chat.open({ kind: "gateway_key", gatewayKey: k.name })}>
+        Test as {k.name}
+      </MenuItem>
+      <MenuSeparator />
+      <MenuItem icon={Ban} danger onSelect={() => onRevoke(k)}>
+        Revoke…
+      </MenuItem>
+      <MenuItem icon={Trash2} danger onSelect={() => onDelete(k)}>
+        Delete…
+      </MenuItem>
+    </RowMenu>
   );
 }
 
@@ -158,115 +305,37 @@ function SecretCell({ k }: { k: GatewayKey }) {
   );
 }
 
-function KeyTable({ keys, ...act }: { keys: GatewayKey[] } & Actions) {
-  const navigate = useNavigate();
-  return (
-    <Table>
-      <THead>
-        <tr>
-          <TH className="w-[24%]">Name</TH>
-          <TH className="w-[20%]">Key</TH>
-          <TH className="w-[22%]">Access</TH>
-          <TH>Last used</TH>
-          <TH align="right">Requests, 24 h</TH>
-          <TH className="w-12">
-            <span className="sr-only">Actions</span>
-          </TH>
-        </tr>
-      </THead>
-      <TBody>
-        {keys.map((k) => (
-          <TR key={k.id} interactive className="group h-[60px]" onClick={() => navigate(`/gateway-keys/${encodeURIComponent(k.id)}`)}>
-            <TD className="max-w-0 truncate text-[15px] font-medium">
-              <Link to={`/gateway-keys/${encodeURIComponent(k.id)}`} onClick={(e) => e.stopPropagation()} className="outline-none focus-visible:underline">
-                {k.name}
-              </Link>
-            </TD>
-            <TD>
-              <SecretCell k={k} />
-            </TD>
-            <TD className="max-w-0 truncate" title={scopeDetail(k.scope)}>
-              {scopeSummary(k.scope)}
-            </TD>
-            <TD className="tabular">
-              <LastUsed k={k} />
-            </TD>
-            <TD align="right">
-              <Recent k={k} />
-            </TD>
-            {/* Menu clicks bubble through the portal to the row; stop them here. */}
-            <TD align="right" onClick={(e) => e.stopPropagation()}>
-              <KeyMenu k={k} {...act} />
-            </TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
-  );
-}
-
 /** Phones: two lines per key, name and last use, then the key and its access (C31). */
-function KeyRows({ keys, ...act }: { keys: GatewayKey[] } & Actions) {
+function KeyLine({ k }: { k: GatewayKey }) {
   return (
-    <ul className="divide-y divide-border border-y border-border">
-      {keys.map((k) => (
-        <li key={k.id} className="flex items-center gap-2">
-          <Link to={`/gateway-keys/${encodeURIComponent(k.id)}`} className="min-w-0 flex-1 py-3">
-            <span className="flex items-center justify-between gap-3">
-              <span className="truncate text-[16px] font-medium">{k.name}</span>
-              <span className="shrink-0 text-[15px] text-fg-muted">
-                <LastUsed k={k} />
-              </span>
-            </span>
-            <span className="mt-0.5 flex items-center justify-between gap-3 text-[14px] text-fg-muted">
-              <Mono>{shortSecret(k.secret)}</Mono>
-              <span className="truncate">{scopeSummary(k.scope)}</span>
-            </span>
-          </Link>
-          <KeyMenu k={k} {...act} />
-        </li>
-      ))}
-    </ul>
+    <span className="block min-w-0 flex-1">
+      <span className="flex items-center justify-between gap-3">
+        <span className="truncate text-[16px] font-medium">{k.name}</span>
+        <span className="shrink-0 text-[15px] text-fg-muted">
+          <LastUsed k={k} />
+        </span>
+      </span>
+      <span className="mt-0.5 flex items-center justify-between gap-3 text-[14px] text-fg-muted">
+        <Mono>{shortSecret(k.secret)}</Mono>
+        <span className="truncate">{scopeSummary(k.scope)}</span>
+      </span>
+    </span>
   );
 }
 
-function RevokedTable({ keys, onDelete }: { keys: GatewayKey[]; onDelete: (k: GatewayKey) => void }) {
+/** Phones: a revoked key's name and when it was revoked, then its key. */
+function RevokedLine({ k }: { k: GatewayKey }) {
   return (
-    <div className="mt-3">
-      <Table>
-        <THead>
-          <tr>
-            <TH className="w-[24%]">Name</TH>
-            <TH className="w-[20%]">Key</TH>
-            <TH className="w-[22%]">Revoked</TH>
-            <TH>Last used</TH>
-            <TH className="w-12">
-              <span className="sr-only">Actions</span>
-            </TH>
-          </tr>
-        </THead>
-        <TBody>
-          {keys.map((k) => (
-            <TR key={k.id} className="h-12 text-fg-muted">
-              <TD className="max-w-0 truncate">
-                <Link to={`/gateway-keys/${encodeURIComponent(k.id)}`} className="hover:text-fg hover:underline">
-                  {k.name}
-                </Link>
-              </TD>
-              <TD>
-                <Mono>{shortSecret(k.secret)}</Mono>
-              </TD>
-              <TD className="tabular">{k.revoked_at ? shortDate(k.revoked_at) : ""}</TD>
-              <TD className="tabular">
-                <LastUsed k={k} />
-              </TD>
-              <TD align="right">
-                <IconButton icon={Trash2} label={`Delete ${k.name}`} size="sm" danger onClick={() => onDelete(k)} />
-              </TD>
-            </TR>
-          ))}
-        </TBody>
-      </Table>
-    </div>
+    <span className="block min-w-0 flex-1 text-fg-muted">
+      <span className="flex items-center justify-between gap-3">
+        <Link to={keyHref(k)} className="truncate text-[16px] font-medium text-fg hover:underline">
+          {k.name}
+        </Link>
+        <span className="shrink-0 text-[14px]">{k.revoked_at ? `Revoked ${shortDate(k.revoked_at)}` : "Revoked"}</span>
+      </span>
+      <span className="mt-0.5 block text-[14px]">
+        <Mono>{shortSecret(k.secret)}</Mono>
+      </span>
+    </span>
   );
 }

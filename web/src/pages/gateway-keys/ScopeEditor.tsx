@@ -5,6 +5,7 @@ import { Checkbox } from "@/ui/Checkbox";
 import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
 import { RadioCards } from "@/ui/Radio";
+import { ScrollArea } from "@/ui/ScrollArea";
 import { usePoolOptions, useProviderOptions } from "./api";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { ModelPicker } from "./ModelPicker";
@@ -94,7 +95,7 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
           className="[&_input]:border-transparent [&_input]:bg-transparent [&_input]:focus:ring-0"
         />
       </div>
-      <div className="max-h-[min(380px,45dvh)] overflow-y-auto">
+      <ScrollArea label="Providers and Pools" viewportClassName="max-h-[min(380px,45dvh)]">
         {loading ? (
           <div className="flex flex-col gap-4 p-4" aria-busy="true">
             {[0, 1, 2].map((i) => (
@@ -150,7 +151,7 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
             )}
           </>
         )}
-      </div>
+      </ScrollArea>
       <ModelPicker
         provider={picking}
         value={picking ? (draft.providers.get(picking) ?? null) : null}

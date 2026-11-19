@@ -1,18 +1,21 @@
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowUp, ChevronDown, Code2, KeyRound, Link2, Maximize2, MessageCircle, Minimize2, Square, SquarePen, Trash2, Wrench, X } from "lucide-react";
 import { useChatPanel } from "@/app/chat-panel";
 import { timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
+import { Button as SdkButton } from "@ui-sdk/react/button";
 import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { Disclosure } from "@/ui/Disclosure";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { createScrollAreaController, ScrollArea } from "@/ui/ScrollArea";
 import { notify } from "@/ui/toast";
+import { Tip } from "@/ui/Tooltip";
 import type { Settings } from "./api";
 import { bareModel } from "./api";
-import { ModelTile, Picker, type View } from "./Picker";
+import { createPickerController, ModelTile, PickerPopover, PickerTrigger } from "./Picker";
 import { Reply } from "./Reply";
 import { SnippetDialog } from "./SnippetDialog";
 import type { Chat } from "./store";
@@ -56,7 +59,7 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
             <h2 className="truncate text-[15px] font-semibold">{chat.title}</h2>
             <ChevronDown size={16} aria-hidden className="shrink-0 text-fg-muted" />
           </MenuTrigger>
-          <MenuContent align="start" className="max-h-[60dvh] w-[min(340px,calc(100vw-32px))] overflow-y-auto">
+          <MenuContent align="start" className="w-[min(340px,calc(100vw-32px))]" maxHeight="max-h-[min(60dvh,calc(var(--available-height)-2px))]">
             <MenuLabel>Earlier chats</MenuLabel>
             {earlier.length === 0 && <p className="px-2 py-2 text-[13.5px] text-fg-muted">Chats you send show here, in this browser.</p>}
             {earlier.map((c) => (
@@ -114,7 +117,8 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
 
 function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide: boolean }) {
   const [text, setText] = useState(chat.draft ?? "");
-  const [picker, setPicker] = useState<View | null>(null);
+  const [picker] = useState(createPickerController);
+  const [composer, setComposer] = useState<HTMLDivElement | null>(null);
   const [snippets, setSnippets] = useState(false);
   // The log follows the reply while it streams, unless the Owner scrolled up.
   const [log] = useState(createScrollAreaController);
@@ -125,7 +129,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
     const v = t.trim();
     if (!v || running) return;
     if (!s.model) {
-      setPicker("models");
+      void picker.open({ payload: "models" });
       return;
     }
     if (t === text) setText("");
@@ -145,9 +149,9 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
             <span className="block truncate text-[14.5px] font-medium">Sending as {s.as}</span>
             <span className="block truncate text-[13px] text-fg-muted">Shows in Requests as Test (as {s.as})</span>
           </span>
-          <button type="button" data-picker-toggle onClick={() => setPicker((p) => (p ? null : "as"))} className="shrink-0 text-[14.5px] font-medium text-info hover:underline">
+          <PickerTrigger controller={picker} payload="as" aria-label={`Change who to send as. Now ${s.as}`} className="shrink-0 text-[14.5px] font-medium text-info hover:underline">
             Change
-          </button>
+          </PickerTrigger>
         </div>
       )}
       <ScrollArea label="Messages" role="log" stickToEnd controller={log} className="flex-1" contentClassName="flex min-h-full flex-col px-4 py-5">
@@ -158,10 +162,9 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
             </p>
           )}
           {chat.system && (
-            <details className="rounded-lg border border-border bg-bg px-3 py-2 text-[13.5px]">
-              <summary className="cursor-pointer text-fg-muted">System prompt</summary>
-              <p className="mt-1.5 whitespace-pre-wrap break-words">{chat.system}</p>
-            </details>
+            <Disclosure summary="System prompt" className="rounded-lg border border-border bg-bg px-3 py-2 text-[13.5px]" triggerClassName="w-full">
+              <p className="pt-1.5 whitespace-pre-wrap break-words">{chat.system}</p>
+            </Disclosure>
           )}
           {chat.turns.length === 0 ? (
             <Empty
@@ -186,12 +189,8 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
         </div>
       </ScrollArea>
       <div className="shrink-0 px-3 pb-3 pt-1">
-        <div className={cn(column, "relative")}>
-          {picker && (
-            <Popover onClose={() => setPicker(null)}>
-              <Picker settings={s} onChange={change} initial={picker} onClose={() => setPicker(null)} />
-            </Popover>
-          )}
+        <div ref={setComposer} className={cn(column, "relative")}>
+          <PickerPopover controller={picker} anchor={composer} settings={s} onChange={change} />
           <div className="rounded-2xl border border-border-strong bg-bg px-3 pb-2 pt-2.5 shadow-sm focus-within:border-info">
             <textarea
               value={text}
@@ -208,47 +207,47 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
               className="block max-h-[200px] min-h-[28px] w-full resize-none bg-transparent px-1 text-base leading-relaxed outline-none [field-sizing:content] placeholder:text-fg-subtle md:text-[15px]"
             />
             <div className="mt-2 flex items-center gap-1.5">
-              <button
-                type="button"
-                data-picker-toggle
-                onClick={() => setPicker((p) => (p ? null : s.model ? "main" : "models"))}
-                aria-expanded={!!picker}
+              <PickerTrigger
+                controller={picker}
+                payload={s.model ? "main" : "models"}
                 aria-label={s.model ? `Model ${s.model}. Settings` : "Pick a model"}
-                className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-lg bg-muted/70 px-2 text-[14px] font-medium hover:bg-muted"
+                className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-lg bg-muted/70 px-2 text-[14px] font-medium hover:bg-muted data-open:bg-muted"
               >
                 {s.model && <ModelTile model={s.model} size={18} />}
                 <span className="truncate">{s.model ? bareModel(s.model) : "Pick a model"}</span>
-                <ChevronDown size={14} className="shrink-0 text-fg-muted" />
-              </button>
-              <button
-                type="button"
-                aria-pressed={s.toolCheck}
-                onClick={() => change({ toolCheck: !s.toolCheck })}
-                title="Offer a test tool and check the call"
-                className={cn(
-                  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[14px]",
-                  s.toolCheck ? "border-info/40 bg-info/10 text-info" : "border-border text-fg hover:bg-muted",
-                )}
-              >
-                <Wrench size={14} /> Tools
-              </button>
+                <ChevronDown size={14} aria-hidden className="shrink-0 text-fg-muted" />
+              </PickerTrigger>
+              <Tip label="Offer a test tool and check the call" type="description">
+                <button
+                  type="button"
+                  aria-pressed={s.toolCheck}
+                  onClick={() => change({ toolCheck: !s.toolCheck })}
+                  className={cn(
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[14px]",
+                    s.toolCheck ? "border-info/40 bg-info/10 text-info" : "border-border text-fg hover:bg-muted",
+                  )}
+                >
+                  <Wrench size={14} aria-hidden /> Tools
+                </button>
+              </Tip>
               <IconButton icon={Code2} label="Use from code" size="sm" disabled={!s.model} onClick={() => setSnippets(true)} />
               <div className="flex-1" />
               {running ? (
-                <button type="button" onClick={() => stop(chat.id)} aria-label="Stop" title="Stop" className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg">
-                  <Square size={13} fill="currentColor" />
-                </button>
+                <Tip label="Stop" type="label">
+                  <SdkButton onClick={() => stop(chat.id)} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg">
+                    <Square size={13} fill="currentColor" aria-hidden />
+                  </SdkButton>
+                </Tip>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => submit()}
-                  disabled={!text.trim()}
-                  aria-label="Send"
-                  title="Send"
-                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg disabled:bg-muted disabled:text-fg-subtle"
-                >
-                  <ArrowUp size={18} />
-                </button>
+                <Tip label="Send" type="label">
+                  <SdkButton
+                    onClick={() => submit()}
+                    disabled={!text.trim()}
+                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg data-disabled:bg-muted data-disabled:text-fg-subtle"
+                  >
+                    <ArrowUp size={18} aria-hidden />
+                  </SdkButton>
+                </Tip>
               )}
             </div>
           </div>
@@ -256,34 +255,6 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
       </div>
       <SnippetDialog open={snippets} onOpenChange={setSnippets} settings={s} prompt={text.trim() || (lastUser?.role === "user" ? lastUser.text : "")} />
     </>
-  );
-}
-
-/** The settings popover above the composer; closes on a click outside it (its toggles excepted, they close it themselves). */
-function Popover({ children, onClose }: { children: ReactNode; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const close = useRef(onClose);
-  close.current = onClose;
-  useEffect(() => {
-    const down = (e: PointerEvent) => {
-      const t = e.target;
-      if (!(t instanceof Element) || ref.current?.contains(t) || t.closest("[data-picker-toggle]")) return;
-      // Radix portals (menus, dialogs) opened from inside the picker are not outside.
-      if (t.closest("[data-radix-popper-content-wrapper],[role=dialog][data-state]")) return;
-      close.current();
-    };
-    const key = (e: KeyboardEvent) => e.key === "Escape" && close.current();
-    document.addEventListener("pointerdown", down);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("pointerdown", down);
-      document.removeEventListener("keydown", key);
-    };
-  }, []);
-  return (
-    <div ref={ref} className="absolute inset-x-0 bottom-full z-20 mb-2">
-      {children}
-    </div>
   );
 }
 

@@ -13,6 +13,7 @@ import { Dialog as SdkDialog, DialogBackdrop, DialogClose, DialogContent, Dialog
 import { buttonClass } from "./Button";
 import { cn } from "./cn";
 import { Field, Input } from "./Input";
+import { ScrollArea } from "./ScrollArea";
 import { isApiError } from "@/api/client";
 
 // Dialogs grow from the middle and dim the page; the content keeps showing
@@ -22,7 +23,7 @@ const backdropClass =
   "fixed inset-0 bg-overlay transition-opacity duration-150 data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-none";
 
 const contentClass = cn(
-  "fixed inset-0 m-auto h-fit w-[calc(100vw-32px)] max-h-[calc(100dvh-32px)] overflow-y-auto",
+  "fixed inset-0 m-auto flex h-fit w-[calc(100vw-32px)] max-h-[calc(100dvh-32px)] flex-col",
   "rounded-xl border border-border bg-elevated p-6 text-fg shadow-elevated outline-none",
   "transition-[opacity,scale] duration-150 ease-out data-starting-style:scale-96 data-starting-style:opacity-0",
   "data-ending-style:scale-96 data-ending-style:opacity-0 motion-reduce:transition-none",
@@ -69,7 +70,11 @@ export function Dialog({
             {shown.description}
           </DialogDescription>
         )}
-        {shown.children && <div className="mt-4">{shown.children}</div>}
+        {shown.children && (
+          <ScrollArea className="-mx-6 mt-4 min-h-0 flex-1" contentClassName="px-6 py-0.5">
+            {shown.children}
+          </ScrollArea>
+        )}
         {shown.footer && <div className="mt-6 flex flex-wrap justify-end gap-2">{shown.footer}</div>}
         {closeButton && (
           <DialogClose aria-label="Close" className="absolute right-4 top-4 rounded-md p-1 text-fg-muted hover:bg-muted hover:text-fg">
@@ -133,7 +138,11 @@ function Confirmation({
         <AlertDialogDescription render={<div />} className={descriptionClass}>
           {shown.body}
         </AlertDialogDescription>
-        {shown.children && <div className="mt-4">{shown.children}</div>}
+        {shown.children && (
+          <ScrollArea className="-mx-6 mt-4 min-h-0 flex-1" contentClassName="px-6 py-0.5">
+            {shown.children}
+          </ScrollArea>
+        )}
         {error && (
           <p role="alert" className="mt-4 text-[13px] text-danger-text">
             {error}

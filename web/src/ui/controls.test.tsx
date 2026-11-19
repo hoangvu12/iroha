@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { createAgent } from "@ui-sdk/react/agent";
 import { useState } from "react";
 import { expect, test, vi } from "vitest";
+import { Autocomplete } from "./Autocomplete";
 import { Checkbox } from "./Checkbox";
 import { Field } from "./Input";
 import { RadioCards } from "./Radio";
@@ -152,4 +153,27 @@ test("an agent finds and changes every control", async () => {
   });
   expect(result.ok, result.error?.message).toBe(true);
   expect(state()).toEqual({ on: true, tick: true, filter: "gaps", shape: "anthropic", access: "some" });
+});
+
+test("Autocomplete takes its Field's label, suggests as you type and keeps text not in the list", async () => {
+  const user = userEvent.setup();
+  function Model() {
+    const [model, setModel] = useState("");
+    return (
+      <>
+        <Field label="Model">{() => <Autocomplete value={model} onValueChange={setModel} items={["glm-4.6", "glm-4.5-air", "qwen3-max"]} />}</Field>
+        <output>{model}</output>
+      </>
+    );
+  }
+  render(<Model />);
+  const input = screen.getByRole("combobox", { name: "Model" });
+  await user.type(input, "glm");
+  await screen.findByRole("option", { name: "glm-4.5-air" });
+  expect(screen.queryByRole("option", { name: "qwen3-max" })).toBeNull();
+  await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+  expect(document.querySelector("output")!.textContent).toBe("glm-4.5-air");
+  await user.clear(input);
+  await user.type(input, "glm-5{Escape}");
+  expect(document.querySelector("output")!.textContent).toBe("glm-5");
 });

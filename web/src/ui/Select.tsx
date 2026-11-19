@@ -2,6 +2,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { Select as SdkSelect, SelectContent, SelectItem, SelectItemIndicator, SelectTrigger, SelectValue } from "@ui-sdk/react/select";
 import { cn } from "./cn";
 import { popupClass } from "./popup";
+import { ScrollArea } from "./ScrollArea";
 
 export type SelectOption<T extends string = string> = { value: T; label: string; disabled?: boolean };
 
@@ -47,8 +48,9 @@ export function Select<T extends string>({
       <SelectContent
         sideOffset={4}
         collisionPadding={8}
-        className={cn(popupClass, "max-h-[min(360px,var(--available-height))] min-w-(--anchor-width) overflow-y-auto")}
+        className={cn(popupClass, "min-w-(--anchor-width) p-0")}
       >
+        <ScrollArea viewportClassName="max-h-[min(360px,calc(var(--available-height)-2px))]" contentClassName="p-1">
         {items.map((it) => (
           <SelectItem
             key={it.value}
@@ -62,6 +64,7 @@ export function Select<T extends string>({
             </SelectItemIndicator>
           </SelectItem>
         ))}
+        </ScrollArea>
       </SelectContent>
     </SdkSelect>
   );

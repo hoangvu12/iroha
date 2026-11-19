@@ -72,7 +72,7 @@ export function AuditEntriesTab() {
             {actor ? actorLabel : "Anyone"}
             <ChevronDown size={15} aria-hidden className="text-fg-muted" />
           </MenuTrigger>
-          <MenuContent align="start" className="max-h-[60vh] min-w-56 overflow-y-auto">
+          <MenuContent align="start" className="min-w-56" maxHeight="max-h-[min(60vh,calc(var(--available-height)-2px))]">
             <MenuRadioGroup label="Changed by" value={actor} onValueChange={(v) => setParam("actor", v)}>
               <MenuRadioItem value="">Anyone</MenuRadioItem>
               {(filters.data?.actors ?? []).map((a) => (

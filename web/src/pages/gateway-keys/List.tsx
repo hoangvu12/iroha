@@ -12,6 +12,7 @@ import { Mono } from "@/ui/bits";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Tip } from "@/ui/Tooltip";
 import { type GatewayKey, useGatewayKeys } from "./api";
 import { DeleteDialog, RevokeDialog } from "./confirm";
 import { CreateDialog } from "./CreateDialog";
@@ -105,9 +106,11 @@ function LastUsed({ k }: { k: GatewayKey }) {
 function Recent({ k }: { k: GatewayKey }) {
   if (k.recent_requests === 0) return <span className="text-fg-muted">0</span>;
   return (
-    <Link to={requestsHref(k)} onClick={(e) => e.stopPropagation()} className="hover:underline" title={`Open ${k.name}'s Requests of the last 24 hours`}>
-      {formatNumber(k.recent_requests)}
-    </Link>
+    <Tip label={`Open ${k.name}'s Requests of the last 24 hours`} type="description">
+      <Link to={requestsHref(k)} onClick={(e) => e.stopPropagation()} className="hover:underline">
+        {formatNumber(k.recent_requests)}
+      </Link>
+    </Tip>
   );
 }
 

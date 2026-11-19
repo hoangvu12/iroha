@@ -19,6 +19,7 @@ import {
 import { iconButtonClass } from "./Button";
 import { cn } from "./cn";
 import { popupClass } from "./popup";
+import { ScrollArea } from "./ScrollArea";
 import { Tip } from "./Tooltip";
 
 // Menus (the ⋯ on rows, the Owner menu, the Requests filters) on UI SDK's
@@ -57,12 +58,14 @@ export function MenuContent({
   align = "end",
   side,
   className,
+  maxHeight = "max-h-[calc(var(--available-height)-2px)]",
   finalFocus,
 }: {
   children: ReactNode;
   align?: "start" | "center" | "end";
   side?: "top" | "right" | "bottom" | "left";
   className?: string;
+  maxHeight?: string;
   finalFocus?: "trigger" | "none" | string;
 }) {
   return (
@@ -72,9 +75,11 @@ export function MenuContent({
       sideOffset={6}
       collisionPadding={8}
       finalFocus={finalFocus}
-      className={cn(popupClass, "max-h-(--available-height) min-w-44 overflow-y-auto", className)}
+      className={cn(popupClass, "min-w-44 p-0", className)}
     >
-      {children}
+      <ScrollArea viewportClassName={maxHeight} contentClassName="p-1">
+        {children}
+      </ScrollArea>
     </SdkMenuContent>
   );
 }
@@ -203,9 +208,11 @@ export function SubMenu({ label, value, children }: { label: string; value?: Rea
       <MenuSubContent
         sideOffset={6}
         collisionPadding={8}
-        className={cn(popupClass, "max-h-[min(420px,var(--available-height))] min-w-52 max-w-80 overflow-y-auto")}
+        className={cn(popupClass, "min-w-52 max-w-80 p-0")}
       >
-        {children}
+        <ScrollArea viewportClassName="max-h-[min(420px,calc(var(--available-height)-2px))]" contentClassName="p-1">
+          {children}
+        </ScrollArea>
       </MenuSubContent>
     </MenuSub>
   );

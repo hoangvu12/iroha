@@ -1,13 +1,14 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ArrowDown, ArrowUp, ExternalLink, GripVertical, Layers, MoreHorizontal, Trash2 } from "lucide-react";
 import { seg } from "@/api/client";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
+import { Autocomplete } from "@/ui/Autocomplete";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
-import { Field, Input } from "@/ui/Input";
+import { Field } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
@@ -257,7 +258,6 @@ export function AddMemberDialog({ pool, open, onOpenChange }: { pool: Pool; open
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
   const ids = useModelIds(provider || undefined);
-  const listId = useId();
   const choices = (providers.data ?? []).filter((p) => !p.archived).sort((a, b) => natural(a.handle, b.handle));
 
   useEffect(() => {
@@ -323,13 +323,8 @@ export function AddMemberDialog({ pool, open, onOpenChange }: { pool: Pool; open
           hint={offered ? "The model ID as this Provider names it." : `${provider}'s model list doesn't name it; it is still tried unless the Provider is strict.`}
           error={error}
         >
-          {(p) => <Input {...p} mono spellCheck={false} list={listId} value={model} onChange={(e) => setModel(e.target.value)} />}
+          {() => <Autocomplete mono value={model} onValueChange={setModel} items={known ?? []} />}
         </Field>
-        <datalist id={listId}>
-          {known?.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
       </form>
     </Dialog>
   );

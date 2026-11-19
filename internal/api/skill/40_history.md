@@ -11,7 +11,7 @@ A Request that was still running when Iroha stopped hard (crash, forced restart)
 **Retention** is three settings, read with `GET /api/settings` and changed with `PUT /api/settings/<name>` `{"value": <days>}` (audited and revertible like any change):
 
 - `retention.history_days` (default 30): Requests and their Attempts.
-- `retention.logs_days` (default 30): log events.
+- `retention.logs_days` (default 30): log events, and Owner sessions counted from when they were revoked or expired.
 - `retention.captures_days` (default 3): captured prompts and responses.
 
 The `retention` job applies them every hour. `GET /api/jobs` shows each background job's schedule, next run and last result; `POST /api/jobs/retention/run?dry_run=true` reports what it would delete now, and without `dry_run` runs it. No job ever changes or deletes Upstream Keys.

@@ -243,3 +243,39 @@ func TestRequestsLeftInProgressByAStoppedRunAreMarkedInterrupted(t *testing.T) {
 		t.Fatalf("%d interrupted events", n)
 	}
 }
+
+// LOG-08: a Request keeps the names it was served under. Renaming the
+// Gateway Key or the Upstream Key later changes neither the old Request nor
+// its Attempts, and the caller=<key ID> filter still finds it.
+func TestRenamedKeysLeaveTheNamesInHistoryAlone(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addProvider(t, srv, up.URL())
+	var key gatewaykeys.GatewayKeyResult
+	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "friend", "scope": map[string]any{"all": true}}).Expect(201).JSON(&key)
+	friend := srv.Client(key.GatewayKey.Secret)
+
+	old := friend.Post(chatPath, `{"model":"gpt-x","messages":[{"role":"user","content":"hi"}]}`).Expect(200).Header.Get("X-Request-Id")
+	before := request(t, srv, old)
+	upstreamKey := before.UpstreamKey
+	if before.Caller.Name != "friend" || before.Caller.GatewayKeyID != key.GatewayKey.ID || upstreamKey == "" || len(before.Attempts) != 1 {
+		t.Fatalf("request = %+v", before)
+	}
+
+	srv.Admin.Patch("/api/gateway-keys/friend", map[string]any{"name": "buddy"}).Expect(200)
+	srv.Admin.Patch("/api/providers/acme/keys/"+upstreamKey, map[string]any{"name": "renamed-key"}).Expect(200)
+
+	after := request(t, srv, old)
+	if after.Caller.Name != "friend" || after.UpstreamKey != upstreamKey || after.UpstreamKeyID != before.UpstreamKeyID || after.Attempts[0].UpstreamKey != upstreamKey {
+		t.Fatalf("history changed with the renames: %+v", after)
+	}
+	fresh := friend.Post(chatPath, `{"model":"gpt-x","messages":[{"role":"user","content":"hi"}]}`).Expect(200).Header.Get("X-Request-Id")
+	if r := request(t, srv, fresh); r.Caller.Name != "buddy" || r.UpstreamKey != "renamed-key" {
+		t.Fatalf("new request = %+v", r)
+	}
+	var page requests.RequestPage
+	srv.Admin.Get("/api/requests?caller=" + key.GatewayKey.ID).Expect(200).JSON(&page)
+	if len(page.Requests) != 2 || page.Requests[1].ID != old || page.Requests[1].Caller.Name != "friend" {
+		t.Fatalf("caller=<key ID> = %+v", page.Requests)
+	}
+}

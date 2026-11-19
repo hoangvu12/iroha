@@ -1,8 +1,10 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -121,6 +123,63 @@ func TestAdminRoutesRefuseMissingUnknownAndRevokedTokens(t *testing.T) {
 	// Public routes need no token.
 	srv.Anon.Get("/skill.md").Expect(200)
 	srv.Anon.Get("/api/openapi.json").Expect(200)
+}
+
+// KEY-23: a Gateway Key is no admin credential, in any header it is sent in.
+func TestGatewayKeysCannotCallTheAdminAPI(t *testing.T) {
+	srv := testkit.Start(t)
+	var key struct {
+		GatewayKey struct{ Secret string } `json:"gateway_key"`
+	}
+	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "friend", "scope": map[string]any{"all": true}}).Expect(201).JSON(&key)
+	caller := srv.Client(key.GatewayKey.Secret)
+	for _, path := range []string{"/api/whoami", "/api/gateway-keys", "/api/requests"} {
+		if e := caller.Get(path).Expect(401).Err(); e.Code != "admin_token_invalid" || e.Hint == "" {
+			t.Errorf("GET %s with a Gateway Key: %+v", path, e)
+		}
+	}
+	if e := caller.Post("/api/gateway-keys", map[string]any{"name": "mine", "scope": map[string]any{"all": true}}).Expect(401).Err(); e.Code != "admin_token_invalid" {
+		t.Fatalf("issuing a key with a Gateway Key: %+v", e)
+	}
+	if e := srv.Anon.WithHeader("x-api-key", key.GatewayKey.Secret).Get("/api/whoami").Expect(401).Err(); e.Code != "admin_token_missing" {
+		t.Fatalf("Gateway Key as x-api-key on an admin route: %+v", e)
+	}
+	srv.Admin.Get("/api/gateway-keys/mine").Expect(404)
+}
+
+// RED-04, RUN-03: when the database stops answering, /readyz says 503
+// not_ready without naming files or paths; the cause goes to the log.
+func TestReadinessFailsWithoutDetailsWhenTheDatabaseIsGone(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Anon.Get("/readyz").Expect(200)
+	if err := srv.App.DB().Close(); err != nil {
+		t.Fatal(err)
+	}
+	r := srv.Anon.Get("/readyz").Expect(503)
+	if e := r.Err(); e.Code != "not_ready" || e.Hint == "" {
+		t.Fatalf("readyz = %+v", e)
+	}
+	for _, leak := range []string{srv.DataDir, filepath.ToSlash(srv.DataDir), "iroha.db", "sql:", "database is closed"} {
+		if strings.Contains(r.Text(), leak) {
+			t.Fatalf("readyz body names %q: %s", leak, r.Body)
+		}
+	}
+	srv.Anon.Get("/healthz").Expect(200) // the process is alive
+}
+
+// RUN-05: Shutdown is safe to call again; the second call does nothing and
+// only one shutdown event is logged.
+func TestShuttingDownTwiceIsHarmless(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Stop()
+	if err := srv.App.Shutdown(context.Background(), "again"); err != nil {
+		t.Fatalf("second Shutdown: %v", err)
+	}
+	srv.Restart()
+	ev := srv.Logs("kind=shutdown")
+	if len(ev) != 1 || ev[0].Attrs["reason"] != "test stop" {
+		t.Fatalf("shutdown events = %+v", ev)
+	}
 }
 
 func TestUnknownRoutesAndWrongMethodsAnswerWithHints(t *testing.T) {

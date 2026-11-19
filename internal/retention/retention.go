@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/jobs"
@@ -22,7 +23,7 @@ var (
 	})
 	LogsDays = settings.NewInt(settings.Int{
 		Name: "retention.logs_days", Unit: "days", Default: 30, Min: 1, Max: 3650,
-		Description: "How long log events (GET /api/logs) are kept.",
+		Description: "How long log events (GET /api/logs) are kept; also how long Owner sessions stay listed after they were revoked or expired.",
 	})
 	CapturesDays = settings.NewInt(settings.Int{
 		Name: "retention.captures_days", Unit: "days", Default: 3, Min: 1, Max: 3650,
@@ -62,13 +63,24 @@ var kinds = []kind{
 		count:  `SELECT count(*) FROM log_events WHERE at < ?`,
 		delete: `DELETE FROM log_events WHERE id IN (SELECT id FROM log_events WHERE at < ? LIMIT ?)`,
 	},
+	{
+		// An Owner session stops working when revoked or expired; it stays
+		// listed (GET /api/owner-sessions?active=false) as long as log events.
+		detail: "owner_sessions", label: "Owner sessions", setting: LogsDays,
+		count:  `SELECT count(*) FROM owner_sessions WHERE ` + sessionEnded + ` < ?`,
+		delete: `DELETE FROM owner_sessions WHERE rowid IN (SELECT rowid FROM owner_sessions WHERE ` + sessionEnded + ` < ? LIMIT ?)`,
+	},
 }
+
+// sessionEnded is when an Owner session stopped working: revoked or expired,
+// whichever came first.
+const sessionEnded = `min(coalesce(revoked_at, expires_at), expires_at)`
 
 // Job is the hourly retention job.
 func Job(db *store.DB) jobs.Job {
 	return jobs.Job{
 		Name:        JobName,
-		Description: "Deletes Requests (with their Attempts), captures and log events older than their retention settings (GET /api/settings).",
+		Description: "Deletes Requests (with their Attempts), captures, log events and ended Owner sessions older than their retention settings (GET /api/settings).",
 		Schedule:    jobs.Every(time.Hour),
 		Run: func(ctx context.Context, dry bool) (jobs.Outcome, error) {
 			return run(ctx, db, dry)
@@ -103,7 +115,8 @@ func run(ctx context.Context, db *store.DB, dry bool) (jobs.Outcome, error) {
 	if dry {
 		verb = "Would delete"
 	}
-	out.Summary = fmt.Sprintf("%s %s, %s and %s.", verb, parts[0], parts[1], parts[2])
+	last := len(parts) - 1
+	out.Summary = fmt.Sprintf("%s %s and %s.", verb, strings.Join(parts[:last], ", "), parts[last])
 	return out, nil
 }
 

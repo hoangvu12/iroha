@@ -1,6 +1,9 @@
 package session_test
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -226,6 +229,164 @@ func TestManyWrongPasswordsLockSignInForAWhile(t *testing.T) {
 	}
 	srv.Clock.Advance(15 * time.Minute)
 	signIn(t, srv, testkit.OwnerPassword)
+}
+
+// AUTH-05: a stored password hash that no longer parses never lets anyone
+// in; sign-in answers a 500 that is logged as http.error, sets no cookie, and
+// the Owner (or an agent) recovers by setting the password again.
+func TestACorruptedPasswordHashRefusesSignInAndIsLogged(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Admin.Put("/api/owner-password", map[string]any{"password": testkit.OwnerPassword}).Expect(201)
+	for i, hash := range []string{"garbage", "pbkdf2-sha256$x$AAAA$AAAA", "pbkdf2-sha256$600000$!!$!!"} {
+		if _, err := srv.App.DB().Exec(`UPDATE owner_password SET hash = ?`, hash); err != nil {
+			t.Fatal(err)
+		}
+		r := srv.Anon.Post("/api/session", map[string]any{"password": testkit.OwnerPassword}).Expect(500)
+		if e := r.Err(); e.Code != "internal" || e.Hint == "" {
+			t.Fatalf("%q: error = %+v", hash, e)
+		}
+		if ck := r.Cookie(session.CookieName); ck != nil {
+			t.Fatalf("%q: a cookie was set: %+v", hash, ck)
+		}
+		ev := srv.Logs("kind=http.error")
+		if len(ev) != i+1 || ev[0].Level != "error" || ev[0].Attrs["route"] != "POST /api/session" || !strings.Contains(ev[0].Attrs["err"].(string), "password hash") {
+			t.Fatalf("%q: http.error events = %+v", hash, ev)
+		}
+		if strings.Contains(srv.Console(), testkit.OwnerPassword) {
+			t.Fatalf("%q: the password reached the console", hash)
+		}
+	}
+	srv.Admin.Put("/api/owner-password", map[string]any{"password": "a fresh password"}).Expect(200)
+	signIn(t, srv, "a fresh password")
+}
+
+// AUTH-08: only the SHA-256 of a session's secret is stored; the cookie's
+// value is in no column.
+func TestSessionSecretsAreStoredOnlyAsTheirHash(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Admin.Put("/api/owner-password", map[string]any{"password": testkit.OwnerPassword}).Expect(201)
+	ck := srv.Anon.Post("/api/session", map[string]any{"password": testkit.OwnerPassword}).Expect(201).Cookie(session.CookieName)
+	if ck == nil || !strings.HasPrefix(ck.Value, "iroha_session") {
+		t.Fatalf("cookie = %+v", ck)
+	}
+	rows, err := srv.App.DB().Query(`SELECT * FROM owner_sessions`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	n := 0
+	for rows.Next() {
+		n++
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			t.Fatal(err)
+		}
+		for i, v := range vals {
+			s := fmt.Sprint(v)
+			if b, ok := v.([]byte); ok {
+				s = string(b)
+			}
+			if strings.Contains(s, ck.Value) {
+				t.Fatalf("column %s holds the session secret", cols[i])
+			}
+			if cols[i] == "secret_hash" {
+				sum := sha256.Sum256([]byte(ck.Value))
+				if want := base64.RawURLEncoding.EncodeToString(sum[:]); s != want {
+					t.Fatalf("secret_hash = %q, want base64url(sha256(cookie)) %q", s, want)
+				}
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d session rows", n)
+	}
+}
+
+// AUTH-09: the cookie is Secure when the browser reached Iroha over HTTPS,
+// read from the first X-Forwarded-Proto value when proxies list several;
+// over plain HTTP it is not, so local use still works.
+func TestTheSessionCookieIsSecureBehindHTTPSProxies(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Admin.Put("/api/owner-password", map[string]any{"password": testkit.OwnerPassword}).Expect(201)
+	for _, tc := range []struct {
+		proto  string
+		secure bool
+	}{
+		{"", false},
+		{"http", false},
+		{"https", true},
+		{"HTTPS", true},
+		{"https, http", true},
+		{" https ,http,http", true},
+		{"http, https", false},
+	} {
+		c := srv.Anon
+		if tc.proto != "" {
+			c = c.WithHeader("X-Forwarded-Proto", tc.proto)
+		}
+		ck := c.Post("/api/session", map[string]any{"password": testkit.OwnerPassword}).Expect(201).Cookie(session.CookieName)
+		if ck == nil || ck.Secure != tc.secure || !ck.HttpOnly {
+			t.Errorf("X-Forwarded-Proto %q: cookie = %+v, want Secure %v", tc.proto, ck, tc.secure)
+			continue
+		}
+		// Signing out deletes the cookie with the same attributes.
+		out := c.WithCookie(ck).Delete("/api/session").Expect(204).Cookie(session.CookieName)
+		if out == nil || out.Secure != tc.secure || out.MaxAge >= 0 {
+			t.Errorf("X-Forwarded-Proto %q: sign-out cookie = %+v", tc.proto, out)
+		}
+	}
+	// A plain-HTTP session works.
+	signedIn, _ := signIn(t, srv, testkit.OwnerPassword)
+	signedIn.Get("/api/whoami").Expect(200)
+}
+
+// AUTH-17, RED-02: refusals of the login and password routes never echo the
+// password sent, whether the body is malformed, of the wrong type, or the
+// password too short.
+func TestLoginRefusalsNeverEchoThePassword(t *testing.T) {
+	srv := testkit.Start(t)
+	const secret = "hunter2-password"
+	check := func(what string, r *testkit.Response, status int) {
+		t.Helper()
+		r.Expect(status)
+		if e := r.Err(); e.Hint == "" {
+			t.Errorf("%s: no hint: %+v", what, e)
+		}
+		if strings.Contains(r.Text(), "hunter2") || strings.Contains(r.Text(), "abc1234") {
+			t.Errorf("%s: the password is echoed: %s", what, r.Body)
+		}
+	}
+	// Before a password exists, and after.
+	check("short password", srv.Admin.Put("/api/owner-password", map[string]any{"password": "abc1234"}), 400)
+	srv.Admin.Put("/api/owner-password", map[string]any{"password": testkit.OwnerPassword}).Expect(201)
+	check("short password, again", srv.Admin.Put("/api/owner-password", map[string]any{"password": "abc1234"}), 400)
+
+	bodies := []string{
+		`{"password": 5, "x": "` + secret + `"}`,
+		`{"password": "` + secret,
+		`{"password": "` + secret + `", "password2": "` + secret + `"}`,
+		`{"password": ["` + secret + `"]}`,
+		`{"password": {"value": "` + secret + `"}}`,
+		`{"password": ` + secret + `}`,
+		`"` + secret + `"`,
+	}
+	for _, b := range bodies {
+		check("sign-in "+b, srv.Anon.Post("/api/session", b), 400)
+		check("set "+b, srv.Admin.Put("/api/owner-password", b), 400)
+	}
+	check("wrong password", srv.Anon.Post("/api/session", map[string]any{"password": secret}), 401)
+	owner := srv.OwnerSession()
+	check("wrong current_password", owner.Put("/api/owner-password", map[string]any{"password": "a new password", "current_password": secret}), 403)
+	for _, line := range testkit.Lines(srv.Console()) {
+		if strings.Contains(line, "hunter2") {
+			t.Fatalf("the password reached the console: %s", line)
+		}
+	}
 }
 
 func TestAnotherSiteCannotChangeIrohaWithTheOwnersCookie(t *testing.T) {

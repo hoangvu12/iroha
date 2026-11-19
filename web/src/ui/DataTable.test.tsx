@@ -151,6 +151,128 @@ test("a row click opens the row, its Open button does too, and its controls and 
   expect(opened).toHaveBeenCalledTimes(2);
 });
 
+// ---- Select mode (UI ticket 25) ----
+
+function SelectableFruits(p: Partial<DataTableProps<Fruit>> & { opened: (name: string) => void; ate?: (name: string) => void }) {
+  const { opened, ate = () => {}, ...rest } = p;
+  return (
+    <Fruits
+      bulk={() => <Button>Eat</Button>}
+      onRowClick={(f) => opened(f.name)}
+      rowActions={(f) => (
+        <RowMenu name={f.name}>
+          <MenuItem onSelect={() => opened(f.name)}>Open</MenuItem>
+          <MenuItem onSelect={() => ate(f.name)}>Eat</MenuItem>
+        </RowMenu>
+      )}
+      {...rest}
+    />
+  );
+}
+const checked = (name: string) => screen.getByRole("checkbox", { name: `Select ${name}` }).getAttribute("aria-checked");
+
+test("select mode: once a row is selected, a click anywhere on a row toggles it instead of opening it", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  await user.click(screen.getByRole("checkbox", { name: "Select apple" }));
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+
+  await user.click(within(bodyRows()[1]).getByText("yellow"));
+  expect(checked("banana")).toBe("true");
+  expect(screen.getByRole("group", { name: "2 selected" })).toBeTruthy();
+  await user.click(within(bodyRows()[0]).getByText("180"));
+  expect(checked("apple")).toBe("false");
+  expect(opened).not.toHaveBeenCalled();
+
+  // The last one unselected leaves select mode: a click opens again.
+  await user.click(within(bodyRows()[1]).getByText("yellow"));
+  expect(screen.queryByRole("group", { name: /selected/ })).toBeNull();
+  await user.click(within(bodyRows()[2]).getByText("8"));
+  expect(opened).toHaveBeenCalledWith("cherry");
+});
+
+test("select mode: Shift+click on a row selects the range from the last one picked", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} data={many(6)} />);
+  await user.click(screen.getByRole("checkbox", { name: "Select fruit-002" }));
+  await user.keyboard("{Shift>}");
+  await user.click(within(bodyRows()[4]).getByText("4"));
+  await user.keyboard("{/Shift}");
+  expect(screen.getByRole("group", { name: "4 selected" })).toBeTruthy();
+  expect(["fruit-001", "fruit-002", "fruit-003", "fruit-004", "fruit-005", "fruit-006"].map(checked)).toEqual(["false", "true", "true", "true", "true", "false"]);
+  expect(opened).not.toHaveBeenCalled();
+});
+
+test("select mode: the name's Open button and the row menu's Open still open the row", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  await user.click(screen.getByRole("checkbox", { name: "Select apple" }));
+  await user.click(screen.getByRole("button", { name: "Open banana" }));
+  expect(opened).toHaveBeenLastCalledWith("banana");
+  await user.click(screen.getByRole("button", { name: "More for cherry" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Open" }));
+  expect(opened).toHaveBeenLastCalledWith("cherry");
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+  expect(checked("banana")).toBe("false");
+  expect(checked("cherry")).toBe("false");
+});
+
+test("the checkbox's whole cell selects the row, in and out of select mode, and never opens it", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  const cell = screen.getByRole("checkbox", { name: "Select banana" }).closest("td")!;
+  await user.click(cell);
+  expect(checked("banana")).toBe("true");
+  await user.click(cell);
+  expect(checked("banana")).toBe("false");
+  const head = screen.getByRole("checkbox", { name: "Select all rows on this page" }).closest("th")!;
+  await user.click(head);
+  expect(screen.getByRole("group", { name: "3 selected" })).toBeTruthy();
+  expect(opened).not.toHaveBeenCalled();
+});
+
+test("select mode: Space on a row's control toggles the row; Enter on its Open button still opens it", async () => {
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  // Outside select mode Space presses the Open button as usual.
+  screen.getByRole("button", { name: "Open cherry" }).focus();
+  await user.keyboard(" ");
+  expect(opened).toHaveBeenLastCalledWith("cherry");
+
+  await user.click(screen.getByRole("checkbox", { name: "Select apple" }));
+  screen.getByRole("button", { name: "Open banana" }).focus();
+  await user.keyboard(" ");
+  expect(checked("banana")).toBe("true");
+  expect(opened).toHaveBeenCalledTimes(1);
+  await user.keyboard(" ");
+  expect(checked("banana")).toBe("false");
+  await user.keyboard("{Enter}");
+  expect(opened).toHaveBeenLastCalledWith("banana");
+});
+
+test("an agent in select mode selects rows by their boxes and still opens one by its name", async () => {
+  const opened = vi.fn();
+  render(<SelectableFruits opened={opened} />);
+  const run = await agent.act({
+    steps: [
+      { ref: "Select apple", action: "toggle" },
+      { ref: "Select cherry", action: "toggle" },
+    ],
+  });
+  expect(run.ok, run.error?.message).toBe(true);
+  const labels = agent.snapshot().filter((e) => !e.offPage).map((e) => e.label);
+  for (const l of ["Clear selection", "Select banana", "Open banana", "More for banana"]) expect(labels, `${l} is missing`).toContain(l);
+  const open = await agent.act({ steps: [{ ref: "Open banana", action: "press" }] });
+  expect(open.ok, open.error?.message).toBe(true);
+  expect(opened).toHaveBeenCalledWith("banana");
+  expect(screen.getByRole("group", { name: "2 selected" })).toBeTruthy();
+});
+
 test("pages of 25: numbered pages and Next move through them; the page size picked is remembered for this table", async () => {
   const user = userEvent.setup();
   const { unmount } = render(<Fruits data={many(60)} footer={(c) => `${c.from}–${c.to} of ${c.shown}`} />);

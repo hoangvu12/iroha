@@ -30,7 +30,7 @@ import { Mono, StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState, NoResults } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notify, notifyChange } from "@/ui/toast";
@@ -220,9 +220,7 @@ export function KeysTab({
           Disable
         </Button>
         <Menu>
-          <MenuTrigger asChild>
-            <IconButton icon={MoreHorizontal} label="More actions for the selected keys" bordered />
-          </MenuTrigger>
+          <MenuIconTrigger icon={MoreHorizontal} label="More actions for the selected keys" bordered />
           <MenuContent align="start">
             <MenuItem icon={CircleCheck} onSelect={() => void bulk("enable", names, "enabled")}>
               Enable
@@ -281,13 +279,13 @@ export function KeysTab({
           onChange={(e) => setParam("q", e.target.value)}
         />
         {phone ? (
-          <Select aria-label="Show keys" value={filter} onChange={(e) => setParam("state", e.target.value === "all" ? undefined : e.target.value)} className="w-28">
-            {(Object.keys(filterLabel) as StateFilter[]).map((f) => (
-              <option key={f} value={f}>
-                {f === "all" ? "All" : filterLabel[f]}
-              </option>
-            ))}
-          </Select>
+          <Select<StateFilter>
+            aria-label="Show keys"
+            value={filter}
+            onValueChange={(v) => setParam("state", v === "all" ? undefined : v)}
+            className="w-28"
+            items={(Object.keys(filterLabel) as StateFilter[]).map((f) => ({ value: f, label: f === "all" ? "All" : filterLabel[f] }))}
+          />
         ) : (
           <Segmented<StateFilter>
             label="Show keys"
@@ -588,9 +586,7 @@ type KeyActions = {
 function KeyMenu({ k, actions, multipleEndpoints }: { k: UpstreamKey; actions: KeyActions; multipleEndpoints: boolean }) {
   return (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
       <MenuContent>
         <MenuItem icon={Play} onSelect={() => actions.test(k)}>
           Test

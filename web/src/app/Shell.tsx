@@ -149,20 +149,14 @@ function OwnerRow({ health }: { health: HealthState }) {
   return (
     <div className="flex items-center gap-1">
       <Menu>
-        <MenuTrigger asChild>
-          <button
-            type="button"
-            className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-left text-[14.5px] text-fg-muted hover:bg-muted/60 hover:text-fg"
-          >
-            <Avatar size={22} health={health} />
-            <span className="truncate">Owner</span>
-          </button>
+        <MenuTrigger className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-left text-[14.5px] text-fg-muted hover:bg-muted/60 hover:text-fg data-open:bg-muted/60 data-open:text-fg">
+          <Avatar size={22} health={health} />
+          <span className="truncate">Owner</span>
         </MenuTrigger>
         <MenuContent align="start" side="top">
           <MenuLabel>{healthLabel(health)}</MenuLabel>
           <MenuSeparator />
-          <MenuLabel>Theme</MenuLabel>
-          <MenuRadioGroup value={pref} onValueChange={(v) => setPref(v as ThemePref)}>
+          <MenuRadioGroup label="Theme" value={pref} onValueChange={(v) => setPref(v as ThemePref)}>
             <MenuRadioItem value="system">
               <Monitor size={15} className="text-fg-muted" /> System
             </MenuRadioItem>

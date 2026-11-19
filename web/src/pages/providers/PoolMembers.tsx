@@ -4,11 +4,11 @@ import { ArrowDown, ArrowUp, ExternalLink, GripVertical, Layers, MoreHorizontal,
 import { seg } from "@/api/client";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button, IconButton } from "@/ui/Button";
+import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notify, notifyChange } from "@/ui/toast";
@@ -74,9 +74,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
 
   const menu = (m: Member, i: number) => (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for member ${i + 1}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for member ${i + 1}`} size="sm" />
       <MenuContent>
         <MenuItem icon={ArrowUp} disabled={i === 0} onSelect={() => move(i, i - 1)}>
           Move up
@@ -318,15 +316,7 @@ export function AddMemberDialog({ pool, open, onOpenChange }: { pool: Pool; open
         }}
       >
         <Field label="Provider">
-          {(p) => (
-            <Select {...p} value={provider} onChange={(e) => setProvider(e.target.value)}>
-              {choices.map((c) => (
-                <option key={c.id} value={c.handle}>
-                  {c.handle}
-                </option>
-              ))}
-            </Select>
-          )}
+          {() => <Select value={provider} onValueChange={setProvider} items={choices.map((c) => ({ value: c.handle, label: c.handle }))} />}
         </Field>
         <Field
           label="Model"

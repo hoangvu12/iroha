@@ -124,13 +124,13 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
         <span className={cn("font-medium", preview.isError ? "text-danger-text" : "text-success")}>{preview.isError ? "Stale" : "Live"}</span>
         <span className="text-fg-muted">Where a request would go right now</span>
       </span>
-      <Select aria-label="The Caller's Shape" value={shape} onChange={(e) => setShape(e.target.value as Shape)} className="w-48">
-        {SHAPES.map((s) => (
-          <option key={s.value} value={s.value}>
-            As {s.label}
-          </option>
-        ))}
-      </Select>
+      <Select<Shape>
+        aria-label="The Caller's Shape"
+        value={shape}
+        onValueChange={setShape}
+        className="w-48"
+        items={SHAPES.map((s) => ({ value: s.value, label: `As ${s.label}` }))}
+      />
     </div>
   );
 

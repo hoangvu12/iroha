@@ -51,11 +51,9 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
     <div className="flex h-full min-h-0 flex-col bg-subtle">
       <header className="flex h-14 shrink-0 items-center gap-1 border-b border-border px-3">
         <Menu>
-          <MenuTrigger asChild>
-            <button type="button" className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-left hover:bg-muted" aria-label={`${chat.title}. Earlier chats`}>
-              <h2 className="truncate text-[15px] font-semibold">{chat.title}</h2>
-              <ChevronDown size={16} className="shrink-0 text-fg-muted" />
-            </button>
+          <MenuTrigger className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-left hover:bg-muted data-open:bg-muted" aria-label={`${chat.title}. Earlier chats`}>
+            <h2 className="truncate text-[15px] font-semibold">{chat.title}</h2>
+            <ChevronDown size={16} aria-hidden className="shrink-0 text-fg-muted" />
           </MenuTrigger>
           <MenuContent align="start" className="max-h-[60dvh] w-[min(340px,calc(100vw-32px))] overflow-y-auto">
             <MenuLabel>Earlier chats</MenuLabel>

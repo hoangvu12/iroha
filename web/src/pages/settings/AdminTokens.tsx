@@ -8,7 +8,7 @@ import { cn } from "@/ui/cn";
 import { Mono } from "@/ui/bits";
 import { Dialog, TypeToConfirmDialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notifyChange } from "@/ui/toast";
@@ -79,9 +79,7 @@ function LastUsed({ t }: { t: AdminToken }) {
 function TokenMenu({ t, onRevoke }: { t: AdminToken; onRevoke: (t: AdminToken) => void }) {
   return (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for ${t.name}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${t.name}`} size="sm" />
       <MenuContent>
         <MenuItem icon={Copy} onSelect={() => void copyText(t.secret, "Admin Token")}>
           Copy token

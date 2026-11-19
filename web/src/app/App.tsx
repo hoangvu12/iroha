@@ -6,7 +6,7 @@ import { Toaster } from "@/ui/toast";
 import { AuthGate } from "./AuthGate";
 import { ChatPanelProvider } from "./chat-panel";
 import { Shell } from "./Shell";
-import { ThemeProvider, useTheme } from "./theme";
+import { ThemeProvider } from "./theme";
 
 // One line per page. Each page folder under src/pages owns everything below
 // its path ("providers/*" lets ticket 22 add /providers/:handle/keys inside
@@ -29,11 +29,6 @@ const queryClient = new QueryClient({
     },
   },
 });
-
-function ThemedToaster() {
-  const { resolved } = useTheme();
-  return <Toaster theme={resolved} />;
-}
 
 export function App() {
   return (
@@ -60,7 +55,7 @@ export function App() {
             </ChatPanelProvider>
           </AuthGate>
         </BrowserRouter>
-        <ThemedToaster />
+        <Toaster />
       </QueryClientProvider>
     </ThemeProvider>
   );

@@ -6,7 +6,7 @@ import { Button, IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState, NoResults } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notify, notifyChange } from "@/ui/toast";
@@ -63,9 +63,7 @@ export function ModelsTab({ handle }: { handle: string }) {
 
   const menu = (m: Model) => (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for ${m.model}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${m.model}`} size="sm" />
       <MenuContent>
         <MenuItem icon={SlidersHorizontal} onSelect={() => setEditing(m)}>
           Details…
@@ -154,9 +152,7 @@ export function ModelsTab({ handle }: { handle: string }) {
           Add model
         </Button>
         <Menu>
-          <MenuTrigger asChild>
-            <IconButton icon={MoreHorizontal} label="More model list actions" bordered />
-          </MenuTrigger>
+          <MenuIconTrigger icon={MoreHorizontal} label="More model list actions" bordered />
           <MenuContent>
             <MenuItem icon={RotateCcw} danger onSelect={() => setResetting(true)}>
               Forget discovered models…
@@ -429,22 +425,10 @@ function ModelDialog({ handle, model, onClose }: { handle: string; model?: Model
           {(p) => <Input {...p} inputMode="numeric" placeholder={shown("max_output_tokens") ? String(shown("max_output_tokens")) : "tokens"} value={f.max_output_tokens} onChange={(e) => setF((x) => ({ ...x, max_output_tokens: e.target.value }))} />}
         </Field>
         <Field label="Reasons before answering" hint={model.metadata.reasoning !== undefined && !f.reasoning ? `Now ${model.metadata.reasoning ? "yes" : "no"}` : undefined}>
-          {(p) => (
-            <Select {...p} value={f.reasoning} onChange={(e) => setF((x) => ({ ...x, reasoning: e.target.value }))}>
-              <option value="">Not set</option>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </Select>
-          )}
+          {() => <Select value={f.reasoning} onValueChange={(v) => setF((x) => ({ ...x, reasoning: v }))} items={[{ value: "", label: "Not set" }, { value: "yes", label: "Yes" }, { value: "no", label: "No" }]} />}
         </Field>
         <Field label="Chat" hint="Embedding, speech and image models don't chat.">
-          {(p) => (
-            <Select {...p} value={f.chat} onChange={(e) => setF((x) => ({ ...x, chat: e.target.value }))}>
-              <option value="">Not set</option>
-              <option value="ok">Chats</option>
-              <option value="unsupported">Doesn't chat</option>
-            </Select>
-          )}
+          {() => <Select value={f.chat} onValueChange={(v) => setF((x) => ({ ...x, chat: v }))} items={[{ value: "", label: "Not set" }, { value: "ok", label: "Chats" }, { value: "unsupported", label: "Doesn't chat" }]} />}
         </Field>
       </div>
       {model.model_gaps.length > 0 && (

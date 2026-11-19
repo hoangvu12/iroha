@@ -1,7 +1,6 @@
-import type { ReactNode, SelectHTMLAttributes } from "react";
-import { forwardRef, useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { Check, ChevronDown, Minus } from "lucide-react";
 import { seg } from "@/api/client";
 import type { Tone } from "@/ui/bits";
 import { StatusDot } from "@/ui/bits";
@@ -11,126 +10,12 @@ import type { KeyState, PreviewSkip } from "./api";
 
 export { PoolTile, ProviderTile } from "@/ui/LogoTile";
 
-// Small controls of the Providers page: a switch, a checkbox, a segmented
-// filter, a native select, and the Key State label.
-
-export function Switch({
-  checked,
-  onChange,
-  label,
-  disabled,
-}: {
-  checked: boolean;
-  onChange: (on: boolean) => void;
-  label: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-      className={cn(
-        "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-        checked ? "bg-primary" : "bg-border-strong",
-      )}
-    >
-      <span
-        className={cn(
-          "inline-block size-[18px] rounded-full bg-bg shadow-sm transition-transform",
-          checked ? "translate-x-[19px]" : "translate-x-[3px]",
-        )}
-      />
-    </button>
-  );
-}
-
-export function Checkbox({
-  checked,
-  onChange,
-  label,
-  className,
-}: {
-  checked: boolean | "mixed";
-  onChange: (on: boolean) => void;
-  label: string;
-  className?: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(checked !== true);
-      }}
-      className={cn(
-        "inline-flex size-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors",
-        checked ? "border-primary bg-primary text-primary-fg" : "border-border-strong bg-bg hover:border-fg-muted",
-        className,
-      )}
-    >
-      {checked === "mixed" ? <Minus size={13} strokeWidth={3} /> : checked ? <Check size={13} strokeWidth={3} /> : null}
-    </button>
-  );
-}
-
-/** "All | With Model Gaps": a filter as a segmented control. */
-export function Segmented<T extends string>({
-  value,
-  onChange,
-  items,
-  label,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  items: { value: T; label: ReactNode }[];
-  label: string;
-}) {
-  return (
-    <div role="radiogroup" aria-label={label} className="inline-flex h-9 shrink-0 rounded-lg bg-muted p-1">
-      {items.map((it) => (
-        <button
-          key={it.value}
-          type="button"
-          role="radio"
-          aria-checked={value === it.value}
-          onClick={() => onChange(it.value)}
-          className={cn(
-            "flex items-center whitespace-nowrap rounded-md px-3 text-[14px] transition-colors",
-            value === it.value ? "bg-bg font-medium text-fg shadow-sm" : "text-fg-muted hover:text-fg",
-          )}
-        >
-          {it.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(function Select({ className, children, ...rest }, ref) {
-  return (
-    <div className={cn("relative", className)}>
-      <select
-        ref={ref}
-        className="h-9 w-full appearance-none rounded-lg border border-border-strong bg-bg pl-3 pr-8 text-base text-fg outline-none focus:border-info focus:ring-2 focus:ring-info/20 md:text-sm"
-        {...rest}
-      >
-        {children}
-      </select>
-      <ChevronDown size={15} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-    </div>
-  );
-});
+// Small controls of the Providers page live in src/ui; the Key State label
+// and settings cards are here.
+export { Checkbox } from "@/ui/Checkbox";
+export { Segmented } from "@/ui/Segmented";
+export { Select } from "@/ui/Select";
+export { Switch } from "@/ui/Switch";
 
 /** Seconds left until a time, ticking every second. */
 export function useSecondsLeft(until?: string): number | undefined {

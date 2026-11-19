@@ -8,6 +8,7 @@ import { useIsPhone } from "@/lib/media";
 import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { ErrorState } from "@/ui/States";
+import { popupOpen } from "@/ui/popup";
 import { notify } from "@/ui/toast";
 import type { RequestRecord } from "./api";
 import { useCopy, useRequest } from "./api";
@@ -24,7 +25,7 @@ type Tab = "details" | "attempts" | "captured";
 function busyTarget(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
   if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return true;
-  return !!document.querySelector('[role="dialog"][aria-modal="true"], [role="menu"]');
+  return popupOpen();
 }
 
 /**

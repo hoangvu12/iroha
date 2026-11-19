@@ -3,10 +3,10 @@ import { useState } from "react";
 import { Ellipsis, KeyRound, Plus, Trash2 } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
 import { ApiError } from "@/api/client";
-import { Button, IconButton } from "@/ui/Button";
+import { Button } from "@/ui/Button";
 import { ConfirmDialog, TypeToConfirmDialog } from "@/ui/Dialog";
 import { LogoTile } from "@/ui/LogoTile";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { Status } from "@/ui/bits";
 import { EmptyState, ErrorState, NoResults } from "@/ui/States";
 import { TBody, TD, TH, THead, TR, Table, TableSkeleton } from "@/ui/Table";
@@ -155,9 +155,7 @@ export default function StatesPage() {
                   </TD>
                   <TD align="right">
                     <Menu>
-                      <MenuTrigger asChild>
-                        <IconButton icon={Ellipsis} label={`Actions for ${n}`} size="sm" />
-                      </MenuTrigger>
+                      <MenuIconTrigger icon={Ellipsis} label={`Actions for ${n}`} size="sm" />
                       <MenuContent>
                         <MenuItem>Test</MenuItem>
                         <MenuItem>Disable</MenuItem>

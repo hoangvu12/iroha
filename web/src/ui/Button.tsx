@@ -2,6 +2,7 @@ import type { ButtonHTMLAttributes, ComponentType, MouseEvent, ReactNode } from 
 import { forwardRef } from "react";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { cn } from "./cn";
+import { Tip } from "./Tooltip";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md" | "lg";
@@ -69,27 +70,32 @@ export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   bordered?: boolean;
 };
 
+export function iconButtonClass(size: "sm" | "md" = "md", bordered?: boolean, className?: string) {
+  return cn(
+    "inline-flex shrink-0 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-muted hover:text-fg",
+    "disabled:opacity-50 data-disabled:opacity-50 data-open:bg-muted data-open:text-fg",
+    size === "sm" ? "size-7" : "size-9",
+    bordered && "border border-border-strong text-fg",
+    className,
+  );
+}
+
+// The label is the button's name and its tooltip.
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
   { icon: Icon, label, size = "md", bordered, className, type = "button", onClick, ...rest },
   ref,
 ) {
   return (
-    <SdkButton
-      ref={ref}
-      type={type}
-      aria-label={label}
-      title={label}
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-muted hover:text-fg",
-        "data-disabled:opacity-50",
-        size === "sm" ? "size-7" : "size-9",
-        bordered && "border border-border-strong text-fg",
-        className,
-      )}
-      onClick={onClick && ((e) => onClick(e as MouseEvent<HTMLButtonElement>))}
-      {...rest}
-    >
-      <Icon size={size === "sm" ? 15 : 17} />
-    </SdkButton>
+    <Tip label={label} type="label">
+      <SdkButton
+        ref={ref}
+        type={type}
+        className={iconButtonClass(size, bordered, className)}
+        onClick={onClick && ((e) => onClick(e as MouseEvent<HTMLButtonElement>))}
+        {...rest}
+      >
+        <Icon size={size === "sm" ? 15 : 17} aria-hidden />
+      </SdkButton>
+    </Tip>
   );
 });

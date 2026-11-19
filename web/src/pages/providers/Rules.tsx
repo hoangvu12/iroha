@@ -3,11 +3,11 @@ import { MoreHorizontal, Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-r
 import { api, isApiError, seg } from "@/api/client";
 import { formatNumber } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button, IconButton } from "@/ui/Button";
+import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notify, notifyChange } from "@/ui/toast";
@@ -35,9 +35,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
 
   const menu = (r: Rule) => (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for ${r.name}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${r.name}`} size="sm" />
       <MenuContent>
         <MenuItem icon={Pencil} onSelect={() => setEditing(r)}>
           {r.source === "builtin" ? "Change (as your rule)…" : "Edit…"}
@@ -281,15 +279,7 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
         </Field>
         <div className="grid gap-4 md:grid-cols-[1fr_160px]">
           <Field label="Then" hint={outcome?.hint}>
-            {(p) => (
-              <Select {...p} value={f.outcome} onChange={set("outcome")}>
-                {OUTCOMES.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            )}
+            {() => <Select value={f.outcome} onValueChange={(v) => set("outcome")({ target: { value: v } })} items={OUTCOMES} />}
           </Field>
           {f.outcome.startsWith("cooling") && (
             <Field label="Cool for" hint="Seconds, when the reply names no reset time.">

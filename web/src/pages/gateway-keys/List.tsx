@@ -9,7 +9,7 @@ import { copyText, shortDate, shortSecret } from "@/pages/settings/format";
 import { Button, IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Mono } from "@/ui/bits";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { type GatewayKey, useGatewayKeys } from "./api";
@@ -116,9 +116,7 @@ function KeyMenu({ k, onRevoke, onDelete }: { k: GatewayKey } & Actions) {
   const chat = useChatPanel();
   return (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${k.name}`} size="sm" />
       <MenuContent>
         <MenuItem icon={Settings2} onSelect={() => navigate(`/gateway-keys/${encodeURIComponent(k.id)}`)}>
           Open settings

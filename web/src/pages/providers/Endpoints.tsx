@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { MoreHorizontal, Pencil, Plug, Trash2 } from "lucide-react";
 import { useIsPhone } from "@/lib/media";
 import { copyText } from "@/pages/settings/format";
-import { Button, IconButton } from "@/ui/Button";
+import { Button } from "@/ui/Button";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notifyChange } from "@/ui/toast";
@@ -42,9 +42,7 @@ export function EndpointsTab({
 
   const menu = (e: Endpoint) => (
     <Menu>
-      <MenuTrigger asChild>
-        <IconButton icon={MoreHorizontal} label={`More for ${e.name}`} size="sm" />
-      </MenuTrigger>
+      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${e.name}`} size="sm" />
       <MenuContent>
         <MenuItem icon={Pencil} onSelect={() => setEditing(e)}>
           Edit…
@@ -259,28 +257,12 @@ function EndpointDialog({
             {(p) => <Input {...p} mono spellCheck={false} placeholder="intl" value={f.name} onChange={set("name")} />}
           </Field>
           <Field label="Shape">
-            {(p) => (
-              <Select {...p} value={f.shape} onChange={set("shape")}>
-                {SHAPES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-            )}
+            {() => <Select value={f.shape} onValueChange={(v) => set("shape")({ target: { value: v } })} items={SHAPES} />}
           </Field>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Key sent as">
-            {(p) => (
-              <Select {...p} value={f.auth_style} onChange={set("auth_style")}>
-                {AUTH.map((a) => (
-                  <option key={a.value} value={a.value}>
-                    {a.label}
-                  </option>
-                ))}
-              </Select>
-            )}
+            {() => <Select value={f.auth_style} onValueChange={(v) => set("auth_style")({ target: { value: v } })} items={AUTH} />}
           </Field>
           {(f.auth_style === "header" || f.auth_style === "query") && (
             <Field label={f.auth_style === "header" ? "Header name" : "Parameter name"}>

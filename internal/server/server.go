@@ -23,6 +23,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/config"
+	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/requests"
@@ -63,6 +64,7 @@ type Server struct {
 	audit   *audit.Trail
 	jobs    *jobs.Runner
 	httpc   *http.Client
+	gw      *gateway.Gateway
 	started time.Time
 
 	migrations store.MigrationResult

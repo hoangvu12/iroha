@@ -12,6 +12,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/jobs"
+	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
@@ -31,12 +32,13 @@ func (s *Server) routes() []api.Route {
 		audit.Routes(s.audit),
 		admintokens.Routes(s.audit, s.db),
 		session.Routes(s.owner, s.audit),
-		providers.Routes(s.audit, s.db),
+		providers.Routes(s.audit, s.db, s.log),
 		gatewaykeys.Routes(s.audit, s.db),
 		requests.Routes(s.db),
 		settings.Routes(s.audit, s.db),
 		jobs.Routes(s.jobs),
-		gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db)}).Routes(),
+		s.gateway().Routes(),
+		s.gateway().AdminRoutes(),
 	)
 }
 
@@ -84,4 +86,13 @@ func (s *Server) coreRoutes() []api.Route {
 			},
 		},
 	}
+}
+
+// gateway builds the Gateway once; its inference and admin routes share it.
+func (s *Server) gateway() *gateway.Gateway {
+	if s.gw == nil {
+		s.gw = gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db),
+			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log)})
+	}
+	return s.gw
 }

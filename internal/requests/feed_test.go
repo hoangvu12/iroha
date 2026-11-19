@@ -79,8 +79,8 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 	slow(t, srv, up, alice, "gpt-x", 3*time.Second)
 	slow(t, srv, up, alice, "gpt-y", 2*time.Second)
 	slow(t, srv, up, bob, "gpt-x", 4*time.Second)
-	up.Enqueue(up.Error(500, "boom"))
-	bob.Post(chatPath, `{"model":"gpt-x","messages":[]}`).Expect(500)
+	up.Enqueue(up.Error(400, "bad messages"))
+	bob.Post(chatPath, `{"model":"gpt-x","messages":[]}`).Expect(400)
 
 	s := statsOf(t, srv, "")
 	if s.Requests != 5 || s.Succeeded != 4 || s.Failed != 1 || s.InProgress != 0 || s.Retried != 0 {
@@ -106,7 +106,7 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 		{"caller=bob", 2, 1, 4000},
 		{"status=failed", 1, 0, 0},
 		{"status=2xx", 4, 4, 2500},
-		{"status=5xx&status=200", 5, 4, 2500},
+		{"status=4xx&status=200", 5, 4, 2500},
 		{"q=gpt-y", 1, 1, 2000},
 		{"q=BOB", 2, 1, 4000},
 		{"provider=acme&since=1h", 5, 4, 2500},

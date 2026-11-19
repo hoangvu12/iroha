@@ -7,8 +7,8 @@
 //     passthrough relay of the answer, buffered or streamed).
 //  4. Recording: requests.Recorder (Request and Attempts) and log events.
 //
-// Ticket 04 makes one Attempt and passes the upstream answer through. Ticket
-// 05 wraps the Attempt in the budget loop and lets Failure Rules decide
+// Attempts run inside the Request budget (budget.go): failed Attempts are
+// classified by the Failure Rules, which change Key States and decide
 // whether to try the next candidate.
 package gateway
 
@@ -17,16 +17,21 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
+	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
+	"github.com/hoangvu12/iroha/internal/rules"
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
@@ -44,6 +49,11 @@ type Options struct {
 	Providers  *providers.Store
 	Keys       *gatewaykeys.Store
 	Recorder   *requests.Recorder
+	KeyStates  *keystate.Store
+	// Rules gives the Failure Rules in force for the next Attempt; nil
+	// means the built-in rules. Ticket 06 passes the live set with the
+	// Owner's rules merged in.
+	Rules func() *rules.Set
 }
 
 // Gateway serves inference.
@@ -54,6 +64,8 @@ type Gateway struct {
 	providers *providers.Store
 	keys      *gatewaykeys.Store
 	rec       *requests.Recorder
+	states    *keystate.Store
+	rules     func() *rules.Set
 	rotation  *planner.Counter
 }
 
@@ -62,7 +74,12 @@ type Gateway struct {
 func New(o Options) *Gateway {
 	hc := *o.HTTPClient
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Gateway{clock: o.Clock, log: o.Log, http: &hc, providers: o.Providers, keys: o.Keys, rec: o.Recorder, rotation: planner.NewCounter()}
+	rs := o.Rules
+	if rs == nil {
+		rs = func() *rules.Set { return rules.Default }
+	}
+	return &Gateway{clock: o.Clock, log: o.Log, http: &hc, providers: o.Providers, keys: o.Keys, rec: o.Recorder,
+		states: o.KeyStates, rules: rs, rotation: planner.NewCounter()}
 }
 
 // ChatCompletionRequest documents the body of the Chat Completions routes.
@@ -114,12 +131,23 @@ func (g *Gateway) serveProviderChat(w http.ResponseWriter, r *http.Request) {
 		x.fail(err)
 		return
 	}
-	plan := planner.Plan(planner.Request{Shape: x.rec.ShapeIn, Model: cr.model}, []planner.Provider{p}, g.rotation)
+	now := g.clock.Now()
+	plan := planner.Plan(planner.Request{Shape: x.rec.ShapeIn, Model: cr.model, Now: now}, []planner.Provider{p}, g.rotation)
 	if len(plan.Candidates) == 0 {
-		x.fail(noCandidate(p.Handle, plan.Empty))
+		e := noCandidate(p.Handle, plan.Empty)
+		if plan.Empty.Code == planner.Cooling {
+			x.w.Header().Set("Retry-After", strconv.Itoa(retryAfter(plan.Empty.Until, now)))
+		}
+		x.fail(e)
 		return
 	}
-	x.attemptChat(1, plan.Candidates[0], body, cr)
+	x.serve(plan.Candidates, body, cr)
+}
+
+// retryAfter is whole seconds from now until t, at least 1.
+func retryAfter(t, now time.Time) int {
+	s := int(math.Ceil(t.Sub(now).Seconds()))
+	return max(s, 1)
 }
 
 // provider resolves the Provider a provider-scoped route names, refusing
@@ -143,10 +171,21 @@ func (x *exchange) provider(caller gatewaykeys.Caller, handle, model string) (pl
 	return rt.Provider, nil
 }
 
+// noCandidate is the error of an empty plan: keys_cooling (servable again
+// at a known time) or no_candidate (nothing can serve it until the Owner
+// changes something).
 func noCandidate(handle string, e *planner.Empty) *api.Error {
+	if e.Code == planner.Cooling {
+		until := e.Until.UTC().Format(time.RFC3339)
+		return api.Errorf(http.StatusServiceUnavailable, "keys_cooling", "Retry after "+until+" (see Retry-After); GET /api/providers/"+handle+"/summary (Admin Token) lists the coolings.",
+			"%s", e.Message).WithDetails(map[string]string{"reason": e.Code, "until": until})
+	}
 	hint := "Ask the Owner to add an Upstream Key to " + handle + " (POST /api/providers/" + handle + "/keys)."
-	if e.Code == planner.NoEndpoint {
+	switch e.Code {
+	case planner.NoEndpoint:
 		hint = "Ask the Owner to add an Endpoint speaking this Shape to " + handle + " (POST /api/providers/" + handle + "/endpoints)."
+	case planner.NoUsableKey:
+		hint = "Ask the Owner to enable a key, test an invalid one, or replace its secret (GET /api/providers/" + handle + "/keys shows each key's state and reason)."
 	}
 	return api.Errorf(http.StatusServiceUnavailable, "no_candidate", hint, "%s", e.Message).WithDetails(map[string]string{"reason": e.Code})
 }

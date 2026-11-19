@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/shape"
@@ -85,5 +86,72 @@ func TestCounterRotatesPerGroup(t *testing.T) {
 	}
 	if c.Next("other") != 0 {
 		t.Fatal("groups share a counter")
+	}
+}
+
+var now = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+func TestKeyStatesExcludeKeys(t *testing.T) {
+	chat := planner.Endpoint{ID: "ep_a", Name: "a", Shape: shape.OpenAIChat}
+	chatB := planner.Endpoint{ID: "ep_b", Name: "b", Shape: shape.OpenAIChat, Renames: map[string]string{"glm": "glm-b"}}
+	soon, later := now.Add(30*time.Second), now.Add(5*time.Minute)
+	k := func(name string, f func(*planner.Key)) planner.Key {
+		key := planner.Key{ID: "uk_" + name, Name: name}
+		f(&key)
+		return key
+	}
+	disabled := k("off", func(k *planner.Key) { k.Disabled = true })
+	invalid := k("bad", func(k *planner.Key) { k.Invalid = true })
+	cooling := k("cool", func(k *planner.Key) { k.CoolingUntil = later })
+	cooled := k("was", func(k *planner.Key) { k.CoolingUntil = now.Add(-time.Second) }) // past cooling: usable
+	modelCool := k("mc", func(k *planner.Key) { k.ModelCooling = map[string]time.Time{"glm": soon} })
+	ok := k("ok", func(*planner.Key) {})
+
+	cases := []struct {
+		name      string
+		eps       []planner.Endpoint
+		keys      []planner.Key
+		want      string
+		skips     string
+		empty     string
+		emptyTill time.Time
+	}{
+		{"usable keys only", []planner.Endpoint{chat}, []planner.Key{disabled, ok, invalid, cooling, cooled},
+			"ok@a:glm was@a:glm", "off:disabled bad:invalid cool:cooling", "", time.Time{}},
+		{"model cooling is per wire model", []planner.Endpoint{chat, chatB}, []planner.Key{modelCool},
+			"mc@b:glm-b", "mc:cooling_model:glm", "", time.Time{}},
+		{"never servable", []planner.Endpoint{chat}, []planner.Key{disabled, invalid},
+			"", "off:disabled bad:invalid", planner.NoUsableKey, time.Time{}},
+		{"cooling until the earliest end", []planner.Endpoint{chat}, []planner.Key{invalid, cooling, modelCool},
+			"", "bad:invalid cool:cooling mc:cooling_model:glm", planner.Cooling, soon},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := []planner.Provider{{ID: "p", Handle: "p", Endpoints: tc.eps, Keys: tc.keys}}
+			r := planner.Plan(planner.Request{Shape: shape.OpenAIChat, Model: "glm", Now: now}, p, planner.Fixed(0))
+			if got := order(r); got != tc.want {
+				t.Fatalf("order = %q, want %q", got, tc.want)
+			}
+			var skips []string
+			for _, s := range r.Skipped {
+				x := s.Key.Name + ":" + s.Reason
+				if s.Model != "" {
+					x += ":" + s.Model
+				}
+				skips = append(skips, x)
+			}
+			if got := strings.Join(skips, " "); got != tc.skips {
+				t.Fatalf("skips = %q, want %q", got, tc.skips)
+			}
+			if tc.empty == "" {
+				if r.Empty != nil {
+					t.Fatalf("unexpected empty %+v", r.Empty)
+				}
+				return
+			}
+			if r.Empty == nil || r.Empty.Code != tc.empty || !r.Empty.Until.Equal(tc.emptyTill) || r.Empty.Message == "" {
+				t.Fatalf("empty = %+v, want %s until %v", r.Empty, tc.empty, tc.emptyTill)
+			}
+		})
 	}
 }

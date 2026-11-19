@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"time"
@@ -22,6 +24,9 @@ type providerSnapshot struct {
 	Enabled   bool      `json:"enabled"`
 	Archived  bool      `json:"archived"`
 	CreatedAt time.Time `json:"created_at"`
+	// Budget overrides; 0 is the default.
+	MaxAttempts      int `json:"max_attempts,omitempty"`
+	FirstByteSeconds int `json:"first_byte_seconds,omitempty"`
 }
 
 // Resource is the Provider resource of the audit machinery.
@@ -32,8 +37,8 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 	Load: func(ctx context.Context, q audit.Querier, id string) (*providerSnapshot, error) {
 		var s providerSnapshot
 		var created int64
-		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at FROM providers WHERE id = ?`, id).
-			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created)
+		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds FROM providers WHERE id = ?`, id).
+			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created, &s.MaxAttempts, &s.FirstByteSeconds)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -63,9 +68,10 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (id) DO UPDATE SET name = excluded.name, enabled = excluded.enabled, archived = excluded.archived`,
-			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt))
+		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET name = excluded.name, enabled = excluded.enabled, archived = excluded.archived,
+			max_attempts = excluded.max_attempts, first_byte_seconds = excluded.first_byte_seconds`,
+			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt), s.MaxAttempts, s.FirstByteSeconds)
 		return err
 	},
 })
@@ -75,6 +81,25 @@ type CreateProvider struct {
 	Handle  string  `json:"handle" doc:"Unique handle: lowercase letters, digits and single hyphens, at most 63. Never changes. Repeating a create with an existing handle updates that Provider."`
 	Name    *string `json:"name,omitempty" doc:"Display name; defaults to the handle for a new Provider."`
 	Enabled *bool   `json:"enabled,omitempty" doc:"Default true for a new Provider."`
+	BudgetOverrides
+}
+
+// BudgetOverrides change a Provider's Request budget.
+type BudgetOverrides struct {
+	MaxAttempts      *int `json:"max_attempts,omitempty" doc:"Attempts per Request at most, 1 to 10; 0 restores the default (3)."`
+	FirstByteSeconds *int `json:"first_byte_seconds,omitempty" doc:"Seconds a Request waits for the first upstream byte across its Attempts, 1 to 95; 0 restores the default (60). Never above the 95 s ceiling, so every Request answers before the 100 s edge cutoff."`
+}
+
+func (b BudgetOverrides) check() error {
+	if b.MaxAttempts != nil && (*b.MaxAttempts < 0 || *b.MaxAttempts > MaxAttemptsLimit) {
+		return api.BadRequest("Use 1 to 10, or 0 for the default of 3.", "max_attempts must be between 0 and %d.", MaxAttemptsLimit)
+	}
+	ceiling := int(FirstByteCeiling / time.Second)
+	if b.FirstByteSeconds != nil && (*b.FirstByteSeconds < 0 || *b.FirstByteSeconds > ceiling) {
+		return api.BadRequest(fmt.Sprintf("Use 1 to %d seconds, or 0 for the default of 60; the edge in front of Iroha cuts Requests at 100 s.", ceiling),
+			"first_byte_seconds must be between 0 and %d.", ceiling)
+	}
+	return nil
 }
 
 // UpdateProvider is the body of PATCH /api/providers/{provider}.
@@ -83,6 +108,7 @@ type UpdateProvider struct {
 	Name     *string `json:"name,omitempty"`
 	Enabled  *bool   `json:"enabled,omitempty"`
 	Archived *bool   `json:"archived,omitempty" doc:"Archive to retire the Provider: Callers are refused and the handle stays reserved."`
+	BudgetOverrides
 }
 
 // ProviderResult is the response of a single Provider change.
@@ -97,14 +123,15 @@ type ProviderList struct {
 }
 
 // Routes returns the Provider, Endpoint and Upstream Key routes.
-func Routes(tr *audit.Trail, db *store.DB) []api.Route {
-	h := handlers{tr: tr, db: db}
-	return slices.Concat(h.providerRoutes(), h.endpointRoutes(), h.keyRoutes())
+func Routes(tr *audit.Trail, db *store.DB, log *slog.Logger) []api.Route {
+	h := handlers{tr: tr, db: db, log: log}
+	return slices.Concat(h.providerRoutes(), []api.Route{h.summaryRoute()}, h.endpointRoutes(), h.keyRoutes())
 }
 
 type handlers struct {
-	tr *audit.Trail
-	db *store.DB
+	tr  *audit.Trail
+	db  *store.DB
+	log *slog.Logger
 }
 
 func (h handlers) providerRoutes() []api.Route {
@@ -168,7 +195,7 @@ func (h handlers) providerRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodPatch, Path: "/api/providers/{provider}", Tag: tag,
-			Summary: "Rename, enable, disable, archive or unarchive a Provider",
+			Summary: "Rename, enable, disable, archive or unarchive a Provider, or change its Request budget",
 			Query:   []api.Param{audit.DryRun},
 			Request: UpdateProvider{}, Response: ProviderResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -237,7 +264,7 @@ func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider
 	var id string
 	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM providers WHERE handle = ?`, in.Handle).Scan(&id)
 	if err == nil {
-		return h.updateProvider(m, id, UpdateProvider{Name: in.Name, Enabled: in.Enabled})
+		return h.updateProvider(m, id, UpdateProvider{Name: in.Name, Enabled: in.Enabled, BudgetOverrides: in.BudgetOverrides})
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Provider{}, err
@@ -252,12 +279,15 @@ func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
+	if err := in.BudgetOverrides.check(); err != nil {
+		return Provider{}, err
+	}
 	id = ids.New("pr")
 	if err := m.Track(Resource, id); err != nil {
 		return Provider{}, err
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO providers (id, handle, name, enabled, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, in.Handle, name, enabled, store.Millis(m.Now)); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO providers (id, handle, name, enabled, created_at, max_attempts, first_byte_seconds) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, in.Handle, name, enabled, store.Millis(m.Now), zeroIfNil(in.MaxAttempts), zeroIfNil(in.FirstByteSeconds)); err != nil {
 		return Provider{}, err
 	}
 	return readProvider(m.Ctx, m.Tx, id)
@@ -281,9 +311,20 @@ func (h handlers) updateProvider(m *audit.Mutation, id string, in UpdateProvider
 			return cur, err
 		}
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE providers SET name = coalesce(?, name), enabled = coalesce(?, enabled), archived = coalesce(?, archived) WHERE id = ?`,
-		in.Name, in.Enabled, in.Archived, id); err != nil {
+	if err := in.BudgetOverrides.check(); err != nil {
+		return cur, err
+	}
+	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE providers SET name = coalesce(?, name), enabled = coalesce(?, enabled), archived = coalesce(?, archived),
+		max_attempts = coalesce(?, max_attempts), first_byte_seconds = coalesce(?, first_byte_seconds) WHERE id = ?`,
+		in.Name, in.Enabled, in.Archived, in.MaxAttempts, in.FirstByteSeconds, id); err != nil {
 		return cur, err
 	}
 	return readProvider(m.Ctx, m.Tx, id)
+}
+
+func zeroIfNil(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

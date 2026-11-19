@@ -3,6 +3,7 @@ package requests
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,7 +26,7 @@ type RequestPage struct {
 
 const requestColumns = `id, started_at, finished_at, state, status, error_code, error_message, caller_kind, gateway_key_id, caller_name,
 	route, shape_in, shape_out, model, stream, provider_id, provider_handle, endpoint_id, endpoint_name, upstream_key_id, upstream_key_name,
-	wire_model, first_byte_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, attempt_count,
+	wire_model, first_byte_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, attempt_count, summary,
 	pool, rev,
 	EXISTS (SELECT 1 FROM captures c WHERE c.request_id = requests.id)`
 
@@ -36,7 +37,7 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var code, msg, shapeIn, shapeOut string
 	err := row.Scan(&r.ID, &started, &finished, &r.State, &r.Status, &code, &msg, &r.Caller.Kind, &r.Caller.GatewayKeyID, &r.Caller.Name,
 		&r.Route, &shapeIn, &shapeOut, &r.Model, &r.Stream, &r.ProviderID, &r.Provider, &r.EndpointID, &r.Endpoint, &r.UpstreamKeyID, &r.UpstreamKey,
-		&r.WireModel, &firstByte, &duration, &in, &out, &cache, &reasoning, &r.AttemptCount,
+		&r.WireModel, &firstByte, &duration, &in, &out, &cache, &reasoning, &r.AttemptCount, &r.Summary,
 		&r.Pool, &r.rev,
 		&r.Captured)
 	if err != nil {
@@ -59,7 +60,8 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 func attempts(ctx context.Context, db *store.DB, id string) ([]Attempt, error) {
 	rows, err := db.QueryContext(ctx, `SELECT seq, started_at, provider_id, provider_handle, endpoint_id, endpoint_name, endpoint_url,
 		upstream_key_id, upstream_key_name, wire_model, shape, status, error, first_byte_ms, duration_ms,
-		input_tokens, output_tokens, cache_read_tokens, reasoning_tokens FROM attempts WHERE request_id = ? ORDER BY seq`, id)
+		input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, rule, outcome, reason, action, failure_headers, failure_body
+		FROM attempts WHERE request_id = ? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -70,10 +72,14 @@ func attempts(ctx context.Context, db *store.DB, id string) ([]Attempt, error) {
 		var started int64
 		var sh string
 		var firstByte, duration, in, outT, cache, reasoning sql.NullInt64
+		var headers string
 		if err := rows.Scan(&a.Seq, &started, &a.ProviderID, &a.Provider, &a.EndpointID, &a.Endpoint, &a.EndpointURL,
 			&a.UpstreamKeyID, &a.UpstreamKey, &a.WireModel, &sh, &a.Status, &a.Error, &firstByte, &duration,
-			&in, &outT, &cache, &reasoning); err != nil {
+			&in, &outT, &cache, &reasoning, &a.Rule, &a.Outcome, &a.Reason, &a.Action, &headers, &a.FailureBody); err != nil {
 			return nil, err
+		}
+		if headers != "" {
+			_ = json.Unmarshal([]byte(headers), &a.FailureHeaders)
 		}
 		a.StartedAt, a.Shape = store.FromMillis(started), shape.Shape(sh)
 		a.FirstByteMs, a.DurationMs = msPtr(firstByte), msPtr(duration)
@@ -136,7 +142,7 @@ func Routes(db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodGet, Path: "/api/requests/{request}", Tag: tag,
-			Summary:  "Read one Request with its Attempts",
+			Summary:  "Read one Request with its Attempts: each one's Failure Rule, outcome, action and the failure body and headers",
 			Response: Request{},
 			Handle: func(call *api.Call) (any, error) {
 				ctx := call.R.Context()

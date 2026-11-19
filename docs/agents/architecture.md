@@ -367,7 +367,7 @@ React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarativ
 |---|---|
 | `app/` | The shell: `App.tsx` (providers and the route table, one line per page), `AuthGate` (setup, login, or the app), `Shell` (sidebar, phone tab bar, chat slot), `nav.ts` (items and shortcuts P, G, R, C), `shortcuts.ts`, `health.ts` (polls `/readyz`), `theme.tsx`, `chat-panel.tsx`, `PageHeader`, `brand.tsx`. |
 | `api/` | `client.ts` (the only `fetch`: JSON, 10 s timeout, `ApiError` with `code`, `hint` and `call`, signed-out detection), `types.ts` (shared shapes: `AuditResult`, `BulkResult`, `AuditEntry`...), `session.ts`, `audit.ts` (`revertEntry`). Add `api/<resource>.ts` for types and hooks other pages also need; otherwise keep them in your page folder. |
-| `ui/` | Shared components, no data fetching: `Button`/`IconButton`/`buttonClass`, `Input`/`PasswordInput`/`SearchInput`/`Field`, `Table` primitives, `Skeleton` (see "UI ticket 02"), `Dialog`/`ConfirmDialog`/`TypeToConfirmDialog`, `Confirm` (`useConfirm`, `ConfirmAction`; see "UI ticket 21"), `Menu`, `Tooltip` (`Tip`), `Switch`, `Checkbox`, `Segmented`, `Select`, `Radio` (`RadioCards`), `Autocomplete`, `Disclosure`, `popup` (`popupClass`, `popupOpen`), `toast` (`Toaster`, `notify`, `notifyChange` with Undo) (see "UI ticket 03"), `CopyButton` (`useCopy`, `copyIcon`), `SaveStatus` (`useSave`, `SaveStatus`, `SaveError`, `toastDone`), `clipboard` (`writeClipboard`) (see "UI ticket 04"), `LogoTile`, `States` (`EmptyState`, `NoResults`, `Chip`, `ErrorState`), `bits` (`StatusDot`, `Status`, `Kbd`, `Mono`), `Tabs`, `ScrollArea`, `Canvas` (see "UI ticket 05"). |
+| `ui/` | Shared components, no data fetching: `Button`/`IconButton`/`buttonClass`, `Input`/`PasswordInput`/`SearchInput`/`Field`, `DataTable` (`columnsFor`, `RowMenu`, `useTablePaging`) and `Pagination` (`Pager`) (see "UI ticket 06"), `Table` primitives (old; until tickets 07–09 move their tables onto `DataTable`), `Skeleton` (see "UI ticket 02"), `Dialog`/`ConfirmDialog`/`TypeToConfirmDialog`, `Confirm` (`useConfirm`, `ConfirmAction`; see "UI ticket 21"), `Menu`, `Tooltip` (`Tip`), `Switch`, `Checkbox`, `Segmented`, `Select`, `Radio` (`RadioCards`), `Autocomplete`, `Disclosure`, `popup` (`popupClass`, `popupOpen`), `toast` (`Toaster`, `notify`, `notifyChange` with Undo) (see "UI ticket 03"), `CopyButton` (`useCopy`, `copyIcon`), `SaveStatus` (`useSave`, `SaveStatus`, `SaveError`, `toastDone`), `clipboard` (`writeClipboard`) (see "UI ticket 04"), `LogoTile`, `States` (`EmptyState`, `NoResults`, `Chip`, `ErrorState`), `bits` (`StatusDot`, `Status`, `Kbd`, `Mono`), `Tabs`, `ScrollArea`, `Canvas` (see "UI ticket 05"). |
 | `sheets/` | The stack of record sheets and `RecordLink` (see "UI ticket 10"). |
 | `lib/` | `format.ts` (numbers, percents, durations, "4 min ago"), `media.ts` (`useIsPhone`). |
 | `pages/<page>/` | One folder per page, owned by its ticket: `providers` (22), `chat` (23), `gateway-keys` (24), `requests` (25), `settings` (28), plus `login`, `states`, `not-found`. Each `index.tsx` default-exports the page, mounted at `/<page>/*`; sub-pages go in a `<Routes>` inside the folder, so parallel tickets never edit the same file. |
@@ -407,7 +407,7 @@ React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarativ
 
 - **UI SDK**: `@ui-sdk/react` and `@ui-sdk/core` at one exact version (`0.1.0-beta.12`, no `^`; upgrading is a ticket of its own). Where to read about it: the note in `AGENTS.md` (`web/node_modules/@ui-sdk/react/docs/llms.txt` first, then only the `docs/components/<part>.md` pages needed; `core.md` by heading with `rendering.md` to build a missing part; the skill, read not installed, at `web/node_modules/@ui-sdk/core/skills/ui-sdk/`). Import each part from its entry (`@ui-sdk/react/button`). No `web.css`: `styles/index.css` declares `@layer ui-sdk;` first, and parts are styled with Tailwind from their `data-slot` and state attributes (`data-disabled:`, `data-pending:`, `aria-[invalid=true]:`).
 - **Button and Input** (`ui/Button.tsx`, `ui/Input.tsx`) are UI SDK's Button, Input, Password Input and Field with the old props and look, so pages did not change. `loading` disables and sets `aria-busy`; an `onClick` returning a Promise makes the button pending by itself. `Field` keeps its `children(props)` form: Input/PasswordInput/SearchInput join the Field by themselves (and drop the repeated `aria-describedby`), and `props` (from `useFieldControl`) wires any other control, like a native `<select>` or `<textarea>`, to the label, hint and error. An error is `FieldError` with `role="alert"`. Only UI SDK parts are visible to agents (`createAgent`): a plain `<button>` or `<input>` is not, so use these.
-- **Pointer cursor** is a base-layer rule in `styles/index.css` (buttons, links, `summary`, `select`, checkboxes, and the roles button, link, tab, menuitem*, option, switch, checkbox, radio; `not-allowed` while `:disabled`, `aria-disabled` or `data-disabled`). Don't put `cursor-default` on clickable items; clickable rows use `TR interactive` (already `cursor-pointer`).
+- **Pointer cursor** is a base-layer rule in `styles/index.css` (buttons, links, `summary`, `select`, checkboxes, and the roles button, link, tab, menuitem*, option, switch, checkbox, radio; `not-allowed` while `:disabled`, `aria-disabled` or `data-disabled`). Don't put `cursor-default` on clickable items; clickable rows use `TR interactive` (already `cursor-pointer`), or `DataTable`'s `onRowClick`.
 - **Page widths** (`app/PageBody.tsx`): `Shell` puts every page except Chat in `<PageBody width="wide">` (centred, at most 1280 px: tables, page headers, tabs). Forms and settings put their content in `<PageBody width="readable">` (at most 768 px, left-aligned under the header): Provider and Pool Settings tabs, the Gateway Key page, Settings → Sign-in, and the Login/Setup form column. The Route view is a fixed overlay, so it has its own wide `PageBody` inside. A new page needs nothing for the wide frame; wrap a form in `readable`. Never hard-code another `max-w-[...]` for a page column.
 - **Web tests**: Vitest + jsdom + Testing Library + user-event (exact pins), `npm --prefix web test` (`vitest run`). Config `web/vitest.config.ts` (merges `vite.config.ts`, so `@/` works); `web/src/test/setup.ts` holds UI SDK's strict mode (`__UI_SDK_STRICT__`: its dev warnings fail tests), the jsdom stubs from the skill's `references/testing.md`, a `matchMedia` stub and `afterEach(cleanup)`. Tests sit next to the code as `*.test.tsx` and are type-checked by the build. Write them first, then the code. Follow the skill's `references/testing.md` (test what you wired: names, values, callbacks, what submits, focus after closing, every dialog button; assert from the real page's markup, not a fixture; don't `checkPattern` UI SDK's own parts) and give every new interface the agent test from `references/agent-ready.md`: one `createAgent()` per file, every `snapshot()` entry named, the controls the ticket names present by label, `act` steps that change them, then assert the DOM or the calls made. Pages that call the API: wrap in a `QueryClientProvider` and `vi.stubGlobal("fetch", vi.fn())` (see `pages/login/LoginPage.test.tsx`). Examples: `ui/Button.test.tsx`, `ui/Input.test.tsx`. Popups, layout, colour and focus moving between fields still need the browser check.
 - **Browser check**: `iroha-v2-notes/v2-ui/check-pages.mjs` (outside the repo) screenshots every page in light, dark, phone and 2560 px and audits each for the pointer cursor, `PageBody` widths and sideways scroll; `zz_uiseed_test.go.txt` next to it seeds Providers, a Pool, Gateway Keys and Requests (copy into `internal/testkit/`, never commit).
@@ -549,3 +549,111 @@ Shared by motion tickets 13–20 (spec story 15), set by an `improve-animations`
 - **Hooks** (`app/chat-panel.tsx`, three contexts): `useChatActions()` (open, close, toggle) for anything that only opens the chat, so the sheet coming and going doesn't re-render a table of Test buttons; `useChatRequest()` for the chat content; `useChatPanel()` (everything, incl. `isOpen`) only where the open state is drawn (the slot, the sidebar button, what sits beside the sheet: `SheetsBesideChat` in Shell, the Request drawer, the Route view). Use `useChatActions` for new Test buttons.
 - **In the panel**: Details and Thinking are UI SDK Collapsibles (collapse recipe, chevron `transition-[rotate]`); Details fetches its Request when the trigger is pointed at or focused, so it opens at full height with nothing re-rendering mid-animation. Thinking folds at once when the answer starts (the stream moved it, `transition-none` until the Owner toggles it). A failure that arrives on screen enters with `animateIn` (list recipe, `shift-sm`); one already in the history is just there. Picker: popup recipe tokens. Tools and starter chips use the `press` utility; Send/Stop copy its scale only (`transition-[scale] duration-release`, `active:not-focus-visible:not-data-disabled:` scale and `duration-press`), since their colour flips on typing and stays instant. Streamed text, auto-scroll, view swaps inside the picker, New chat and earlier chats swap at once.
 - Tests: `app/ChatSheet.test.tsx` (pointer slides from the starting style, C is instant both ways, Close stays mounted and inert until the exit ends, reopen mid-exit turns back, C mid-exit snaps, Full page closes at once, Test buttons don't re-render), `pages/chat/Reply.test.tsx`.
+
+### UI ticket 06: DataTable
+
+Every table is `DataTable` from `@/ui/DataTable` (spec "One data table"). It renders a semantic `<table>` driven by TanStack Table `9.3.1` (`@tanstack/react-table`, exact pin). Its controls are UI SDK parts: Checkbox, Menu, Select, and Pagination through `ui/Pagination.tsx` `Pager`, which is 1-based. The table sits in a `ScrollArea axis="both"` with a sticky header and loads through `Skeleton`. The Keys tab (`pages/providers/Keys.tsx`) is the worked example; copy its shape.
+
+Tickets 07–09 move the other tables onto it. The last of them deletes `ui/Table.tsx` (`Table`/`TR`/`TH`/`TD`).
+
+**Columns** are defined once, at module scope (or `useMemo` when they need props):
+
+```tsx
+const col = columnsFor<UpstreamKey>();
+const columns = col.columns([
+  col.accessor("name", { header: "Name", sortFn: (a, b) => natural(a.original.name, b.original.name), meta: { width: "w-[24%]", opens: true } }),
+  col.display({ id: "key", header: "Key", cell: ({ row }) => <SecretCell k={row.original} /> }),
+  col.accessor((k) => k.state.state, { id: "state", header: "State", filterFn: (row, _id, v) => row.original.state.state === v }),
+]);
+```
+
+- **Sorting:** every accessor column sorts unless `enableSorting: false`; display columns don't.
+  - `sortFn` is a comparator on rows (`a.original`). It can also be a built-in name: `"alphanumeric"`, `"basic"`, `"datetime"` or `"text"`.
+  - Break ties inside it, by name. The first press sorts ascending, and there is no "unsorted" third press.
+  - The header string names the button "Sort by <header>". Give `meta.label` when the header isn't text.
+- **`filterFn`** matches this column's entry in `columnFilters`. It is either `(row, id, value) => boolean` or one of `"includesString"`, `"equals"`, `"arrIncludesSome"`.
+- **`meta`** (`DataColumnMeta`):
+  - `width`: a class on the header cell.
+  - `align: "right"`: numbers, with tabular figures.
+  - `className`: classes on the body cells.
+  - `label`: the column's name when the header isn't text.
+  - `opens`: the cell becomes a button "Open <name>" that calls `onRowClick`, the keyboard's and agents' way to open the row. Put it on the name column of a clickable table, and only around plain text. A cell that is already a `RecordLink` (ticket 10) needs no `opens`: the link is the way in.
+- **One fact per cell.** A cell may hold a `RecordLink`, a `StatusDot` word or a pill.
+
+**Props.** Every table needs:
+- `id`: a stable name. It keys the remembered page size and the skeleton's shape.
+- `label`: names the table, its scroller and "Loading <label>".
+- `columns`, plus `data={query.data}` (`undefined` means loading).
+- `sample`: from `pages/<page>/samples.ts`.
+- `getRowId`: the record's ID, never the index, since selection and expansion key off it.
+- `rowName`: the name every row control carries.
+
+The rest are optional.
+
+- **States in place of the table:**
+  - `error` and `onRetry`: `ErrorState`, while there is no data.
+  - `empty`: `EmptyState` with its one action, when there are no rows and nothing filters. The toolbar hides then.
+  - `filterChips`, `onClearFilters` and `noResultsTitle`: `NoResults` with chips. Write the title in the table's own words, with Glossary capitals ("No keys match", "No Requests match").
+  - `noResults` replaces the whole `NoResults`.
+- **Toolbar, search, filters:** the page owns the controls and their state, in the URL as Keys does (`?q=`, `?state=`). It passes:
+  - `toolbar`: the search box and filters.
+  - `search`, with `searchFn(row, needle)`. The needle arrives lower-cased and trimmed. By default, any text column containing it matches.
+  - `columnFilters`: `[{ id: "state", value: "cooling" }]`.
+
+  A new search, filter or sort goes back to page 1. A page left empty shows the last page.
+
+  A Select in a toolbar is `w-full`, and `cn` has no tailwind-merge, so a width class on it loses. Wrap it in a sized box instead: `<div className="w-28 shrink-0"><Select …/></div>`.
+- **Sorting:** `defaultSorting` lets the table keep the state. `sorting` + `onSortingChange` keep it in the URL: Keys maps `?sort=&dir=` to and from `[{ id, desc }]`. Add `manualSorting` when the server sorts.
+- **Selection and the bulk bar:** `bulk={(sel) => <>…buttons…</>}` turns selection on. That adds:
+  - A checkbox column, with Shift-click for a range.
+  - The header box "Select all rows on this page", which shows mixed when some are selected.
+  - A bar that replaces the toolbar while anything is selected. It is `role="group"` "N selected", and shows your buttons, "Select all N" when the whole page is selected and more rows match, and "Clear selection".
+
+  `sel.ids` holds the selected row IDs on every page, `sel.rows` the selected rows that are loaded, and `sel.clear()` clears it. Show the bar's results in the bar (`useSave` with `SaveStatus`/`SaveError`, ticket 04). Selected rows that leave `data` are dropped. Use `selection` / `onSelectionChange` only if the page must own the selection.
+- **Row actions:** use `rowActions={(r) => <RowMenu name={r.name}>…MenuItems…</RowMenu>}`. It is the last cell, a ⋯ named "More for <name>"; pass `copy={useCopy().state}` for a copy made from the menu (ticket 04).
+  - A `Switch` may sit beside the menu.
+  - "Test in Chat" items call `useChatActions().open(target)` (ticket 22).
+  - Destructive items are `MenuItem danger` and call `confirm.ask`. Use one `useConfirm()` per table, with `{confirm.dialog}` rendered once beside the `DataTable`.
+  - The bulk "Delete…" names the count in the title and the first five names in the body. See Keys `askDelete`, and ticket 21.
+- **Clickable rows:** `onRowClick(row)` opens the record: Keys sets `?key=`; others open a sheet, `useSheets().open(rec.provider(h))` (ticket 10). Clicks on the row's own controls don't open it, so cells need no `stopPropagation`. That covers buttons, links, inputs, checkboxes, switches, menu items, and anything inside a popup or dialog rendered in place.
+- **`rowTone={(r) => … ? "danger" : undefined}`** tints a row red.
+- **Expandable rows** (Audit Entries): `renderExpanded={(r) => <Diff …/>}` adds a chevron column, "Show details of <name>" / "Hide details of <name>" with `aria-expanded`. The details sit in a full-width row underneath. The chevron rotates; the row doesn't animate its height (motion system).
+- **`columnVisibility={{ key: false }}`** hides columns (the Requests `?hide=`).
+- **Phones (< 768 px):** `phoneRow={(r) => <two lines/>}` turns the table into a `ul` named `label`, with one two-line row per record (C31).
+  - With `onRowClick`, each row is a button "Open <name>", and its menu lives in the record it opens. Without it, `rowActions` sits at the end of the row.
+  - With `bulk`, the toolbar gets Select / Done, which shows the checkboxes; a tap then toggles the row.
+  - Without `phoneRow`, phones get the table, scrolling sideways.
+- **`footer={({ shown, total, from, to }) => …}`** is the line left of the pager ("42 keys", "12 of 42 keys").
+- **Loading:**
+  - The skeleton is built in: `id` `table:<id>` (`table:<id>:phone` on phones), label "Loading <label>".
+  - When the page, sort or filter changes the query key, use `placeholderData: keepPreviousData` and pass `dimmed={query.isPlaceholderData}`. The old rows stay, dimmed, with no skeleton.
+- **Scrolling:** the table scrolls inside its own `ScrollArea` so the header sticks. The default limit is `max-h-[calc(100dvh-4rem)]`; change it with `maxHeight`. A long table scrolls within itself before the page does.
+
+**Paging** (`paging`, spec "Pagination"):
+- **`{ mode: "pages" }`** (the default): numbered pages over the loaded rows.
+  - Pages hold 25, 50 or 100 rows (`PAGE_SIZES`; `sizes` overrides).
+  - The size is remembered per table in `localStorage["iroha:table:<id>:page-size"]`. Where storage is refused, it lasts the visit.
+  - The size Select ("Rows per page") and the pager ("Pages of <label>") show once there are more rows than the smallest size.
+- **`{ mode: "server", pagination, onPaginationChange, rowCount }`**: Models in 07, Requests' numbered pages in 09.
+  - `const [pagination, setPagination] = useTablePaging("provider-models")` gives the same remembered size.
+  - Put `pagination` in the query key, with `keepPreviousData` and `dimmed`.
+  - Pass the page's rows as `data` and all matching rows as `rowCount`.
+  - Add `manualFiltering` and still pass `search` / `columnFilters`. The table then shows `NoResults` rather than `empty` for a filtered nothing, and goes back to page 1.
+  - Add `manualSorting` when the server sorts.
+  - `sel.rows` holds only the loaded page; `sel.ids` spans pages.
+- **`{ mode: "infinite", hasMore, loadingMore, onLoadMore, moreLabel? }`**: the Requests feed in 09.
+  - `data` is every loaded row: the `useInfiniteQuery` pages flattened, with live rows put first.
+  - `onLoadMore` runs when the list's end comes within 240 px of view (IntersectionObserver). A "Load more" button (`moreLabel`, for example "Load older") is there too, for the keyboard and agents.
+  - The flash on arriving rows (motion system) is the page's to add.
+- **`{ mode: "none" }`**: every row at once, for short fixed lists such as Endpoints, Rules and Admin Tokens.
+
+**Names agents and tests rely on** (keep them):
+- Sorting and selection: "Sort by <header>"; "Select all rows on this page" / "Unselect all rows on this page"; "Select <name>".
+- The bulk bar: group "N selected", "Select all N", "Clear selection".
+- Rows: "More for <name>", "Open <name>", "Show details of <name>".
+- Paging: "Rows per page" (Select, `setValue "50"`); "Pages of <label>" (Pagination: `setPage`, `next`, `previous`, `first`, `last`); "Load more".
+
+**Tests:**
+- Where they are: `ui/DataTable.test.tsx` (every mode, the keyboard, an agent test) and `pages/providers/Keys.test.tsx` (the page on the table: URL state, bulk calls, confirms, the row menu, an agent refused a delete).
+- What a page on DataTable tests: its own wiring (its columns' sort and filter, URL state, the API calls of bulk and row actions, confirms). Not the table again.
+- In jsdom: body rows are `within(getByRole("table", { name: label })).getAllByRole("row").slice(1)`. The size Select is `combobox "Rows per page"` with options "50 per page". IntersectionObserver exists only if stubbed.

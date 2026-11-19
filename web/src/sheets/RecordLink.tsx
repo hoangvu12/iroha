@@ -20,16 +20,24 @@ const textClass = "min-w-0 truncate underline decoration-border-strong underline
  */
 export const RecordLink = forwardRef<
   HTMLAnchorElement,
-  { record: SheetRecord; children: ReactNode; className?: string; "aria-label"?: string; title?: string }
->(function RecordLink({ record, children, className, ...rest }, ref) {
+  {
+    record: SheetRecord;
+    children: ReactNode;
+    className?: string;
+    "aria-label"?: string;
+    title?: string;
+    /** Search params the link removes: the modal dialog it sits in, when the URL holds it (`["key"]`), so the sheet replaces the dialog and Back brings it back. */
+    drop?: string[];
+  }
+>(function RecordLink({ record, children, className, drop, ...rest }, ref) {
   const sheets = useMaybeSheets();
   const level = useSheetLevel();
   const location = useLocation();
-  const href = sheets ? sheets.hrefFor(record, level) : location.pathname + writeStack(location.search, [record]);
+  const href = sheets ? sheets.hrefFor(record, level, drop) : location.pathname + writeStack(location.search, [record]);
   const onClick = (e: MouseEvent) => {
     if (!sheets || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
-    sheets.open(record, level);
+    sheets.open(record, level, drop);
   };
   return (
     <SdkButton

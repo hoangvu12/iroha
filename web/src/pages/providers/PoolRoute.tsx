@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link } from "react-router";
+import { rec, RecordLink } from "@/sheets/RecordLink";
 import { ArrowUpRight, CircleX, Layers, X } from "lucide-react";
 import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
@@ -90,7 +91,7 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
       chain.push(
         <Card key={`m${m.position}`} selected={is({ kind: "member", position: m.position })} onSelect={() => setSelected({ kind: "member", position: m.position })} label={`Member ${m.position}`}>
           <ProviderTile handle={m.provider} size={36} />
-          <CardText small={`Member ${m.position}`} big={m.provider} />
+          <CardText small={`Member ${m.position}`} big={<ProviderName handle={m.provider} />} />
           <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-[13.5px]", pill[r.tone])}>{r.text}</span>
         </Card>,
       );
@@ -116,7 +117,7 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
           <div key={`o${m.position}`} className="mb-2">
             <Card dashed selected={is({ kind: "member", position: m.position })} onSelect={() => setSelected({ kind: "member", position: m.position })} label={`Member ${m.position}`}>
               <ProviderTile handle={m.provider} size={36} />
-              <CardText small={`Member ${m.position}`} big={m.provider} muted />
+              <CardText small={`Member ${m.position}`} big={<ProviderName handle={m.provider} />} muted />
               <Tag>{m.not_planned === "off" ? "Off" : m.not_planned === "model_not_offered" ? "Not offered" : "Unavailable"}</Tag>
             </Card>
           </div>,
@@ -195,30 +196,43 @@ function Card({
   label: string;
   dashed?: boolean;
 }) {
+  // The whole card is the button that selects it; a record's name on it is a link of its own, above it.
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      aria-label={label}
+    <div
       className={cn(
         // Selection and hover change colour and ring only (duration-hover); a card doesn't scale on press.
-        "flex w-[min(400px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-[box-shadow,border-color] duration-hover ease-[ease]",
+        "relative flex w-[min(400px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-[box-shadow,border-color] duration-hover ease-[ease]",
         dashed && "border-dashed bg-bg/70 shadow-none",
         selected ? "border-info ring-2 ring-info/30" : "border-border hover:border-border-strong",
       )}
     >
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={selected}
+        aria-label={label}
+        className="absolute inset-0 rounded-xl outline-none focus-visible:outline-2 focus-visible:outline-info"
+      />
       {children}
-    </button>
+    </div>
   );
 }
 
-function CardText({ small, big, muted }: { small: string; big: string; muted?: boolean }) {
+function CardText({ small, big, muted }: { small: string; big: ReactNode; muted?: boolean }) {
   return (
     <span className="min-w-0 flex-1">
       <span className="block truncate text-[13px] text-fg-muted">{small}</span>
-      <span className={cn("block truncate text-[16px] font-semibold", muted && "text-fg-muted")}>{big}</span>
+      <span className={cn("flex min-w-0 text-[16px] font-semibold", muted && "text-fg-muted")}>{typeof big === "string" ? <span className="truncate">{big}</span> : big}</span>
     </span>
+  );
+}
+
+/** A member's Provider on its card: a link to its sheet, above the card's button. */
+function ProviderName({ handle }: { handle: string }) {
+  return (
+    <RecordLink record={rec.provider(handle)} className="relative">
+      {handle}
+    </RecordLink>
   );
 }
 
@@ -248,7 +262,7 @@ function Connector({ label }: { label?: string }) {
   );
 }
 
-function Header({ icon, title, subtitle, onClose }: { icon: ReactNode; title: string; subtitle: string; onClose: () => void }) {
+function Header({ icon, title, subtitle, onClose }: { icon: ReactNode; title: ReactNode; subtitle: string; onClose: () => void }) {
   return (
     <header className="flex items-center gap-3">
       {icon}
@@ -346,11 +360,15 @@ function MemberPanel({ m, pool, onClose }: { m: PreviewMember; pool: string; onC
   const endpoints = [...new Set(m.candidates.map((c) => c.endpoint))];
   const first = m.candidates[0];
   const r = readiness(m);
-  const keyLink = (k: string) => `/providers/${seg(m.provider)}/keys?key=${encodeURIComponent(k)}`;
 
   return (
     <div className="flex min-h-full flex-col p-6">
-      <Header icon={<ProviderTile handle={m.provider} size={40} />} title={m.provider} subtitle={`Member ${m.position} of ${pool}`} onClose={onClose} />
+      <Header
+        icon={<ProviderTile handle={m.provider} size={40} />}
+        title={<RecordLink record={rec.provider(m.provider)}>{m.provider}</RecordLink>}
+        subtitle={`Member ${m.position} of ${pool}`}
+        onClose={onClose}
+      />
       <h3 className="mt-7 text-[20px] font-semibold">
         {m.planned ? (m.ready_keys ? `${m.ready_keys} of ${m.keys} keys ready` : (m.empty?.message ?? r.text)) : r.text === "Off" ? "Switched off" : "Not tried"}
       </h3>
@@ -367,7 +385,18 @@ function MemberPanel({ m, pool, onClose }: { m: PreviewMember; pool: string; onC
           <Row label="Model" mono>
             {first?.wire_model ?? m.model}
           </Row>
-          {endpoints.length > 0 && <Row label="Endpoint">{endpoints.join(", ")}</Row>}
+          {endpoints.length > 0 && (
+            <Row label="Endpoint">
+              <span className="flex flex-wrap gap-x-2">
+                {endpoints.map((e, i) => (
+                  <span key={e} className="inline-flex min-w-0">
+                    <RecordLink record={rec.endpoint(m.provider, e)}>{e}</RecordLink>
+                    {i < endpoints.length - 1 && ","}
+                  </span>
+                ))}
+              </span>
+            </Row>
+          )}
           {first && <Row label="Shape">{first.translated ? `${shapeLabel(first.shape)}, translated` : shapeLabel(first.shape)}</Row>}
         </dl>
       </Section>
@@ -380,9 +409,11 @@ function MemberPanel({ m, pool, onClose }: { m: PreviewMember; pool: string; onC
               return (
                 <li key={i} className="flex items-center gap-3 py-1.5 text-[14.5px]">
                   <StatusDot tone={t.tone} />
-                  <Link to={keyLink(s.upstream_key)} className="min-w-0 flex-1 truncate font-mono text-[13.5px] hover:underline">
-                    {s.upstream_key}
-                  </Link>
+                  <span className="flex min-w-0 flex-1">
+                    <RecordLink record={rec.key(m.provider, s.upstream_key)} className="font-mono text-[13.5px]">
+                      {s.upstream_key}
+                    </RecordLink>
+                  </span>
                   <span className={cn("shrink-0", toneText[t.tone])} title={s.model ? `for ${s.model}` : undefined}>
                     {t.text}
                   </span>
@@ -399,9 +430,11 @@ function MemberPanel({ m, pool, onClose }: { m: PreviewMember; pool: string; onC
             {shown.map((c, i) => (
               <li key={c.upstream_key} className="flex items-center gap-3 py-1.5 text-[14.5px]">
                 <StatusDot tone="green" />
-                <Link to={keyLink(c.upstream_key)} className="min-w-0 flex-1 truncate font-mono text-[13.5px] hover:underline">
-                  {c.upstream_key}
-                </Link>
+                <span className="flex min-w-0 flex-1">
+                  <RecordLink record={rec.key(m.provider, c.upstream_key)} className="font-mono text-[13.5px]">
+                    {c.upstream_key}
+                  </RecordLink>
+                </span>
                 <span className="shrink-0 text-fg-muted">{i === 0 ? "next" : `#${i + 1}`}</span>
               </li>
             ))}

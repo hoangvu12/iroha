@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, Route as RouteIcon, Send } from "lucide-react";
+import { Button as SdkButton } from "@ui-sdk/react/button";
+import { rec, RecordLink } from "@/sheets/RecordLink";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Skeleton } from "@/ui/Skeleton";
@@ -55,16 +57,27 @@ function AttemptCard({ a, next, defaultOpen }: { a: Attempt; next?: Attempt; def
   const e = explain(a);
   return (
     <li className="rounded-xl border border-border">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+      {/* The whole header toggles the Attempt; the key's name above it is a link of its own. */}
+      <div className="relative flex w-full items-center gap-3 px-4 py-3 text-left">
+        <SdkButton
+          aria-label={`Attempt ${a.seq}`}
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-info/30"
+        />
         <ProviderLogo handle={a.provider} size={32} />
         <span className="min-w-0 flex-1">
           <span className="block text-[13px] text-fg-muted">Attempt {a.seq}</span>
-          <span className="block truncate font-mono text-[14.5px] font-medium">{a.upstream_key}</span>
+          <span className="flex min-w-0">
+            <RecordLink record={rec.key(a.provider, a.upstream_key)} className="relative font-mono text-[14.5px] font-medium">
+              {a.upstream_key}
+            </RecordLink>
+          </span>
         </span>
         <span className="shrink-0 text-[13.5px] text-fg-muted tabular">{secs(a.duration_ms)}</span>
         <Badge tone={a.status ? statusBadgeTone(a.status) : "red"}>{a.status || "–"}</Badge>
-        <ChevronDown size={16} className={cn("shrink-0 text-fg-muted transition-transform", open && "rotate-180")} />
-      </button>
+        <ChevronDown size={16} aria-hidden className={cn("shrink-0 text-fg-muted transition-transform", open && "rotate-180")} />
+      </div>
       {open && (
         <div className="border-t border-border px-4 pb-4 pt-3">
           <AttemptFacts a={a} next={next} />
@@ -102,11 +115,7 @@ export function AttemptFacts({ a, next, withSentTo = true }: { a: Attempt; next?
       )}
       {withSentTo && (
         <>
-          <Row label="Provider">{a.provider}</Row>
-          <Row label="Endpoint">{a.endpoint}</Row>
-          <Row label="Upstream Key" mono>
-            {a.upstream_key}
-          </Row>
+          <AttemptTarget a={a} />
           <Row label="Shape">{longShape(a.shape)}</Row>
           <Row label="Model sent" mono>
             {a.wire_model}
@@ -120,6 +129,21 @@ export function AttemptFacts({ a, next, withSentTo = true }: { a: Attempt; next?
         </>
       )}
     </dl>
+  );
+}
+
+/** Where an Attempt went (Provider, Endpoint, Upstream Key), each a link to its sheet (drawer and Route view). */
+export function AttemptTarget({ a }: { a: Attempt }) {
+  return (
+    <>
+      <Row label="Provider">
+        <RecordLink record={rec.provider(a.provider)}>{a.provider}</RecordLink>
+      </Row>
+      <Row label="Endpoint">{a.endpoint ? <RecordLink record={rec.endpoint(a.provider, a.endpoint)}>{a.endpoint}</RecordLink> : "–"}</Row>
+      <Row label="Upstream Key" mono>
+        {a.upstream_key ? <RecordLink record={rec.key(a.provider, a.upstream_key)}>{a.upstream_key}</RecordLink> : "–"}
+      </Row>
+    </>
   );
 }
 

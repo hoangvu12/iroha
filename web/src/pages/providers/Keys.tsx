@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import {
   CircleCheck,
   CircleSlash,
@@ -18,7 +18,7 @@ import {
   Waypoints,
 } from "lucide-react";
 import { useChatActions } from "@/app/chat-panel";
-import { seg } from "@/api/client";
+import { rec, RecordLink } from "@/sheets/RecordLink";
 import type { BulkResult } from "@/api/types";
 import { formatDate, formatDuration, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
@@ -1066,9 +1066,9 @@ function KeyDialog({
               <p className="mt-1.5 flex flex-wrap gap-x-4 text-[13.5px] text-fg-muted">
                 {s.rule && <span>Rule: {s.rule}</span>}
                 {s.request_id && (
-                  <Link to={`/requests/${seg(s.request_id)}/route`} className="text-info hover:underline">
+                  <RecordLink record={rec.request(s.request_id)} drop={DIALOG}>
                     Open the Request
-                  </Link>
+                  </RecordLink>
                 )}
               </p>
             )}
@@ -1166,8 +1166,18 @@ function KeyDialog({
               </button>
             </div>
             <p className="text-[14px] text-fg-muted">
-              {k.endpoints.length ? `Only ${k.endpoints.join(", ")}` : "Every Endpoint"}
-              {k.worked_on.length > 0 && `. Worked on ${k.worked_on.map((w) => w.endpoint).join(", ")}.`}
+              {k.endpoints.length ? (
+                <>
+                  Only <EndpointNames handle={handle} names={k.endpoints} />
+                </>
+              ) : (
+                "Every Endpoint"
+              )}
+              {k.worked_on.length > 0 && (
+                <>
+                  . Worked on <EndpointNames handle={handle} names={k.worked_on.map((w) => w.endpoint)} />.
+                </>
+              )}
             </p>
             {k.endpoint_gaps.length > 0 && (
               <>
@@ -1176,7 +1186,11 @@ function KeyDialog({
                     <li key={g.endpoint_id} className="flex items-start gap-3 px-4 py-2.5">
                       <StatusDot tone="blue" className="mt-1.5" />
                       <span className="min-w-0 flex-1">
-                        <span className="block font-medium">{g.endpoint}</span>
+                        <span className="flex min-w-0 font-medium">
+                          <RecordLink record={rec.endpoint(handle, g.endpoint)} drop={DIALOG}>
+                            {g.endpoint}
+                          </RecordLink>
+                        </span>
                         <span className="block text-fg-muted">Endpoint Gap: {g.reason}. Not sent there until cleared; a passing test there clears it.</span>
                       </span>
                       <button type="button" className="shrink-0 text-info hover:underline" onClick={() => void clearEndpointGap(g.endpoint)}>
@@ -1229,6 +1243,21 @@ function KeyDialog({
       </div>
     </Dialog>
   );
+}
+
+/** The key's dialog is in the URL (?key=): a link out of it closes it, and Back reopens it. */
+const DIALOG = ["key"];
+
+/** "main, intl": each Endpoint's name a link to its sheet. */
+function EndpointNames({ handle, names }: { handle: string; names: string[] }) {
+  return names.map((n, i) => (
+    <span key={n}>
+      {i > 0 && ", "}
+      <RecordLink record={rec.endpoint(handle, n)} drop={DIALOG} className="align-bottom">
+        {n}
+      </RecordLink>
+    </span>
+  ));
 }
 
 function CoolingRow({ model, reason, until }: { model: string; reason: string; until: string }) {

@@ -16,6 +16,7 @@ import {
   MenuSubTrigger,
   MenuTrigger as SdkMenuTrigger,
 } from "@ui-sdk/react/menu";
+import { useIsPhone } from "@/lib/media";
 import { iconButtonClass } from "./Button";
 import { cn } from "./cn";
 import { type CopyState, copyIcon } from "./CopyButton";
@@ -205,6 +206,10 @@ export function MenuSeparator() {
 }
 
 export function SubMenu({ label, value, children }: { label: string; value?: ReactNode; children: ReactNode }) {
+  // Beside its item there's no room on a phone: UI SDK flips a side placement
+  // to the other side but only shifts it along that side, so it would hang off
+  // the screen. Under its item it shifts sideways to stay fully on screen.
+  const phone = useIsPhone();
   return (
     <MenuSub>
       <MenuSubTrigger className={itemClass}>
@@ -213,7 +218,8 @@ export function SubMenu({ label, value, children }: { label: string; value?: Rea
         <ChevronRight size={14} aria-hidden className="text-fg-muted" />
       </MenuSubTrigger>
       <MenuSubContent
-        sideOffset={6}
+        side={phone ? "bottom" : undefined}
+        sideOffset={phone ? 2 : 6}
         collisionPadding={8}
         className={cn(popupClass, "min-w-52 max-w-80 p-0")}
       >

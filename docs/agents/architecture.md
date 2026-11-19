@@ -787,6 +787,7 @@ Built into `DataTable` and the shared controls, so a page needs nothing:
 - **Requests paging choice**: the feed's toolbar menu is "View" (Show columns, then Load Requests: "Live, load older as you scroll" or "Numbered pages"), on phones a Load Requests submenu in the filter menu. The choice is `localStorage["iroha:requests:paging"]`, read and written in `try/catch`.
 - **Chat panel focus**: closing the panel (its X, the sidebar, or C from inside it) returns focus to the last focused element outside it, if still on the page, instead of the body.
 - **Upstream Key sheet**: copies the key's name and its key (`CopyIconButton`), as the Keys tab already shows the key.
+- **Submenus on phones**: `SubMenu` opens under its item (`side="bottom"`) below 768 px, because beside the menu there's no room and UI SDK only shifts a side placement vertically; under it, the SDK shifts it sideways onto the screen. Wider screens open it beside the item.
 
 ### UI ticket 17: Providers and Pools motion
 

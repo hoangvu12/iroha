@@ -48,6 +48,11 @@ Branch `agent/uifix`. Every item of the review list was fixed. The "Not to chang
 - `npm --prefix web run build` passes (tsc and vite). Web suite: see the commit message's results. Go is unchanged.
 - Headless Chrome screenshots, in light, dark and phone, are in `iroha-v2-notes/v2-ui/shots/review/` (outside the repo): feed View menu, chips with × and Clear filters, numbered pages, phone filter menu, Keys toolbar, Key and Endpoint sheets, ModelPicker scrolled, chat Picker, and chat close focus.
 
-## Found, not changed
+## Found during the review, then fixed
 
-- On phones (390 px), every submenu of the Requests filter menu (Status, Caller, and the new Load Requests) opens partly off the left edge. The menu sits on the right, and UI SDK flips the submenu to the left without shifting it into view. This was already the case before these fixes (Status measured −55 px). It needs a phone layout for `SubMenu`, for example opening the submenu in place of the menu, and is outside this list.
+- **Phone submenus off screen.** On phones (390 px), every submenu of the Requests filter menu (Caller, Provider or Pool, Model, Status, Time, Load Requests) opened partly off the left edge. Status, for example, measured −55 px. This was already so before these fixes.
+  - Cause: the filter menu sits at the right, so there's no room beside it on either side. UI SDK's placement (`core/foundation/platform/position.js`) flips a `right` placement to `left` but only shifts it along that side (vertically). Sideways, it is clamped only when the submenu is no wider than its item.
+  - Fix: UI SDK's own positioning, no custom layout. `SubMenu` (`ui/Menu.tsx`) opens with `side="bottom"` on phones (`useIsPhone`, < 768 px). There the SDK shifts it sideways to stay within `collisionPadding`, and `--available-height` still caps its list. Wider screens keep `right`. `SubMenu` is the only submenu in the app, so this covers every one.
+  - Tests: `ui/Menu.test.tsx`, "on a wide screen a submenu opens beside its item" and "on a phone a submenu opens under its item".
+  - Chrome at 390 px: every submenu measured on screen (left 136–154 px, right at most 382 px). Shots `submenu-phone-*-light/dark.png`. The desktop filter submenu still opens to the right (`submenu-desktop-filter-light.png`).
+  - On a phone, the submenu now covers the menu items under its trigger while it is open. Escape or a press outside closes it as before.

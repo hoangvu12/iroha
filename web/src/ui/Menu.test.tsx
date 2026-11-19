@@ -111,6 +111,41 @@ test("radio items choose one value and close; checkbox items toggle and stay ope
   expect(screen.getByText("failed")).toBeTruthy();
 });
 
+function StatusMenu() {
+  return (
+    <Menu>
+      <MenuIconTrigger icon={MoreHorizontal} label="Filter" />
+      <MenuContent>
+        <SubMenu label="Status" value="Any">
+          <MenuItem onSelect={() => {}}>Failed</MenuItem>
+        </SubMenu>
+      </MenuContent>
+    </Menu>
+  );
+}
+
+async function openStatus() {
+  const user = userEvent.setup();
+  render(<StatusMenu />);
+  await user.click(screen.getByRole("button", { name: "Filter" }));
+  await user.click(await screen.findByRole("menuitem", { name: /Status/ }));
+  const failed = await screen.findByRole("menuitem", { name: "Failed" });
+  return failed.closest<HTMLElement>("[data-side]")!;
+}
+
+test("on a wide screen a submenu opens beside its item", async () => {
+  expect((await openStatus()).getAttribute("data-side")).toBe("right");
+});
+
+test("on a phone a submenu opens under its item, where it can shift to stay on screen (there's no room beside the menu)", async () => {
+  vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(max-width: 767px)", media: q, addEventListener() {}, removeEventListener() {} }));
+  try {
+    expect((await openStatus()).getAttribute("data-side")).toBe("bottom");
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 test("a copy from a menu item shows on the trigger the menu closes back to, keeping its name", async () => {
   const user = userEvent.setup();
   function CopyMenu() {

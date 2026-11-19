@@ -10,6 +10,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/session"
 )
 
 // routes is the route table: one line per module. Each module package
@@ -22,6 +23,7 @@ func (s *Server) routes() []api.Route {
 		logs.Routes(s.logs),
 		audit.Routes(s.audit),
 		admintokens.Routes(s.audit, s.db),
+		session.Routes(s.owner, s.audit),
 	)
 }
 

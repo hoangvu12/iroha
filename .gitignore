@@ -10,3 +10,9 @@
 *.db
 *.db-shm
 *.db-wal
+
+# UI build output (embedded by internal/webui; only the placeholder is committed)
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+/web/node_modules/
+

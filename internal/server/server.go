@@ -24,7 +24,9 @@ import (
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/config"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/session"
 	"github.com/hoangvu12/iroha/internal/store"
+	"github.com/hoangvu12/iroha/internal/webui"
 )
 
 // Options are everything the server takes from outside. Tests replace the
@@ -48,6 +50,7 @@ type Server struct {
 	log     *slog.Logger
 	router  *api.Router
 	tokens  *admintokens.Store
+	owner   *session.Store
 	audit   *audit.Trail
 	httpc   *http.Client
 	started time.Time
@@ -113,8 +116,10 @@ func New(ctx context.Context, o Options) (*Server, error) {
 	}
 
 	s.audit = audit.New(db, s.log)
-	s.router = api.NewRouter(s.log, s.tokens.Authenticator())
+	s.owner = session.New(db, s.log)
+	s.router = api.NewRouter(s.log, s.tokens.Authenticator(), s.owner.Authenticator())
 	s.router.Add(s.routes()...)
+	s.router.Fallback(webui.Handler())
 	s.router.AddDocs(o.Version, logs.SkillSection)
 	return s, nil
 }

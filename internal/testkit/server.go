@@ -200,6 +200,30 @@ func (s *Server) NewAdminToken(name string) *Client {
 	return s.Client(out.AdminToken.Secret)
 }
 
+// OwnerPassword is the password OwnerSession sets.
+const OwnerPassword = "test-owner-password"
+
+// OwnerSession signs in as the Owner, as the UI does, and returns a client
+// that sends the session cookie. It first sets the Owner password to
+// OwnerPassword (as the bootstrap Admin Token) when none is set. Changes it
+// makes are recorded with the actor "Owner".
+func (s *Server) OwnerSession() *Client {
+	s.t.Helper()
+	var st struct {
+		PasswordSet bool `json:"password_set"`
+	}
+	s.Anon.Get("/api/session").Expect(http.StatusOK).JSON(&st)
+	if !st.PasswordSet {
+		s.Admin.Put("/api/owner-password", map[string]any{"password": OwnerPassword}).OK()
+	}
+	resp := s.Anon.Post("/api/session", map[string]any{"password": OwnerPassword}).Expect(http.StatusCreated)
+	ck := resp.Cookie("iroha_session")
+	if ck == nil {
+		s.t.Fatalf("sign-in set no iroha_session cookie; headers %v", resp.Header)
+	}
+	return (&Client{t: s.t, srv: s}).WithCookie(ck)
+}
+
 // Client returns a client sending "Authorization: Bearer token" (none when
 // token is empty).
 func (s *Server) Client(token string) *Client {

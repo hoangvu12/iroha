@@ -6,14 +6,14 @@
 
 **Blocked by:** 07, 12
 
-**Status:** open
+**Status:** done
 
 Spec story: 15.
 
-- [ ] Proposal from `find-animation-opportunities` recorded in Comments, with what was rejected and why
-- [ ] Built motion matches the proposal; reduced motion holds still
-- [ ] No dropped frames in a Chrome performance trace of this area's main interactions
-- [ ] `review-animations` findings fixed or answered in Comments
+- [x] Proposal from `find-animation-opportunities` recorded in Comments, with what was rejected and why
+- [x] Built motion matches the proposal; reduced motion holds still
+- [x] No dropped frames in a Chrome performance trace of this area's main interactions
+- [x] `review-animations` findings fixed or answered in Comments
 
 ## Comments
 
@@ -42,3 +42,70 @@ Not motion, from audit #14: the hover-revealed "Test in Chat" (Providers/Pools r
 - Keyboard reorder, canvas `+ − 0`, Tab-to-card, wheel, drag and pinch. **Rejected (Frequency):** keyboard and 1:1 never animate.
 
 Verdict: this area needs little. The drag reorder (1) is the one real gap, a gesture that teleports today. The canvas glide (2) and the dialogs' missing exit (3) are the next highest leverage. The rest are token fixes. Tabs' indicators still carry `duration-200` (`ui/Tabs.tsx`). That is shared with 18 and 20, so it's left to them or a final pass.
+
+### Built (2026-11-20, branch `agent/ui17`)
+
+What was built, against the proposal (architecture.md "UI ticket 17" has the details):
+
+1. **Reorder glide** (`ui/RowOrder.tsx`, `ui/reorder-primitive.ts`, new `ui/motion.ts`), as proposed, with one change: the FLIP runs on `transform`, not `translate`. jsdom computes `transform`, and ticket 16's row entrance already uses `translate` on the same `tr`, so the two can't fight. The held row is lifted with `relative z-10 bg-subtle shadow-elevated`.
+2. **Canvas glide** (`ui/Canvas.tsx`), as proposed. A keyboard or agent click on a zoom button (`detail === 0`) stays instant too.
+3. **Dialog exits**: `KeyDialog` and `ModelDialog` stay mounted and show the last record while they leave.
+4. **Content under a choice**: changed from the proposal for cohesion with ticket 20. The sections under a choice (Add Provider's URL settings, the Endpoint's header or parameter name, a Rule's "Cool for", the found-keys box, the Replace form) use the shared collapse `Reveal` (`ui/Reveal.tsx`). The gap above each sits inside its panel, so it folds with it. `ringRoom` keeps input focus rings unclipped. The Rule replay result uses `riseIn`. Dialog error lines keep the Field-error drop-in (`appearClass`). The Endpoint and Rule dialogs reset their form during render, not in an effect, so their first frame is right. My page-local `Reveal` was removed.
+5. **Switch**: done by ticket 20 (same classes); my duplicate was dropped at the merge.
+6. **Logo tile**: fades in and grows from `--motion-scale-popup` (from the review, below).
+7. **Route cards**: `transition-[box-shadow,border-color] duration-hover ease-[ease]`.
+- Touch fix (audit #14): superseded by ticket 16's `row-reveal` utility, taken at the merge.
+- **Layout bug (from ticket 11)**: at 1440×900 the Pool Route's live bar wrapped to two rows and covered the Start card. The cause was that `Select` is `w-full` inside, so its `className="w-48"` lost to `w-full`, and the select stretched. It now sits in a `w-48` box. The bar stays on one row over the canvas (its note truncates first) and wraps only on phones. Measured: the bar's bottom edge is at 289 px and the Start card's top at 302 px; before the fix the bar ended at 329 px.
+
+**Test-first** (tdd skill). The seams were each component's or page's behaviour as seen in the DOM:
+- RowOrder: the drag follows the pointer, siblings glide, the drop settles, the keyboard doesn't animate, reduced motion snaps.
+- Canvas: the buttons and a card press glide; wheel, pan, `+` and Tab don't.
+- Key and Model dialogs: the exit plays while still showing the record.
+- LogoField: a found logo fades in; the first tile doesn't.
+- Endpoints: picking "A header you name" opens the name field in a collapse panel with room for the focus ring.
+
+Each test was red before the code. One exception: the Endpoints test was written after the switch to the shared `Reveal` and passed at once. Web: 51 files, 291 tests, all passing. `tsc -b` is clean and the build passes.
+
+**Browser checks** (seeded server, `check17.mjs`, headless and headed Chrome):
+- **Drag**:
+  - The held row follows (`translateY(26px)`) and is lifted (`position: relative`, z 10, shadow).
+  - On drop the passed row glides 48 px → 0 and the held row settles 9 px → 0, each 250 ms on `cubic-bezier(0.77, 0, 0.175, 1)`. After 400 ms every row's transform is `none`.
+  - The keyboard reorder (Space, ↑↑, Space) runs no glide.
+- **Zoom in**: `data-glide` is on, one 250 ms transform transition runs, and it is off again after it (120%). Wheel: no glide.
+- **Key dialog**: on close it shows `data-ending-style` with the title still "key-1", then it unmounts.
+- **Add Provider settings**: open 0 → 182 px, fold 182 → 0, then unmount. The Shape select's focus ring is unclipped (`add-provider-focus-ring.png`).
+- **Reduced motion**: the drag follows with no glides, zoom has a 0 s transition, and the dialog only fades (scale 1).
+
+**Trace** (headed, CPU ×4, 240 Hz display, frames over 17 / 34 ms, motion vs every transition and WAAPI off):
+
+| Interaction | Motion | Still |
+|---|---|---|
+| Drag | 5 / 2 | 6 / 3 |
+| Zoom | 7 / 2 | 4 / 2 |
+| Key dialog | 7 / 5 | 7 / 5 |
+
+The motion adds no long frames of its own; the long ones come from navigation and data loading in both runs. The trace is `trace17-headed-cpu4.json`.
+
+Screenshots (light, dark, phone, phone-dark of the Providers list, Members, Route and key dialog, plus mid-drag, after drop, route reset and the Add Provider reveal) are in `iroha-v2-notes/v2-ui/shots/17/`.
+
+### `review-animations` on the diff
+
+| Before | After | Why |
+|---|---|---|
+| `LogoField.tsx` tile: `transition-opacity … starting:opacity-0` (pure fade) | `transition-[opacity,scale] duration-fade ease-out starting:scale-(--motion-scale-popup) starting:opacity-0` | A pure-fade entrance has no initial transform. Under reduced motion the scale token is 1, so it falls back to a fade. |
+| Page-local `Reveal` (drop-in from above, instant hide) for sections under a choice | Shared collapse `Reveal` from ticket 20, gap inside the panel, `ringRoom` | Cohesion: the same kind of moment now moves the same way app-wide. Measured height is the documented accordion exception. |
+| Collapse panel `overflow-hidden` around inputs | `ringRoom` (`-mx-1 px-1 -mb-1 pb-1`) on those panels | The 2 px focus ring was clipped at the sides and bottom. |
+
+Answered, no change:
+- **Drag past the list's ends has no rubber-banding.** The held row is clipped at the table's edge, and core clamps the order. The rows are short and the list is small; deferred.
+- **The held row's lift (tint, shadow) is instant on grab.** That is feedback on the press itself, and it should be immediate.
+- **Glides use `ease-in-out`.** They are on-screen movement, at the move token's 250 ms. They are interruptible: a running glide is cancelled and restarted from its computed transform.
+
+Verdict: **Approve**.
+
+**Deferred:**
+- Tabs' `duration-200` indicator (shared with 18 and 20).
+- Rubber-banding at the reorder's ends.
+- The empty-to-first-row moment and row hover belong to ticket 16 (merged).
+
+`ui/RowOrder`, `ui/Canvas` and `ui/motion.ts` are shared, so ticket 18's Route view gets the canvas glide too.

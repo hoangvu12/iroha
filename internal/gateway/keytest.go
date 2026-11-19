@@ -67,7 +67,7 @@ type KeyTestBulk struct {
 var testModelParam = api.Param{Name: "model", Description: "The model to ask for. Default: the model of the Provider's latest successful Request."}
 
 const keyTestDescription = "Sends a tiny real chat call (\"" + keyTestPrompt + "\", max_tokens 16) with the key on the Provider's first OpenAI Chat Endpoint. " +
-	"A pass makes an invalid or cooling key active again. A failure is read by the Failure Rules like any Attempt, so a 401 makes the key invalid and a 429 cools it. " +
+	"A pass makes an invalid or cooling key active again and clears its Model Gaps. A failure is read by the Failure Rules like any Attempt, so a 401 makes the key invalid and a 429 cools it. " +
 	"Disabled keys are tested too and stay disabled. The test is not recorded as a Request."
 
 // AdminRoutes are the admin routes the Gateway serves: key tests.
@@ -241,7 +241,7 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 		res.Rule, res.Outcome, res.Reason = d.Rule, string(d.Outcome), d.Reason
 		res.Action = "Key State unchanged."
 		switch d.Outcome {
-		case rules.Invalid, rules.CoolingKey, rules.CoolingKeyModel:
+		case rules.Invalid, rules.CoolingKey, rules.CoolingKeyModel, rules.ModelGap:
 			eff, err := g.states.Fail(ctx, keystate.Failure{Key: key, Model: wire, Decision: d})
 			if err != nil {
 				return res, err

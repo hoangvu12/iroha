@@ -16,7 +16,7 @@ Every Upstream Key reports exactly one Key State with its reason in `GET /api/pr
 | `invalid` | The key is invalid. |
 | `cooling_key` | The whole key cools (e.g. 402: out of credit). |
 | `cooling_key_model` | The key cools for this model (e.g. 429). |
-| `model_gap` | The key cannot serve this model; another key is tried. |
+| `model_gap` | The key cannot serve this model: it gets a Model Gap (below) and another key is tried. |
 | `retry_elsewhere` | Try the next candidate; the key is unchanged (5xx, network errors, timeouts). |
 | `fail_request` | The Provider refused the request itself (other 4xx); it goes back to the Caller. |
 
@@ -24,6 +24,8 @@ The built-in rules are generic: 401 → invalid; 403 → model_gap when the body
 
 **Request budget.** A Request makes at most 3 Attempts and must see a first byte within 60 seconds of arriving. A Provider can change both: `PATCH /api/providers/<handle>` `{"max_attempts": 1..10, "first_byte_seconds": 1..95}` (0 restores the default). A key refused as invalid, cooling or model gap is not tried again in the same Request; a key and Endpoint that answered 5xx may be tried once more, after every other candidate. An Attempt that ran out of time ends the Request with `504 upstream_timeout`; it is never replayed.
 
-**Key test.** `POST /api/providers/<handle>/keys/<key>/test` sends a tiny real chat call ("Reply with the word OK.", max_tokens 16) with the key on the Provider's first OpenAI Chat Endpoint, using `?model=` or the model of the Provider's latest successful Request. A pass makes an invalid or cooling key active; a failure goes through the Failure Rules like any Attempt. `POST /api/providers/<handle>/keys/bulk/test` tests many keys (5 at a time). Both take `dry_run`.
+**Model Gaps.** When a Provider refuses one key one model (outcome `model_gap`, e.g. a 404 `model_not_found` or a 403 naming the model), the key keeps its Key State and serves its other models; only that model (as sent upstream) is no longer sent to it. Each key lists its gaps in `model_gaps` (`model`, `reason`, `rule`, `request_id`, `created_at`, `expires_at`); `GET /api/providers/<handle>/model-gaps` (`?model=`, `?upstream_key=`) lists a Provider's, and the summary includes them. A gap ends by itself 24 hours after it was recorded, when a key test of the key passes, and when the key's name or secret is edited (enabling or disabling does not clear it). Clear gaps by hand with `POST /api/providers/<handle>/keys/<key>/clear-model-gaps` or, for selected keys, `POST /api/providers/<handle>/keys/bulk/clear-model-gaps` `{"items": ["key-1", ...]}`; both take `?model=` to clear one model only and `dry_run`, and are audited, so reverting the Audit Entry restores the gaps. When every usable key has a gap for the model, Callers get `404 model_unavailable` at once. Creation, clearing and expiry are logged as `model_gap` (`op` created, cleared, expired).
 
-**Provider summary.** `GET /api/providers/<handle>/summary` gives key counts per Key State, every cooling with its end time, when the next key is usable, the effective budget, and the failure rate of the last hour's Attempts.
+**Key test.** `POST /api/providers/<handle>/keys/<key>/test` sends a tiny real chat call ("Reply with the word OK.", max_tokens 16) with the key on the Provider's first OpenAI Chat Endpoint, using `?model=` or the model of the Provider's latest successful Request. A pass makes an invalid or cooling key active and clears its Model Gaps; a failure goes through the Failure Rules like any Attempt. `POST /api/providers/<handle>/keys/bulk/test` tests many keys (5 at a time). Both take `dry_run`.
+
+**Provider summary.** `GET /api/providers/<handle>/summary` gives key counts per Key State, every cooling with its end time, every Model Gap, when the next key is usable, the effective budget, and the failure rate of the last hour's Attempts.

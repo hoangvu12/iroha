@@ -9,11 +9,11 @@
 // 13, adds other Endpoints after them); Upstream Keys round-robin, each key
 // paired with every such Endpoint in configured order.
 //
-// Excluded (ticket 05): disabled and invalid keys, keys cooling at
-// Request.Now, and keys cooling for the wire model of that Endpoint. Each
-// exclusion is reported as a Skip. Later tickets add exclusions (Model Gaps,
-// Endpoint restrictions) and tiers (known carriers first) here, and nowhere
-// else.
+// Excluded: disabled and invalid keys, keys cooling at Request.Now, keys
+// with a live Model Gap for the wire model of that Endpoint (ticket 08), and
+// keys cooling for that wire model. Each exclusion is reported as a Skip.
+// Later tickets add exclusions (Endpoint restrictions) and tiers (known
+// carriers first) here, and nowhere else.
 package planner
 
 import (
@@ -72,6 +72,9 @@ type Key struct {
 	// ModelCooling maps wire models to the end of the key's latest cooling
 	// for that model, which may be past.
 	ModelCooling map[string]time.Time
+	// ModelGaps maps wire models the key was refused to when that Model Gap
+	// expires, which may be past.
+	ModelGaps map[string]time.Time
 }
 
 // Recovering reports whether a success with this key on model has a
@@ -96,6 +99,7 @@ const (
 	NoUpstreamKey = "no_upstream_key" // the Provider holds no Upstream Keys
 	NoUsableKey   = "no_usable_key"   // every Upstream Key is disabled or invalid
 	Cooling       = "cooling"         // every usable key is cooling; Empty.Until says until when
+	ModelGap      = "model_gap"       // every usable key has a Model Gap for the model; Empty.Until is the first expiry
 )
 
 // Reasons a key is skipped.
@@ -104,6 +108,7 @@ const (
 	SkipInvalid      = "invalid"
 	SkipCooling      = "cooling"
 	SkipCoolingModel = "cooling_model"
+	SkipModelGap     = "model_gap"
 )
 
 // Empty explains why nothing can serve the Request.
@@ -117,9 +122,9 @@ type Empty struct {
 type Skip struct {
 	Provider *Provider
 	Key      *Key
-	Model    string    // the wire model, for SkipCoolingModel
+	Model    string    // the wire model, for SkipCoolingModel and SkipModelGap
 	Reason   string    // one of the Skip* constants
-	Until    time.Time // cooling end
+	Until    time.Time // cooling end, or when the Model Gap expires
 }
 
 // Result is the plan: Candidates in the order to try, or why there is none.
@@ -200,6 +205,9 @@ func skip(k *Key, wm string, now time.Time) *Skip {
 	case k.CoolingUntil.After(now):
 		return &Skip{Key: k, Reason: SkipCooling, Until: k.CoolingUntil}
 	}
+	if until, ok := k.ModelGaps[wm]; ok && until.After(now) {
+		return &Skip{Key: k, Reason: SkipModelGap, Model: wm, Until: until}
+	}
 	if until, ok := k.ModelCooling[wm]; ok && until.After(now) {
 		return &Skip{Key: k, Reason: SkipCoolingModel, Model: wm, Until: until}
 	}
@@ -216,18 +224,27 @@ func addSkip(list []Skip, s Skip) []Skip {
 }
 
 // emptyFromSkips explains a plan whose every key was skipped: cooling until
-// the earliest end when any key is cooling, else nothing usable.
+// the earliest end when any key is cooling, else a Model Gap when any key has
+// one, else nothing usable.
 func emptyFromSkips(skipped []Skip) *Empty {
-	var until time.Time
-	var handle string
+	var until, gapUntil time.Time
+	var handle, gapHandle, gapModel string
 	for _, s := range skipped {
 		if (s.Reason == SkipCooling || s.Reason == SkipCoolingModel) && (until.IsZero() || s.Until.Before(until)) {
 			until, handle = s.Until, s.Provider.Handle
+		}
+		if s.Reason == SkipModelGap && (gapUntil.IsZero() || s.Until.Before(gapUntil)) {
+			gapUntil, gapHandle, gapModel = s.Until, s.Provider.Handle, s.Model
 		}
 	}
 	if !until.IsZero() {
 		return &Empty{Code: Cooling, Until: until,
 			Message: fmt.Sprintf("Every usable Upstream Key of %s is cooling; the first is usable again at %s.", handle, until.UTC().Format(time.RFC3339))}
+	}
+	if !gapUntil.IsZero() {
+		return &Empty{Code: ModelGap, Until: gapUntil,
+			Message: fmt.Sprintf("Every usable Upstream Key of %s has a Model Gap for %s (the Provider refused them that model); the first expires at %s.",
+				gapHandle, gapModel, gapUntil.UTC().Format(time.RFC3339))}
 	}
 	return &Empty{Code: NoUsableKey, Message: fmt.Sprintf("Every Upstream Key of %s is disabled or invalid.", skipped[0].Provider.Handle)}
 }

@@ -84,5 +84,7 @@ Answered, not changed: the sheet's opacity reaches 1 by ~120 ms while the slide 
 
 ### Notes for the orchestrator
 
+- After merging v2-ui at `1b5d0ea` (ticket 13's `@utility press`): Tools and the starter chips use `press`; Send/Stop copy only its scale (down on `duration-press`, back on `duration-release`, not for a key or while disabled), so their colour still flips instantly as the Owner types.
+
 - `ui/toast.test.tsx` "an action on a toast runs and closes it" flakes when the whole suite runs on a busy machine (also on the base without this ticket's tests: the announcer keeps the text). It passes alone. Not touched (ticket 14's area).
 - Record sheets (`sheets/records/*Sheet.tsx`) still call `useChatPanel()` only for `open`; switching them to `useChatActions()` would spare their re-render as the chat comes and goes (ticket 10/15).

@@ -28,12 +28,14 @@ import { startFor } from "./targets";
 // composer's model button. The shell renders <ChatPanel mode="sheet" /> on
 // the right and /chat renders <ChatPanel mode="page" /> (phones, Expand).
 
-// The press recipe (architecture.md "UI motion system") for the panel's own
-// buttons, which aren't ui/Button: Send/Stop, Tools and the starter chips.
-const pressClass = "transition-[scale,background-color,color] duration-press ease-out not-data-disabled:active:scale-(--motion-scale-press)";
-// Send/Stop: scale only. Its colour flips as the Owner types the first letter
-// or clears the box (a keyboard action), so that change stays instant.
-const sendPressClass = "transition-[scale] duration-press ease-out not-data-disabled:active:scale-(--motion-scale-press)";
+// The press (`@utility press`, styles/index.css) for the panel's own buttons,
+// which aren't ui/Button: Tools and the starter chips.
+const pressClass = "press";
+// Send/Stop: the same press on the scale only (down on duration-press, back on
+// duration-release, never for a key). Its colour flips as the Owner types the
+// first letter or clears the box (a keyboard action), so that stays instant.
+const sendPressClass =
+  "transition-[scale] duration-release ease-out active:not-focus-visible:not-data-disabled:scale-(--motion-scale-press) active:not-focus-visible:not-data-disabled:duration-press";
 
 /** The last Test button handled, so remounting the panel does not start its chat again. */
 let handledSeq = 0;

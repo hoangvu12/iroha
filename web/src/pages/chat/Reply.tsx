@@ -77,6 +77,7 @@ function RoundView({ r, last, streaming }: { r: Round; last: boolean; streaming:
 
 function PartView({ p, caret }: { p: Part; caret: boolean }) {
   const [open, setOpen] = useState(false);
+  const [touched, setTouched] = useState(false);
   if (p.kind === "tool")
     return (
       <div className="flex max-w-full items-start gap-2 self-start rounded-lg border border-border bg-bg px-3 py-2 font-mono text-[13px]">
@@ -86,13 +87,22 @@ function PartView({ p, caret }: { p: Part; caret: boolean }) {
     );
   if (p.kind === "reasoning")
     return (
-      // Open while it streams (open on first paint, so no animation); folds once the answer starts.
-      <Collapsible open={open || caret} onOpenChange={setOpen} className="text-[13.5px] text-fg-muted">
+      // Open while it streams (open on first paint, so no animation). It folds at
+      // once when the answer starts: the stream moved it, not the Owner, and
+      // streamed content changes in place. Only the Owner's own toggles animate.
+      <Collapsible
+        open={open || caret}
+        onOpenChange={(o) => {
+          setOpen(o);
+          setTouched(true);
+        }}
+        className="text-[13.5px] text-fg-muted"
+      >
         <CollapsibleTrigger className="group inline-flex items-center gap-1.5 hover:text-fg">
           <Lightbulb size={14} /> Thinking
-          <ChevronDown size={14} aria-hidden className={cn(chevronClass, "-rotate-90 group-data-open:rotate-0")} />
+          <ChevronDown size={14} aria-hidden className={cn(chevronClass, "-rotate-90 group-data-open:rotate-0", !touched && "transition-none")} />
         </CollapsibleTrigger>
-        <CollapsiblePanel className={collapseClass}>
+        <CollapsiblePanel className={cn(collapseClass, !touched && "transition-none")}>
           <p className="mt-1 whitespace-pre-wrap border-l-2 border-border pl-3">{p.text}</p>
         </CollapsiblePanel>
       </Collapsible>
@@ -135,14 +145,17 @@ function Failure({ r, enter }: { r: Round; enter: boolean }) {
 }
 
 function Details({ round, rounds }: { round: Round; rounds: Round[] }) {
-  // Fetched on first open and kept after, so the facts stay while it folds away.
+  // Fetched as soon as the trigger is pointed at or focused, so the panel opens
+  // with its facts at their full height (nothing re-renders or grows while it
+  // animates), and kept after, so they stay while it folds away.
   const [wanted, setWanted] = useState(false);
+  const want = () => setWanted(true);
   const req = useRequest(wanted ? round.requestId : undefined);
   const r = req.data;
   const check = round.toolCheck;
   return (
-    <Collapsible onOpenChange={(open) => open && setWanted(true)}>
-      <CollapsibleTrigger className="group inline-flex items-center gap-1 text-[13.5px] text-fg-muted hover:text-fg">
+    <Collapsible onOpenChange={(open) => open && want()}>
+      <CollapsibleTrigger onPointerEnter={want} onFocus={want} className="group inline-flex items-center gap-1 text-[13.5px] text-fg-muted hover:text-fg">
         Details
         <ChevronDown size={14} aria-hidden className={cn(chevronClass, "group-data-open:rotate-180")} />
       </CollapsibleTrigger>

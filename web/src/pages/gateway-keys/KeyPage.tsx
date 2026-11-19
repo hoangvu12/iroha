@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowUpRight, Copy, KeyRound, MessageCircle, Pencil } from "lucide-react";
 import { isApiError } from "@/api/client";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { PageBody } from "@/app/PageBody";
 import { PageHeader } from "@/app/PageHeader";
 import { formatDate, formatNumber, timeAgo } from "@/lib/format";
@@ -33,7 +33,7 @@ export function KeyPage() {
   const { key = "" } = useParams();
   const k = useGatewayKey(key);
   const navigate = useNavigate();
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const phone = useIsPhone();
   const [revoking, setRevoking] = useState(false);
   const [deleting, setDeleting] = useState(false);

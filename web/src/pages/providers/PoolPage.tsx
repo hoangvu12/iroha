@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router";
 import { MessageCircle, Plus } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
 import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
@@ -21,7 +21,7 @@ export function PoolPage() {
   const { name = "", tab: raw } = useParams();
   const tab = TABS.find((t) => t === raw);
   const pool = usePool(name);
-  const chat = useChatPanel();
+  const chat = useChatActions();
   const phone = useIsPhone();
   const [params, setParams] = useSearchParams();
   const [adding, setAdding] = useState(false);

@@ -70,6 +70,15 @@ test("Details opens as a collapsible and keeps its facts on screen while it clos
   await waitFor(() => expect(screen.queryByText("team-5")).toBeNull());
 });
 
+test("pointing at Details fetches its facts, so the panel opens at its full height with nothing loading in mid-animation", async () => {
+  const user = userEvent.setup();
+  renderReply(done);
+  const calls = () => vi.mocked(fetch).mock.calls.filter(([u]) => String(u).includes("/api/requests/req_1")).length;
+  expect(calls()).toBe(0);
+  await user.hover(screen.getByRole("button", { name: "Details" }));
+  await waitFor(() => expect(calls()).toBe(1));
+});
+
 test("Thinking shows while it streams and folds behind its toggle afterwards", async () => {
   const user = userEvent.setup();
   const streaming: AssistantTurn = { ...done, rounds: [{ status: "streaming", parts: [{ kind: "reasoning", text: "Let me see." }] }] };

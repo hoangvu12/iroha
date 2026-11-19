@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { ChatPanelProvider, useChatPanel } from "./chat-panel";
+import { ChatPanelProvider, useChatActions, useChatPanel } from "./chat-panel";
 import { ChatSheet } from "./ChatSheet";
 import { useNavShortcuts } from "./shortcuts";
 
@@ -133,6 +133,34 @@ test("C while it slides out snaps it back open", async () => {
   const aside = sheet()!;
   expect(aside.hasAttribute("data-ending-style")).toBe(false);
   expect(aside.hasAttribute("data-instant")).toBe(true);
+});
+
+test("opening and closing the sheet doesn't re-render what only opens it (a table of Test buttons)", async () => {
+  const user = userEvent.setup();
+  let renders = 0;
+  function TestButton() {
+    renders++;
+    const chat = useChatActions();
+    return (
+      <button type="button" onClick={() => chat.open({ kind: "provider", provider: "acme" })}>
+        Test
+      </button>
+    );
+  }
+  render(
+    <MemoryRouter>
+      <ChatPanelProvider>
+        <TestButton />
+        <Harness />
+      </ChatPanelProvider>
+    </MemoryRouter>,
+  );
+  const before = renders;
+  await user.click(screen.getByRole("button", { name: "Test" }));
+  expect(sheet()).not.toBeNull();
+  await user.keyboard("c");
+  expect(sheet()).toBeNull();
+  expect(renders).toBe(before);
 });
 
 test("a hidden slot (the /chat page) renders nothing", () => {

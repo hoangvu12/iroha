@@ -27,18 +27,25 @@ export type ChatRequest = { seq: number; target?: ChatTarget };
  */
 export type SheetMotion = { instant?: boolean };
 
-type Ctx = {
-  isOpen: boolean;
-  /** The last open or close asked not to animate. */
-  instant: boolean;
-  request: ChatRequest;
+type Actions = {
   /** Open the sheet (or the /chat page on phones), optionally set up for a target. Each call with a target starts a new chat. */
   open: (target?: ChatTarget, how?: SheetMotion) => void;
   close: (how?: SheetMotion) => void;
   toggle: (how?: SheetMotion) => void;
 };
+type State = {
+  isOpen: boolean;
+  /** The last open or close asked not to animate. */
+  instant: boolean;
+};
+type Ctx = State & Actions & { request: ChatRequest };
 
-const ChatPanelContext = createContext<Ctx | null>(null);
+// Three contexts, so opening and closing the sheet re-renders only what shows
+// whether it is open (the slot, the sidebar button, what sits beside it),
+// not every table of Test buttons (useChatActions) or the chat itself.
+const ActionsContext = createContext<Actions | null>(null);
+const StateContext = createContext<State | null>(null);
+const RequestContext = createContext<ChatRequest | null>(null);
 
 export function ChatPanelProvider({ children }: { children: ReactNode }) {
   const [isOpen, setOpen] = useState(false);
@@ -73,15 +80,36 @@ export function ChatPanelProvider({ children }: { children: ReactNode }) {
     [phone, navigate],
   );
 
-  const value = useMemo(
-    () => ({ isOpen: isOpen && !phone, instant, request, open, close, toggle }),
-    [isOpen, phone, instant, request, open, close, toggle],
+  const actions = useMemo(() => ({ open, close, toggle }), [open, close, toggle]);
+  const state = useMemo(() => ({ isOpen: isOpen && !phone, instant }), [isOpen, phone, instant]);
+  return (
+    <ActionsContext.Provider value={actions}>
+      <StateContext.Provider value={state}>
+        <RequestContext.Provider value={request}>{children}</RequestContext.Provider>
+      </StateContext.Provider>
+    </ActionsContext.Provider>
   );
-  return <ChatPanelContext.Provider value={value}>{children}</ChatPanelContext.Provider>;
 }
 
+function need<T>(v: T | null): T {
+  if (v === null) throw new Error("chat panel hook outside ChatPanelProvider");
+  return v;
+}
+
+/** Open, close and toggle only: a Test button needs nothing else, and doesn't re-render as the sheet comes and goes. */
+export function useChatActions(): Actions {
+  return need(useContext(ActionsContext));
+}
+
+/** The last "open the chat" call, for the chat content. */
+export function useChatRequest(): ChatRequest {
+  return need(useContext(RequestContext));
+}
+
+/** Everything, including whether the sheet is open (re-renders on every open and close). */
 export function useChatPanel(): Ctx {
-  const ctx = useContext(ChatPanelContext);
-  if (!ctx) throw new Error("useChatPanel outside ChatPanelProvider");
-  return ctx;
+  const actions = useChatActions();
+  const state = need(useContext(StateContext));
+  const request = useChatRequest();
+  return useMemo(() => ({ ...state, ...actions, request }), [state, actions, request]);
 }

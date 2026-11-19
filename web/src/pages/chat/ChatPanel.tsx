@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowUp, ChevronDown, Code2, KeyRound, Link2, Maximize2, MessageCircle, Minimize2, Square, SquarePen, Trash2, Wrench, X } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useChatActions, useChatRequest } from "@/app/chat-panel";
 import { timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button as SdkButton } from "@ui-sdk/react/button";
@@ -30,12 +30,16 @@ import { startFor } from "./targets";
 // The press recipe (architecture.md "UI motion system") for the panel's own
 // buttons, which aren't ui/Button: Send/Stop, Tools and the starter chips.
 const pressClass = "transition-[scale,background-color,color] duration-press ease-out not-data-disabled:active:scale-(--motion-scale-press)";
+// Send/Stop: scale only. Its colour flips as the Owner types the first letter
+// or clears the box (a keyboard action), so that change stays instant.
+const sendPressClass = "transition-[scale] duration-press ease-out not-data-disabled:active:scale-(--motion-scale-press)";
 
 /** The last Test button handled, so remounting the panel does not start its chat again. */
 let handledSeq = 0;
 
 export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
-  const panel = useChatPanel();
+  // Not useChatPanel: the chat needn't re-render as its sheet opens and closes.
+  const panel = { ...useChatActions(), request: useChatRequest() };
   const navigate = useNavigate();
   const phone = useIsPhone();
   const state = useChatState();
@@ -240,7 +244,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
               <div className="flex-1" />
               {running ? (
                 <Tip label="Stop" type="label">
-                  <SdkButton onClick={() => stop(chat.id)} className={cn("inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg", pressClass)}>
+                  <SdkButton onClick={() => stop(chat.id)} className={cn("inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg", sendPressClass)}>
                     <Square size={13} fill="currentColor" aria-hidden />
                   </SdkButton>
                 </Tip>
@@ -251,7 +255,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
                     disabled={!text.trim()}
                     className={cn(
                       "inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg data-disabled:bg-muted data-disabled:text-fg-subtle",
-                      pressClass,
+                      sendPressClass,
                     )}
                   >
                     <ArrowUp size={18} aria-hidden />

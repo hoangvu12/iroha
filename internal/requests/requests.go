@@ -26,6 +26,9 @@ const (
 // Caller kinds.
 const (
 	CallerGatewayKey = "gateway_key"
+	// CallerTest is a Request sent from the test chat, named "Test" or
+	// "Test (as <Gateway Key name>)"; it never counts as that key's traffic.
+	CallerTest = "test"
 )
 
 // Request is one Request as recorded and as the API returns it.
@@ -44,6 +47,7 @@ type Request struct {
 	ShapeIn  shape.Shape `json:"shape_in" doc:"The Shape the Caller spoke."`
 	ShapeOut shape.Shape `json:"shape_out,omitempty" doc:"The Shape of the serving Endpoint."`
 	Model    string      `json:"model" doc:"The model as the Caller named it."`
+	Pool     string      `json:"pool,omitempty" doc:"The Model Pool the Caller asked for, when the model named one."`
 	Stream   bool        `json:"stream"`
 
 	ProviderID    string `json:"provider_id,omitempty"`
@@ -60,6 +64,8 @@ type Request struct {
 	AttemptCount int          `json:"attempt_count"`
 	Captured     bool         `json:"captured" doc:"true when the prompt and response are stored: GET /api/requests/{request}/capture."`
 	Attempts     []Attempt    `json:"attempts,omitempty" doc:"Every Attempt in order (on GET /api/requests/{request} only)."`
+
+	rev int64 // change counter (see GET /api/requests?changed_after=)
 }
 
 // Failure is why a Request failed.
@@ -70,9 +76,9 @@ type Failure struct {
 
 // Caller is who sent a Request.
 type Caller struct {
-	Kind         string `json:"kind" enum:"gateway_key"`
+	Kind         string `json:"kind" enum:"gateway_key,test"`
 	GatewayKeyID string `json:"gateway_key_id,omitempty"`
-	Name         string `json:"name" doc:"Gateway Key name at the time of the Request."`
+	Name         string `json:"name" doc:"Gateway Key name at the time of the Request; for test Requests \"Test\" or \"Test (as <Gateway Key name>)\"."`
 }
 
 // Attempt is one transmission to a Provider.

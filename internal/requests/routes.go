@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
@@ -21,11 +21,13 @@ import (
 type RequestPage struct {
 	Requests   []Request `json:"requests"`
 	NextBefore string    `json:"next_before,omitempty" doc:"Pass as before= to read the next older page; absent on the last page."`
+	Cursor     int64     `json:"cursor" doc:"Pass as changed_after= to get only the Requests that started or changed after this page was read."`
 }
 
 const requestColumns = `id, started_at, finished_at, state, status, error_code, error_message, caller_kind, gateway_key_id, caller_name,
 	route, shape_in, shape_out, model, stream, provider_id, provider_handle, endpoint_id, endpoint_name, upstream_key_id, upstream_key_name,
 	wire_model, first_byte_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, attempt_count, summary,
+	pool, rev,
 	EXISTS (SELECT 1 FROM captures c WHERE c.request_id = requests.id)`
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
@@ -35,7 +37,9 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var code, msg, shapeIn, shapeOut string
 	err := row.Scan(&r.ID, &started, &finished, &r.State, &r.Status, &code, &msg, &r.Caller.Kind, &r.Caller.GatewayKeyID, &r.Caller.Name,
 		&r.Route, &shapeIn, &shapeOut, &r.Model, &r.Stream, &r.ProviderID, &r.Provider, &r.EndpointID, &r.Endpoint, &r.UpstreamKeyID, &r.UpstreamKey,
-		&r.WireModel, &firstByte, &duration, &in, &out, &cache, &reasoning, &r.AttemptCount, &r.Summary, &r.Captured)
+		&r.WireModel, &firstByte, &duration, &in, &out, &cache, &reasoning, &r.AttemptCount, &r.Summary,
+		&r.Pool, &r.rev,
+		&r.Captured)
 	if err != nil {
 		return r, err
 	}
@@ -94,20 +98,47 @@ func Routes(db *store.DB) []api.Route {
 	return []api.Route{
 		{
 			Method: http.MethodGet, Path: "/api/requests", Tag: tag,
-			Summary:     "List Requests, newest first",
-			Description: "Every Request a Caller with a valid Gateway Key made, refusals included. Filters combine with AND. Read one Request for its Attempts.",
-			Query: []api.Param{
-				{Name: "caller", Description: "Gateway Key name (at the time of the Request) or ID."},
-				{Name: "provider", Description: "Provider handle that served (or was named by) the Request."},
-				{Name: "model", Description: "Model exactly as the Caller named it."},
-				{Name: "status", Description: "HTTP status the Caller received: exact (429) or a class (2xx, 4xx, 5xx)."},
-				{Name: "since", Description: "Only Requests that started at or after this time: RFC 3339, or a duration back from now such as 1h."},
-				{Name: "until", Description: "Only Requests that started before this time: RFC 3339, or a duration back from now."},
-				{Name: "before", Description: "Only Requests older than this Request ID (paging; use next_before)."},
-				{Name: "limit", Type: "integer", Description: "RequestPage size, default 100, at most 1000."},
-			},
+			Summary: "List Requests, newest first, or follow new ones",
+			Description: "Every Request a Caller with a valid Gateway Key made, refusals included, and test Requests from the chat. Filters combine with AND; " +
+				"a repeated filter matches any of its values. Read one Request for its Attempts.\n\n" +
+				"To follow the feed live, keep the `cursor` of a page and poll with `changed_after=<cursor>` (same filters) every few seconds: " +
+				"you get only the Requests that started or changed since (an in-progress Request appears again when it finishes), oldest change first, " +
+				"and a new `cursor`. When the page is full, ask again at once.",
+			Query: append(slices.Clone(filterParams),
+				api.Param{Name: "before", Description: "Only Requests older than this Request ID (paging; use next_before)."},
+				api.Param{Name: "changed_after", Type: "integer", Description: "Only Requests that started or changed after this cursor (from a page's cursor), oldest change first. Not with before."},
+				api.Param{Name: "limit", Type: "integer", Description: "Page size, default 100, at most 1000."},
+			),
 			Response: RequestPage{},
 			Handle:   func(call *api.Call) (any, error) { return list(call, db, c) },
+		},
+		{
+			Method: http.MethodGet, Path: "/api/requests/stats", Tag: tag,
+			Summary:     "Summarise the Requests matching filters",
+			Description: "Takes the same filters as GET /api/requests and counts the Requests they match: how many succeeded, failed and were retried, median duration and time to first token of succeeded Requests, and tokens.",
+			Query:       filterParams,
+			Response:    Stats{},
+			Handle: func(call *api.Call) (any, error) {
+				f, err := parseFilter(call.R.URL.Query(), c, false)
+				if err != nil {
+					return nil, err
+				}
+				return stats(call.R.Context(), db, f)
+			},
+		},
+		{
+			Method: http.MethodGet, Path: "/api/requests/filters", Tag: tag,
+			Summary:     "List the Callers, Providers, Pools and models seen in Requests",
+			Description: "The values GET /api/requests can be filtered by within a time window, each with its number of Requests, most used first (at most 200 each). Test callers are listed with kind test.",
+			Query:       timeParams,
+			Response:    FilterOptions{},
+			Handle: func(call *api.Call) (any, error) {
+				f, err := parseFilter(call.R.URL.Query(), c, true)
+				if err != nil {
+					return nil, err
+				}
+				return filterOptions(call.R.Context(), db, f)
+			},
 		},
 		{
 			Method: http.MethodGet, Path: "/api/requests/{request}", Tag: tag,
@@ -140,41 +171,33 @@ func Routes(db *store.DB) []api.Route {
 }
 
 func list(call *api.Call, db *store.DB, c clock.Clock) (any, error) {
+	ctx := call.R.Context()
 	q := call.R.URL.Query()
-	var where []string
-	var args []any
-	add := func(cond string, a ...any) { where, args = append(where, cond), append(args, a...) }
-	if s := q.Get("caller"); s != "" {
-		add("(gateway_key_id = ? OR caller_name = ?)", s, s)
+	f, err := parseFilter(q, c, false)
+	if err != nil {
+		return nil, err
 	}
-	if s := q.Get("provider"); s != "" {
-		add("provider_handle = ?", s)
-	}
-	if s := q.Get("model"); s != "" {
-		add("model = ?", s)
-	}
-	if s := q.Get("status"); s != "" {
-		if len(s) == 3 && strings.HasSuffix(s, "xx") && s[0] >= '1' && s[0] <= '5' {
-			lo := int(s[0]-'0') * 100
-			add("status >= ? AND status < ?", lo, lo+100)
-		} else if n, err := strconv.Atoi(s); err == nil && n >= 100 && n <= 599 {
-			add("status = ?", n)
-		} else {
-			return nil, api.BadRequest("Use an HTTP status such as 429 or a class such as 5xx.", "status %q is not a status or class.", s)
+	var cursor int64
+	follow := q.Get("changed_after") != ""
+	if follow {
+		if q.Get("before") != "" {
+			return nil, api.BadRequest("Use before= to page back through history, or changed_after= to follow new Requests, not both.", "before and changed_after cannot be combined.")
 		}
-	}
-	timeHint := "Use an RFC 3339 time (2026-01-02T15:04:05Z) or a duration such as 1h."
-	for _, p := range []struct{ name, op string }{{"since", ">="}, {"until", "<"}} {
-		if s := q.Get(p.name); s != "" {
-			t, err := parseTime(s, c)
-			if err != nil {
-				return nil, api.BadRequest(timeHint, "%s: %v", p.name, err)
-			}
-			add("started_at "+p.op+" ?", store.Millis(t))
+		cursor, err = strconv.ParseInt(q.Get("changed_after"), 10, 64)
+		if err != nil || cursor < 0 {
+			return nil, api.BadRequest("Pass the cursor of a page you read from GET /api/requests.", "changed_after %q is not a cursor.", q.Get("changed_after"))
 		}
+	} else if s := q.Get("before"); s != "" {
+		f.add("rowid < coalesce((SELECT rowid FROM requests WHERE id = ?), 0)", s)
 	}
-	if s := q.Get("before"); s != "" {
-		add("rowid < coalesce((SELECT rowid FROM requests WHERE id = ?), 0)", s)
+	// Read the newest change before the page: a change committed in between
+	// then shows up on the next poll instead of never.
+	var head int64
+	if err := db.QueryRowContext(ctx, `SELECT coalesce(max(rev), 0) FROM requests`).Scan(&head); err != nil {
+		return nil, err
+	}
+	if follow {
+		f.add("rev > ? AND rev <= ?", cursor, head)
 	}
 	limit := 100
 	if s := q.Get("limit"); s != "" {
@@ -184,18 +207,16 @@ func list(call *api.Call, db *store.DB, c clock.Clock) (any, error) {
 		}
 		limit = n
 	}
-	sqlq := `SELECT ` + requestColumns + ` FROM requests`
-	if len(where) > 0 {
-		sqlq += " WHERE " + strings.Join(where, " AND ")
+	order := " ORDER BY rowid DESC LIMIT ?"
+	if follow {
+		order = " ORDER BY rev LIMIT ?"
 	}
-	sqlq += " ORDER BY rowid DESC LIMIT ?"
-	args = append(args, limit)
-	rows, err := db.QueryContext(call.R.Context(), sqlq, args...)
+	rows, err := db.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests`+f.clause()+order, slices.Concat(f.args, []any{limit})...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	p := RequestPage{Requests: []Request{}}
+	p := RequestPage{Requests: []Request{}, Cursor: head}
 	for rows.Next() {
 		r, err := scanRequest(rows)
 		if err != nil {
@@ -207,7 +228,12 @@ func list(call *api.Call, db *store.DB, c clock.Clock) (any, error) {
 		return nil, err
 	}
 	if len(p.Requests) == limit {
-		p.NextBefore = p.Requests[len(p.Requests)-1].ID
+		last := p.Requests[len(p.Requests)-1]
+		if follow {
+			p.Cursor = last.rev // more changes wait; the next call continues from here
+		} else {
+			p.NextBefore = last.ID
+		}
 	}
 	return p, nil
 }

@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/config"
+	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/server"
 )
@@ -37,6 +39,8 @@ type Options struct {
 	LogLevel slog.Level  // default info, as in production
 	// HTTPClient makes Iroha's outbound calls; default a plain client.
 	HTTPClient *http.Client
+	// Jobs are background jobs added to the built-in ones.
+	Jobs []jobs.Job
 }
 
 // Server is a running in-process Iroha.
@@ -107,6 +111,7 @@ func (s *Server) start() {
 		Clock:      s.Clock,
 		Console:    s.console,
 		HTTPClient: s.opts.HTTPClient,
+		Jobs:       s.opts.Jobs,
 	})
 	if err != nil {
 		s.t.Fatalf("start Iroha: %v", err)
@@ -181,6 +186,54 @@ func (s *Server) Logs(query string) []logs.Event {
 	var page logs.Page
 	s.Admin.Get("/api/logs?" + query).Expect(http.StatusOK).JSON(&page)
 	return page.Events
+}
+
+// SettleJobs waits (real time, up to 10 s) until no background job is
+// running and every job's next run is after the fake clock's now: call it
+// after Advance to let the runs that time triggered finish. It returns the
+// jobs as GET /api/jobs then reports them.
+func (s *Server) SettleJobs() []jobs.JobView {
+	s.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	read := func() (jobs.JobList, bool) {
+		var list jobs.JobList
+		s.Admin.Get("/api/jobs").Expect(http.StatusOK).JSON(&list)
+		for _, j := range list.Jobs {
+			if j.Running || j.NextRunAt == nil || !j.NextRunAt.After(s.Clock.Now()) {
+				return list, false
+			}
+		}
+		return list, true
+	}
+	for {
+		list, settled := read()
+		if settled {
+			// Read again a moment later: a goroutine woken by the last
+			// timer may not have marked its job running yet.
+			time.Sleep(10 * time.Millisecond)
+			again, still := read()
+			if still && reflect.DeepEqual(list, again) {
+				return list.Jobs
+			}
+		}
+		if time.Now().After(deadline) {
+			s.t.Fatalf("background jobs did not settle within 10s: %+v", list.Jobs)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// RunJob runs a background job now through POST /api/jobs/{job}/run and
+// returns the run. Pass query "dry_run=true" for a dry run.
+func (s *Server) RunJob(name string, query ...string) jobs.Run {
+	s.t.Helper()
+	path := "/api/jobs/" + name + "/run"
+	if len(query) > 0 {
+		path += "?" + query[0]
+	}
+	var run jobs.Run
+	s.Admin.Post(path, nil).Expect(http.StatusOK).JSON(&run)
+	return run
 }
 
 // NewAdminToken creates an Admin Token named name through the admin API

@@ -23,7 +23,10 @@ import (
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/config"
+	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/requests"
+	"github.com/hoangvu12/iroha/internal/retention"
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
@@ -40,6 +43,9 @@ type Options struct {
 	// Routes are added after the built-in route table. Tests use it for
 	// routes production has no need of, such as a deliberately slow one.
 	Routes []api.Route
+	// Jobs are added after the built-in background jobs. Tests use it for
+	// jobs production has no need of, such as one that fails.
+	Jobs []jobs.Job
 }
 
 // Server is one running Iroha.
@@ -52,6 +58,7 @@ type Server struct {
 	router  *api.Router
 	tokens  *admintokens.Store
 	audit   *audit.Trail
+	jobs    *jobs.Runner
 	httpc   *http.Client
 	started time.Time
 
@@ -103,6 +110,13 @@ func New(ctx context.Context, o Options) (*Server, error) {
 	}
 	s.migrations = mig
 
+	// Nothing is in flight before Serve, so a Request still in progress was
+	// left by a run of Iroha that stopped without finishing it.
+	if _, err := requests.Recover(ctx, db, s.log); err != nil {
+		s.closeStores()
+		return nil, fmt.Errorf("closing interrupted Requests: %w", err)
+	}
+
 	s.tokens = admintokens.New(db)
 	tok, created, err := s.tokens.Bootstrap(ctx)
 	if err != nil {
@@ -116,6 +130,11 @@ func New(ctx context.Context, o Options) (*Server, error) {
 	}
 
 	s.audit = audit.New(db, s.log)
+	s.jobs = jobs.NewRunner(db, s.log)
+	s.jobs.Add(retention.Job(db))
+	for _, j := range o.Jobs {
+		s.jobs.Add(j)
+	}
 	s.router = api.NewRouter(s.log, s.tokens.Authenticator())
 	s.router.Add(s.routes()...)
 	s.router.Add(o.Routes...)
@@ -148,6 +167,9 @@ func (s *Server) Serve(ln net.Listener) error {
 		ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
 	}
 	s.started = s.clock.Now()
+	if err := s.jobs.Start(context.Background()); err != nil {
+		return err
+	}
 	s.log.Info("Iroha started", logs.Kind(logs.KindStartup),
 		"version", s.opts.Version, "addr", ln.Addr().String(), "data_dir", s.opts.Config.DataDir,
 		"migrations_applied", s.migrations.Applied, "migrations_total", s.migrations.Total, "go", runtime.Version())
@@ -172,6 +194,7 @@ func (s *Server) Shutdown(ctx context.Context, reason string) error {
 				_ = s.httpSrv.Close()
 			}
 		}
+		s.jobs.Stop() // after the drain: a job run by hand through the API has finished
 		attrs := []any{logs.Kind(logs.KindShutdown), "reason", reason,
 			"drain_ms", s.clock.Now().Sub(begin).Milliseconds(), "drained", drainErr == nil}
 		if !s.started.IsZero() {

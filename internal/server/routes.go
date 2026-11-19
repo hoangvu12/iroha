@@ -11,9 +11,11 @@ import (
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
+	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
+	"github.com/hoangvu12/iroha/internal/settings"
 )
 
 // routes is the route table: one line per module. Each module package
@@ -29,6 +31,8 @@ func (s *Server) routes() []api.Route {
 		providers.Routes(s.audit, s.db),
 		gatewaykeys.Routes(s.audit, s.db),
 		requests.Routes(s.db),
+		settings.Routes(s.audit, s.db),
+		jobs.Routes(s.jobs),
 		gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db)}).Routes(),
 	)
 }

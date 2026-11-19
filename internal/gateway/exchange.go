@@ -25,6 +25,9 @@ type exchange struct {
 	rec   requests.Request
 	begun bool // the Request is recorded (the Caller is known)
 	wrote bool // the status line went to the Caller
+	// capture collects the prompt and response when the Gateway Key has
+	// capture on; it wraps r.Body and w, so nothing else needs to know.
+	capture *requests.Capture
 }
 
 func (g *Gateway) newExchange(w http.ResponseWriter, r *http.Request, sh shape.Shape) *exchange {
@@ -35,9 +38,15 @@ func (g *Gateway) newExchange(w http.ResponseWriter, r *http.Request, sh shape.S
 	return x
 }
 
-// begin records the Request once the Caller is known.
+// begin records the Request once the Caller is known, and starts capturing
+// it when the Caller's Gateway Key asks for that.
 func (x *exchange) begin(c gatewaykeys.Caller) {
 	x.rec.Caller = requests.Caller{Kind: requests.CallerGatewayKey, GatewayKeyID: c.KeyID, Name: c.Name}
+	if c.Capture {
+		x.capture = requests.NewCapture(x.start)
+		x.r.Body = x.capture.Body(x.r)
+		x.w = x.capture.Writer(x.w)
+	}
 	if err := x.g.rec.Begin(x.ctx, &x.rec); err != nil {
 		x.g.log.Error("recording a Request failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
 		return
@@ -57,6 +66,11 @@ func (x *exchange) finish() {
 	if x.begun {
 		if err := x.g.rec.Finish(x.ctx, &x.rec); err != nil {
 			x.g.log.Error("recording a Request failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
+		}
+		if x.capture != nil {
+			if err := x.g.rec.SaveCapture(x.ctx, x.rec.ID, x.rec.ShapeIn, x.capture); err != nil {
+				x.g.log.Error("storing a capture failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
+			}
 		}
 	}
 	attrs := []any{logs.Kind(KindRequest), logs.Request(x.rec.ID), "caller", x.rec.Caller.Name, "route", x.rec.Route,

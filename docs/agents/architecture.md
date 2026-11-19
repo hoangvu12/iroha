@@ -430,7 +430,60 @@ React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarativ
 - **Popups render in place** (top layer, no portal): DOM events bubble to the page around them (a row's `onClick` sees a menu item's click unless the cell stops it, as every row-menu cell does), and CSS inherits. `styles/index.css` resets text styles on `[popover]` and `dialog` so a menu in a right-aligned or bold cell looks the same. Styles come from `data-slot` and state attributes; `ui/popup.ts` `popupClass` is the shared surface (grows from `--transform-origin` on `data-starting-style`, fades on `data-ending-style`, no motion under reduced motion). `popupOpen()` is what page shortcuts and the Request drawer check before taking a key.
 - **Chat model Picker** (`pages/chat/Picker.tsx`): a Popover driven by `createPickerController()` (a popover controller whose payload is the view to open: `main`, `models`, `as`...). Its triggers are `PickerTrigger`s (the composer's model button, the "Sending as" Change link) and `picker.open({ payload: "models" })` from Send without a model; `PickerPopover` lines it up with the composer column (`anchor`) at the column's width. Model and key lists are UI SDK Command (the input over an always-shown list: arrows, Enter; models `filter={false}` because the server searches), the short lists (Shape, Endpoint, Send as) are Listbox; Escape in a list goes back to the settings (the popover's `onOpenChange` cancels that Escape), Escape there closes and focus returns to the trigger.
 - **Gateway Key access** (`ScopeEditor`, `ModelPicker`): Access and "All models / Only these" are `RadioCards`; Providers, Pools and models are `Checkbox`es named by their handle or model ID inside a `<label>` row; "Models of <handle>: All models" opens the nested model Dialog, whose virtualised list still scrolls natively (it reads `scrollTop`). In `CreateDialog` the access editor sits outside the name `<form>`, so Enter in its search fields never submits the key.
-- Tests: `ui/Dialog.test.tsx`, `ui/Menu.test.tsx`, `ui/controls.test.tsx`, `ui/toast.test.tsx`, `ui/popup.test.tsx`, `pages/chat/Picker.test.tsx`, `pages/gateway-keys/ScopeEditor.test.tsx` (names, keyboard, focus return, agent tests).
+- Tests: `ui/Dialog.test.tsx`, `ui/Menu.test.tsx`, `ui/controls.test.tsx`, `ui/toast.test.tsx`, `ui/popup.test.tsx`, `pages/chat/Picker.test.tsx`, `pages/gateway-keys/ScopeEditor.test.tsx` (names, keyboard, focus return, agent tests). An unnamed `ScrollArea` is an agent component without a label: give it `label` when it holds a list an agent should find, or leave it out of a test's "every entry named" check as `Picker.test.tsx` does. Native `title` tooltips remain only on text that isn't focusable (truncated cells, state words, the health dot): a UI SDK Tooltip needs a focusable trigger.
+
+### UI motion system
+
+Shared by motion tickets 13–20 (spec story 15), set by an `improve-animations` audit (Owner, 2026-11-19). Tokens live in `styles/index.css` ("Motion tokens", and the reduced-motion rule at the end of the file); `styles/motion.test.ts` pins them. Use the tokens, never a typed number (`duration-150`, `ease-[cubic-bezier(...)]`, `scale-95`). If a value is missing, add a token here and in the test; don't add a one-off. The app is a crisp dashboard: no bounce, no springs on things nobody drags, nothing over 300 ms except sheets (300) and toasts (400).
+
+**Curves** (Tailwind `@theme`; also `var(--ease-*)` in CSS). The utility `ease-out` is the strong curve, not Tailwind's default; `ease-in` does not exist.
+
+| Utility | Curve | For |
+|---|---|---|
+| `ease-out` | `cubic-bezier(0.23, 1, 0.32, 1)` | anything entering or leaving; indicators; presses |
+| `ease-in-out` | `cubic-bezier(0.77, 0, 0.175, 1)` | something moving from one place on screen to another without a press (reorder settling, canvas pan to a card, zoom buttons) |
+| `ease-drawer` | `cubic-bezier(0.32, 0.72, 0, 1)` | sheets and the chat panel |
+| `ease` (CSS keyword, Tailwind `ease-[ease]`) | | hover colours, toasts |
+
+**Durations** (`--duration-*` in `:root`, utilities `duration-<name>`):
+
+| Token | ms | For |
+|---|---|---|
+| `hover` | 150 | colour/background on hover and selection (Tailwind's `transition-colors` default is also 150) |
+| `press` | 160 | `:active` scale |
+| `tooltip` | 125 | tooltip in and out |
+| `popup-in` / `popup-out` | 180 / 120 | menu, select, combobox, autocomplete, popover |
+| `dialog-in` / `dialog-out` | 200 / 150 | dialog, alert dialog and their backdrop |
+| `sheet-in` / `sheet-out` | 300 / 240 | sheet stack, chat panel, older sheets moving aside or back |
+| `indicator` | 200 | tab and segmented indicator |
+| `collapse` | 200 | disclosure, expandable row (height), its chevron's rotation |
+| `move` | 250 | on-screen repositioning |
+| `list-in` / `list-out` | 200 / 150 | a row, bulk-action bar or pill appearing / leaving |
+| `toast` | 400 | toast enter, stack, leave |
+| `fade` | 150 | a plain crossfade; a sheet's opacity |
+| `flash` | 1600 | background of a just-arrived row fading back (WAAPI: read it with `getComputedStyle(document.documentElement).getPropertyValue("--duration-flash")`) |
+
+**Distances and scales** (`--motion-*`, used as `scale-(--motion-scale-popup)`, `translate-y-(--motion-shift)`): `scale-popup` 0.96 (popups and dialogs start and end here, never `scale-0`), `scale-press` 0.97, `shift` 8px (bar, pill), `shift-sm` 4px (row), `sheet-offset` 100% (a sheet's own width), `toast-offset` 100% (a toast's own height).
+
+**Recipes** (UI SDK state attributes, never mount timers or `useEffect` flags):
+
+- **Popup from a trigger** (menu, select, popover, combobox, tooltip): `origin-(--transform-origin) transition-[opacity,scale] duration-popup-in ease-out data-starting-style:scale-(--motion-scale-popup) data-starting-style:opacity-0 data-ending-style:scale-(--motion-scale-popup) data-ending-style:opacity-0 data-ending-style:duration-popup-out`. Tooltip: `duration-tooltip` and `data-instant:duration-0` (the next tooltip after one was open shows at once). `ui/popup.ts` `popupClass` is the one place menus and selects get this; reuse it.
+- **Dialog**: same, but centred (no `--transform-origin`), `duration-dialog-in` / `data-ending-style:duration-dialog-out`; backdrop `transition-opacity` with the same durations.
+- **Sheet** (stack, chat panel): enter and leave along the same edge. `data-starting-style:translate-x-(--motion-sheet-offset) data-ending-style:translate-x-(--motion-sheet-offset) data-starting-style:opacity-0 data-ending-style:opacity-0 [transition:translate_var(--duration-sheet-in)_var(--ease-drawer),opacity_var(--duration-fade)_var(--ease-out)] data-ending-style:[transition-duration:var(--duration-sheet-out),var(--duration-fade)]`. Older sheets move aside with the same translate transition on the same frame (no stagger). Opacity gets its own duration so it can still fade when reduced motion zeroes the slide.
+- **Indicator** (Tabs `TabsIndicator`, `SegmentedControlIndicator`): position with `translate-x-(--active-tab-left)` / `translate-x-(--segmented-control-indicator-left)`, never `left`; `transition-[translate,width] duration-indicator ease-out data-[activation-direction=none]:transition-none` (no slide on first placement). Panels swap at once.
+- **Press**: `transition-[scale,background-color,color] duration-press ease-out active:scale-(--motion-scale-press)` on Buttons and icon buttons; not on rows, menu items, tabs or checkboxes.
+- **Collapse** (Collapsible, expandable rows): `h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-collapse ease-out data-starting-style:h-0 data-ending-style:h-0`; chevron `transition-[rotate] duration-collapse ease-out`.
+- **Row, bar or pill that isn't a UI SDK popup**: `animateIn(el)` / `animateOut(el)` from `@ui-sdk/core` set `data-starting-style` / `data-ending-style` on a plain element and wait for the exit, or CSS `@starting-style`. Enter `translate-y-(--motion-shift)` (rows: `--motion-shift-sm`) + `opacity-0` → place, `duration-list-in ease-out`; leave opacity only, `duration-list-out`. Table rows never animate height: siblings close the gap at once.
+- **Toast**: `transition-[translate,opacity,height] duration-toast ease-[ease]`, start `translate-y-(--motion-toast-offset) opacity-0`; `data-swiping:transition-none` (the finger drives it).
+- Hover: Tailwind's `hover:` already applies only on devices that hover, so touch never sticks. Never `transition-all`. `will-change` only after a trace shows a 1 px shift.
+
+**Reduced motion** (one `@media (prefers-reduced-motion: reduce)` rule on `:root`): what moves or changes size holds still, because `press`, `indicator`, `collapse`, `move`, `sheet-in` and `sheet-out` become `0ms`, distances `0`, scales `1`, and `animate-pulse`/`ping`/`bounce` become `none` (Skullet and `.skeleton` stop themselves). What may fade: enter/exit of popups, dialogs, sheets, rows and toasts, hover colours and the arrival flash keep their durations, and with no distance or scale left they play as plain fades. Built from the tokens, a component needs nothing more. `motion-reduce:transition-none` on existing parts is fine (stricter). JS-driven motion (WAAPI, scroll) checks `matchMedia("(prefers-reduced-motion: reduce)")` itself and keeps opacity and colour only.
+
+**Never animate**:
+- **Keyboard actions.** The page shortcuts P/G/R (no page transitions at all), C toggling the chat panel (open it instantly when the key did it; slide only for a pointer), arrow/Home/End moving a highlight in menus, lists and tables, the canvas's `+ − 0` and Tab-to-card pan, Escape (popups use their normal short exit, nothing extra), `Kbd` hints.
+- **High-frequency or 1:1 surfaces.** Row hover (instant background), selection checkboxes (colour only), sorting, filtering, search results, page changes (keep the previous rows, no skeleton), drag/wheel/pinch on the canvas, a drag in progress, scrolling (no smooth scroll; chat sticks to its end instantly).
+- **Data that refreshes on its own.** Polled numbers, counts, Key States, the route preview every 5 s, streamed tokens in a reply: they change in place. The only arrival motion is a new Requests feed row (shift-sm + flash), all rows of one poll together, no stagger.
+- Theme switching (the `.dark` class flips colours at once; suppress `transition-colors` for that frame).
 
 ### UI ticket 21: destructive actions look dangerous and confirm
 
@@ -438,4 +491,4 @@ React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarativ
 - **Asking** (`ui/Confirm.tsx`, over `ConfirmDialog`/`TypeToConfirmDialog`): `const confirm = useConfirm()`, render `{confirm.dialog}` once in the component, then `confirm.ask({ title, body, confirmLabel, onConfirm, typeToConfirm? })` from any handler: a menu item's `onSelect`, a bulk bar, a row's ×. `<ConfirmAction {...question}><IconButton danger …/></ConfirmAction>` wraps one trigger. `title` names what goes and how many; `confirmLabel` says what the button does ("Remove model", "Delete 12 keys"), never "OK"; `typeToConfirm: name` for revokes. `onConfirm` runs with the dialog open and pending, shows its error inline, and closes when it resolves: do the call and the ticket 04 result there (Undo toast when the row is gone). Escape or Cancel closes, and focus goes back to the trigger (for a menu item, the menu's ⋯ trigger). The dialog is wrapped so its clicks don't reach a clickable row; `ConfirmAction` also stops the trigger's click.
 - **Don't ask** for a row of a draft that isn't saved (chips in the model picker, ticks in an access editor): nothing is lost until Save. Give it the danger tone only. Clearing Model or Endpoint Gaps, disabling, unpinning a discovered model and hiding are not destructive (Undo, design C25) and stay plain.
 - **Tables (tickets 06–09)**: row menus use `MenuItem danger` + `confirm.ask` (one `useConfirm` per table, not per row); bulk bars name the count ("Delete 12 keys?") and the first few names in `body`. `/states` shows each form.
-- Tests: `ui/Confirm.test.tsx` (Escape cancels and focus returns to the trigger or the menu trigger, confirm runs once, a clickable row never sees the clicks, type-to-confirm, the tone classes, agent test), `pages/providers/Models.test.tsx` (removing an added model asks; unpinning doesn't). An unnamed `ScrollArea` is an agent component without a label: give it `label` when it holds a list an agent should find, or leave it out of a test's "every entry named" check as `Picker.test.tsx` does. Native `title` tooltips remain only on text that isn't focusable (truncated cells, state words, the health dot): a UI SDK Tooltip needs a focusable trigger.
+- Tests: `ui/Confirm.test.tsx` (Escape cancels and focus returns to the trigger or the menu trigger, confirm runs once, a clickable row never sees the clicks, type-to-confirm, the tone classes, agent test), `pages/providers/Models.test.tsx` (removing an added model asks; unpinning doesn't).

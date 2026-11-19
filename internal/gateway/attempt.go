@@ -32,10 +32,14 @@ const (
 	opMessages = "/messages"
 )
 
-// opFor is the operation path of an inference call in Shape sh.
-func opFor(sh shape.Shape) string {
-	if sh == shape.AnthropicMessages {
+// opFor is the operation path of an inference call in Shape sh for model
+// (a Gemini URL names the model and whether it streams).
+func opFor(sh shape.Shape, model string, stream bool) string {
+	switch sh {
+	case shape.AnthropicMessages:
 		return opMessages
+	case shape.Gemini:
+		return geminiOp(model, stream)
 	}
 	return opChat
 }
@@ -140,7 +144,7 @@ func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []b
 // Caller did not.
 func preparePassthrough(body []byte, cr callerRequest, wireModel string) (out []byte, injected bool) {
 	out = body
-	if wireModel != cr.bodyModel {
+	if wireModel != cr.bodyModel && cr.shape != shape.Gemini { // Gemini's model is in the URL (opFor)
 		out, _ = setField(out, "model", jsonString(wireModel))
 	}
 	if cr.shape == shape.OpenAIChat && cr.stream && !cr.includeUsage {
@@ -212,7 +216,7 @@ func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (
 		call.header.Del("Anthropic-Version")
 		call.header.Del("Anthropic-Beta")
 	}
-	tr, err := translate.New(cr.shape, ep, translate.Options{Model: cr.model, ID: x.rec.ID, Now: x.g.clock.Now()})
+	tr, err := translate.New(cr.shape, ep, translate.Options{Model: cr.model, ID: x.rec.ID, Now: x.g.clock.Now(), Stream: cr.stream})
 	if err != nil {
 		return call, api.Errorf(http.StatusInternalServerError, "translation_failed", "Report this; the Request cannot be translated.", "%v", err)
 	}
@@ -258,7 +262,7 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 	}
 	ctx, disarm, release := deadlineContext(x.ctx, g.clock, deadline)
 	defer release()
-	req, err := outbound(ctx, c, call.header, call.body, opFor(c.Endpoint.Shape), cr.stream)
+	req, err := outbound(ctx, c, call.header, call.body, opFor(c.Endpoint.Shape, c.WireModel, cr.stream), cr.stream)
 	if err != nil {
 		a.Error = err.Error()
 		x.fail(api.Errorf(http.StatusBadGateway, "endpoint_misconfigured",
@@ -590,6 +594,9 @@ func (c *passRelay) body(status int, b []byte) ([]byte, *api.Error) {
 		return b, nil
 	}
 	c.usage.Body(b)
+	if c.shape == shape.Gemini {
+		return echoModelVersion(b, c.model), nil
+	}
 	return echoModel(b, c.model), nil
 }
 
@@ -613,6 +620,8 @@ func (c *passRelay) data(p []byte) ([]byte, bool) {
 			}
 		}
 		return p, false
+	case shape.Gemini:
+		return echoModelVersion(p, c.model), false
 	}
 	return echoModel(p, c.model), false
 }

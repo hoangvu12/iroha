@@ -13,16 +13,19 @@ import (
 )
 
 func TestTargetsAreTheShapesWithCodecs(t *testing.T) {
-	if got := translate.Targets(shape.OpenAIChat); !slices.Equal(got, []shape.Shape{shape.AnthropicMessages}) {
-		t.Errorf("Chat targets = %v", got)
+	for _, sh := range []shape.Shape{shape.OpenAIChat, shape.AnthropicMessages, shape.Gemini} {
+		got := translate.Targets(sh)
+		for _, to := range []shape.Shape{shape.OpenAIChat, shape.AnthropicMessages, shape.Gemini} {
+			if slices.Contains(got, to) != (to != sh) {
+				t.Errorf("%s targets = %v", sh, got)
+			}
+		}
 	}
-	if got := translate.Targets(shape.AnthropicMessages); !slices.Equal(got, []shape.Shape{shape.OpenAIChat}) {
-		t.Errorf("Anthropic targets = %v", got)
-	}
-	if translate.Supported(shape.OpenAIChat, shape.OpenAIChat) || translate.Supported(shape.OpenAIChat, shape.Gemini) {
+	unknown := shape.Shape("unknown")
+	if translate.Supported(shape.OpenAIChat, shape.OpenAIChat) || translate.Supported(shape.OpenAIChat, unknown) {
 		t.Error("same-Shape and codec-less pairs are not translations")
 	}
-	if _, err := translate.New(shape.OpenAIChat, shape.Gemini, translate.Options{Now: now}); err == nil {
+	if _, err := translate.New(shape.OpenAIChat, unknown, translate.Options{Now: now}); err == nil {
 		t.Error("New accepted a pair without codecs")
 	}
 }

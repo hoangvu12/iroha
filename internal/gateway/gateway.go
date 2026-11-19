@@ -139,7 +139,7 @@ func (g *Gateway) Routes() []api.Route {
 		Description: messagesDescription,
 		Request:     MessagesRequest{}, Response: map[string]any{},
 		Raw: g.serveProvider(shape.AnthropicMessages),
-	}}
+	}, g.geminiRoute()}
 }
 
 // serveProvider serves a provider-scoped route whose Caller speaks sh.
@@ -258,11 +258,13 @@ type callerRequest struct {
 var bodyHints = map[shape.Shape]string{
 	shape.OpenAIChat:        "Send an OpenAI Chat Completions JSON object with model and messages.",
 	shape.AnthropicMessages: "Send an Anthropic Messages JSON object with model, max_tokens and messages.",
+	shape.Gemini:            "Send a Gemini generateContent JSON object with contents to .../v1beta/models/{model}:generateContent.",
 }
 
 // readBody reads a Caller's body written in sh. Every Shape whose body
 // names the model shares these rules: a JSON object, a non-blank string
-// model, stream only when it is exactly true.
+// model, stream only when it is exactly true. Gemini names both in the URL
+// (gemini.go).
 func readBody(r *http.Request, sh shape.Shape) ([]byte, callerRequest, *api.Error) {
 	cr := callerRequest{shape: sh}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxCallerBody+1))
@@ -284,6 +286,9 @@ func readBody(r *http.Request, sh shape.Shape) ([]byte, callerRequest, *api.Erro
 	}
 	if trimmed[0] != '{' || json.Unmarshal(trimmed, &head) != nil {
 		return nil, cr, api.BadRequest(hint, "The request body is not a JSON object.")
+	}
+	if sh == shape.Gemini {
+		return body, cr, readGeminiTarget(r, &cr)
 	}
 	if len(head.Model) > 0 && string(head.Model) != "null" {
 		if json.Unmarshal(head.Model, &cr.bodyModel) != nil {

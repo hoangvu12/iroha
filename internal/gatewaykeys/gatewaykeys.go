@@ -26,7 +26,7 @@ const SecretPrefix = "sk-iroha"
 type GatewayKey struct {
 	ID         string     `json:"id"`
 	Name       string     `json:"name" doc:"Who the key was issued to; Requests are attributed to it."`
-	Secret     string     `json:"secret" doc:"The key itself. Callers send it as \"Authorization: Bearer <secret>\", \"x-api-key\" or \"api-key\"."`
+	Secret     string     `json:"secret" doc:"The key itself. Callers send it as \"Authorization: Bearer <secret>\", \"x-api-key\", \"api-key\", \"x-goog-api-key\" or Gemini's ?key= parameter."`
 	Scope      Scope      `json:"scope"`
 	Capture    bool       `json:"capture" doc:"true: the full prompt and response of every Request made with this key are stored (GET /api/requests/{request}/capture), for retention.captures_days. false: neither is stored."`
 	Revoked    bool       `json:"revoked"`
@@ -258,18 +258,19 @@ type Store struct {
 func New(db *store.DB) *Store { return &Store{db: db, clock: db.Clock()} }
 
 // Credential returns the Gateway Key a request presents: "Authorization:
-// Bearer", then "x-api-key", then "api-key". Gemini's x-goog-api-key and
-// key= arrive with ticket 15.
+// Bearer", then "x-api-key", "api-key", Gemini's "x-goog-api-key", then
+// Gemini's key query parameter. The Gateway builds upstream URLs from the
+// Endpoint alone, so the key parameter is never forwarded either.
 func Credential(r *http.Request) string {
 	if t := api.BearerToken(r); t != "" {
 		return t
 	}
-	for _, h := range []string{"x-api-key", "api-key"} {
+	for _, h := range []string{"x-api-key", "api-key", "x-goog-api-key"} {
 		if v := strings.TrimSpace(r.Header.Get(h)); v != "" {
 			return v
 		}
 	}
-	return ""
+	return strings.TrimSpace(r.URL.Query().Get("key"))
 }
 
 // CredentialHeaders are the request headers that may carry a Caller's
@@ -292,7 +293,7 @@ func (s *Store) Authenticate(r *http.Request) (Caller, *api.Error) {
 		return Caller{}, &api.Error{
 			Status: http.StatusUnauthorized, Code: "gateway_key_missing",
 			Message: "This route needs a Gateway Key.",
-			Hint:    "Send your Gateway Key as \"Authorization: Bearer <key>\" (or in an x-api-key or api-key header).",
+			Hint:    "Send your Gateway Key as \"Authorization: Bearer <key>\" (or in an x-api-key, api-key or x-goog-api-key header, or Gemini's ?key= parameter).",
 		}
 	}
 	k, err := scan(s.db.QueryRowContext(r.Context(), `SELECT `+keyColumns+` FROM gateway_keys WHERE secret = ?`, secret))

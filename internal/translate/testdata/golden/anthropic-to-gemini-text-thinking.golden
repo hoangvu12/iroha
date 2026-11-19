@@ -1,0 +1,108 @@
+== request sent upstream ==
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "What is in this image?"
+        },
+        {
+          "fileData": {
+            "fileUri": "https://example.com/dog.png",
+            "mimeType": "image/png"
+          }
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "A dog.",
+          "thoughtSignature": "context_engineering_is_the_way_to_go"
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "text": "What breed?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 4096,
+    "stopSequences": [
+      "END"
+    ],
+    "thinkingConfig": {
+      "thinkingBudget": 2048
+    }
+  },
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "You are terse."
+      }
+    ]
+  }
+}
+== answer to the Caller ==
+{
+  "content": [
+    {
+      "thinking": "Floppy ears, short coat.",
+      "type": "thinking"
+    },
+    {
+      "text": "A beagle.",
+      "type": "text"
+    }
+  ],
+  "id": "chatcmpl-<uuid>",
+  "model": "claude-sonnet-4-5",
+  "role": "assistant",
+  "stop_reason": "max_tokens",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 300,
+    "output_tokens": 30
+  }
+}
+== stream to the Caller ==
+event: message_start
+data: {"message":{"content":[],"id":"chatcmpl-<uuid>","model":"claude-sonnet-4-5","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":300,"output_tokens":0}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"thinking":"","type":"thinking"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"Floppy ears.","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"A bea","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"gle.","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":1,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":300,"output_tokens":30}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

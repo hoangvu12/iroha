@@ -1,0 +1,56 @@
+{
+  "from": "openai-chat",
+  "to": "gemini",
+  "model": "smart",
+  "wire_model": "gemini-2.5-pro",
+  "include_usage": true,
+  "request": {
+    "model": "smart",
+    "max_tokens": 2048,
+    "reasoning_effort": "low",
+    "stream": true,
+    "stream_options": {"include_usage": true},
+    "messages": [
+      {"role": "system", "content": "You are terse."},
+      {"role": "user", "content": [
+        {"type": "text", "text": "Weather in Hanoi? Also what is in these images?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}},
+        {"type": "image_url", "image_url": {"url": "https://example.com/cat.webp?size=large"}}
+      ]},
+      {"role": "assistant", "content": null, "tool_calls": [
+        {"id": "call_0", "type": "function", "function": {"name": "mcp:git status", "arguments": "{}"}}
+      ]},
+      {"role": "tool", "tool_call_id": "call_0", "content": "clean"},
+      {"role": "user", "content": "Now the weather."}
+    ],
+    "tools": [
+      {"type": "function", "function": {"name": "get_weather", "description": "Get weather",
+        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"], "additionalProperties": false}}},
+      {"type": "function", "function": {"name": "mcp:git status", "parameters": {"type": "object", "properties": {}}}}
+    ],
+    "tool_choice": {"type": "function", "function": {"name": "mcp:git status"}}
+  },
+  "answer": {
+    "candidates": [{
+      "content": {"role": "model", "parts": [
+        {"text": "User wants weather and git status.", "thought": true},
+        {"text": "Checking."},
+        {"functionCall": {"name": "get_weather", "args": {"city": "Hanoi"}}, "thoughtSignature": "c2lnMTIz"},
+        {"functionCall": {"name": "mcp_git_status", "args": {}}}
+      ]},
+      "finishReason": "STOP",
+      "index": 0
+    }],
+    "usageMetadata": {"promptTokenCount": 52, "candidatesTokenCount": 20, "totalTokenCount": 90, "thoughtsTokenCount": 18, "cachedContentTokenCount": 16,
+      "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 52}]},
+    "modelVersion": "gemini-2.5-pro",
+    "responseId": "resp-1"
+  },
+  "stream": [
+    {"candidates": [{"content": {"role": "model", "parts": [{"text": "User wants weather.", "thought": true}]}, "index": 0}], "usageMetadata": {"promptTokenCount": 52, "totalTokenCount": 52}, "modelVersion": "gemini-2.5-pro", "responseId": "resp-2"},
+    {"candidates": [{"content": {"role": "model", "parts": [{"text": "Check"}]}, "index": 0}], "modelVersion": "gemini-2.5-pro", "responseId": "resp-2"},
+    {"candidates": [{"content": {"role": "model", "parts": [{"text": "ing."}]}, "index": 0}], "modelVersion": "gemini-2.5-pro", "responseId": "resp-2"},
+    {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "get_weather", "args": {"city": "Hanoi"}}, "thoughtSignature": "c2lnMTIz"}, {"functionCall": {"name": "mcp_git_status", "args": {}}}]}, "finishReason": "STOP", "index": 0}],
+      "usageMetadata": {"promptTokenCount": 52, "candidatesTokenCount": 20, "totalTokenCount": 90, "thoughtsTokenCount": 18, "cachedContentTokenCount": 16}, "modelVersion": "gemini-2.5-pro", "responseId": "resp-2"}
+  ]
+}

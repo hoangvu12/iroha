@@ -83,6 +83,9 @@ type Options struct {
 	ID string
 	// Now is when the Request is served; Chat answers carry it as created.
 	Now time.Time
+	// Stream: the Caller asked for a stream. Only a Shape whose body does
+	// not say so (Gemini, where the URL does) needs it.
+	Stream bool
 }
 
 // Translation converts one Attempt: the Caller's request into the
@@ -92,6 +95,8 @@ type Translation struct {
 	o                Options
 	meta             *convmeta.Values
 	names            toolNames
+	chat             map[string]any // the whole answer in Chat form, for a chatHop Caller (hop.go)
+	thoughts         bool           // a Gemini Caller asked for thought parts (includeThoughts)
 	// Diagnostics are RelayKit's notes on what the request conversion
 	// could not carry across ("code: message"), for the record.
 	Diagnostics []string
@@ -140,8 +145,15 @@ func (t *Translation) Request(ctx context.Context, body []byte, wireModel string
 		return nil, &Error{Message: fmt.Sprintf("The body is not a valid %s request: %v", t.caller.shape, err)}
 	}
 	t.caller.setModel(in, wireModel)
-	t.meta = &convmeta.Values{OriginModelName: t.o.Model, UpstreamModelName: wireModel, ChannelMetaAttached: true,
-		Options: &convmeta.Options{Claude: convmeta.ClaudeOptions{DefaultMaxTokens: defaultMaxTokens}}}
+	if t.caller.noteRequest != nil {
+		t.caller.noteRequest(in, t)
+	}
+	t.meta = &convmeta.Values{OriginModelName: t.o.Model, UpstreamModelName: wireModel, ChannelMetaAttached: true, IsStream: t.o.Stream,
+		Options: &convmeta.Options{Claude: convmeta.ClaudeOptions{DefaultMaxTokens: defaultMaxTokens},
+			// Gemini 3 refuses replayed model turns whose function calls lack
+			// the thought signature only Gemini can make; history from another
+			// Shape gets Google's documented bypass value instead.
+			Gemini: convmeta.GeminiOptions{FunctionCallThoughtSignatureEnabled: true}}}
 	res, err := relayconvert.ConvertRequest(ctx, t.meta, t.endpoint.format, in)
 	if err != nil {
 		return nil, &Error{Message: fmt.Sprintf("The request cannot be translated from %s to %s: %v", t.caller.shape, t.endpoint.shape, err)}
@@ -162,6 +174,10 @@ func (t *Translation) Response(ctx context.Context, body []byte) ([]byte, error)
 	in := t.endpoint.answer()
 	if err := json.Unmarshal(body, in); err != nil {
 		return nil, fmt.Errorf("the Provider's answer is not a valid %s answer: %w", t.endpoint.shape, err)
+	}
+	in, err := t.toChat(ctx, in) // hop.go
+	if err != nil {
+		return nil, err
 	}
 	res, err := relayconvert.ConvertResponse(ctx, t.metaOrEmpty(), t.caller.format, in)
 	if err != nil {
@@ -193,18 +209,23 @@ type StreamOptions struct {
 type Stream struct {
 	t        *Translation
 	st       *relayconvert.ResponseStreamState
+	hop      *relayconvert.ResponseStreamState // Endpoint to Chat, for a chatHop Caller (hop.go)
 	w        streamWriter
 	complete bool
 }
 
 // Stream starts converting a streamed answer from the Endpoint.
 func (t *Translation) Stream(o StreamOptions) (*Stream, error) {
-	st, err := relayconvert.NewResponseStreamState(t.endpoint.format, t.caller.format,
-		relayconvert.ResponseStreamOptions{Model: t.o.Model, Created: t.o.Now.Unix(), IncludeUsage: true})
+	so := relayconvert.ResponseStreamOptions{Model: t.o.Model, Created: t.o.Now.Unix(), IncludeUsage: true}
+	st, err := relayconvert.NewResponseStreamState(t.streamFrom(), t.caller.format, so)
 	if err != nil {
 		return nil, err
 	}
-	return &Stream{t: t, st: st, w: t.caller.newWriter(t, o)}, nil
+	hop, err := t.newHop(so)
+	if err != nil {
+		return nil, err
+	}
+	return &Stream{t: t, st: st, hop: hop, w: t.caller.newWriter(t, o)}, nil
 }
 
 // Event converts the data of one upstream server-sent event. It returns the
@@ -225,11 +246,7 @@ func (s *Stream) Event(ctx context.Context, data []byte) ([]byte, error) {
 	if err := json.Unmarshal(data, in); err != nil {
 		return nil, fmt.Errorf("the Provider sent a stream event that is not a valid %s event: %w", s.t.endpoint.shape, err)
 	}
-	res, err := relayconvert.ConvertStreamResponseChunk(ctx, s.t.metaOrEmpty(), s.st, in)
-	if err != nil {
-		return nil, fmt.Errorf("a stream event cannot be translated to %s: %w", s.t.caller.shape, err)
-	}
-	return s.write(res)
+	return s.convert(ctx, in) // hop.go
 }
 
 // End finishes the stream after the upstream's last event and returns the
@@ -239,6 +256,10 @@ func (s *Stream) End(ctx context.Context) ([]byte, error) {
 	if !s.complete {
 		return nil, ErrIncomplete
 	}
+	pre, err := s.endHop(ctx)
+	if err != nil {
+		return nil, err
+	}
 	res, err := relayconvert.FinalizeStreamResponse(ctx, s.t.metaOrEmpty(), s.st)
 	if err != nil {
 		return nil, fmt.Errorf("the stream cannot be finished in %s: %w", s.t.caller.shape, err)
@@ -247,7 +268,7 @@ func (s *Stream) End(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(out, s.w.end(s.st.Usage())...), nil
+	return append(append(pre, out...), s.w.end(s.st.Usage())...), nil
 }
 
 func (s *Stream) write(res []relayconvert.ResponseResult) ([]byte, error) {

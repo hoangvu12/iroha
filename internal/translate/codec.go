@@ -34,6 +34,13 @@ type codec struct {
 	tidyAnswer func(m map[string]any, t *Translation, u *dto.Usage)
 	// newWriter writes a stream converted to this Shape to the Caller.
 	newWriter func(t *Translation, o StreamOptions) streamWriter
+	// noteRequest, when set, reads what the Caller's decoded request asks
+	// of the answer (Gemini: whether thoughts are wanted).
+	noteRequest func(req any, t *Translation)
+	// chatHop: answers are converted to this Shape through OpenAI Chat,
+	// whose form tidyAnswer (Translation.chat) and the writer (chatReader)
+	// see (hop.go).
+	chatHop bool
 }
 
 // codecs are the translatable Shapes. Tickets 14 (OpenAI Responses) and 15
@@ -41,6 +48,7 @@ type codec struct {
 var codecs = map[shape.Shape]*codec{
 	shape.OpenAIChat:        chatCodec,
 	shape.AnthropicMessages: anthropicCodec,
+	shape.Gemini:            geminiCodec,
 }
 
 // upstreamEvent is what one upstream stream event means.

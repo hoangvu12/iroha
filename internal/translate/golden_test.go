@@ -7,6 +7,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,9 @@ type goldenCase struct {
 	// Stream is the data of each upstream server-sent event, in order.
 	Stream       []json.RawMessage `json:"stream"`
 	IncludeUsage bool              `json:"include_usage"`
+	// CallerStream: the Caller asked for a stream in its URL (Gemini's
+	// :streamGenerateContent), which its body cannot say.
+	CallerStream bool `json:"caller_stream"`
 }
 
 var now = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -92,8 +96,11 @@ func (o output) String() string {
 	if o.stream != nil {
 		b.WriteString("== stream to the Caller ==\n" + string(o.stream))
 	}
-	return b.String()
+	// RelayKit names answers and tool calls from Gemini with random UUIDs.
+	return randomID.ReplaceAllString(b.String(), "<uuid>")
 }
+
+var randomID = regexp.MustCompile(`[0-9a-f]{32}`)
 
 func indent(b []byte) string {
 	var out bytes.Buffer
@@ -106,7 +113,7 @@ func indent(b []byte) string {
 func run(t *testing.T, gc goldenCase) output {
 	t.Helper()
 	ctx := context.Background()
-	opts := translate.Options{Model: gc.Model, ID: "req_golden", Now: now}
+	opts := translate.Options{Model: gc.Model, ID: "req_golden", Now: now, Stream: gc.CallerStream}
 	tr, err := translate.New(gc.From, gc.To, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -168,13 +175,21 @@ func checkInvariants(t *testing.T, gc goldenCase, o output) {
 	if err := json.Unmarshal(o.request, &req); err != nil {
 		t.Fatalf("request is not JSON: %v", err)
 	}
-	if req["model"] != gc.WireModel {
+	if gc.To == shape.Gemini { // the model goes in the URL
+		if _, ok := req["model"]; ok {
+			t.Errorf("a Gemini request names its model in the URL, not the body: %v", req["model"])
+		}
+	} else if req["model"] != gc.WireModel {
 		t.Errorf("request model = %v, want %s", req["model"], gc.WireModel)
+	}
+	modelField := "model"
+	if gc.From == shape.Gemini {
+		modelField = "modelVersion"
 	}
 	if o.answer != nil {
 		var a map[string]any
-		if err := json.Unmarshal(o.answer, &a); err != nil || a["model"] != gc.Model {
-			t.Errorf("answer model = %v (%v), want %s", a["model"], err, gc.Model)
+		if err := json.Unmarshal(o.answer, &a); err != nil || a[modelField] != gc.Model {
+			t.Errorf("answer %s = %v (%v), want %s", modelField, a[modelField], err, gc.Model)
 		}
 	}
 	if o.stream == nil {
@@ -208,6 +223,25 @@ func checkInvariants(t *testing.T, gc goldenCase, o output) {
 	case shape.AnthropicMessages:
 		if !bytes.HasPrefix(o.stream, []byte("event: message_start\n")) || !bytes.HasSuffix(o.stream, []byte("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")) {
 			t.Errorf("an Anthropic stream runs from message_start to message_stop:\n%s", o.stream)
+		}
+	case shape.Gemini:
+		finished := false
+		for _, e := range events {
+			var c struct {
+				ModelVersion string `json:"modelVersion"`
+				Candidates   []struct {
+					FinishReason string `json:"finishReason"`
+				}
+			}
+			if err := json.Unmarshal([]byte(e), &c); err != nil || c.ModelVersion != gc.Model {
+				t.Errorf("chunk not stamped with the Caller's model: %s", e)
+			}
+			for _, cand := range c.Candidates {
+				finished = finished || cand.FinishReason != ""
+			}
+		}
+		if !finished {
+			t.Errorf("a Gemini stream ends with a finishReason:\n%s", o.stream)
 		}
 	}
 }

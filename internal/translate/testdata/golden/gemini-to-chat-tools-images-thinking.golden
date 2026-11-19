@@ -1,0 +1,157 @@
+== request sent upstream ==
+{
+  "max_tokens": 2048,
+  "messages": [
+    {
+      "content": "You are terse.",
+      "role": "system"
+    },
+    {
+      "content": [
+        {
+          "text": "Weather in Hanoi? Also what is in these images?",
+          "type": "text"
+        },
+        {
+          "image_url": {
+            "detail": "auto",
+            "url": "data:image/png;base64,iVBORw0KGgo="
+          },
+          "type": "image_url"
+        },
+        {
+          "image_url": {
+            "detail": "auto",
+            "url": "https://example.com/cat.jpg"
+          },
+          "type": "image_url"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"path\":\"/tmp/a\"}",
+            "name": "fs_read"
+          },
+          "id": "call_1",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"content\":\"file a\"}",
+      "role": "tool",
+      "tool_call_id": "call_1"
+    },
+    {
+      "content": "Now the weather.",
+      "role": "user"
+    }
+  ],
+  "model": "glm-4.6",
+  "reasoning_effort": "low",
+  "stop": [
+    "END"
+  ],
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "temperature": 0.2,
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "function": {
+        "description": "Get weather",
+        "name": "get_weather",
+        "parameters": {
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "city"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Read a file",
+        "name": "fs_read",
+        "parameters": {
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "User wants weather.",
+            "thought": true
+          },
+          {
+            "text": "Checking."
+          },
+          {
+            "functionCall": {
+              "args": {
+                "city": "Hanoi"
+              },
+              "id": "call_1",
+              "name": "get_weather"
+            }
+          },
+          {
+            "functionCall": {
+              "args": {
+                "path": "/tmp/b"
+              },
+              "id": "call_2",
+              "name": "fs.read"
+            }
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "glm-4.6",
+  "responseId": "req_golden",
+  "usageMetadata": {
+    "cachedContentTokenCount": 8,
+    "candidatesTokenCount": 18,
+    "promptTokenCount": 40,
+    "thoughtsTokenCount": 12,
+    "totalTokenCount": 70
+  }
+}
+== stream to the Caller ==
+data: {"candidates":[{"content":{"parts":[{"text":"User wants weather.","thought":true}],"role":"model"},"index":0}],"modelVersion":"glm-4.6","responseId":"req_golden"}
+
+data: {"candidates":[{"content":{"parts":[{"text":"Checking."}],"role":"model"},"index":0}],"modelVersion":"glm-4.6","responseId":"req_golden"}
+
+data: {"candidates":[{"content":{"parts":[{"functionCall":{"args":{"city":"Hanoi"},"id":"call_1","name":"get_weather"}},{"functionCall":{"args":{"path":"/tmp/b"},"id":"call_2","name":"fs.read"}}],"role":"model"},"finishReason":"STOP","index":0}],"modelVersion":"glm-4.6","responseId":"req_golden","usageMetadata":{"cachedContentTokenCount":8,"candidatesTokenCount":18,"promptTokenCount":40,"thoughtsTokenCount":12,"totalTokenCount":70}}
+

@@ -1,0 +1,44 @@
+{
+  "from": "anthropic-messages",
+  "to": "gemini",
+  "model": "claude-sonnet-4-5",
+  "wire_model": "gemini-2.5-flash",
+  "request": {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 4096,
+    "stream": true,
+    "system": [{"type": "text", "text": "You are terse.", "cache_control": {"type": "ephemeral"}}],
+    "thinking": {"type": "enabled", "budget_tokens": 2048},
+    "stop_sequences": ["END"],
+    "messages": [
+      {"role": "user", "content": [
+        {"type": "text", "text": "What is in this image?"},
+        {"type": "image", "source": {"type": "url", "url": "https://example.com/dog.png"}}
+      ]},
+      {"role": "assistant", "content": [
+        {"type": "thinking", "thinking": "Looking.", "signature": "sig1"},
+        {"type": "text", "text": "A dog."}
+      ]},
+      {"role": "user", "content": "What breed?"}
+    ]
+  },
+  "answer": {
+    "candidates": [{
+      "content": {"role": "model", "parts": [
+        {"text": "Floppy ears, short coat.", "thought": true},
+        {"text": "A beagle."}
+      ]},
+      "finishReason": "MAX_TOKENS",
+      "index": 0,
+      "safetyRatings": [{"category": "HARM_CATEGORY_HARASSMENT", "probability": "NEGLIGIBLE"}]
+    }],
+    "usageMetadata": {"promptTokenCount": 300, "candidatesTokenCount": 4, "totalTokenCount": 330, "thoughtsTokenCount": 26},
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "resp-3"
+  },
+  "stream": [
+    {"candidates": [{"content": {"role": "model", "parts": [{"text": "Floppy ears.", "thought": true}]}, "index": 0}], "usageMetadata": {"promptTokenCount": 300, "totalTokenCount": 300}, "modelVersion": "gemini-2.5-flash"},
+    {"candidates": [{"content": {"role": "model", "parts": [{"text": "A bea"}]}, "index": 0}], "modelVersion": "gemini-2.5-flash"},
+    {"candidates": [{"content": {"role": "model", "parts": [{"text": "gle."}]}, "finishReason": "STOP", "index": 0}], "usageMetadata": {"promptTokenCount": 300, "candidatesTokenCount": 4, "totalTokenCount": 330, "thoughtsTokenCount": 26}, "modelVersion": "gemini-2.5-flash"}
+  ]
+}

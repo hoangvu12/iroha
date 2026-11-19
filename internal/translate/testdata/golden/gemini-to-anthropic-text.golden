@@ -1,0 +1,53 @@
+== request sent upstream ==
+{
+  "max_tokens": 64,
+  "messages": [
+    {
+      "content": "Capital of Vietnam?",
+      "role": "user"
+    }
+  ],
+  "model": "claude-haiku-4-5",
+  "stop_sequences": [
+    "\n\n"
+  ],
+  "system": [
+    {
+      "text": "Answer in one word.",
+      "type": "text"
+    }
+  ],
+  "top_p": 0.9
+}
+== answer to the Caller ==
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "Hanoi."
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "claude-haiku-4-5",
+  "responseId": "req_golden",
+  "usageMetadata": {
+    "cachedContentTokenCount": 6,
+    "candidatesTokenCount": 3,
+    "promptTokenCount": 20,
+    "totalTokenCount": 23
+  }
+}
+== stream to the Caller ==
+data: {"candidates":[{"content":{"parts":[{"text":"Ha"}],"role":"model"},"index":0}],"modelVersion":"claude-haiku-4-5","responseId":"req_golden"}
+
+data: {"candidates":[{"content":{"parts":[{"text":"noi."}],"role":"model"},"index":0}],"modelVersion":"claude-haiku-4-5","responseId":"req_golden"}
+
+data: {"candidates":[{"content":{"parts":[{"text":""}],"role":"model"},"finishReason":"MAX_TOKENS","index":0}],"modelVersion":"claude-haiku-4-5","responseId":"req_golden","usageMetadata":{"cachedContentTokenCount":6,"candidatesTokenCount":3,"promptTokenCount":20,"totalTokenCount":23}}
+

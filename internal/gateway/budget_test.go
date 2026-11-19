@@ -2,6 +2,7 @@ package gateway_test
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -42,9 +43,14 @@ type callerError struct {
 	}
 }
 
+// bearers lists the keys of the Attempts the fake received from the
+// from-th request on (model list reads of the daily refresh left out).
 func bearers(up *testkit.Upstream, from int) string {
 	var out []string
 	for _, r := range up.Requests()[from:] {
+		if r.Method == http.MethodGet {
+			continue
+		}
 		out = append(out, strings.TrimPrefix(r.Bearer(), "sk-test-"))
 	}
 	return strings.Join(out, ",")

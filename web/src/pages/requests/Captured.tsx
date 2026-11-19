@@ -4,12 +4,14 @@ import { isApiError } from "@/api/client";
 import { formatNumber } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { notify } from "@/ui/toast";
 import type { Capture, RequestRecord } from "./api";
 import { useCapture, useCaptureDays, useCopy } from "./api";
 import { CodeBlock, longShape } from "./bits";
 import { type Block, parseRequest, parseResponse } from "./messages";
+import { SAMPLE_CAPTURE } from "./samples";
 
 // The Captured tab (C26): what the Caller sent and what it received, each
 // message in order, with Raw JSON, Copy as cURL and Replay in Chat. Iroha
@@ -32,7 +34,6 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
         description={`Only Requests from Gateway Keys with capture on keep their prompt and response. ${r.caller.name} had it off.`}
       />
     );
-  if (cap.isPending) return <div className="skeleton h-40 rounded-xl bg-muted" aria-busy="true" />;
   if (cap.isError)
     return isApiError(cap.error) && cap.error.code === "capture_not_found" ? (
       <EmptyState icon={FileX} title="Capture expired" description={cap.error.message} />
@@ -40,8 +41,7 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
       <ErrorState title="Couldn't load the capture" error={cap.error} onRetry={() => void cap.refetch()} />
     );
 
-  const c = cap.data;
-  const curl = () => {
+  const curl = (c: Capture) => {
     const body = JSON.stringify(c.request.body);
     const cmd = [
       `curl ${window.location.origin}${r.route}`,
@@ -53,6 +53,8 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
   };
 
   return (
+    <Skeleton data={cap.data} sample={SAMPLE_CAPTURE} label="Loading the capture">
+      {(c) => (
     <div>
       <div className="mb-5 flex items-center gap-3">
         <div className="inline-flex rounded-lg bg-muted p-1" role="tablist">
@@ -90,7 +92,7 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
       {side === "sent" ? <SentSide c={c} r={r} raw={raw} /> : <ResponseSide c={c} r={r} raw={raw} />}
       <div className="mt-8 flex flex-wrap items-center gap-2">
         <p className="mr-auto text-[14px] text-fg-muted">{days.data ? `Bodies are kept for ${days.data} day${days.data === 1 ? "" : "s"}.` : ""}</p>
-        <Button icon={SquareTerminal} onClick={curl}>
+        <Button icon={SquareTerminal} onClick={() => curl(c)}>
           Copy as cURL
         </Button>
         <Button icon={MessageCircle} onClick={onReplay}>
@@ -98,6 +100,8 @@ export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () =
         </Button>
       </div>
     </div>
+      )}
+    </Skeleton>
   );
 }
 

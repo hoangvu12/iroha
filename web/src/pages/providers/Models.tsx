@@ -8,11 +8,13 @@ import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState, NoResults } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notify, notifyChange } from "@/ui/toast";
 import type { Facts, Model, ModelFilter } from "./api";
 import { calls, errorText, MODEL_PAGE, useKeys, useModels, useRefresh } from "./api";
 import { Pill, Segmented, Select } from "./controls";
+import { SAMPLE_MODEL_LIST } from "./samples";
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 const ctx = (n?: number) => (n ? compact.format(n) : "–");
@@ -165,11 +167,17 @@ export function ModelsTab({ handle }: { handle: string }) {
         </Menu>
       </div>
 
-      {models.isPending ? (
-        <TableSkeleton columns={["Model", "Context", "Keys with access", "Model Gaps"]} rows={8} />
-      ) : models.isError ? (
+      {models.isError ? (
         <ErrorState title="Couldn't load the models" error={models.error} onRetry={() => void models.refetch()} />
-      ) : data && data.total === 0 && !query && filter === "all" ? (
+      ) : (
+      // Waits for the keys too, so "Keys with access" arrives filled in. A new page or filter keeps the rows (dimmed).
+      <Skeleton
+        data={keys.isPending ? undefined : data}
+        sample={SAMPLE_MODEL_LIST}
+        id={phone ? "provider-models:phone" : "provider-models"}
+        label="Loading models"
+      >
+      {(data) => data && data.total === 0 && !query && filter === "all" ? (
         <EmptyState
           icon={ListPlus}
           title="No models yet"
@@ -250,6 +258,8 @@ export function ModelsTab({ handle }: { handle: string }) {
           </Table>
         </div>
       ) : null}
+      </Skeleton>
+      )}
 
       {data && data.total > 0 && (
         <div className="mt-4 flex items-center justify-between">

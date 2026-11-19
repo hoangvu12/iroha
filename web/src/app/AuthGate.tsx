@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { forgetShapes } from "skullet";
 import { onSignedOut } from "@/api/client";
 import { type SessionStatus, sessionKey, useSession } from "@/api/session";
 import { ErrorState } from "@/ui/States";
@@ -25,6 +26,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
           setNotice(e.code === "owner_session_expired" ? "Your session ended after 30 days. Sign in again." : "You were signed out. Sign in again.");
         }
         qc.setQueryData<SessionStatus>(sessionKey, { password_set: was?.password_set ?? true, signed_in: false });
+        forgetShapes();
       }),
     [qc],
   );

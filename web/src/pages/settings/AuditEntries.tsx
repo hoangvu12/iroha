@@ -12,11 +12,12 @@ import { SearchInput } from "@/ui/Input";
 import { LogoTile, PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { Menu, MenuContent, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { Chip, EmptyState, ErrorState, NoResults } from "@/ui/States";
-import { TableSkeleton } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
 import { notify, notifyChange } from "@/ui/toast";
 import { type EntryFilter, type ResourceOption, useAuditEntries, useAuditFilters, useInvalidateAll } from "./api";
 import { EntryChanges, RevertNote } from "./Changes";
 import { clockTime, dayLabel } from "./format";
+import { SAMPLE_AUDIT_ENTRIES } from "./samples";
 
 /** Settings → Audit Entries (C29): every change, grouped by day, with Revert on the row. */
 export function AuditEntriesTab() {
@@ -100,11 +101,18 @@ export function AuditEntriesTab() {
         {resource && <Chip label={`Only ${resourceLabel}`} onRemove={() => setParam("resource", "")} />}
       </div>
 
-      {entries.isPending ? (
-        <TableSkeleton columns={["Time", "Who", "What", "On"]} rows={6} />
-      ) : entries.isError ? (
+      {entries.isError ? (
         <ErrorState title="Couldn't load Audit Entries" error={entries.error} onRetry={() => void entries.refetch()} />
-      ) : all.length === 0 ? (
+      ) : (
+      // Measured from sample entries grouped by day, like the real list. A filter change keeps the list (dimmed).
+      <Skeleton
+        data={entries.data ? all : undefined}
+        sample={SAMPLE_AUDIT_ENTRIES}
+        id="audit-entries"
+        label="Loading Audit Entries"
+        className={cn("transition-opacity", entries.isPlaceholderData && "opacity-60")}
+      >
+      {(all) => all.length === 0 ? (
         chips.length > 0 ? (
           <NoResults title="No changes match these filters" filters={chips} onClear={clear} />
         ) : (
@@ -125,6 +133,8 @@ export function AuditEntriesTab() {
             </div>
           )}
         </>
+      )}
+      </Skeleton>
       )}
     </section>
   );

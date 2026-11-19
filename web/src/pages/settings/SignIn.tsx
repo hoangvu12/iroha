@@ -9,10 +9,12 @@ import { Button } from "@/ui/Button";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, PasswordInput } from "@/ui/Input";
 import { EmptyState, ErrorState } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notify, notifyChange } from "@/ui/toast";
 import { useChangePassword, useOwnerSessions, useRevokeOtherSessions, useRevokeOwnerSession } from "./api";
 import { shortDate } from "./format";
+import { SAMPLE_SESSIONS } from "./samples";
 
 // Settings → Sign-in: the Owner password and the browsers signed in with
 // it (ticket 21 built the API; this is its UI).
@@ -88,15 +90,15 @@ function Sessions() {
         )}
       </div>
 
-      {sessions.isPending ? (
-        <TableSkeleton columns={["Browser", "Signed in", "Last seen", "Expires"]} rows={2} />
-      ) : sessions.isError ? (
+      {sessions.isError ? (
         <ErrorState title="Couldn't load signed-in browsers" error={sessions.error} onRetry={() => void sessions.refetch()} />
-      ) : sessions.data.length === 0 ? (
+      ) : (
+      <Skeleton data={sessions.data} sample={SAMPLE_SESSIONS} id={phone ? "owner-sessions:phone" : "owner-sessions"} label="Loading signed-in browsers">
+      {(list) => list.length === 0 ? (
         <EmptyState icon={Monitor} title="No browser is signed in" description="Agents use Admin Tokens, so this stays empty until you sign in." />
       ) : phone ? (
         <ul className="divide-y divide-border border-y border-border">
-          {sessions.data.map((s) => (
+          {list.map((s) => (
             <li key={s.id} className="flex items-center gap-3 py-3">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[16px] font-medium">{browserName(s.user_agent)}</p>
@@ -122,7 +124,7 @@ function Sessions() {
             </tr>
           </THead>
           <TBody>
-            {sessions.data.map((s) => (
+            {list.map((s) => (
               <TR key={s.id} className="h-[60px]">
                 <TD className="text-[15px]" title={s.user_agent}>
                   <span className="font-medium">{browserName(s.user_agent)}</span>
@@ -138,6 +140,8 @@ function Sessions() {
             ))}
           </TBody>
         </Table>
+      )}
+      </Skeleton>
       )}
 
       <EndDialog session={ending} onClose={() => setEnding(undefined)} />

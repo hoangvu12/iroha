@@ -32,11 +32,13 @@ import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState, NoResults } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notify, notifyChange } from "@/ui/toast";
 import type { KeyTestBulk, KeyTestResult, Provider, UpstreamKey } from "./api";
 import { calls, errorText, maskSecret, natural, useKeys, useRefresh } from "./api";
 import { Checkbox, KeyStateLabel, Pill, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
+import { SAMPLE_KEYS } from "./samples";
 
 // The Keys tab (C01, C11, C20; phones C31): one line per Upstream Key,
 // sorted, filtered and searched; selecting keys turns the toolbar into
@@ -312,10 +314,10 @@ export function KeysTab({
       </div>
     );
 
+  // Loading draws the key table from SAMPLE_KEYS (ui/Skeleton); the states below only once keys arrived.
   let body: ReactNode;
-  if (keys.isPending) body = <TableSkeleton columns={["", "Name", "Key", "State", "Last used"]} rows={8} />;
-  else if (keys.isError) body = <ErrorState title="Couldn't load Upstream Keys" error={keys.error} onRetry={() => void keys.refetch()} />;
-  else if (all.length === 0)
+  if (keys.isError) body = <ErrorState title="Couldn't load Upstream Keys" error={keys.error} onRetry={() => void keys.refetch()} />;
+  else if (keys.data && all.length === 0)
     body = (
       <EmptyState
         icon={KeyRound}
@@ -333,7 +335,7 @@ export function KeysTab({
         }
       />
     );
-  else if (shown.length === 0)
+  else if (keys.data && shown.length === 0)
     body = (
       <NoResults
         title="No keys match"
@@ -351,10 +353,10 @@ export function KeysTab({
         }
       />
     );
-  else if (phone)
-    body = <KeyList keys={shown} selecting={selecting || selected.size > 0} selected={selected} onToggle={toggle} actions={keyActions} />;
-  else
-    body = (
+  const keyTable = (rows: UpstreamKey[]) =>
+    phone ? (
+      <KeyList keys={rows} selecting={selecting || selected.size > 0} selected={selected} onToggle={toggle} actions={keyActions} />
+    ) : (
       <Table>
         <THead>
           <tr>
@@ -381,7 +383,7 @@ export function KeysTab({
           </tr>
         </THead>
         <TBody>
-          {shown.map((k, i) => (
+          {rows.map((k, i) => (
             <TR key={k.id} interactive selected={selected.has(k.name)} className="group" onClick={() => keyActions.open(k)}>
               <TD onClick={(e) => e.stopPropagation()}>
                 <span
@@ -420,8 +422,12 @@ export function KeysTab({
 
   return (
     <section aria-label="Upstream Keys">
-      {all.length > 0 && <div className="mb-4">{toolbar}</div>}
-      {body}
+      {(keys.isPending || all.length > 0) && <div className="mb-4">{toolbar}</div>}
+      {body ?? (
+        <Skeleton data={keys.data && shown} sample={SAMPLE_KEYS} id={phone ? "provider-keys:phone" : "provider-keys"} label="Loading Upstream Keys">
+          {keyTable}
+        </Skeleton>
+      )}
       {all.length > 0 && shown.length > 0 && (
         <p className="mt-4 text-[13px] text-fg-muted">
           {shown.length === all.length ? `${all.length} key${all.length === 1 ? "" : "s"}` : `${shown.length} of ${all.length} keys`}. Hover a state for its reason; shift-click to select a range.

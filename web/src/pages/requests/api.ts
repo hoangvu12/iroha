@@ -134,7 +134,10 @@ export function useRequestFeed(q: Query, live: boolean) {
     getNextPageParam: (last) => last.next_before ?? undefined,
     refetchOnWindowFocus: false,
     staleTime: Infinity,
+    // A filter change is a new query: keep the old rows until the new ones land, so no skeleton flashes.
+    placeholderData: keepPreviousData,
   });
+  const placeholder = pages.isPlaceholderData;
 
   // Changes seen since the first page was read, keyed by Request ID.
   const [changes, setChanges] = useState<Map<string, RequestRecord>>(new Map());
@@ -149,7 +152,8 @@ export function useRequestFeed(q: Query, live: boolean) {
 
   const qKey = JSON.stringify(q);
   useEffect(() => {
-    if (!live || cursor.current === undefined) return;
+    // The rows on screen are the previous filter's until the new page lands: nothing to poll for yet.
+    if (!live || placeholder || cursor.current === undefined) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const ctrl = new AbortController();
@@ -183,7 +187,7 @@ export function useRequestFeed(q: Query, live: boolean) {
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [live, qKey, firstPage]); // q is read through qKey
+  }, [live, qKey, firstPage, placeholder]); // q is read through qKey
 
   // Rows that arrived live are in `added` (the table fades them in once).
   const { rows, added } = useMemo(() => {

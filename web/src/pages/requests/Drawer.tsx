@@ -7,6 +7,7 @@ import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
 import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { Skeleton } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
 import { notify } from "@/ui/toast";
 import type { RequestRecord } from "./api";
@@ -15,6 +16,7 @@ import { AttemptList } from "./Attempts";
 import { ProviderLogo, StatusPill, when } from "./bits";
 import { CapturedView } from "./Captured";
 import { RequestDetails } from "./Details";
+import { SAMPLE_REQUEST } from "./samples";
 
 export const DRAWER_WIDTH = 540;
 
@@ -95,13 +97,12 @@ export function RequestDrawer({
 
       {req.isError && !r ? (
         <ErrorState title="Couldn't load this Request" error={req.error} onRetry={() => void req.refetch()} />
-      ) : !r ? (
-        <div className="space-y-3 p-6" aria-busy="true">
-          <div className="skeleton h-5 w-48 rounded-full bg-muted" />
-          <div className="skeleton h-3 w-32 rounded-full bg-muted" />
-        </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
+          {/* Opened from the feed, the row seeds it and no skeleton shows; from a link, the Details tab is measured. */}
+          <Skeleton data={r} sample={SAMPLE_REQUEST} id="request-drawer" label="Loading Request">
+            {(r) => (
+          <>
           <header className="flex items-start gap-3.5 pb-5 pt-6">
             {r.provider ? <ProviderLogo handle={r.provider} size={44} /> : null}
             <div className="min-w-0 flex-1">
@@ -136,6 +137,9 @@ export function RequestDrawer({
           {tab === "details" && <RequestDetails r={r} onShowCaptured={() => setTab("captured")} />}
           {tab === "attempts" && <AttemptList r={r} loading={!r.attempts && req.isFetching} onOpenRoute={openRoute} />}
           {tab === "captured" && <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />}
+          </>
+            )}
+          </Skeleton>
         </div>
       )}
     </aside>

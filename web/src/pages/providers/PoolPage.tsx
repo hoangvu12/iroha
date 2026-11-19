@@ -7,12 +7,14 @@ import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
 import { Tabs } from "@/ui/bits";
+import { Skeleton } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
 import { usePool } from "./api";
 import { PoolTile } from "./controls";
 import { AddMemberDialog, PoolMembersTab } from "./PoolMembers";
 import { PoolRouteTab } from "./PoolRoute";
 import { PoolSettingsTab } from "./PoolSettings";
+import { SAMPLE_POOL } from "./samples";
 
 const TABS = ["route", "members", "settings"] as const;
 
@@ -87,7 +89,11 @@ export function PoolPage() {
           <div className="pt-6">
             {tab === "route" && <PoolRouteTab name={name} pool={p} onAdd={() => setAdding(true)} />}
             {tab === "members" && <PoolMembersTab name={name} pool={p} onAdd={() => setAdding(true)} />}
-            {tab === "settings" && p && <PoolSettingsTab pool={p} />}
+            {tab === "settings" && (
+              <Skeleton data={p} sample={SAMPLE_POOL} id="pool-settings" label="Loading settings">
+                {(p) => <PoolSettingsTab pool={p} />}
+              </Skeleton>
+            )}
           </div>
           {p && <AddMemberDialog pool={p} open={adding} onOpenChange={setAdding} />}
         </>

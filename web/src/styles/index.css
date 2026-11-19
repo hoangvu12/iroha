@@ -20,6 +20,7 @@
   --bg: #ffffff;              /* page */
   --bg-subtle: #fafafa;       /* sidebar, canvas, panels */
   --bg-muted: #f2f2f3;        /* hover, selected nav, skeleton bars, chips */
+  --skeleton-highlight: rgb(255 255 255 / 0.6); /* the shimmer crossing skeleton bars */
   --bg-elevated: #ffffff;     /* dialogs, menus, toasts */
   --fg: #171717;
   --fg-muted: #6b6b6f;
@@ -48,6 +49,7 @@
   --bg: #0e0e10;
   --bg-subtle: #151517;
   --bg-muted: #232326;
+  --skeleton-highlight: rgb(255 255 255 / 0.06);
   --bg-elevated: #1a1a1d;
   --fg: #ededee;
   --fg-muted: #a1a1a8;
@@ -135,10 +137,13 @@
   }
 }
 
-@keyframes shimmer {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
-@media (prefers-reduced-motion: no-preference) {
-  .skeleton { animation: shimmer 1.6s ease-in-out infinite; }
+/* Skeletons are Skullet's (ui/Skeleton.tsx, app/skeletons.tsx), coloured from
+   --bg-muted with this highlight. .skeleton-fill passes a flex parent's height
+   through Skullet's wrappers, for content that fills it (the route canvases). */
+.skeleton-fill,
+.skeleton-fill :is([skullet-pane], [skullet-loading], [skullet-ghost]) {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  min-height: 0;
 }

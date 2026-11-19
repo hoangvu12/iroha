@@ -3,10 +3,12 @@ import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/ui/cn";
 import { SearchInput } from "@/ui/Input";
+import { Skeleton } from "@/ui/Skeleton";
 import { usePoolOptions, useProviderOptions } from "./api";
 import { Checkbox, RadioOption } from "./bits";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { ModelPicker } from "./ModelPicker";
+import { SAMPLE_SCOPE_ROWS } from "./samples";
 import { type Draft, modelsLabel } from "./scope";
 
 // Access, as in C02: Everything, or Only some, a checklist of Providers
@@ -98,18 +100,13 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
         />
       </div>
       <div className="max-h-[min(380px,45dvh)] overflow-y-auto">
-        {loading ? (
-          <div className="flex flex-col gap-4 p-4" aria-busy="true">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="skeleton h-2.5 w-32 rounded-full bg-muted" />
-            ))}
-          </div>
-        ) : failed ? (
+        {failed ? (
           <p className="p-4 text-sm text-danger-text">Couldn't load the Providers and Pools. Close this and try again.</p>
-        ) : shownProviders.length === 0 && shownPools.length === 0 ? (
+        ) : (
+        <Skeleton data={loading ? undefined : { shownProviders, shownPools }} sample={SAMPLE_SCOPE_ROWS} label="Loading Providers and Pools">
+        {({ shownProviders, shownPools }) => shownProviders.length === 0 && shownPools.length === 0 ? (
           <p className="p-4 text-sm text-fg-muted">{needle ? `Nothing matches “${q.trim()}”.` : "There are no Providers or Model Pools yet."}</p>
-        ) : null}
-        {!loading && !failed && (
+        ) : (
           <>
             {shownProviders.map((p) => {
               const on = draft.providers.has(p.handle);
@@ -164,6 +161,8 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
               </div>
             )}
           </>
+        )}
+        </Skeleton>
         )}
       </div>
       <ModelPicker

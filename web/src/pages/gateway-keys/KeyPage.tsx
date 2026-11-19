@@ -13,12 +13,14 @@ import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Dialog } from "@/ui/Dialog";
 import { Input } from "@/ui/Input";
+import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { notify, notifyChange } from "@/ui/toast";
 import { type GatewayKey, useCaptureDays, useGatewayKey, useInvalidateKeys, useUpdateKey } from "./api";
 import { baseUrls, Switch } from "./bits";
 import { DeleteDialog, RevokeDialog } from "./confirm";
 import { requestsHref } from "./List";
+import { SAMPLE_GATEWAY_KEY } from "./samples";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { type Draft, modelsLabel, sameScope, scopeSummary, toDraft, toScope } from "./scope";
 import { ScopeEditor } from "./ScopeEditor";
@@ -37,16 +39,6 @@ export function KeyPage() {
   const [deleting, setDeleting] = useState(false);
 
   const back = { to: "/gateway-keys", label: "Gateway Keys" };
-  if (k.isPending) {
-    return (
-      <>
-        <PageHeader back={back} title={<span className="skeleton inline-block h-7 w-40 rounded-md bg-muted align-middle" />} />
-        <PageBody width="readable">
-          <div className="skeleton h-48 rounded-xl bg-muted" aria-busy="true" />
-        </PageBody>
-      </>
-    );
-  }
   if (k.isError) {
     return (
       <>
@@ -69,8 +61,10 @@ export function KeyPage() {
     );
   }
 
-  const g = k.data;
+  // Opened from the list, the list's row seeds it and no skeleton shows; from a link, the page is measured from a sample.
   return (
+    <Skeleton data={k.data} sample={SAMPLE_GATEWAY_KEY} id="gateway-key-page" label="Loading the Gateway Key">
+      {(g) => (
     <>
       <PageHeader
         back={back}
@@ -141,6 +135,8 @@ export function KeyPage() {
       <RevokeDialog k={revoking ? g : undefined} onClose={() => setRevoking(false)} />
       <DeleteDialog k={deleting ? g : undefined} onClose={() => setDeleting(false)} onDone={() => navigate("/gateway-keys")} />
     </>
+      )}
+    </Skeleton>
   );
 }
 

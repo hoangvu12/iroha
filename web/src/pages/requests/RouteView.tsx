@@ -11,6 +11,7 @@ import { useIsPhone } from "@/lib/media";
 import { Button, buttonClass, IconButton } from "@/ui/Button";
 import type { Tone } from "@/ui/bits";
 import { cn } from "@/ui/cn";
+import { Skeleton } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
 import { notify } from "@/ui/toast";
 import type { Attempt, RequestRecord } from "./api";
@@ -20,6 +21,7 @@ import { Headers, keyStateClass } from "./Attempts";
 import { Badge, clockMs, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, StatusPill, statusText, statusTone, Summary } from "./bits";
 import { CapturedView } from "./Captured";
 import { RequestDetails } from "./Details";
+import { SAMPLE_REQUEST } from "./samples";
 
 // A Request's Route view (C18, C22): full page, tabs Route / Details /
 // Captured. Route draws the Request as a top-to-bottom chain of cards on a
@@ -52,16 +54,20 @@ export function RouteViewPage() {
         <TopBar id={id} r={r} tab={tab} phone={phone} onReplay={() => chat.open({ kind: "request", request: id })} />
         {req.isError && !r ? (
           <ErrorState title="Couldn't load this Request" error={req.error} onRetry={() => void req.refetch()} />
-        ) : !r ? (
-          <div className="flex-1 bg-subtle" aria-busy="true" />
-        ) : tab === "route" ? (
-          <RouteCanvas r={r} phone={phone} />
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-[640px] px-4 py-8 md:px-6">
-              {tab === "details" ? <RequestDetails r={r} /> : <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />}
-            </div>
-          </div>
+          <Skeleton data={r} sample={SAMPLE_REQUEST} id={`request-view:${tab}`} label="Loading Request" className="skeleton-fill">
+            {(r) =>
+              tab === "route" ? (
+                <RouteCanvas r={r} phone={phone} />
+              ) : (
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <div className="mx-auto max-w-[640px] px-4 py-8 md:px-6">
+                    {tab === "details" ? <RequestDetails r={r} /> : <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />}
+                  </div>
+                </div>
+              )
+            }
+          </Skeleton>
         )}
       </PageBody>
     </div>

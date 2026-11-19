@@ -7,7 +7,9 @@ import { formatNumber } from "@/lib/format";
 import { useRequest } from "@/pages/requests/api";
 import { AttemptList } from "@/pages/requests/Attempts";
 import { secs } from "@/pages/requests/bits";
+import { SAMPLE_REQUEST } from "@/pages/requests/samples";
 import { cn } from "@/ui/cn";
+import { Skeleton } from "@/ui/Skeleton";
 import { bareModel } from "./api";
 import { ModelTile } from "./Picker";
 import type { AssistantTurn, Part, Round } from "./store";
@@ -128,9 +130,8 @@ function Details({ round, rounds }: { round: Round; rounds: Round[] }) {
       </button>
       {open && (
         <div className="mt-2 rounded-xl border border-border bg-bg px-4 py-3">
-          {!r ? (
-            <div className="skeleton h-16 rounded-lg bg-muted" aria-busy="true" />
-          ) : (
+          <Skeleton data={r} sample={SAMPLE_REQUEST} label="Loading the Request">
+          {(r) => (
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 min-[400px]:grid-cols-4">
               <Fact label="Served by" mono>
                 {r.upstream_key || "–"}
@@ -146,6 +147,7 @@ function Details({ round, rounds }: { round: Round; rounds: Round[] }) {
               <Fact label="Output">{r.usage ? formatNumber(r.usage.output) : "–"}</Fact>
             </dl>
           )}
+          </Skeleton>
           {check && (
             <div className="mt-3 border-t border-border pt-3 text-[13.5px]">
               <p className="text-fg-muted">{check.reason}</p>
@@ -171,7 +173,9 @@ function Details({ round, rounds }: { round: Round; rounds: Round[] }) {
 function Fact({ label, children, mono }: { label: string; children: ReactNode; mono?: boolean }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[12.5px] text-fg-muted">{label}</dt>
+      <dt className="text-[12.5px] text-fg-muted">
+        {label}
+      </dt>
       <dd className={cn("mt-0.5 truncate text-[14.5px]", mono && "font-mono text-[13.5px]")}>{children}</dd>
     </div>
   );

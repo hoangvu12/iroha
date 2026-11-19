@@ -4,9 +4,11 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, CornerDownLeft } from "luc
 import { formatNumber } from "@/lib/format";
 import { useGatewayKeys, useKeys, useProvider } from "@/pages/providers/api";
 import { KeyStateLabel, Segmented, Switch } from "@/pages/providers/controls";
+import { SAMPLE_KEYS } from "@/pages/providers/samples";
 import { Kbd } from "@/ui/bits";
 import { cn } from "@/ui/cn";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
+import { Skeleton } from "@/ui/Skeleton";
 import type { ModelChoice, Reasoning, Settings, Shape } from "./api";
 import { bareModel, providerOf, SHAPES, shapeLabel, useModelChoices } from "./api";
 import { recentModels } from "./store";
@@ -17,6 +19,8 @@ import { recentModels } from "./store";
 // on the server (GET /api/test/models), Pools first, and takes typed IDs.
 
 export type View = "main" | "models" | "keys" | "endpoints" | "shapes" | "as";
+
+const SAMPLE_KEY_OPTIONS = SAMPLE_KEYS.slice(0, 5);
 
 /** A model's logo: square for a Pool, round for a Provider's model. */
 export function ModelTile({ model, size = 20 }: { model: string; size?: number }) {
@@ -236,13 +240,16 @@ function KeyList({ handle, value, onPick, onBack }: { handle: string; value?: st
             Any active key
           </Option>
         )}
-        {keys.isPending && <p className="px-3 py-2 text-[14px] text-fg-muted">Loading keys…</p>}
-        {shown.map((k) => (
-          <Option key={k.id} selected={k.name === value} onClick={() => onPick(k.name)}>
-            <span className="min-w-0 flex-1 truncate font-mono text-[13.5px]">{k.name}</span>
-            <KeyStateLabel state={k.state} className="shrink-0 text-[13px]" />
-          </Option>
-        ))}
+        <Skeleton data={keys.data && shown} sample={SAMPLE_KEY_OPTIONS} label={`Loading the keys of ${handle}`}>
+          {(shown) =>
+            shown.map((k) => (
+              <Option key={k.id} selected={k.name === value} onClick={() => onPick(k.name)}>
+                <span className="min-w-0 flex-1 truncate font-mono text-[13.5px]">{k.name}</span>
+                <KeyStateLabel state={k.state} className="shrink-0 text-[13px]" />
+              </Option>
+            ))
+          }
+        </Skeleton>
       </div>
       <p className="border-t border-border px-4 py-2 text-[12.5px] text-fg-muted">A picked key gets every Attempt, whatever its state.</p>
     </>

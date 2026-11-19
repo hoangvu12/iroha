@@ -11,13 +11,13 @@ import { cn } from "@/ui/cn";
 import { Mono } from "@/ui/bits";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { type GatewayKey, useGatewayKeys } from "./api";
+import { SAMPLE_GATEWAY_KEYS } from "./samples";
 import { DeleteDialog, RevokeDialog } from "./confirm";
 import { CreateDialog } from "./CreateDialog";
 import { scopeDetail, scopeSummary } from "./scope";
-
-const COLUMNS = ["Name", "Key", "Access", "Last used", "Requests, 24 h"];
 
 /** Where a key's Requests of the last 24 hours are listed. */
 export const requestsHref = (k: GatewayKey) => `/requests?caller=${encodeURIComponent(k.name)}&range=24h`;
@@ -31,8 +31,6 @@ export function KeysList() {
   const [deleting, setDeleting] = useState<GatewayKey>();
   const [showRevoked, setShowRevoked] = useState(false);
 
-  const active = list.data?.filter((k) => !k.revoked) ?? [];
-  const revoked = list.data?.filter((k) => k.revoked) ?? [];
   const act = { onRevoke: setRevoking, onDelete: setDeleting };
 
   return (
@@ -47,11 +45,14 @@ export function KeysList() {
         }
       />
 
-      {list.isPending ? (
-        <TableSkeleton columns={COLUMNS} rows={5} />
-      ) : list.isError ? (
+      {list.isError ? (
         <ErrorState title="Couldn't load Gateway Keys" error={list.error} onRetry={() => void list.refetch()} />
-      ) : active.length === 0 && revoked.length === 0 ? (
+      ) : (
+      <Skeleton data={list.data} sample={SAMPLE_GATEWAY_KEYS} id={phone ? "gateway-keys:phone" : "gateway-keys"} label="Loading Gateway Keys">
+      {(keys) => {
+        const active = keys.filter((k) => !k.revoked);
+        const revoked = keys.filter((k) => k.revoked);
+        return active.length === 0 && revoked.length === 0 ? (
         <EmptyState
           icon={KeyRound}
           title="No Gateway Keys yet"
@@ -87,6 +88,9 @@ export function KeysList() {
             </div>
           )}
         </>
+      );
+      }}
+      </Skeleton>
       )}
 
       <CreateDialog open={creating} onOpenChange={setCreating} existing={list.data ?? []} />

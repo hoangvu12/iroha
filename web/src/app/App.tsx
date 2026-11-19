@@ -6,6 +6,7 @@ import { Toaster } from "@/ui/toast";
 import { AuthGate } from "./AuthGate";
 import { ChatPanelProvider } from "./chat-panel";
 import { Shell } from "./Shell";
+import { SkeletonRoot } from "./skeletons";
 import { ThemeProvider, useTheme } from "./theme";
 
 // One line per page. Each page folder under src/pages owns everything below
@@ -38,6 +39,8 @@ function ThemedToaster() {
 export function App() {
   return (
     <ThemeProvider>
+      {/* Skeletons follow Iroha's theme, so their provider sits inside it. */}
+      <SkeletonRoot>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthGate>
@@ -62,6 +65,7 @@ export function App() {
         </BrowserRouter>
         <ThemedToaster />
       </QueryClientProvider>
+      </SkeletonRoot>
     </ThemeProvider>
   );
 }

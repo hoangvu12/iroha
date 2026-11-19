@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { forgetShapes } from "skullet";
 import { api } from "./client";
 
 export type OwnerSession = {
@@ -58,9 +59,11 @@ export function useSignOut() {
   return useMutation({
     mutationFn: () => api.delete<void>("/api/session"),
     onSettled: () => {
-      // Keep the session query itself (the auth gate observes it); drop every other cached answer.
+      // Keep the session query itself (the auth gate observes it); drop every other cached answer,
+      // and the skeleton shapes remembered from what this session saw.
       qc.setQueryData<SessionStatus>(sessionKey, { password_set: true, signed_in: false });
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== sessionKey[0] });
+      forgetShapes();
     },
   });
 }

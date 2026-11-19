@@ -7,11 +7,13 @@ import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
-import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { Skeleton } from "@/ui/Skeleton";
+import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
 import { notifyChange } from "@/ui/toast";
 import type { AuthStyle, Endpoint, Provider, Shape, UpstreamKey } from "./api";
 import { calls, errorText, shapeLabel, SHAPES, useKeys, useRefresh } from "./api";
 import { Select } from "./controls";
+import { SAMPLE_ENDPOINTS } from "./samples";
 
 /** The Endpoints tab (C07): where a Provider's API lives, in which Shape, and which keys go there. */
 export function EndpointsTab({
@@ -62,9 +64,14 @@ export function EndpointsTab({
 
   return (
     <section aria-label="Endpoints">
-      {!provider ? (
-        <TableSkeleton columns={["Name", "URL", "Shape", "Keys"]} rows={3} />
-      ) : eps.length === 0 ? (
+      {/* Waits for the keys too, so the Keys column arrives filled in. */}
+      <Skeleton
+        data={provider && !keys.isPending ? eps : undefined}
+        sample={SAMPLE_ENDPOINTS}
+        id={phone ? "provider-endpoints:phone" : "provider-endpoints"}
+        label="Loading Endpoints"
+      >
+      {(eps) => eps.length === 0 ? (
         <EmptyState
           icon={Plug}
           title="No Endpoints"
@@ -120,6 +127,7 @@ export function EndpointsTab({
           </TBody>
         </Table>
       )}
+      </Skeleton>
 
       <EndpointDialog handle={handle} existing={eps} open={adding} onOpenChange={setAdding} />
       <EndpointDialog handle={handle} existing={eps} endpoint={editing} open={!!editing} onOpenChange={(o) => !o && setEditing(undefined)} />

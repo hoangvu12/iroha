@@ -8,6 +8,7 @@ import { formatNumber } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
 import { Tabs } from "@/ui/bits";
+import { Skeleton } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
 import { notify } from "@/ui/toast";
 import { calls, useChange, useProvider } from "./api";
@@ -17,6 +18,7 @@ import { KeysTab } from "./Keys";
 import { ModelsTab } from "./Models";
 import { ProviderSettingsTab } from "./ProviderSettings";
 import { RulesTab } from "./Rules";
+import { SAMPLE_PROVIDER } from "./samples";
 
 const TABS = ["keys", "endpoints", "models", "rules", "settings"] as const;
 type Tab = (typeof TABS)[number];
@@ -87,7 +89,11 @@ export function ProviderPage() {
             {p?.archived ? <Pill>Archived</Pill> : p && !p.enabled ? <Pill>Off</Pill> : null}
           </span>
         }
-        description={p ? `${formatNumber(p.upstream_key_count)} Upstream Key${p.upstream_key_count === 1 ? "" : "s"}` : " "}
+        description={
+          <Skeleton data={p} sample={SAMPLE_PROVIDER} label={`Loading ${handle}`}>
+            {(p) => `${formatNumber(p.upstream_key_count)} Upstream Key${p.upstream_key_count === 1 ? "" : "s"}`}
+          </Skeleton>
+        }
         actions={actions}
       />
       {provider.isError && !p ? (
@@ -102,7 +108,11 @@ export function ProviderPage() {
             {tab === "endpoints" && <EndpointsTab handle={handle} provider={p} adding={adding} setAdding={setAdding} />}
             {tab === "models" && <ModelsTab handle={handle} />}
             {tab === "rules" && <RulesTab handle={handle} adding={adding} setAdding={setAdding} />}
-            {tab === "settings" && p && <ProviderSettingsTab provider={p} />}
+            {tab === "settings" && (
+              <Skeleton data={p} sample={SAMPLE_PROVIDER} id="provider-settings" label="Loading settings">
+                {(p) => <ProviderSettingsTab provider={p} />}
+              </Skeleton>
+            )}
           </div>
         </>
       )}

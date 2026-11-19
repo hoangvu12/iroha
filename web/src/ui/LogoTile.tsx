@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { poolLogo, providerLogo } from "@/api/logos";
 import { cn } from "./cn";
+import { useIsSample } from "./Skeleton";
 
 /**
  * A Provider's logo (round), served by Iroha; the handle's first letter when
@@ -39,10 +40,12 @@ export function LogoTile({
   // The src that failed, so a new src (another logo domain) is tried again.
   const [failed, setFailed] = useState<string>();
   const letter = (name.trim()[0] ?? "?").toUpperCase();
-  const showImg = src && failed !== src;
+  // A skeleton's sample draws the tile as one block and fetches no logo.
+  const showImg = src && failed !== src && !useIsSample();
   return (
     <span
       aria-hidden="true"
+      skullet-block=""
       style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
       className={cn(
         "inline-flex shrink-0 select-none items-center justify-center overflow-hidden border border-border bg-bg font-semibold text-fg-muted",

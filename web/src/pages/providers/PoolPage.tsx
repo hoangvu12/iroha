@@ -42,7 +42,7 @@ export function PoolPage() {
     <>
       <PageHeader
         back={{ to: "/providers", label: "Providers" }}
-        icon={<PoolTile name={name} version={p?.maker} size={phone ? 48 : 60} />}
+        icon={<PoolTile name={name} version={p?.maker} size={phone ? 40 : 60} />}
         title={name}
         description="Model Pool"
         actions={

@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { ChevronRight, Layers, MessageCircle, Plus, Server } from "lucide-react";
 import { useChatPanel } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
-import { seg } from "@/api/client";
+import { api, isApiError, seg } from "@/api/client";
 import { formatNumber, formatPercent, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
@@ -101,8 +101,8 @@ export function ProvidersList() {
         </>
       )}
 
-      <AddProviderDialog open={adding} onOpenChange={setAdding} />
-      <NewPoolDialog open={pooling} onOpenChange={setPooling} providers={list.filter((p) => !p.archived)} />
+      <AddProviderDialog open={adding} onOpenChange={setAdding} existing={list} />
+      <NewPoolDialog open={pooling} onOpenChange={setPooling} providers={list.filter((p) => !p.archived)} pools={pools.data ?? []} />
     </>
   );
 }
@@ -115,7 +115,7 @@ function Rate({ t }: { t?: { succeeded: number; failed: number } }) {
 function ProviderName({ p }: { p: Provider }) {
   return (
     <span className="flex min-w-0 items-center gap-3">
-      <ProviderTile handle={p.handle} version={p.logo_domain} />
+      <ProviderTile handle={p.handle} version={p.logo_domain} size={28} />
       <span className="truncate text-[15px] font-medium">{p.handle}</span>
       {p.name && p.name !== p.handle && <span className="hidden truncate text-[14px] text-fg-muted lg:inline">{p.name}</span>}
       {p.archived ? <Pill>Archived</Pill> : !p.enabled ? <Pill>Off</Pill> : null}
@@ -267,7 +267,7 @@ function PoolTable({ pools, stats }: { pools: Pool[]; stats: Map<string, PoolOve
             <TR key={p.id} interactive className="group" onClick={() => navigate(`/providers/pools/${seg(p.name)}/route`)}>
               <TD>
                 <Link to={`/providers/pools/${seg(p.name)}/route`} onClick={(e) => e.stopPropagation()} className="flex min-w-0 items-center gap-3">
-                  <PoolTile name={p.name} version={p.maker} />
+                  <PoolTile name={p.name} version={p.maker} size={28} />
                   <span className="truncate text-[15px] font-medium">{p.name}</span>
                 </Link>
               </TD>
@@ -328,7 +328,7 @@ function PoolCards({ pools, stats }: { pools: Pool[]; stats: Map<string, PoolOve
   );
 }
 
-function AddProviderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; onOpenChange: (o: boolean) => void; existing: Provider[] }) {
   const navigate = useNavigate();
   const refresh = useRefresh();
   const [handle, setHandle] = useState("");
@@ -351,6 +351,19 @@ function AddProviderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     const h = handle.trim();
     const u = url.trim();
     if (!h) return setError({ handle: "Give it a handle: Callers use it in model names like dashscope/qwen3-max." });
+    // POST /api/providers updates a Provider that has the handle, so a taken handle is refused here.
+    let taken = existing.find((p) => p.handle.toLowerCase() === h.toLowerCase());
+    if (!taken) {
+      try {
+        taken = await api.get<Provider>(`/api/providers/${seg(h)}`);
+      } catch (e) {
+        if (!(isApiError(e) && e.status === 404)) return setError({ handle: errorText(e) });
+      }
+    }
+    if (taken)
+      return setError({
+        handle: `${taken.handle} already exists${taken.archived ? " (archived)" : ""}. Pick another handle, or open ${taken.handle} to change it.`,
+      });
     if (u && !/^https?:\/\//.test(u)) return setError({ url: "Start the URL with https:// (or http://)." });
     setPending(true);
     setError({});
@@ -438,7 +451,17 @@ function AddProviderDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   );
 }
 
-function NewPoolDialog({ open, onOpenChange, providers }: { open: boolean; onOpenChange: (o: boolean) => void; providers: Provider[] }) {
+function NewPoolDialog({
+  open,
+  onOpenChange,
+  providers,
+  pools,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  providers: Provider[];
+  pools: Pool[];
+}) {
   const navigate = useNavigate();
   const refresh = useRefresh();
   const [name, setName] = useState("");
@@ -455,8 +478,12 @@ function NewPoolDialog({ open, onOpenChange, providers }: { open: boolean; onOpe
   const submit = async () => {
     const n = name.trim();
     if (!n) return setError("Name it the model Callers will ask for, like glm-4.6.");
+    // POST /api/pools updates a Pool of that name (and would replace its members), so a taken name is refused here.
+    if (pools.some((p) => p.name === n)) return setError(`A Model Pool is already named ${n}. Pick another name, or open ${n} to change its members.`);
     setPending(true);
     try {
+      if (await api.get<Pool>(`/api/pools/${seg(n)}`).then(() => true, (e) => (isApiError(e) && e.status === 404 ? false : Promise.reject(e))))
+        return setError(`A Model Pool is already named ${n}. Pick another name.`);
       const res = await calls.createPool({ name: n });
       notifyChange(`Model Pool ${n} created`, res, { undoneMessage: `${n} deleted`, onUndone: refresh });
       refresh();

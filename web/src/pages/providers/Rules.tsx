@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { MoreHorizontal, Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
+import { api, isApiError, seg } from "@/api/client";
 import { formatNumber } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
@@ -204,6 +205,20 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
     setPending(dry ? "check" : "save");
     setError(undefined);
     try {
+      // POST /api/rules updates (or overrides) a rule of that name, so a new rule's name must be free.
+      if (!rule) {
+        const name = f.name.trim();
+        const taken = await api.get<Rule>(`/api/rules/${seg(name)}`).then(
+          (r) => r,
+          (e) => (isApiError(e) && e.status === 404 ? undefined : Promise.reject(e)),
+        );
+        if (taken)
+          return setError(
+            taken.source === "builtin"
+              ? `${name} is a built-in rule. Pick another name, or use Change on ${name} to replace it.`
+              : `A rule is already named ${name}${taken.provider && taken.provider !== handle ? ` (for ${taken.provider})` : ""}. Pick another name.`,
+          );
+      }
       const res = await send(dry);
       if (dry) setReplay(res.replay);
       else {

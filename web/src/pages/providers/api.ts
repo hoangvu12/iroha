@@ -357,7 +357,7 @@ export function useGatewayKeys() {
 export function useRefresh() {
   const qc = useQueryClient();
   return () => {
-    for (const k of [qk.providers, qk.pools, qk.overview, ["rules"], ["route-preview"], ["audit-entries"], qk.gatewayKeys])
+    for (const k of [qk.providers, qk.pools, qk.overview, ["rules"], ["route-preview"], ["audit-entries"], qk.gatewayKeys, ["gateway-keys"]])
       void qc.invalidateQueries({ queryKey: k });
   };
 }

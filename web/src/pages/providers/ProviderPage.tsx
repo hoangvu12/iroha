@@ -80,7 +80,7 @@ export function ProviderPage() {
     <>
       <PageHeader
         back={{ to: "/providers", label: "Providers" }}
-        icon={<ProviderTile handle={handle} version={p?.logo_domain} size={phone ? 48 : 60} />}
+        icon={<ProviderTile handle={handle} version={p?.logo_domain} size={phone ? 40 : 60} />}
         title={
           <span className="flex min-w-0 items-center gap-3">
             <span className="truncate">{handle}</span>

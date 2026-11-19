@@ -215,7 +215,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
       <h2 className="mb-3 mt-10 text-[17px] font-semibold">Gateway Keys that can use this Pool</h2>
       <div className="flex flex-wrap items-center gap-2">
         {keysWith.sort((a, b) => natural(a.name, b.name)).map((k) => (
-          <Link key={k.id} to={`/gateway-keys/${seg(k.name)}`} className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-[15px] hover:bg-muted">
+          <Link key={k.id} to={`/gateway-keys/${seg(k.id)}`} className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-[15px] hover:bg-muted">
             {k.name}
           </Link>
         ))}

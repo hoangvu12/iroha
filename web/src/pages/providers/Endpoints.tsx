@@ -121,8 +121,8 @@ export function EndpointsTab({
         </Table>
       )}
 
-      <EndpointDialog handle={handle} open={adding} onOpenChange={setAdding} />
-      <EndpointDialog handle={handle} endpoint={editing} open={!!editing} onOpenChange={(o) => !o && setEditing(undefined)} />
+      <EndpointDialog handle={handle} existing={eps} open={adding} onOpenChange={setAdding} />
+      <EndpointDialog handle={handle} existing={eps} endpoint={editing} open={!!editing} onOpenChange={(o) => !o && setEditing(undefined)} />
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(undefined)}
@@ -159,7 +159,19 @@ const linesToMap = (text: string, sep: RegExp) => {
 const HEADER_LINE = /^\s*([^:]+?)\s*:\s*(.*)$/;
 const RENAME_LINE = /^\s*(\S+)\s*(?:->|=>|→)\s*(\S+)\s*$/;
 
-function EndpointDialog({ handle, endpoint, open, onOpenChange }: { handle: string; endpoint?: Endpoint; open: boolean; onOpenChange: (o: boolean) => void }) {
+function EndpointDialog({
+  handle,
+  endpoint,
+  existing,
+  open,
+  onOpenChange,
+}: {
+  handle: string;
+  endpoint?: Endpoint;
+  existing: Endpoint[];
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
   const refresh = useRefresh();
   const [f, setF] = useState({ name: "", url: "", shape: "openai-chat" as Shape, auth_style: "bearer" as AuthStyle, auth_param: "", discovery_url: "", headers: "", renames: "" });
   const [error, setError] = useState<string>();
@@ -188,6 +200,9 @@ function EndpointDialog({ handle, endpoint, open, onOpenChange }: { handle: stri
 
   const submit = async () => {
     if (!f.url.trim()) return setError("The URL is required: the API's base URL with its version path.");
+    // Creating with a taken name would update that Endpoint instead.
+    const clash = existing.find((e) => e.name === f.name.trim() && e.id !== endpoint?.id);
+    if (f.name.trim() && clash) return setError(`${handle} already has an Endpoint named ${clash.name}. Pick another name${endpoint ? "" : ", or edit that one"}.`);
     setPending(true);
     setError(undefined);
     const body: Partial<Endpoint> = {

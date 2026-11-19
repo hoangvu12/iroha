@@ -3,12 +3,13 @@ import { forwardRef, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { Check, ChevronDown, Minus } from "lucide-react";
 import { seg } from "@/api/client";
-import { providerLogo, poolLogo } from "@/api/logos";
 import type { Tone } from "@/ui/bits";
 import { StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
-import { LogoTile } from "@/ui/LogoTile";
+import { ProviderTile } from "@/ui/LogoTile";
 import type { KeyState, PreviewSkip } from "./api";
+
+export { PoolTile, ProviderTile } from "@/ui/LogoTile";
 
 // Small controls of the Providers page: a switch, a checkbox, a segmented
 // filter, a native select, and the Key State label.
@@ -191,14 +192,6 @@ export const skipText = (s: PreviewSkip): { text: string; tone: Tone } => {
       return { text: "Not on this Endpoint", tone: "gray" };
   }
 };
-
-export function ProviderTile({ handle, version, size = 28 }: { handle: string; version?: string; size?: number }) {
-  return <LogoTile name={handle} src={providerLogo(handle, version)} size={size} />;
-}
-
-export function PoolTile({ name, version, size = 28 }: { name: string; version?: string; size?: number }) {
-  return <LogoTile name={name} src={poolLogo(name, version)} shape="square" size={size} />;
-}
 
 /** A Provider's logo and handle, linking to its keys. */
 export function ProviderLink({ handle, className }: { handle: string; className?: string }) {

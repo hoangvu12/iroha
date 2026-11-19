@@ -7,7 +7,7 @@ import { Dialog } from "@/ui/Dialog";
 import { SearchInput } from "@/ui/Input";
 import { useProviderModels } from "./api";
 import { Checkbox, RadioOption } from "./bits";
-import { ProviderTile } from "./logos";
+import { ProviderTile } from "@/ui/LogoTile";
 
 // The model picker behind a checked Provider's "All models" (C02): every
 // model, or only some. Search runs on the server and the list draws only

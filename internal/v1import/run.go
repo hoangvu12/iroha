@@ -53,7 +53,10 @@ type Report struct {
 	DryRun                                          bool
 	Providers, Endpoints, UpstreamKeys, GatewayKeys Counts
 	DisableKeys                                     int // keys v1 had disabled that get (or would get) disabled
-	Skipped, NotMapped                              int // report lines
+	// RemoveKeys counts keyless slots an earlier import made for v1 rows
+	// that hold a secret, deleted (or to delete) once those keys are in.
+	RemoveKeys         int
+	Skipped, NotMapped int // report lines
 }
 
 // Failed is the number of records that could not be imported.
@@ -75,7 +78,7 @@ func (r Report) Line() string {
 	}{{"providers", r.Providers}, {"endpoints", r.Endpoints}, {"upstream_keys", r.UpstreamKeys}, {"gateway_keys", r.GatewayKeys}} {
 		fmt.Fprintf(&b, " %s_create=%d %s_update=%d %s_unchanged=%d", k.name, k.c.Create, k.name, k.c.Update, k.name, k.c.Unchanged)
 	}
-	fmt.Fprintf(&b, " upstream_keys_disable=%d skipped=%d not_mapped=%d failed=%d", r.DisableKeys, r.Skipped, r.NotMapped, r.Failed())
+	fmt.Fprintf(&b, " upstream_keys_disable=%d upstream_keys_remove=%d skipped=%d not_mapped=%d failed=%d", r.DisableKeys, r.RemoveKeys, r.Skipped, r.NotMapped, r.Failed())
 	return b.String()
 }
 
@@ -93,13 +96,13 @@ func Run(ctx context.Context, o Options) (Report, error) {
 	}
 	pl := MakePlan(v)
 	r := &run{ctx: ctx, o: o, plan: pl, rep: &rep, c: client{http: o.HTTP, base: strings.TrimRight(o.URL, "/"), token: o.Token}}
-	for _, p := range pl.Providers {
+	// Mask every secret v1 held, also those the plan leaves out (archived
+	// Providers, static headers v1 never sent).
+	for _, p := range v.Providers {
 		for _, k := range p.Keys {
-			r.secrets = append(r.secrets, k.Secret)
+			r.secrets = append(r.secrets, strings.TrimSpace(k.Secret))
 		}
-		for _, e := range p.Endpoints {
-			r.secrets = slices.AppendSeq(r.secrets, maps.Values(e.StaticHeaders))
-		}
+		r.secrets = slices.AppendSeq(r.secrets, maps.Values(p.StaticHeaders))
 	}
 	r.secrets = append(r.secrets, o.Token, o.MasterKey)
 	return rep, r.run()
@@ -425,6 +428,44 @@ func (r *run) keys(p PProvider, exists bool, epNames []string) error {
 		}
 		r.say("  Upstream Keys disabled in v1: %d %s", len(disable), done)
 	}
+	return r.removeFormerSlots(p, byName, c.Failed)
+}
+
+// removeFormerSlots deletes the keyless slots an earlier import made for v1
+// rows that hold a secret (PProvider.FormerSlots), now that those secrets are
+// keys: only slots with that exact name and still no secret, and only when
+// every key of the Provider went in, so a Provider is never left with fewer
+// working keys than before. One bulk delete, so one Audit Entry reverts it.
+func (r *run) removeFormerSlots(p PProvider, byName map[string]providers.UpstreamKey, failed int) error {
+	var names []string
+	for _, n := range p.FormerSlots {
+		if k, ok := byName[n]; ok && k.Secret == "" {
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	if failed > 0 {
+		r.say("  Keyless slots an earlier import made for rows that have a secret: %d kept, because some keys above failed; run again once they are in", len(names))
+		return nil
+	}
+	done := "would be deleted"
+	if r.o.Apply {
+		var res audit.BulkResult[providers.UpstreamKey]
+		if err := r.c.do(r.ctx, http.MethodPost, "/api/providers/"+url.PathEscape(p.Handle)+"/keys/bulk/delete", audit.BulkRequest[string]{Items: names}, &res); err != nil {
+			return fmt.Errorf("delete former keyless slots of %s: %w", p.Handle, err)
+		}
+		for _, it := range res.Items {
+			if !it.OK {
+				r.say("  Keyless slot %s: failed: %s", names[it.Index], it.Error)
+				r.rep.UpstreamKeys.Failed++
+			}
+		}
+		done = "deleted (one Audit Entry; revert it to restore them)"
+	}
+	r.rep.RemoveKeys += len(names)
+	r.say("  Keyless slots an earlier import made for rows that have a secret: %d %s (%s)", len(names), done, strings.Join(names, ", "))
 	return nil
 }
 

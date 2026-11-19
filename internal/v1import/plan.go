@@ -34,6 +34,11 @@ type PProvider struct {
 	MaxAttempts    int    // 0: the default
 	Endpoints      []PEndpoint
 	Keys           []PKey
+	// FormerSlots are keyless slot names an earlier import (before the fix
+	// below) made for v1 rows that hold a secret, and that this plan no
+	// longer maps to an empty row. A re-run deletes the ones v2 still holds
+	// with no secret, once the secret keys are in.
+	FormerSlots []string
 }
 
 // PEndpoint is an Endpoint to create or update; it is found again by URL and Shape.
@@ -214,7 +219,13 @@ func mapProvider(p V1Provider, n *notes) (PProvider, bool) {
 		n.add("Provider transport settings changed from v1's defaults (timeouts, redirects, idempotency header); v2 uses its Request budget instead", p.Handle)
 	}
 
+	// Every Endpoint carries the Provider's auth style: v1 sent
+	// <auth_prefix><secret> in auth_header for every key that had a secret,
+	// on every base URL, whatever requires_upstream_key said (the flag only
+	// let keys be empty). A key with an empty secret sends nothing in any
+	// auth style, so an Endpoint only empty rows used stays keyless.
 	style, param := authStyle(p, n)
+	headers := staticHeaders(p, style, param, n)
 
 	// Endpoints: the Provider's base URL first, then each distinct per-key
 	// base URL, in the order keys were added.
@@ -229,7 +240,7 @@ func mapProvider(p V1Provider, n *notes) (PProvider, bool) {
 		if i, ok := index[u]; ok {
 			return i, true
 		}
-		e := PEndpoint{URL: u, Shape: string(t.shape), AuthStyle: style, AuthParam: param, StaticHeaders: p.StaticHeaders}
+		e := PEndpoint{URL: u, Shape: string(t.shape), AuthStyle: style, AuthParam: param, StaticHeaders: headers}
 		if t.basePath != "" {
 			if pu, err := url.Parse(u); err == nil {
 				if d := pu.Scheme + "://" + pu.Host + t.basePath + "/models"; d != u+"/models" {
@@ -298,7 +309,10 @@ func mapProvider(p V1Provider, n *notes) (PProvider, bool) {
 	}
 
 	// Keys: one per distinct secret, restricted to their Endpoints when the
-	// Provider has more than one.
+	// Provider has more than one. A row is a keyless slot only when its
+	// secret is empty: requires_upstream_key = 0 does not make v1 drop a
+	// secret a row holds (production v1 had such Providers with only real
+	// keys), so it is not read here.
 	bySecret := map[string]int{}
 	keyless := map[string]bool{}
 	merged := 0
@@ -309,9 +323,6 @@ func mapProvider(p V1Provider, n *notes) (PProvider, bool) {
 	}()
 	for _, ka := range keys {
 		secret := strings.TrimSpace(ka.k.Secret)
-		if !p.RequiresKey {
-			secret = ""
-		}
 		if secret == "" {
 			name := uniqueName("keyless", keyless)
 			keyless[name] = true
@@ -332,6 +343,20 @@ func mapProvider(p V1Provider, n *notes) (PProvider, bool) {
 	if len(eps) <= 1 {
 		for i := range pp.Keys {
 			pp.Keys[i].Endpoints = nil
+		}
+	}
+
+	// The import before this fix made every row of a Provider with
+	// requires_upstream_key = 0 a slot keyless, keyless-2, ... in row order.
+	// The names it made that no empty row maps to now are leftovers.
+	if !p.RequiresKey && len(bySecret) > 0 {
+		old := map[string]bool{}
+		for range keys {
+			name := uniqueName("keyless", old)
+			old[name] = true
+			if !keyless[name] {
+				pp.FormerSlots = append(pp.FormerSlots, name)
+			}
 		}
 	}
 
@@ -370,6 +395,27 @@ func authStyle(p V1Provider, n *notes) (style, param string) {
 		n.add("Auth prefixes on a custom header (the raw key is sent instead; check these Providers)", p.Handle)
 		return string(planner.AuthHeader), p.AuthHeader
 	}
+}
+
+// staticHeaders are the Provider's decrypted static headers as v1 sent them
+// on every request: v1 skipped one named like its auth header (the key's slot
+// wins), and v2 refuses such a header on an Endpoint, so it is left out
+// rather than failing the Endpoint and every key on it.
+func staticHeaders(p V1Provider, style, param string, n *notes) map[string]string {
+	if len(p.StaticHeaders) == 0 {
+		return nil
+	}
+	slot, _ := planner.AuthStyle(style).Slot(param)
+	out := map[string]string{}
+	for name, v := range p.StaticHeaders {
+		name = strings.TrimSpace(name)
+		if strings.EqualFold(name, strings.TrimSpace(p.AuthHeader)) || (slot != "" && strings.EqualFold(name, slot)) {
+			n.add("Static headers named like the Provider's auth header (v1 never sent them: the key's header won; left out)", p.Handle+" "+name)
+			continue
+		}
+		out[name] = v
+	}
+	return out
 }
 
 // normalURL is the URL as v2 stores an Endpoint URL, refusing what v2 refuses.

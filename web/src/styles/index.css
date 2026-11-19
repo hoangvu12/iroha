@@ -168,6 +168,20 @@
   --transition-duration-list-out: var(--duration-list-out);
   --transition-duration-toast: var(--duration-toast);
   --transition-duration-fade: var(--duration-fade);
+
+  /* animate-rise-in: a page's first screen entering once (Login, Setup).
+     A keyframe, not @starting-style, because Chrome skips @starting-style
+     for elements styled before the first frame. Under reduced motion the
+     shift is 0, so it plays as a fade. `backwards`, not `both`: once done it
+     holds nothing, so the column doesn't keep a compositor layer. */
+  --animate-rise-in: rise-in var(--duration-dialog-in) var(--ease-out) backwards;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    translate: 0 var(--motion-shift);
+  }
 }
 
 @layer base {
@@ -199,11 +213,13 @@
     outline-offset: 2px;
   }
   /* Tailwind 4 dropped the pointer on buttons: every control that acts on a
-     press shows it, and none does while disabled. */
+     press shows it, and none does while disabled. On touch, a control never
+     double-tap-zooms, so a tap acts at once. */
   :is(button, a[href], summary, select, input:is([type="checkbox"], [type="radio"], [type="file"]),
     [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="menuitemradio"],
     [role="menuitemcheckbox"], [role="option"], [role="switch"], [role="checkbox"], [role="radio"]) {
     cursor: pointer;
+    touch-action: manipulation;
   }
   :is(button, a, summary, select, input, [role="button"], [role="link"], [role="tab"], [role="menuitem"],
     [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="switch"], [role="checkbox"],
@@ -294,6 +310,15 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .skeleton { animation: shimmer 1.6s ease-in-out infinite; }
+}
+
+/* The theme flips in one step: app/theme.tsx sets this on <html> while .dark
+   changes, so hover-coloured parts don't fade behind the rest. Unlayered and
+   !important so no part's own transition survives it. */
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
 }
 
 /*

@@ -43,7 +43,7 @@ export function PageHeader({
           <div className="flex shrink-0 items-center gap-2">
             {actions}
             {phone && (
-              <Link to="/settings" aria-label="Settings" className="ml-1 rounded-full">
+              <Link to="/settings" aria-label="Settings" className="ml-1 select-none rounded-full [-webkit-touch-callout:none]">
                 <Avatar size={36} health={health} />
               </Link>
             )}

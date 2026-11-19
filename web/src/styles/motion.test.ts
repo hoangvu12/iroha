@@ -71,6 +71,27 @@ describe("motion tokens", () => {
     expect(css).toMatch(/--ease-drawer:\s*cubic-bezier\(0\.32, 0\.72, 0, 1\)/);
   });
 
+  it("has a one-time rise-in that also plays on page load, built from the tokens", () => {
+    // @starting-style is skipped when an element is styled before the first
+    // frame (Chrome, a fast reload of the login page), so a page's first
+    // screen uses this keyframe entrance instead.
+    expect(css).toMatch(/--animate-rise-in:\s*rise-in var\(--duration-dialog-in\) var\(--ease-out\) backwards;/);
+    const rule = Array.from(sheet().cssRules).find((r): r is CSSKeyframesRule => r instanceof CSSKeyframesRule && r.name === "rise-in");
+    expect(rule, "@keyframes rise-in").toBeDefined();
+    const from = rule!.findRule("from") ?? rule!.findRule("0%");
+    expect(from?.style.getPropertyValue("opacity")).toBe("0");
+    expect(from?.style.getPropertyValue("translate")).toBe("0 var(--motion-shift)");
+  });
+
+  it("turns every transition off while the theme flips (app/theme.tsx)", () => {
+    const rule = Array.from(sheet().cssRules).find(
+      (r): r is CSSStyleRule => r instanceof CSSStyleRule && r.selectorText.includes(".theme-switching"),
+    );
+    expect(rule?.selectorText).toMatch(/\.theme-switching \*/);
+    expect(rule?.style.getPropertyValue("transition")).toBe("none");
+    expect(rule?.style.getPropertyPriority("transition")).toBe("important");
+  });
+
   it("holds movement still under reduced motion and keeps fades", () => {
     const reduce = reducedMotionRoot(sheet());
     // Nothing moves or changes size...

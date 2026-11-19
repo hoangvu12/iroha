@@ -63,9 +63,11 @@ export function Shell() {
   );
 }
 
+// No transition: P, G, R and C move the highlight, and a key never animates
+// (architecture.md "UI motion system"); hover is instant too, like menu items.
 const navItemClass = (active: boolean) =>
   cn(
-    "group flex h-9 items-center gap-3 rounded-lg px-2.5 text-[14.5px] transition-colors",
+    "group flex h-9 select-none items-center gap-3 rounded-lg px-2.5 text-[14.5px]",
     active ? "bg-muted text-fg" : "text-fg hover:bg-muted/60",
   );
 
@@ -104,10 +106,12 @@ function Sidebar() {
   return (
     <aside
       style={{ width: SIDEBAR_WIDTH }}
-      className="fixed inset-y-0 left-0 z-20 flex flex-col border-r border-border bg-subtle px-3 pb-3 pt-3"
+      // Left padding clears a phone's notch in landscape (wide enough for the sidebar).
+      className="fixed inset-y-0 left-0 z-20 flex flex-col border-r border-border bg-subtle pb-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-3 pt-3"
     >
-      {/* Short windows: the banner and nav scroll; health, Settings and the Owner stay. */}
-      <ScrollArea className="-mx-3 mb-2 flex-1" contentClassName="px-3">
+      {/* Short windows: the banner and nav scroll; health, Settings and the Owner stay.
+          Scrolling past its end doesn't scroll the page behind. */}
+      <ScrollArea className="-mx-3 mb-2 flex-1" contentClassName="px-3" viewportClassName="overscroll-contain">
         <img src={BANNER_SRC} alt="Iroha" className="h-[84px] w-full rounded-lg object-cover" draggable={false} />
         <nav aria-label="Main" className="mt-4 flex flex-col gap-1">
           {NAV.map((item) => (
@@ -131,7 +135,10 @@ function Sidebar() {
 function HealthNotice({ health }: { health: HealthState }) {
   if (health.state !== "not_ready" && health.state !== "unreachable") return null;
   return (
-    <div role="status" className="mb-2 rounded-lg bg-danger-tint px-2.5 py-2 text-[13px]">
+    <div
+      role="status"
+      className="mb-2 rounded-lg bg-danger-tint px-2.5 py-2 text-[13px] transition-[opacity,translate] duration-list-in ease-out starting:translate-y-(--motion-shift-sm) starting:opacity-0"
+    >
       <p className="font-medium text-danger-text">{healthLabel(health)}</p>
       <p className="mt-0.5 font-mono text-[11px] text-fg-muted">{health.call}</p>
     </div>
@@ -152,7 +159,7 @@ function OwnerRow({ health }: { health: HealthState }) {
   return (
     <div className="flex items-center gap-1">
       <Menu>
-        <MenuTrigger className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-left text-[14.5px] text-fg-muted hover:bg-muted/60 hover:text-fg data-open:bg-muted/60 data-open:text-fg">
+        <MenuTrigger className="flex h-9 min-w-0 flex-1 select-none items-center gap-2.5 rounded-lg px-2 text-left text-[14.5px] text-fg-muted hover:bg-muted/60 hover:text-fg data-open:bg-muted/60 data-open:text-fg">
           <Avatar size={22} health={health} />
           <span className="truncate">Owner</span>
         </MenuTrigger>
@@ -197,8 +204,9 @@ function TabBar() {
           <NavLink
             key={item.label}
             to={to}
+            // A tab, not a link to copy: long-press neither selects the label nor opens the link callout.
             className={cn(
-              "flex h-[64px] flex-col items-center justify-center gap-1 text-[11.5px] font-medium",
+              "flex h-[64px] select-none flex-col items-center justify-center gap-1 text-[11.5px] font-medium [-webkit-touch-callout:none]",
               active ? "text-fg" : "text-fg-muted",
             )}
           >

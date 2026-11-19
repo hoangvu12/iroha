@@ -36,6 +36,7 @@ export function LoginPage({ notice }: { notice?: string }) {
               {...p}
               autoFocus
               autoComplete="current-password"
+              enterKeyHint="go"
               className="h-11"
               value={password}
               onChange={(ev) => setPassword(ev.target.value)}

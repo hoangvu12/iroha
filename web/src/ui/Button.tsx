@@ -32,10 +32,16 @@ const sizes: Record<Size, string> = {
   lg: "h-11 px-4 text-[15px] gap-2",
 };
 
+// The press (architecture.md "UI motion system"): every button and icon
+// button scales down while held, except while disabled or pending. The same
+// transition carries the hover colours; reduced motion holds the scale at 1.
+const press =
+  "transition-[scale,background-color,color] duration-press ease-out active:not-data-disabled:not-data-pending:scale-(--motion-scale-press)";
+
 // disabled: for other elements styled with buttonClass; data-disabled for UI
 // SDK's Button, which also marks a focusable disabled button that way.
 const base =
-  "inline-flex select-none items-center justify-center whitespace-nowrap rounded-lg font-medium transition-colors " +
+  `inline-flex select-none items-center justify-center whitespace-nowrap rounded-lg font-medium ${press} ` +
   "disabled:opacity-50 data-disabled:opacity-50 data-pending:cursor-progress";
 
 /** Button looks for a <Link> or <a> (never nest a button in a link). */
@@ -74,7 +80,7 @@ export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 export function iconButtonClass(size: "sm" | "md" = "md", bordered?: boolean, className?: string) {
   return cn(
-    "inline-flex shrink-0 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-muted hover:text-fg",
+    `inline-flex shrink-0 items-center justify-center rounded-lg text-fg-muted ${press} hover:bg-muted hover:text-fg`,
     "disabled:opacity-50 data-disabled:opacity-50 data-open:bg-muted data-open:text-fg",
     size === "sm" ? "size-7" : "size-9",
     bordered && "border border-border-strong text-fg",

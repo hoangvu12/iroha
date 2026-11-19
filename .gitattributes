@@ -1,0 +1,5 @@
+# Keep Go sources LF on every checkout so gofmt agrees on Windows too.
+*.go   text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+*.sql  text eol=lf

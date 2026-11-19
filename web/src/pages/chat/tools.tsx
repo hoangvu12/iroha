@@ -98,7 +98,7 @@ function ToolList({ on, onChange }: { on: string[]; onChange: (tools: string[]) 
       <div className="flex shrink-0 items-center gap-2 border-b border-border py-2 pl-4 pr-2">
         <div className="min-w-0 flex-1">
           <PopoverTitle className="text-[14.5px] font-semibold">Test tools</PopoverTitle>
-          <PopoverDescription className="truncate text-[12.5px] text-fg-muted">Iroha answers each call and checks it.</PopoverDescription>
+          <PopoverDescription className="text-[12.5px] leading-snug text-fg-muted">Iroha answers each call and checks it.</PopoverDescription>
         </div>
         <Button variant="ghost" size="sm" disabled={!list.data || allOn} onClick={() => onChange(all)}>
           All on

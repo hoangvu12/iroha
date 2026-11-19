@@ -37,7 +37,8 @@ import { EmptyState } from "@/ui/States";
 import { notify, notifyChange } from "@/ui/toast";
 import type { KeyTestBulk, KeyTestResult, Provider, UpstreamKey } from "./api";
 import { calls, errorText, maskSecret, natural, useKeys, useRefresh } from "./api";
-import { appearClass, Checkbox, KeyStateLabel, Pill, Reveal, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
+import { Reveal } from "@/ui/Reveal";
+import { appearClass, Checkbox, KeyStateLabel, Pill, ringRoom, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
 import { SAMPLE_KEYS } from "./samples";
 
 // The Keys tab (C01, C11, C20; phones C31): one line per Upstream Key in the
@@ -804,8 +805,9 @@ function AddKeysDialog({
         rows={6}
         className="w-full resize-y rounded-lg border border-border-strong bg-subtle px-3 py-2.5 font-mono text-[13px] leading-6 text-fg outline-none placeholder:text-fg-subtle focus:border-info focus:ring-2 focus:ring-info/20"
       />
-      <Reveal show={secrets.length > 0}>
-        <div className="mt-4 overflow-hidden rounded-lg border border-border">
+      <Reveal open={secrets.length > 0} label="Keys found">
+        <div className="pt-4">
+        <div className="overflow-hidden rounded-lg border border-border">
           <div className="flex items-center justify-between bg-subtle px-4 py-2.5 text-[14px]">
             <span className="font-medium">
               {secrets.length} key{secrets.length === 1 ? "" : "s"} found
@@ -831,6 +833,7 @@ function AddKeysDialog({
               </ul>
             </ScrollArea>
           )}
+        </div>
         </div>
       </Reveal>
       <label className="mt-5 flex items-center gap-3 text-[15px]">
@@ -1085,9 +1088,9 @@ function KeyDialog({
               {secret !== undefined ? "Cancel" : k.secret ? "Replace" : "Add a secret"}
             </Button>
           </div>
-          <Reveal show={secret !== undefined}>
+          <Reveal open={secret !== undefined} label="New key" className={ringRoom}>
             <form
-              className="mt-2 flex gap-2"
+              className="flex gap-2 pt-2"
               onSubmit={(e) => {
                 e.preventDefault();
                 replace((secret ?? "").trim());

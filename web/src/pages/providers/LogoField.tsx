@@ -83,7 +83,7 @@ export function LogoInput({
     <div className="min-w-0 flex-1">
       <div className="relative">
         <span className="absolute left-2 top-1/2 flex -translate-y-1/2">
-          <span key={tileKey} data-logo-tile="" className={cn("flex", fades.current && "transition-opacity duration-fade ease-out starting:opacity-0")}>
+          <span key={tileKey} data-logo-tile="" className={cn("flex", fades.current && "transition-[opacity,scale] duration-fade ease-out starting:scale-(--motion-scale-popup) starting:opacity-0")}>
             <LogoTile name={name} shape={shape} src={lastFound.current} size={22} />
           </span>
         </span>

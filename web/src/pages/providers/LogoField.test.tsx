@@ -106,7 +106,8 @@ test("the Pool logo field previews what it finds as you type, debounced, and is 
 test("a logo found while typing fades into the tile; the tile first drawn doesn't", async () => {
   const user = userEvent.setup();
   renderWith(<PoolSettingsTab pool={pool} />, { "/api/logos?maker=chatgpt.com": image });
-  const FADE = ["transition-opacity", "duration-fade", "ease-out", "starting:opacity-0"];
+  // Fades and grows from the popup scale (1 under reduced motion: a plain fade).
+  const FADE = ["transition-[opacity,scale]", "duration-fade", "ease-out", "starting:opacity-0", "starting:scale-(--motion-scale-popup)"];
   const tile = () => document.querySelector("[data-logo-tile]")!;
   await screen.findByText("No logo found for openai. The tile shows a letter.");
   for (const c of FADE) expect(tile().className.split(" ")).not.toContain(c);

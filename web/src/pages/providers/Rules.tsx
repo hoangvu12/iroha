@@ -15,7 +15,8 @@ import { SaveError, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import type { Outcome, Replay, Rule, RuleFields } from "./api";
 import { calls, errorText, OUTCOMES, useRefresh, useRules } from "./api";
-import { appearClass, Checkbox, Pill, Reveal, Select, Switch } from "./controls";
+import { Reveal, riseIn } from "@/ui/Reveal";
+import { appearClass, Checkbox, Pill, ringRoom, Select, Switch } from "./controls";
 import { SAMPLE_RULES } from "./samples";
 
 /** The Rules tab (C09): which Failure Rules decide this Provider's failures, in order, and how often each did today. */
@@ -328,14 +329,17 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
         <Field label="Body contains" hint="A regular expression, case-insensitive.">
           {(p) => <Input {...p} mono placeholder="quota exceeded" value={f.body} onChange={set("body")} />}
         </Field>
-        <div className="grid gap-4 md:grid-cols-[1fr_160px]">
+        {/* No row gap: on phones the gap above "Cool for" is inside its panel, so it opens and folds with it. */}
+        <div className="grid gap-x-4 md:grid-cols-[1fr_160px]">
           <Field label="Then" hint={outcome?.hint}>
             {() => <Select value={f.outcome} onValueChange={(v) => set("outcome")({ target: { value: v } })} items={OUTCOMES} />}
           </Field>
-          <Reveal show={f.outcome.startsWith("cooling")}>
-            <Field label="Cool for" hint="Seconds, when the reply names no reset time.">
-              {(p) => <Input {...p} inputMode="numeric" placeholder="60" value={f.cooling} onChange={set("cooling")} />}
-            </Field>
+          <Reveal open={f.outcome.startsWith("cooling")} label="Cooling time" className={ringRoom}>
+            <div className="pt-4 md:pt-0">
+              <Field label="Cool for" hint="Seconds, when the reply names no reset time.">
+                {(p) => <Input {...p} inputMode="numeric" placeholder="60" value={f.cooling} onChange={set("cooling")} />}
+              </Field>
+            </div>
           </Reveal>
         </div>
         <Field label="Description" hint="Optional: what it recognises and why.">
@@ -353,7 +357,7 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
           Only for {handle}
         </label>
         {replay && (
-          <p className={cn("rounded-lg bg-subtle px-4 py-3 text-[14px]", appearClass)}>
+          <p className={cn("rounded-lg bg-subtle px-4 py-3 text-[14px]", riseIn)}>
             {replay.attempts === 0
               ? "No failed Attempts in the last 7 days to check it against."
               : replay.changed === 0

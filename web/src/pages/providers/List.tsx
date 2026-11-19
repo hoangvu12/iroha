@@ -17,7 +17,8 @@ import { EmptyState, ErrorState } from "@/ui/States";
 import { notifyChange } from "@/ui/toast";
 import type { Pool, PoolOverview, Provider, ProviderOverview, Shape } from "./api";
 import { calls, errorText, natural, SHAPES, successRate, useOverview, usePools, useProviders, useRefresh } from "./api";
-import { Pill, PoolTile, ProviderTile, Reveal, Select, Switch } from "./controls";
+import { Reveal } from "@/ui/Reveal";
+import { Pill, PoolTile, ProviderTile, ringRoom, Select, Switch } from "./controls";
 import { SAMPLE_POOLS, SAMPLE_PROVIDERS } from "./samples";
 
 /** /providers: every Provider, then every Model Pool (C05; phones C30). */
@@ -461,32 +462,36 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
             <Input {...p} mono autoFocus autoComplete="off" spellCheck={false} placeholder="dashscope" value={handle} onChange={(e) => setHandle(e.target.value)} />
           )}
         </Field>
-        <Field label="Endpoint URL" hint="Optional: the API's URL with its version path. You can add more Endpoints later." error={error.url}>
-          {(p) => (
-            <Input
-              {...p}
-              mono
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-          )}
-        </Field>
-        {/* The URL's own settings drop in together once there is a URL. */}
-        <Reveal show={!!url.trim()} className="flex flex-col gap-4">
-          <Field label="Shape" hint="The API format the URL speaks.">
-            {() => <Select value={shape} onValueChange={(v) => setShape(v as Shape)} items={SHAPES} />}
+        {/* The URL's own settings open under it once there is a URL (collapse recipe); the gap above them is inside the panel. */}
+        <div>
+          <Field label="Endpoint URL" hint="Optional: the API's URL with its version path. You can add more Endpoints later." error={error.url}>
+            {(p) => (
+              <Input
+                {...p}
+                mono
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+            )}
           </Field>
-          <label className="flex items-start gap-3 text-[15px]">
-            <Switch checked={keyless} onChange={setKeyless} label="No key needed" />
-            <span>
-              No key needed
-              <span className="block text-[13px] text-fg-muted">For self-hosted servers and free relays. Iroha sends no credential and adds a keyless key for you.</span>
-            </span>
-          </label>
-        </Reveal>
+          <Reveal open={!!url.trim()} label="Settings of the Endpoint URL" className={ringRoom}>
+            <div className="flex flex-col gap-4 pt-4">
+              <Field label="Shape" hint="The API format the URL speaks.">
+                {() => <Select value={shape} onValueChange={(v) => setShape(v as Shape)} items={SHAPES} />}
+              </Field>
+              <label className="flex items-start gap-3 text-[15px]">
+                <Switch checked={keyless} onChange={setKeyless} label="No key needed" />
+                <span>
+                  No key needed
+                  <span className="block text-[13px] text-fg-muted">For self-hosted servers and free relays. Iroha sends no credential and adds a keyless key for you.</span>
+                </span>
+              </label>
+            </div>
+          </Reveal>
+        </div>
       </form>
     </Dialog>
   );

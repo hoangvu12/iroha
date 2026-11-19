@@ -12,7 +12,8 @@ import { EmptyState } from "@/ui/States";
 import { notifyChange } from "@/ui/toast";
 import type { AuthStyle, Endpoint, Provider, Shape, UpstreamKey } from "./api";
 import { calls, errorText, natural, shapeLabel, SHAPES, useKeys, useRefresh } from "./api";
-import { appearClass, Reveal, Select } from "./controls";
+import { Reveal } from "@/ui/Reveal";
+import { appearClass, ringRoom, Select } from "./controls";
 import { SAMPLE_ENDPOINTS } from "./samples";
 
 /** The Endpoints tab (C07): where a Provider's API lives, in which Shape, and which keys go there. */
@@ -274,14 +275,17 @@ function EndpointDialog({
             {() => <Select value={f.shape} onValueChange={(v) => set("shape")({ target: { value: v } })} items={SHAPES} />}
           </Field>
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
+        {/* No row gap: on phones the name's gap is inside its panel, so it opens and folds with it. */}
+        <div className="grid gap-x-4 md:grid-cols-2">
           <Field label="Key sent as">
             {() => <Select value={f.auth_style} onValueChange={(v) => set("auth_style")({ target: { value: v } })} items={AUTH} />}
           </Field>
-          <Reveal show={f.auth_style === "header" || f.auth_style === "query"}>
-            <Field label={f.auth_style === "header" ? "Header name" : "Parameter name"}>
-              {(p) => <Input {...p} mono spellCheck={false} placeholder={f.auth_style === "header" ? "api-key" : "key"} value={f.auth_param} onChange={set("auth_param")} />}
-            </Field>
+          <Reveal open={f.auth_style === "header" || f.auth_style === "query"} label="Name of the key's header or parameter" className={ringRoom}>
+            <div className="pt-4 md:pt-0">
+              <Field label={f.auth_style === "header" ? "Header name" : "Parameter name"}>
+                {(p) => <Input {...p} mono spellCheck={false} placeholder={f.auth_style === "header" ? "api-key" : "key"} value={f.auth_param} onChange={set("auth_param")} />}
+              </Field>
+            </div>
           </Reveal>
         </div>
         <Field label="Model list URL" hint={'Empty reads <URL>/models; "none" never asks.'}>

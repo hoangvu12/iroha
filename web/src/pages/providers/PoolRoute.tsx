@@ -139,19 +139,18 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
   const dots = { backgroundImage: "radial-gradient(var(--border-strong) 1px, transparent 1px)", backgroundSize: "20px 20px" };
 
   const live = (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="inline-flex h-8 items-center gap-2 rounded-full border border-border bg-bg px-3 text-[14px] shadow-sm">
+    // Over the canvas it stays one row at any width, so it never reaches the Start card: the note
+    // truncates first. On phones it sits above the chain and wraps. (Select is w-full inside, so
+    // the box around it sets its width.)
+    <div className={cn("flex items-center gap-2", phone && "flex-wrap")}>
+      <span className="inline-flex h-8 min-w-0 items-center gap-2 rounded-full border border-border bg-bg px-3 text-[14px] shadow-sm">
         <StatusDot tone={preview.isError ? "red" : "green"} />
         <span className={cn("font-medium", preview.isError ? "text-danger-text" : "text-success")}>{preview.isError ? "Stale" : "Live"}</span>
-        <span className="text-fg-muted">Where a request would go right now</span>
+        <span className="truncate text-fg-muted">Where a request would go right now</span>
       </span>
-      <Select<Shape>
-        aria-label="The Caller's Shape"
-        value={shape}
-        onValueChange={setShape}
-        className="w-48"
-        items={SHAPES.map((s) => ({ value: s.value, label: `As ${s.label}` }))}
-      />
+      <div className="w-48 shrink-0">
+        <Select<Shape> aria-label="The Caller's Shape" value={shape} onValueChange={setShape} items={SHAPES.map((s) => ({ value: s.value, label: `As ${s.label}` }))} />
+      </div>
     </div>
   );
 

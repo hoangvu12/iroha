@@ -115,7 +115,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest)
 			stop = stopRule
 		case rules.RetryElsewhere:
 			pairOut[pair] = true
-			if f.Status >= 500 && !replayed[pair] {
+			if t.decision.Status >= 500 && !replayed[pair] {
 				replayed[pair] = true
 				queue = append(queue, queued{c: c, replay: true})
 			}
@@ -255,7 +255,7 @@ func (x *exchange) failAll(failed []tried, stop string, maxAttempts int) {
 	var e *api.Error
 	switch {
 	case last.decision.Outcome == rules.FailRequest:
-		status := last.failure.Status
+		status := last.decision.Status // an error sent inside a 200 answer: the status it stands for
 		if status < 400 || status > 599 {
 			status = http.StatusBadGateway
 		}

@@ -43,14 +43,14 @@ type RuleList struct {
 type RuleFields struct {
 	Description    *string            `json:"description,omitempty" doc:"What the rule recognises and why it decides as it does."`
 	Provider       *string            `json:"provider,omitempty" doc:"Handle or ID of the only Provider the rule applies to (stored as the handle); empty for every Provider."`
-	Host           *string            `json:"host,omitempty" doc:"Endpoint host the rule applies to, or a parent domain of it (aliyuncs.com matches dashscope.aliyuncs.com); empty for any host."`
-	Status         *[]string          `json:"status,omitempty" doc:"Upstream statuses, any of which matches: exact (429), a class (5xx), network (no response at all) or timeout (no response within the time budget)."`
-	Code           *[]string          `json:"code,omitempty" doc:"Provider error codes, any of which matches, compared without case against error.code, error.type, error.status, code and type of the JSON body (numbers as text)."`
+	Host           *string            `json:"host,omitempty" doc:"Endpoint hosts the rule applies to, separated by commas, each matching itself and its subdomains (aliyuncs.com matches dashscope-intl.aliyuncs.com); empty for any host. To apply a built-in Provider rule through a relay, override it with the relay's host added: aliyuncs.com,relay.example.com."`
+	Status         *[]string          `json:"status,omitempty" doc:"Upstream statuses, any of which matches: exact (429), a class (5xx), network (no response at all) or timeout (no response within the time budget). An error sent inside a 200 answer or as a stream's first event counts as the status it stands for."`
+	Code           *[]string          `json:"code,omitempty" doc:"Provider error codes, any of which matches, compared without case against error.code, error.type, error.status, code, type and base_resp.status_code of the JSON body (numbers as text). A code ending in * matches by prefix (billing_*)."`
 	Body           *string            `json:"body,omitempty" doc:"Regular expression, case-insensitive, that must match somewhere in the response body (a plain word works: Arrearage)."`
 	Header         *map[string]string `json:"header,omitempty" doc:"Response headers that must be present, each with a case-insensitive regular expression its value must match (empty: any value)."`
 	Outcome        *rules.Outcome     `json:"outcome,omitempty" enum:"invalid,cooling_key,cooling_key_model,model_gap,retry_elsewhere,fail_request" doc:"What a match means; required for a new rule. Changing it to a non-cooling outcome clears cooling_seconds and reset unless you send them."`
 	CoolingSeconds *int               `json:"cooling_seconds,omitempty" doc:"For cooling outcomes: how long to cool when the response names no reset time; 0 for the default (60 s, doubling on repeats up to 1 h)."`
-	Reset          *[]string          `json:"reset,omitempty" doc:"For cooling outcomes: where the response names its reset time, tried in order before Retry-After: header:<name> or json:<dotted.path>."`
+	Reset          *[]string          `json:"reset,omitempty" doc:"For cooling outcomes: where the response names its reset time, tried in order before Retry-After: header:<name>, json:<dotted.path>, or body:<regexp> whose first group captures it from the body text."`
 	Enabled        *bool              `json:"enabled,omitempty" doc:"false switches the rule off. Default true for a new rule."`
 }
 
@@ -405,8 +405,7 @@ func appliesTo(r rules.Rule, handle string, hosts []string) bool {
 	if r.Host == "" {
 		return true
 	}
-	domain := strings.ToLower(strings.TrimSuffix(r.Host, "."))
-	return slices.ContainsFunc(hosts, func(h string) bool { return h == domain || strings.HasSuffix(h, "."+domain) })
+	return slices.ContainsFunc(hosts, r.MatchesHost)
 }
 
 // mutate runs one audited rule change; on a dry run it also replays recent

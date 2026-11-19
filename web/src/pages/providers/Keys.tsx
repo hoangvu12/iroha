@@ -602,7 +602,7 @@ function testResults(res: KeyTestBulk, items: string[]): Results {
   };
 }
 
-function ResultsDialog({ results, onClose }: { results?: Results; onClose: () => void }) {
+export function ResultsDialog({ results, onClose }: { results?: Results; onClose: () => void }) {
   return (
     <Dialog
       open={!!results}
@@ -616,7 +616,8 @@ function ResultsDialog({ results, onClose }: { results?: Results; onClose: () =>
         </Button>
       }
     >
-      <ScrollArea className="rounded-lg border border-border" viewportClassName="max-h-[50vh]">
+      {/* No scroll box: the dialog scrolls as a page (UI ticket 28). */}
+      <div className="rounded-lg border border-border">
         <ul className="divide-y divide-border">
           {results?.rows.map((r) => (
             <li key={r.name} className="flex items-start gap-3 px-4 py-2.5 text-[14px]">
@@ -626,7 +627,7 @@ function ResultsDialog({ results, onClose }: { results?: Results; onClose: () =>
             </li>
           ))}
         </ul>
-      </ScrollArea>
+      </div>
     </Dialog>
   );
 }
@@ -781,6 +782,8 @@ function AddKeysDialog({
           </div>
           {current?.error && <p className="border-t border-border px-4 py-2.5 text-[14px] text-danger-text">{current.error}</p>}
           {rows && (
+            // Keeps its own scroll while the dialog scrolls as a page (UI ticket 28): a paste can be
+            // hundreds of keys, and the switch and Add button below must stay a short scroll away.
             <ScrollArea className="border-t border-border" viewportClassName="max-h-[240px]">
               <ul className="divide-y divide-border">
                 {/* Pasted keys are deduplicated, so each secret is one row. */}

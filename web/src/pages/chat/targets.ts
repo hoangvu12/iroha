@@ -85,7 +85,7 @@ async function startReplay(id: string) {
           ? { id: `r${i}`, role: "user", text: b.text }
           : { id: `r${i}`, role: "assistant", model: settings.model, shape: settings.shape, replayed: true, rounds: [{ parts: [{ kind: "text", text: b.text }], status: "done" }] },
       );
-      settings.toolCheck = false;
+      settings.tools = [];
     } catch {
       /* expired: start from the model alone */
     }

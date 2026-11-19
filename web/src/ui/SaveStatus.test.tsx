@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createAgent } from "@ui-sdk/react/agent";
 import { useState } from "react";
@@ -111,7 +111,7 @@ test("a failed save shows its error under the field until the next try", async (
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(screen.queryByRole("alert")).toBeNull();
   // Nothing to undo: the result goes sooner.
-  expect(screen.getByText("Renamed to team-5", onPage)).toBeTruthy();
+  expect(await screen.findByText("Renamed to team-5", onPage)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Undo/ })).toBeNull();
   act(() => void vi.advanceTimersByTime(DONE_MS));
   expect(screen.queryByText("Renamed to team-5", onPage)).toBeNull();
@@ -152,7 +152,7 @@ test("a switch saving on toggle shows its new state at once, is busy, and goes b
   await user.click(sw);
   expect(sw.getAttribute("aria-checked")).toBe("true");
   await act(async () => fail(new Error("Iroha is restarting.")));
-  expect(sw.getAttribute("aria-checked")).toBe("false");
+  await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("false"));
   expect(sw.hasAttribute("aria-busy")).toBe(false);
   expect(screen.getByRole("alert").textContent).toBe("Iroha is restarting.");
   expect(document.activeElement).toBe(sw);

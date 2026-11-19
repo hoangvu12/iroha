@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createAgent } from "@ui-sdk/react/agent";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -36,7 +36,8 @@ test("a copy button copies its value and says Copied in place, then goes back", 
   expect(button.textContent).toBe("Copy");
   await user.click(button);
   expect(await navigator.clipboard.readText()).toBe("gk_secret");
-  expect(button.textContent).toBe("Copied");
+  // The copy resolves after the click, so its render can come a moment later.
+  await waitFor(() => expect(button.textContent).toBe("Copied"));
   expect(button.getAttribute("data-copy")).toBe("copied");
   // The result is read out, not toasted.
   expect(await announced()).toContain("Gateway Key copied");
@@ -65,7 +66,7 @@ test("without the Clipboard API it copies through a hidden textarea and keeps fo
   expect(copied).toEqual(["http://iroha.local/v1"]);
   expect(document.querySelector("textarea")).toBeNull();
   expect(document.activeElement).toBe(button);
-  expect(button.textContent).toBe("Copied");
+  await waitFor(() => expect(button.textContent).toBe("Copied"));
 });
 
 test("when the browser refuses, the button says Couldn't copy and the reason is read out", async () => {
@@ -75,7 +76,7 @@ test("when the browser refuses, the button says Couldn't copy and the reason is 
   document.execCommand = vi.fn(() => false);
   const button = screen.getByRole("button", { name: "Copy the Request ID" });
   await user.click(button);
-  expect(button.textContent).toBe("Couldn't copy");
+  await waitFor(() => expect(button.textContent).toBe("Couldn't copy"));
   expect(button.getAttribute("data-copy")).toBe("failed");
   expect(await announced()).toContain("Couldn't copy the Request ID: Write permission denied.");
 });
@@ -92,7 +93,7 @@ test("an icon copy button is named by its tooltip, which says Copied after a cop
   expect(button.textContent).toBe("");
   await user.click(button);
   expect(await navigator.clipboard.readText()).toBe("req_1");
-  expect(screen.getByRole("button", { name: "Copied" })).toBe(button);
+  expect(await screen.findByRole("button", { name: "Copied" })).toBe(button);
   expect(row).not.toHaveBeenCalled();
   act(() => void vi.advanceTimersByTime(COPIED_MS));
   expect(screen.getByRole("button", { name: "Copy the Request ID" })).toBe(button);

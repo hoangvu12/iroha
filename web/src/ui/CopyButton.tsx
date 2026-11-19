@@ -76,6 +76,7 @@ export function CopyButton({
   what,
   label,
   icon,
+  glyph = Copy,
   children = "Copy",
   size = "sm",
   variant = "secondary",
@@ -87,6 +88,8 @@ export function CopyButton({
   what: string;
   label?: string;
   icon?: boolean;
+  /** The icon shown before a copy (Copy by default). */
+  glyph?: Icon;
   children?: string;
   size?: "sm" | "md";
   variant?: "secondary" | "ghost";
@@ -104,7 +107,7 @@ export function CopyButton({
   if (icon)
     return (
       <IconButton
-        icon={copyIcon(state, Copy)}
+        icon={copyIcon(state, glyph)}
         label={state === "copied" ? "Copied" : state === "failed" ? `Couldn't copy the ${what}` : name}
         size={size}
         bordered={bordered}
@@ -118,7 +121,7 @@ export function CopyButton({
 
   const text = state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : children;
   return (
-    <Button size={size} variant={variant} icon={copyIcon(state, Copy)} disabled={disabled} aria-label={name} data-copy={state} className={className} onClick={press}>
+    <Button size={size} variant={variant} icon={copyIcon(state, glyph)} disabled={disabled} aria-label={name} data-copy={state} className={className} onClick={press}>
       {/* Keeps the width of "Copied" so the button doesn't jump when it changes. */}
       <span data-reserve="Copied" className="grid justify-items-start after:invisible after:col-start-1 after:row-start-1 after:content-[attr(data-reserve)]">
         <span className="col-start-1 row-start-1">{text}</span>

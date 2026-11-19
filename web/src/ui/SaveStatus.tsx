@@ -23,12 +23,23 @@ type Action = { label: string; onClick: () => void };
 /** A finished change: what to say, the Audit Entry Undo reverts, and an optional second action ("Details"). */
 export type Done = { message: string; entry?: string; tone?: "ok" | "bad"; action?: Action; undone?: boolean };
 
+type RunOptions<R> = {
+  message?: string | ((r: R) => string | Done);
+  undoable?: boolean;
+  /** Shows no result here: the change's place goes away and `fn` toasts it. */
+  quiet?: boolean;
+};
+
 export type Save = {
   pending: boolean;
   done?: Done;
   error?: string;
-  /** Runs a change; resolves true when it worked. `message` words the result ("Saved" by default). */
-  run<R>(fn: () => Promise<R>, opts?: { message?: string | ((r: R) => string | Omit<Done, "undone">) }): Promise<boolean>;
+  /**
+   * Runs a change; resolves true when it worked. `message` words the result
+   * ("Saved" by default). `undoable: false` drops Undo, for a switch, which
+   * undoes itself.
+   */
+  run<R>(fn: () => Promise<R>, opts?: RunOptions<R>): Promise<boolean>;
   /** Shows a result worked out elsewhere. */
   show(d: Done): void;
   undo(): Promise<void>;
@@ -60,7 +71,7 @@ export function useSave({ refresh, describe = describeError }: { refresh?: () =>
   const schedule = useCallback((d: Done) => {
     clearTimeout(timer.current);
     if (held.current) return;
-    timer.current = setTimeout(() => setDone(undefined), d.entry || d.action ? UNDO_MS : DONE_MS);
+    timer.current = setTimeout(() => setDone(undefined), d.entry || d.action || d.tone === "bad" ? UNDO_MS : DONE_MS);
   }, []);
 
   const show = useCallback(
@@ -81,7 +92,7 @@ export function useSave({ refresh, describe = describeError }: { refresh?: () =>
   }, []);
 
   const run = useCallback(
-    async <R,>(fn: () => Promise<R>, o: { message?: string | ((r: R) => string | Omit<Done, "undone">) } = {}) => {
+    async <R,>(fn: () => Promise<R>, o: RunOptions<R> = {}) => {
       if (busy.current) return false;
       busy.current = true;
       clearTimeout(timer.current);
@@ -92,7 +103,9 @@ export function useSave({ refresh, describe = describeError }: { refresh?: () =>
         const res = await fn();
         await opts.current.refresh?.();
         const m = typeof o.message === "function" ? o.message(res) : o.message;
-        const d: Done = typeof m === "object" ? { entry: entryOf(res), ...m } : { message: m ?? "Saved", entry: entryOf(res) };
+        if (o.quiet) return true;
+        const entry = o.undoable === false ? undefined : entryOf(res);
+        const d: Done = typeof m === "object" ? { entry, ...m } : { message: m ?? "Saved", entry };
         show(d);
         return true;
       } catch (e) {

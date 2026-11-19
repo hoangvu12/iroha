@@ -18,6 +18,7 @@ export function RevokeDialog({ k, onClose, onDone }: { k?: GatewayKey; onClose: 
       onConfirm={async () => {
         if (!k) return;
         const res = await revoke.mutateAsync(k.id);
+        // Toast: the confirm dialog has closed.
         notifyChange(`${k.name} revoked`, res, { undoable: false });
         onDone?.();
       }}
@@ -42,6 +43,7 @@ export function DeleteDialog({ k, onClose, onDone }: { k?: GatewayKey; onClose: 
       onConfirm={async () => {
         if (!k) return;
         const res = await del.mutateAsync(k.id);
+        // Toast: the confirm dialog has closed (and the key page navigates away), with Undo after a delete.
         notifyChange(`${k.name} deleted`, res, { undoneMessage: `${k.name} is back`, onUndone: invalidate });
         onDone?.();
       }}

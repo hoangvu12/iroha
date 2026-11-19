@@ -10,7 +10,8 @@ import { Field, Input } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { Table, TableSkeleton, TBody, TD, TH, THead, TR } from "@/ui/Table";
-import { notify, notifyChange } from "@/ui/toast";
+import { SaveError, useSave } from "@/ui/SaveStatus";
+import { notifyChange } from "@/ui/toast";
 import type { Outcome, Replay, Rule, RuleFields } from "./api";
 import { calls, errorText, OUTCOMES, useRefresh, useRules } from "./api";
 import { Checkbox, Pill, Select, Switch } from "./controls";
@@ -23,15 +24,6 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
   const [editing, setEditing] = useState<Rule>();
   const [deleting, setDeleting] = useState<Rule>();
 
-  const flip = async (r: Rule, on: boolean) => {
-    try {
-      const res = await calls.switchRule(r.name, on);
-      refresh();
-      notifyChange(`${r.name} switched ${on ? "on" : "off"}`, res, { onUndone: refresh });
-    } catch (e) {
-      notify.failure(`Couldn't switch ${r.name}`, e);
-    }
-  };
 
   const menu = (r: Rule) => (
     <Menu>
@@ -74,7 +66,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
                   {matchText(r)} · {r.key_effect} · {formatNumber(r.hits)} today
                 </span>
               </button>
-              <Switch checked={r.enabled} onChange={(on) => void flip(r, on)} label={`${r.name} on`} />
+              <RuleSwitch r={r} />
             </li>
           ))}
         </ul>
@@ -112,7 +104,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
                   <Pill>{r.source === "builtin" ? "Built-in" : "Custom"}</Pill>
                 </TD>
                 <TD onClick={(e) => e.stopPropagation()}>
-                  <Switch checked={r.enabled} onChange={(on) => void flip(r, on)} label={`${r.name} on`} />
+                  <RuleSwitch r={r} />
                 </TD>
                 <TD align="right" onClick={(e) => e.stopPropagation()}>
                   {menu(r)}
@@ -135,10 +127,28 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
           if (!deleting) return;
           const res = await calls.deleteRule(deleting.name);
           refresh();
+          // Toast: the confirm dialog has closed; Undo after a delete.
           notifyChange(deleting.overrides ? `${deleting.name} restored` : `${deleting.name} deleted`, res, { onUndone: refresh });
         }}
       />
     </section>
+  );
+}
+
+/** A rule's On switch: shows its new state while it saves (and the result is read out); a failure puts it back and shows under it. */
+function RuleSwitch({ r }: { r: Rule }) {
+  const refresh = useRefresh();
+  const saving = useSave({ refresh, describe: errorText });
+  return (
+    <span className="inline-flex flex-col items-start gap-1">
+      <Switch
+        checked={r.enabled}
+        pending={saving.pending}
+        onChange={(on) => void saving.run(() => calls.switchRule(r.name, on), { message: `${r.name} switched ${on ? "on" : "off"}`, undoable: false })}
+        label={`${r.name} on`}
+      />
+      <SaveError save={saving} className="max-w-56 text-[12.5px] leading-snug" />
+    </span>
   );
 }
 
@@ -221,6 +231,7 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
       if (dry) setReplay(res.replay);
       else {
         refresh();
+        // Toast: the rule dialog closes on Save.
         notifyChange(rule ? `${f.name.trim()} saved` : `${f.name.trim()} added`, res, { onUndone: refresh });
         onOpenChange(false);
       }

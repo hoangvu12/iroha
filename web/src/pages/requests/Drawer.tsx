@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { ChevronDown, ChevronUp, Copy, Route as RouteIcon, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Route as RouteIcon, X } from "lucide-react";
 import { useChatPanel } from "@/app/chat-panel";
 import { CHAT_WIDTH } from "@/app/Shell";
 import { seg } from "@/api/client";
@@ -11,9 +11,9 @@ import { ScrollArea } from "@/ui/ScrollArea";
 import { ErrorState } from "@/ui/States";
 import { popupOpen } from "@/ui/popup";
 import { Tab as UITab, TabList, TabPanel, Tabs } from "@/ui/Tabs";
-import { notify } from "@/ui/toast";
+import { CopyButton } from "@/ui/CopyButton";
 import type { RequestRecord } from "./api";
-import { useCopy, useRequest } from "./api";
+import { useRequest } from "./api";
 import { AttemptList } from "./Attempts";
 import { ProviderLogo, StatusPill, when } from "./bits";
 import { CapturedView } from "./Captured";
@@ -51,7 +51,6 @@ export function RequestDrawer({
   const phone = useIsPhone();
   const chat = useChatPanel();
   const navigate = useNavigate();
-  const copy = useCopy();
   const [tab, setTab] = useState<Tab>("details");
   const req = useRequest(id, seed);
   const r = req.data;
@@ -87,11 +86,7 @@ export function RequestDrawer({
         <IconButton icon={ChevronUp} label="Newer Request (↑)" bordered size="sm" className="size-8" disabled={!prev} onClick={() => prev && onSelect(prev.id)} />
         <IconButton icon={ChevronDown} label="Older Request (↓)" bordered size="sm" className="size-8" disabled={!next} onClick={() => next && onSelect(next.id)} />
         <span className="ml-1 min-w-0 flex-1 truncate font-mono text-[13.5px] text-fg-muted">{id}</span>
-        <IconButton
-          icon={Copy}
-          label="Copy Request ID"
-          onClick={async () => (await copy(id)) && notify.copied("Request ID")}
-        />
+        <CopyButton icon size="md" value={id} what="Request ID" label="Copy Request ID" />
         <IconButton icon={RouteIcon} label="Open the Route view" onClick={openRoute} />
         <IconButton icon={X} label="Close (Esc)" onClick={onClose} />
       </div>

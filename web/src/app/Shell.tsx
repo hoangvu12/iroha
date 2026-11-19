@@ -142,6 +142,7 @@ function useSignOutWithToast() {
   const signOut = useSignOut();
   return () =>
     signOut.mutate(undefined, {
+      // Toast: the Owner menu has closed, so the error has nowhere else to go.
       onError: (e) => notify.failure("Couldn't sign out", e),
     });
 }

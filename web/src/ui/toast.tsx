@@ -1,23 +1,25 @@
 import type { ReactNode } from "react";
 import { OverlayHost } from "@ui-sdk/react/overlays";
 import { Toast, ToastAction, ToastDescription, ToastTitle, toast } from "@ui-sdk/react/toast";
-import { CircleAlert, CircleCheck, Copy, RotateCcw } from "lucide-react";
+import { CircleAlert, CircleCheck, RotateCcw } from "lucide-react";
 import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
 import type { AuditResult } from "@/api/types";
 import { cn } from "./cn";
 
-// Toasts: bottom right, 6 s (C25). Every change that can be put back gets
-// Undo, which reverts its Audit Entry through the same API agents use.
+// Toasts: bottom right, 6 s (C25), only for a result whose place is gone (a
+// menu or dialog that closed, a page that moved on, a background job) or an
+// error with nowhere else to go; anything else shows where it happened
+// (CopyButton, SaveStatus). Every change that can be put back gets Undo,
+// which reverts its Audit Entry through the same API agents use.
 
 export const TOAST_MS = 6000;
 
-type Icon = "ok" | "bad" | "copy" | "undo";
+type Icon = "ok" | "bad" | "undo";
 
 const icons: Record<Icon, ReactNode> = {
   ok: <CircleCheck size={17} aria-hidden className="shrink-0 text-success" />,
   bad: <CircleAlert size={17} aria-hidden className="shrink-0 text-danger-text" />,
-  copy: <Copy size={16} aria-hidden className="shrink-0 text-fg-muted" />,
   undo: <RotateCcw size={16} aria-hidden className="shrink-0 text-fg-muted" />,
 };
 
@@ -74,8 +76,6 @@ export const notify = {
   success: (message: ReactNode, action?: Action) => show(message, "ok", action),
   // "Couldn't test team-5: 401 Invalid key  Open"
   error: (message: ReactNode, action?: Action) => show(message, "bad", action),
-  // "Base URL copied"
-  copied: (what: string) => show(`${what} copied`, "copy"),
   // A failed call, worded from its error.
   failure: (what: string, e: unknown) => show(`${what}: ${isApiError(e) ? e.message : e instanceof Error ? e.message : String(e)}`, "bad"),
 };

@@ -1,22 +1,23 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowUpRight, Copy, KeyRound, MessageCircle, Pencil } from "lucide-react";
+import { ArrowUpRight, KeyRound, MessageCircle, Pencil } from "lucide-react";
 import { isApiError } from "@/api/client";
 import { useChatPanel } from "@/app/chat-panel";
 import { PageBody } from "@/app/PageBody";
 import { PageHeader } from "@/app/PageHeader";
 import { formatDate, formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { copyText } from "@/pages/settings/format";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { CopyButton } from "@/ui/CopyButton";
 import { Dialog } from "@/ui/Dialog";
 import { Input } from "@/ui/Input";
 import { Switch } from "@/ui/Switch";
 import { Tip } from "@/ui/Tooltip";
 import { EmptyState, ErrorState } from "@/ui/States";
-import { notify, notifyChange } from "@/ui/toast";
+import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
+import { notifyChange } from "@/ui/toast";
 import { type GatewayKey, useCaptureDays, useGatewayKey, useInvalidateKeys, useUpdateKey } from "./api";
 import { baseUrls } from "./bits";
 import { DeleteDialog, RevokeDialog } from "./confirm";
@@ -157,15 +158,32 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** One setting: label and one line on the left, its control on the right (stacked on phones). */
-function Row({ title, description, children, className }: { title: ReactNode; description?: ReactNode; children?: ReactNode; className?: string }) {
+/** One setting: label and one line on the left, its control on the right (stacked on phones); `below` (an error) under the control. */
+function Row({
+  title,
+  description,
+  children,
+  below,
+  className,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  children?: ReactNode;
+  below?: ReactNode;
+  className?: string;
+}) {
   return (
     <div className={cn("flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:gap-6", className)}>
       <div className="min-w-0 flex-1">
         <p className="text-[15px] font-medium text-fg">{title}</p>
         {description && <p className="mt-0.5 text-sm text-fg-muted">{description}</p>}
       </div>
-      {children && <div className="flex min-w-0 shrink-0 items-center gap-2">{children}</div>}
+      {children && (
+        <div className="flex min-w-0 shrink-0 flex-col gap-1.5 md:items-end">
+          <div className="flex min-w-0 items-center gap-3">{children}</div>
+          {below}
+        </div>
+      )}
     </div>
   );
 }
@@ -176,9 +194,7 @@ function CopyValue({ value, what }: { value: string; what: string }) {
       <span className="min-w-0 truncate font-mono text-[13px] text-fg md:max-w-[300px]" title={value}>
         {value}
       </span>
-      <Button size="sm" icon={Copy} onClick={() => void copyText(value, what)} aria-label={`Copy ${what.toLowerCase()}`}>
-        Copy
-      </Button>
+      <CopyButton value={value} what={what} />
     </>
   );
 }
@@ -188,30 +204,29 @@ function General({ k }: { k: GatewayKey }) {
   const invalidate = useInvalidateKeys();
   const [name, setName] = useState(k.name);
   useEffect(() => setName(k.name), [k.name]);
+  // Saved on blur: the result shows beside the field, a failure under it.
+  const saving = useSave({ refresh: invalidate });
 
   const save = () => {
     const n = name.trim();
-    if (!n || n === k.name) return setName(k.name);
-    update.mutate(
-      { id: k.id, name: n },
-      {
-        onSuccess: (res) => notifyChange(`Renamed ${k.name} to ${n}`, res, { undoneMessage: `named ${k.name} again`, onUndone: invalidate }),
-        onError: (e) => {
-          notify.failure(`Couldn't rename ${k.name}`, e);
-          setName(k.name);
-        },
-      },
-    );
+    if (!n || n === k.name) {
+      saving.clear();
+      return setName(k.name);
+    }
+    void saving.run(() => update.mutateAsync({ id: k.id, name: n }), { message: `Renamed to ${n}` });
   };
 
   return (
     <Card title="General">
-      <Row title="Name" description="Requests from this key show this name">
+      <Row title="Name" description="Requests from this key show this name" below={<SaveError save={saving} />}>
+        <SaveStatus save={saving} />
         <Input
           aria-label="Name"
           className="md:w-[300px]"
           value={name}
-          disabled={k.revoked || update.isPending}
+          aria-invalid={!!saving.error}
+          aria-busy={saving.pending || undefined}
+          disabled={k.revoked}
           autoComplete="off"
           spellCheck={false}
           onChange={(e) => setName(e.target.value)}
@@ -297,6 +312,7 @@ function AccessDialog({ k, open, onClose }: { k: GatewayKey; open: boolean; onCl
       { id: k.id, scope },
       {
         onSuccess: (res) => {
+          // Toast: the Access dialog closes on Save, so its place is gone.
           notifyChange(`Access of ${k.name} changed`, res, { undoneMessage: `${k.name}'s access is as before`, onUndone: invalidate });
           onClose();
         },
@@ -340,26 +356,19 @@ function Capture({ k }: { k: GatewayKey }) {
   const update = useUpdateKey();
   const invalidate = useInvalidateKeys();
   const days = useCaptureDays();
-  const set = (on: boolean) =>
-    update.mutate(
-      { id: k.id, capture: on },
-      {
-        onSuccess: (res) =>
-          notifyChange(on ? `Prompt capture on for ${k.name}` : `Prompt capture off for ${k.name}`, res, {
-            undoneMessage: `prompt capture ${on ? "off" : "on"} again`,
-            onUndone: invalidate,
-          }),
-        onError: (e) => notify.failure("Couldn't change prompt capture", e),
-      },
-    );
+  // The switch shows its new state while it saves; a failure puts it back and shows under it.
+  const saving = useSave({ refresh: invalidate });
+  const set = (on: boolean) => void saving.run(() => update.mutateAsync({ id: k.id, capture: on }), { message: on ? "Capture on" : "Capture off", undoable: false });
   const kept = days.data ? `for ${days.data} day${days.data === 1 ? "" : "s"}` : "for a while";
   return (
     <Card title="Prompt capture">
       <Row
         title="Capture prompts and responses"
         description={`Keeps the full prompt and response of this key's Requests ${kept}, under Captured in Requests. Leave it off for other people's keys.`}
+        below={<SaveError save={saving} />}
       >
-        <Switch label="Capture prompts and responses" checked={k.capture} disabled={k.revoked || update.isPending} onChange={set} />
+        <SaveStatus save={saving} saving={false} />
+        <Switch label="Capture prompts and responses" checked={k.capture} disabled={k.revoked} pending={saving.pending} onChange={set} />
       </Row>
       {k.capture && (
         <Row title="Captured Requests" description="Requests from now on show what was sent and received">

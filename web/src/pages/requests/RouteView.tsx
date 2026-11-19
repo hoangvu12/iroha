@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, ArrowUpRight, Copy, CornerDownLeft, MessageCircle, User, X } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, CornerDownLeft, MessageCircle, User, X } from "lucide-react";
 import { useChatPanel } from "@/app/chat-panel";
 import { PageBody } from "@/app/PageBody";
 import { CHAT_WIDTH, SIDEBAR_WIDTH } from "@/app/Shell";
@@ -15,9 +15,9 @@ import { cn } from "@/ui/cn";
 import { ScrollArea } from "@/ui/ScrollArea";
 import { ErrorState } from "@/ui/States";
 import { Tab as UITab, TabList, TabPanel, Tabs } from "@/ui/Tabs";
-import { notify } from "@/ui/toast";
+import { CopyButton } from "@/ui/CopyButton";
 import type { Attempt, RequestRecord } from "./api";
-import { useCopy, useRequest } from "./api";
+import { useRequest } from "./api";
 import { attemptFailed, explain, jumpLabel, servedModel, thenText } from "./attempt-info";
 import { Headers, keyStateClass } from "./Attempts";
 import { Badge, clockMs, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, StatusPill, statusText, statusTone, Summary } from "./bits";
@@ -74,7 +74,6 @@ export function RouteViewPage() {
 }
 
 function TopBar({ id, r, phone, onReplay }: { id: string; r?: RequestRecord; phone: boolean; onReplay: () => void }) {
-  const copy = useCopy();
   const base = `/requests/${seg(id)}`;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:h-[60px] md:flex-nowrap md:px-6 md:py-0">
@@ -114,7 +113,7 @@ function TopBar({ id, r, phone, onReplay }: { id: string; r?: RequestRecord; pho
             Replay in Chat
           </Button>
         ))}
-      <IconButton icon={Copy} label="Copy Request ID" bordered onClick={async () => (await copy(id)) && notify.copied("Request ID")} />
+      <CopyButton icon size="md" bordered value={id} what="Request ID" label="Copy Request ID" />
     </div>
   );
 }

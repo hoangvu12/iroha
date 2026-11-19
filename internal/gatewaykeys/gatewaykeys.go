@@ -34,6 +34,20 @@ type GatewayKey struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty" doc:"Last authenticated use, to the minute; absent when never used."`
+	// Ticket 24: activity for the Gateway Keys list.
+	RecentRequests int `json:"recent_requests" doc:"Requests made with this key in the last 24 hours (test Requests sent as it from the chat are not counted). GET /api/requests?caller=<name or ID> lists them."`
+}
+
+// recentWindow is the period recent_requests counts.
+const recentWindow = 24 * time.Hour
+
+// countRecent counts the key's own Requests (not test Requests sent as it)
+// started since now - recentWindow, over the requests_gateway_key index.
+func countRecent(ctx context.Context, q queryer, id string, now time.Time) (int, error) {
+	var n int
+	err := q.QueryRowContext(ctx, `SELECT count(*) FROM requests WHERE gateway_key_id = ? AND started_at >= ? AND caller_kind = 'gateway_key'`,
+		id, store.Millis(now.Add(-recentWindow))).Scan(&n)
+	return n, err
 }
 
 // Scope is what a Gateway Key may use.
@@ -218,13 +232,17 @@ func scan(r interface{ Scan(...any) error }) (row, error) {
 	return k, nil
 }
 
-// byID reads one Gateway Key with its scope view; sql.ErrNoRows when absent.
-func byID(ctx context.Context, q queryer, id string) (GatewayKey, error) {
+// byID reads one Gateway Key with its scope view and its Requests of the
+// 24 hours before now; sql.ErrNoRows when absent.
+func byID(ctx context.Context, q queryer, id string, now time.Time) (GatewayKey, error) {
 	r, err := scan(q.QueryRowContext(ctx, `SELECT `+keyColumns+` FROM gateway_keys WHERE id = ?`, id))
 	if err != nil {
 		return r.GatewayKey, err
 	}
-	r.GatewayKey.Scope, err = view(ctx, q, r.scope)
+	if r.GatewayKey.Scope, err = view(ctx, q, r.scope); err != nil {
+		return r.GatewayKey, err
+	}
+	r.RecentRequests, err = countRecent(ctx, q, id, now)
 	return r.GatewayKey, err
 }
 

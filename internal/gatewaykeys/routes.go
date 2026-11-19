@@ -122,7 +122,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 				if err != nil {
 					return nil, err
 				}
-				return byID(c.R.Context(), h.db, id)
+				return byID(c.R.Context(), h.db, id, h.db.Clock().Now())
 			},
 		},
 		{
@@ -198,6 +198,32 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 			},
 		},
 		{
+			Method: http.MethodDelete, Path: "/api/gateway-keys/{key}", Tag: tag,
+			Summary: "Delete a Gateway Key, by name or ID",
+			Description: "Removes the key and frees its name; Callers still holding it get 401 gateway_key_invalid. Requests already recorded keep the key's name. " +
+				"Revertible through the Audit Entry (the same secret works again). Revoke instead to keep the key on record.",
+			Query:    []api.Param{audit.DryRun},
+			Response: GatewayKeyResult{},
+			Handle: func(c *api.Call) (any, error) {
+				var out GatewayKey
+				res, err := h.tr.Mutate(c, "gateway_key.delete", "Deleted", func(m *audit.Mutation) error {
+					id, err := Resource.Resolve(m.Ctx, m.Tx, c.Path("key"))
+					if err != nil {
+						return err
+					}
+					if out, err = byID(m.Ctx, m.Tx, id, m.Now); err != nil {
+						return err
+					}
+					if err := m.Track(Resource, id); err != nil {
+						return err
+					}
+					_, err = m.Tx.ExecContext(m.Ctx, `DELETE FROM gateway_keys WHERE id = ?`, id)
+					return err
+				})
+				return GatewayKeyResult{Result: res, GatewayKey: out}, err
+			},
+		},
+		{
 			Method: http.MethodPost, Path: "/api/gateway-keys/bulk/revoke", Tag: tag,
 			Summary:     "Revoke many Gateway Keys, each by name or ID",
 			Description: `Body {"items": ["discord-bot", "gk_..."]}. Each item is applied or refused on its own.`,
@@ -248,8 +274,9 @@ func (h handlers) list(c *api.Call) (any, error) {
 		return nil, err
 	}
 	out := GatewayKeyList{GatewayKeys: []GatewayKey{}}
+	now := h.db.Clock().Now()
 	for _, id := range idList {
-		k, err := byID(c.R.Context(), h.db, id)
+		k, err := byID(c.R.Context(), h.db, id, now)
 		if err != nil {
 			return nil, err
 		}
@@ -265,7 +292,7 @@ func (h handlers) upsert(m *audit.Mutation, in CreateGatewayKey) (GatewayKey, er
 	var id string
 	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM gateway_keys WHERE name = ?`, in.Name).Scan(&id)
 	if err == nil {
-		k, err := byID(m.Ctx, m.Tx, id)
+		k, err := byID(m.Ctx, m.Tx, id, m.Now)
 		if err != nil {
 			return k, err
 		}
@@ -294,14 +321,14 @@ func (h handlers) upsert(m *audit.Mutation, in CreateGatewayKey) (GatewayKey, er
 		id, in.Name, ids.Secret(SecretPrefix), scope.json(), capture, store.Millis(m.Now)); err != nil {
 		return GatewayKey{}, err
 	}
-	return byID(m.Ctx, m.Tx, id)
+	return byID(m.Ctx, m.Tx, id, m.Now)
 }
 
 func (h handlers) update(m *audit.Mutation, id string, in UpdateGatewayKey) (GatewayKey, error) {
 	if err := m.Track(Resource, id); err != nil {
 		return GatewayKey{}, err
 	}
-	cur, err := byID(m.Ctx, m.Tx, id)
+	cur, err := byID(m.Ctx, m.Tx, id, m.Now)
 	if err != nil {
 		return cur, err
 	}
@@ -333,7 +360,7 @@ func (h handlers) update(m *audit.Mutation, id string, in UpdateGatewayKey) (Gat
 			return cur, err
 		}
 	}
-	return byID(m.Ctx, m.Tx, id)
+	return byID(m.Ctx, m.Tx, id, m.Now)
 }
 
 func (h handlers) revoke(m *audit.Mutation, ref string) (GatewayKey, error) {
@@ -341,7 +368,7 @@ func (h handlers) revoke(m *audit.Mutation, ref string) (GatewayKey, error) {
 	if err != nil {
 		return GatewayKey{}, err
 	}
-	k, err := byID(m.Ctx, m.Tx, id)
+	k, err := byID(m.Ctx, m.Tx, id, m.Now)
 	if err != nil || k.Revoked {
 		return k, err
 	}
@@ -352,5 +379,5 @@ func (h handlers) revoke(m *audit.Mutation, ref string) (GatewayKey, error) {
 	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE gateway_keys SET revoked_at = ? WHERE id = ?`, store.Millis(m.Now), id); err != nil {
 		return k, err
 	}
-	return byID(m.Ctx, m.Tx, id)
+	return byID(m.Ctx, m.Tx, id, m.Now)
 }

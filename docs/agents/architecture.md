@@ -310,3 +310,10 @@ React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarativ
 - Settings (`pages/settings`, ticket 28) has three tabs, each a route: Admin Tokens, Audit Entries and Sign-in (Owner password and signed-in browsers). Audit Entry filters live in the URL (`/settings/audit-entries?actor=Owner&resource=admin_token&q=...`), so other pages can link to a filtered history.
 - Checking pages in a headless browser: `iroha-v2-notes/ui-screenshots/` (outside the repo) has a seed test template (testkit with a fake clock near real time) and a Chrome-over-CDP screenshot script.
 - Phones (< 768 px): bottom tab bar, `PageHeader` shows the avatar linking to Settings; design tables as two-line rows there (C31, C32). Inputs use 16 px text on phones so focusing does not zoom.
+
+### Ticket 24: Gateway Keys page
+
+- `pages/gateway-keys`: `/gateway-keys` (list, create dialog, revoked keys folded under the table) and `/gateway-keys/<key ID>` (settings cards: name, key, base URL, access, prompt capture, activity, danger zone). `ScopeEditor` (Everything / Only some, Providers and Pools) is shared by the create dialog and Edit access; `ModelPicker` narrows a Provider to models with server-side search (`GET /api/providers/{p}/models?q=&filter=visible`, pages of 200) and draws only the rows in view, so thousands of models cost nothing; a typed ID not in the list can still be allowed.
+- API: `GatewayKey.recent_requests` (the key's own Requests of the last 24 h, `caller_kind = 'gateway_key'`, one indexed count per key) and `DELETE /api/gateway-keys/{key}` (audited, revertible; revoke stays irreversible).
+- Logos: `providerLogo` / `poolLogo` in `pages/gateway-keys/logos.tsx` return `undefined` until ticket 22 serves logos (letter tiles meanwhile).
+- Test: `useChatPanel().open({ kind: "gateway_key", gatewayKey: <key name> })` (the name, which the test API's `as` resolves like an ID).

@@ -23,7 +23,7 @@ The look stays the one in `.scratch/v2-gateway/design/v2-clean/` and the tokens 
 1. As the Owner, every button, link, menu item, tab and clickable row shows a pointer cursor (Tailwind 4 dropped `cursor: pointer` on buttons).
 2. As the Owner, the tabs on a Provider, Pool or Gateway Key page never show a scrollbar; when they don't fit on a narrow screen they scroll sideways with no visible bar, and the selected tab's underline slides to the new tab.
 3. As the Owner, every scrolling region (route canvas, sheets, chat panel, pickers, tables, code blocks) uses one styled scrollbar that appears on hover or scroll, never the browser's default bars and arrows.
-4. As the Owner, every page has a sensible width: forms and settings sit in a readable column (about 768px), tables and the route view may use more (about 1280px), and nothing stretches across a wide monitor.
+4. As the Owner, every page has a sensible width: every page, forms and settings included, uses the page frame (about 1280px), setting rows keep their controls to a sensible width, and nothing stretches across a wide monitor. (Owner, 2026-11-20, ticket 24: replaces "forms and settings sit in a readable column (about 768px)"; Login and Setup stay narrow centred forms.)
 5. As the Owner, every table looks and behaves the same: header, sorting, a search box where the data is long enough to need it, row selection with a bulk-action bar where actions exist, row actions in a menu, empty and error states, a skeleton while loading, and pagination.
 6. As the Owner, I can page through every table with numbered pages and choose the page size; my choice is remembered per table.
 7. As the Owner, the Requests feed keeps showing new Requests live and loads older ones as I scroll.

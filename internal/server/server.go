@@ -37,6 +37,9 @@ type Options struct {
 	// HTTPClient makes every outbound call (Attempts, discovery, tests).
 	// Default: a client with no overall timeout; budgets use contexts.
 	HTTPClient *http.Client
+	// Routes are added after the built-in route table. Tests use it for
+	// routes production has no need of, such as a deliberately slow one.
+	Routes []api.Route
 }
 
 // Server is one running Iroha.
@@ -115,6 +118,7 @@ func New(ctx context.Context, o Options) (*Server, error) {
 	s.audit = audit.New(db, s.log)
 	s.router = api.NewRouter(s.log, s.tokens.Authenticator())
 	s.router.Add(s.routes()...)
+	s.router.Add(o.Routes...)
 	s.router.AddDocs(o.Version, logs.SkillSection)
 	return s, nil
 }

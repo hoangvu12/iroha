@@ -41,8 +41,9 @@ export function RequestDetails({ r, onShowCaptured }: { r: RequestRecord; onShow
       )}
       <Section title="Route">
         <Fact label="Caller">{r.caller.name}</Fact>
-        <Fact label="Gateway Key" mono>
-          {r.caller.gateway_key_id ? <RecordLink record={rec.gatewayKey(r.caller.gateway_key_id)}>{r.caller.gateway_key_id}</RecordLink> : test ? "Test" : none}
+        {/* The key's name (the Caller's name when it called), linked by ID so a rename since still finds it. */}
+        <Fact label="Gateway Key">
+          {r.caller.gateway_key_id ? <RecordLink record={rec.gatewayKey(r.caller.gateway_key_id)}>{r.caller.name}</RecordLink> : test ? "Test" : none}
         </Fact>
         <Fact label="Provider">
           {r.provider ? (

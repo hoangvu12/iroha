@@ -16,7 +16,7 @@ import { riseIn } from "@/ui/Reveal";
 import { Chip, EmptyState } from "@/ui/States";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { type EntryFilter, type ResourceOption, useAuditEntries, useAuditFilters, useInvalidateAll } from "./api";
-import { EntryChanges, RevertNote } from "./Changes";
+import { ChangedName, EntryChanges, RevertNote } from "./Changes";
 import { clockTime, dayLabel } from "./format";
 import { SAMPLE_AUDIT_ENTRIES } from "./samples";
 
@@ -309,20 +309,23 @@ function ActorName({ actor }: { actor: Actor }) {
  * shared parent when several children of one Provider changed
  * ("dashscope/team-1", "dashscope/team-2" -> dashscope), else the first.
  */
-function targetOf(e: AuditEntry): { name: string; resource: string; parent: boolean; more: number } | undefined {
+type TargetOf = { id: string; name: string; resource: string; parent: boolean; more: number };
+
+function targetOf(e: AuditEntry): TargetOf | undefined {
   const c = e.changes;
   if (c.length === 0) return undefined;
-  if (c.length === 1) return { name: c[0].name, resource: c[0].resource, parent: false, more: 0 };
+  if (c.length === 1) return { id: c[0].id, name: c[0].name, resource: c[0].resource, parent: false, more: 0 };
   const parent = c[0].name.includes("/") ? c[0].name.slice(0, c[0].name.indexOf("/")) : "";
-  if (parent && c.every((x) => x.name.startsWith(parent + "/"))) return { name: parent, resource: "provider", parent: true, more: 0 };
-  return { name: c[0].name, resource: c[0].resource, parent: false, more: c.length - 1 };
+  if (parent && c.every((x) => x.name.startsWith(parent + "/"))) return { id: "", name: parent, resource: "provider", parent: true, more: 0 };
+  return { id: c[0].id, name: c[0].name, resource: c[0].resource, parent: false, more: c.length - 1 };
 }
 
-function TargetName({ t }: { t: { name: string; more: number } }) {
+/** The changed record's name, a link to its sheet when it has one (UI ticket 11). */
+function TargetName({ t }: { t: TargetOf }) {
   return (
-    <span className="truncate">
-      {t.name}
-      {t.more > 0 && <span className="text-fg-muted"> and {t.more} more</span>}
+    <span className="flex min-w-0 items-baseline">
+      <ChangedName resource={t.resource} id={t.id} name={t.name} className="min-w-0" />
+      {t.more > 0 && <span className="shrink-0 whitespace-pre text-fg-muted"> and {t.more} more</span>}
     </span>
   );
 }

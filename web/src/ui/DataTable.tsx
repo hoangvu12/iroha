@@ -237,6 +237,8 @@ export type DataTableProps<T extends RowData> = {
 
   /** Phones (< 768 px): the row as two lines (C31). Without it phones get the table, scrolling sideways. */
   phoneRow?: (row: T) => ReactNode;
+  /** Phones: controls that stay on the row beside it (a row's Switch), even when the row opens on a tap. */
+  phoneActions?: (row: T) => ReactNode;
 
   paging?: DataTablePaging;
   /** Line under the table, left of the pages: "42 keys". */
@@ -600,6 +602,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
               ) : (
                 <div className="flex min-w-0 flex-1 items-center gap-3">{content}</div>
               )}
+              {!showChecks && props.phoneActions?.(r)}
               {!onRowClick && !showChecks && rowActions?.(r)}
               {renderExpanded && !onRowClick && !showChecks && expandButton(row, name)}
               {renderExpanded && row.getIsExpanded() && <div className="min-w-0 basis-full">{renderExpanded(r)}</div>}
@@ -648,7 +651,8 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
           {/* Wraps onto its own line before it gets narrower than this. */}
           <div className="min-w-[min(100%,18rem)] flex-1">{props.footer?.(counts)}</div>
           {pages && (
-            <div className="flex shrink-0 items-center gap-3">
+            // Many pages on a phone: the pager wraps under the size box rather than pushing the page sideways.
+            <div className="flex max-w-full flex-wrap items-center gap-3">
               {/* The Select is w-full; its box sets the width (cn has no tailwind-merge). */}
               <div className="w-[150px] md:w-[128px]">
                 <Select

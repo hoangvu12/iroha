@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
-import { MoreHorizontal, Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
+import { useSearchParams } from "react-router";
+import { Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { api, isApiError, seg } from "@/api/client";
 import { formatNumber } from "@/lib/format";
-import { useIsPhone } from "@/lib/media";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
-import { ConfirmDialog, Dialog } from "@/ui/Dialog";
-import { Field, Input } from "@/ui/Input";
-import { Menu, MenuContent, MenuItem, MenuIconTrigger } from "@/ui/Menu";
-import { EmptyState, ErrorState } from "@/ui/States";
-import { Skeleton } from "@/ui/Skeleton";
-import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { useConfirm } from "@/ui/Confirm";
+import { DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
+import { Dialog } from "@/ui/Dialog";
+import { Field, Input, SearchInput } from "@/ui/Input";
+import { MenuItem } from "@/ui/Menu";
+import { EmptyState } from "@/ui/States";
 import { SaveError, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import type { Outcome, Replay, Rule, RuleFields } from "./api";
@@ -22,25 +22,46 @@ import { SAMPLE_RULES } from "./samples";
 export function RulesTab({ handle, adding, setAdding }: { handle: string; adding: boolean; setAdding: (o: boolean) => void }) {
   const rules = useRules(handle);
   const refresh = useRefresh();
-  const phone = useIsPhone();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState<Rule>();
-  const [deleting, setDeleting] = useState<Rule>();
+  const [params, setParams] = useSearchParams();
+  const q = params.get("q") ?? "";
+  const setQ = (v: string) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (v) n.set("q", v);
+        else n.delete("q");
+        return n;
+      },
+      { replace: true },
+    );
 
+  // Asks first, naming the rule; the result (with Undo) toasts, since the confirm has closed.
+  const askDelete = (r: Rule) =>
+    confirm.ask({
+      title: r.overrides ? `Restore the built-in ${r.name}?` : `Delete ${r.name}?`,
+      body: r.overrides ? "Your version goes and the built-in rule decides again. Undo brings yours back." : "Failures it matched fall to the next rule. Undo brings it back.",
+      confirmLabel: r.overrides ? "Restore built-in" : "Delete rule",
+      onConfirm: async () => {
+        const res = await calls.deleteRule(r.name);
+        refresh();
+        // Toast: the confirm dialog has closed; Undo after a delete.
+        notifyChange(r.overrides ? `${r.name} restored` : `${r.name} deleted`, res, { onUndone: refresh });
+      },
+    });
 
   const menu = (r: Rule) => (
-    <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${r.name}`} size="sm" />
-      <MenuContent>
-        <MenuItem icon={Pencil} onSelect={() => setEditing(r)}>
-          {r.source === "builtin" ? "Change (as your rule)…" : "Edit…"}
+    <RowMenu name={r.name}>
+      <MenuItem icon={Pencil} onSelect={() => setEditing(r)}>
+        {r.source === "builtin" ? "Change (as your rule)…" : "Edit…"}
+      </MenuItem>
+      {r.source === "owner" && (
+        <MenuItem icon={r.overrides ? RotateCcw : Trash2} danger onSelect={() => askDelete(r)}>
+          {r.overrides ? "Restore the built-in rule…" : "Delete…"}
         </MenuItem>
-        {r.source === "owner" && (
-          <MenuItem icon={r.overrides ? RotateCcw : Trash2} danger onSelect={() => setDeleting(r)}>
-            {r.overrides ? "Restore the built-in rule…" : "Delete…"}
-          </MenuItem>
-        )}
-      </MenuContent>
-    </Menu>
+      )}
+    </RowMenu>
   );
 
   return (
@@ -48,93 +69,104 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
       <p className="mb-4 text-[15px] text-fg-muted">
         When {handle} fails, the first matching rule decides what happens to the Upstream Key and the Request. Your rules run before built-in ones.
       </p>
-      {rules.isError ? (
-        <ErrorState title="Couldn't load the rules" error={rules.error} onRetry={() => void rules.refetch()} />
-      ) : (
-      <Skeleton data={rules.data} sample={SAMPLE_RULES} id={phone ? "provider-rules:phone" : "provider-rules"} label="Loading Failure Rules">
-      {(list) => list.length === 0 ? (
-        <EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />
-      ) : phone ? (
-        <ul className="divide-y divide-border border-y border-border">
-          {list.map((r) => (
-            <li key={r.name} className="flex items-center gap-3 py-3">
-              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setEditing(r)}>
-                <span className="flex items-center gap-2">
-                  <span className={cn("truncate text-[16px] font-medium", !r.enabled && "text-fg-muted")}>{r.name}</span>
-                  <Pill>{r.source === "builtin" ? "Built-in" : "Custom"}</Pill>
-                </span>
-                <span className="block truncate text-[14px] text-fg-muted">
-                  {matchText(r)} · {r.key_effect} · {formatNumber(r.hits)} today
-                </span>
-              </button>
-              <RuleSwitch r={r} />
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <Table>
-          <THead>
-            <tr>
-              <TH>Name</TH>
-              <TH>Status</TH>
-              <TH>Body contains</TH>
-              <TH>Upstream Key</TH>
-              <TH>Request</TH>
-              <TH align="right">Hits today</TH>
-              <TH className="pl-4">Source</TH>
-              <TH>On</TH>
-              <TH className="w-10">
-                <span className="sr-only">Actions</span>
-              </TH>
-            </tr>
-          </THead>
-          <TBody>
-            {list.map((r) => (
-              <TR key={r.name} interactive onClick={() => setEditing(r)} className={cn(!r.enabled && "text-fg-muted")}>
-                <TD className="text-[15px] font-medium" title={r.description}>
-                  {r.name}
-                </TD>
-                <TD mono>{r.status?.length ? r.status.join(", ") : "Any"}</TD>
-                <TD className="max-w-[220px] truncate">
-                  {r.body || r.code?.length ? <span className="font-mono text-[13px]">{[...(r.code ?? []), ...(r.body ? [r.body] : [])].join(", ")}</span> : <span className="text-fg-muted">Any</span>}
-                </TD>
-                <TD className="whitespace-nowrap">{r.key_effect}</TD>
-                <TD className="whitespace-nowrap">{r.request_effect}</TD>
-                <TD align="right">{formatNumber(r.hits)}</TD>
-                <TD className="pl-4">
-                  <Pill>{r.source === "builtin" ? "Built-in" : "Custom"}</Pill>
-                </TD>
-                <TD onClick={(e) => e.stopPropagation()}>
-                  <RuleSwitch r={r} />
-                </TD>
-                <TD align="right" onClick={(e) => e.stopPropagation()}>
-                  {menu(r)}
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      )}
-      </Skeleton>
-      )}
+      <DataTable<Rule>
+        id="provider-rules"
+        label="Failure Rules"
+        columns={columns}
+        data={rules.data}
+        sample={SAMPLE_RULES}
+        getRowId={(r) => r.name}
+        rowName={(r) => r.name}
+        error={rules.isError ? rules.error : undefined}
+        errorTitle="Couldn't load the rules"
+        onRetry={() => void rules.refetch()}
+        toolbar={
+          <SearchInput
+            className="min-w-0 flex-1 md:max-w-[320px] md:flex-none"
+            placeholder="Search rules"
+            aria-label="Search rules"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        }
+        search={q}
+        searchFn={searchRules}
+        filterChips={q ? [{ label: `Search: ${q}`, onRemove: () => setQ("") }] : []}
+        onClearFilters={() => setQ("")}
+        noResultsTitle="No rules match"
+        rowActions={menu}
+        onRowClick={setEditing}
+        phoneRow={(r) => <RuleLine r={r} />}
+        phoneActions={(r) => <RuleSwitch r={r} />}
+        empty={<EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />}
+        footer={({ shown, total }) => (shown === total ? `${total} rule${total === 1 ? "" : "s"}, in the order they're tried` : `${shown} of ${total} rules`)}
+      />
 
+      {confirm.dialog}
       <RuleDialog handle={handle} open={adding} onOpenChange={setAdding} />
       <RuleDialog handle={handle} rule={editing} open={!!editing} onOpenChange={(o) => !o && setEditing(undefined)} />
-      <ConfirmDialog
-        open={!!deleting}
-        onOpenChange={(o) => !o && setDeleting(undefined)}
-        title={deleting?.overrides ? `Restore the built-in ${deleting.name}?` : `Delete ${deleting?.name}?`}
-        body={deleting?.overrides ? "Your version goes and the built-in rule decides again. Undo brings yours back." : "Failures it matched fall to the next rule. Undo brings it back."}
-        confirmLabel={deleting?.overrides ? "Restore built-in" : "Delete rule"}
-        onConfirm={async () => {
-          if (!deleting) return;
-          const res = await calls.deleteRule(deleting.name);
-          refresh();
-          // Toast: the confirm dialog has closed; Undo after a delete.
-          notifyChange(deleting.overrides ? `${deleting.name} restored` : `${deleting.name} deleted`, res, { onUndone: refresh });
-        }}
-      />
     </section>
+  );
+}
+
+const matchesText = (r: Rule) => [...(r.code ?? []), ...(r.body ? [r.body] : [])].join(", ");
+
+const searchRules = (r: Rule, needle: string) =>
+  !needle || [r.name, r.description ?? "", matchesText(r), (r.status ?? []).join(" "), r.key_effect, r.request_effect].some((s) => s.toLowerCase().includes(needle));
+
+// Rules keep the order they are tried in (the first match decides), so no column sorts.
+const col = columnsFor<Rule>();
+const columns = col.columns([
+  col.accessor("name", {
+    header: "Name",
+    enableSorting: false,
+    meta: { className: "text-[15px] font-medium", opens: true },
+    cell: ({ row }) => (
+      <span title={row.original.description} className={cn(!row.original.enabled && "text-fg-muted")}>
+        {row.original.name}
+      </span>
+    ),
+  }),
+  col.accessor((r) => (r.status ?? []).join(", "), {
+    id: "status",
+    header: "Status",
+    enableSorting: false,
+    meta: { className: "font-mono text-[13px]" },
+    cell: ({ row }) => (row.original.status?.length ? row.original.status.join(", ") : "Any"),
+  }),
+  col.accessor(matchesText, {
+    id: "body",
+    header: "Body contains",
+    enableSorting: false,
+    meta: { className: "max-w-[220px] truncate" },
+    cell: ({ row }) => (matchesText(row.original) ? <span className="font-mono text-[13px]">{matchesText(row.original)}</span> : <span className="text-fg-muted">Any</span>),
+  }),
+  col.accessor("key_effect", { header: "Upstream Key", enableSorting: false, meta: { className: "whitespace-nowrap" } }),
+  col.accessor("request_effect", { header: "Request", enableSorting: false, meta: { className: "whitespace-nowrap" } }),
+  col.accessor("hits", { header: "Hits today", enableSorting: false, meta: { align: "right" }, cell: ({ row }) => formatNumber(row.original.hits) }),
+  col.display({
+    id: "source",
+    header: "Source",
+    meta: { className: "pl-4", width: "pl-4" /* the header lines up with the pills */ },
+    cell: ({ row }) => <Pill>{row.original.source === "builtin" ? "Built-in" : "Custom"}</Pill>,
+  }),
+  col.display({ id: "on", header: "On", cell: ({ row }) => <RuleSwitch r={row.original} /> }),
+]);
+
+/** Phones (C31): a rule in two lines, with its switch. */
+function RuleLine({ r }: { r: Rule }) {
+  return (
+    <>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className={cn("truncate text-[16px] font-medium", !r.enabled && "text-fg-muted")}>{r.name}</span>
+          <Pill>{r.source === "builtin" ? "Built-in" : "Custom"}</Pill>
+        </span>
+        <span className="block truncate text-[14px] text-fg-muted">
+          {matchText(r)} · {r.key_effect} · {formatNumber(r.hits)} today
+        </span>
+      </span>
+    </>
   );
 }
 

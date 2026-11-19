@@ -367,7 +367,7 @@ React 19 + TypeScript + Vite in `web/`, Tailwind CSS 4, React Router (declarativ
 |---|---|
 | `app/` | The shell: `App.tsx` (providers and the route table, one line per page), `AuthGate` (setup, login, or the app), `Shell` (sidebar, phone tab bar, chat slot), `nav.ts` (items and shortcuts P, G, R, C), `shortcuts.ts`, `health.ts` (polls `/readyz`), `theme.tsx`, `chat-panel.tsx`, `PageHeader`, `brand.tsx`. |
 | `api/` | `client.ts` (the only `fetch`: JSON, 10 s timeout, `ApiError` with `code`, `hint` and `call`, signed-out detection), `types.ts` (shared shapes: `AuditResult`, `BulkResult`, `AuditEntry`...), `session.ts`, `audit.ts` (`revertEntry`). Add `api/<resource>.ts` for types and hooks other pages also need; otherwise keep them in your page folder. |
-| `ui/` | Shared components, no data fetching: `Button`/`IconButton`/`buttonClass`, `Input`/`PasswordInput`/`SearchInput`/`Field`, `DataTable` (`columnsFor`, `RowMenu`, `useTablePaging`) and `Pagination` (`Pager`) (see "UI ticket 06"), `Table` primitives (old; until tickets 07–09 move their tables onto `DataTable`), `Skeleton` (see "UI ticket 02"), `Dialog`/`ConfirmDialog`/`TypeToConfirmDialog`, `Confirm` (`useConfirm`, `ConfirmAction`; see "UI ticket 21"), `Menu`, `Tooltip` (`Tip`), `Switch`, `Checkbox`, `Segmented`, `Select`, `Radio` (`RadioCards`), `Autocomplete`, `Disclosure`, `popup` (`popupClass`, `popupOpen`), `toast` (`Toaster`, `notify`, `notifyChange` with Undo) (see "UI ticket 03"), `CopyButton` (`useCopy`, `copyIcon`), `SaveStatus` (`useSave`, `SaveStatus`, `SaveError`, `toastDone`), `clipboard` (`writeClipboard`) (see "UI ticket 04"), `LogoTile`, `States` (`EmptyState`, `NoResults`, `Chip`, `ErrorState`), `bits` (`StatusDot`, `Status`, `Kbd`, `Mono`), `Tabs`, `ScrollArea`, `Canvas` (see "UI ticket 05"). |
+| `ui/` | Shared components, no data fetching: `Button`/`IconButton`/`buttonClass`, `Input`/`PasswordInput`/`SearchInput`/`Field`, `DataTable` (`columnsFor`, `RowMenu`, `useTablePaging`) and `Pagination` (`Pager`) (see "UI ticket 06"), `RowOrder` (`RowHandle`, on `reorder-primitive.ts`; see "UI ticket 07"), `Skeleton` (see "UI ticket 02"), `Dialog`/`ConfirmDialog`/`TypeToConfirmDialog`, `Confirm` (`useConfirm`, `ConfirmAction`; see "UI ticket 21"), `Menu`, `Tooltip` (`Tip`), `Switch`, `Checkbox`, `Segmented`, `Select`, `Radio` (`RadioCards`), `Autocomplete`, `Disclosure`, `popup` (`popupClass`, `popupOpen`), `toast` (`Toaster`, `notify`, `notifyChange` with Undo) (see "UI ticket 03"), `CopyButton` (`useCopy`, `copyIcon`), `SaveStatus` (`useSave`, `SaveStatus`, `SaveError`, `toastDone`), `clipboard` (`writeClipboard`) (see "UI ticket 04"), `LogoTile`, `States` (`EmptyState`, `NoResults`, `Chip`, `ErrorState`), `bits` (`StatusDot`, `Status`, `Kbd`, `Mono`), `Tabs`, `ScrollArea`, `Canvas` (see "UI ticket 05"). |
 | `sheets/` | The stack of record sheets and `RecordLink` (see "UI ticket 10"). |
 | `lib/` | `format.ts` (numbers, percents, durations, "4 min ago"), `media.ts` (`useIsPhone`). |
 | `pages/<page>/` | One folder per page, owned by its ticket: `providers` (22), `chat` (23), `gateway-keys` (24), `requests` (25), `settings` (28), plus `login`, `states`, `not-found`. Each `index.tsx` default-exports the page, mounted at `/<page>/*`; sub-pages go in a `<Routes>` inside the folder, so parallel tickets never edit the same file. |
@@ -562,7 +562,7 @@ Shared by motion tickets 13–20 (spec story 15), set by an `improve-animations`
 
 Every table is `DataTable` from `@/ui/DataTable` (spec "One data table"). It renders a semantic `<table>` driven by TanStack Table `9.3.1` (`@tanstack/react-table`, exact pin). Its controls are UI SDK parts: Checkbox, Menu, Select, and Pagination through `ui/Pagination.tsx` `Pager`, which is 1-based. The table sits in a `ScrollArea axis="both"` with a sticky header and loads through `Skeleton`. The Keys tab (`pages/providers/Keys.tsx`) is the worked example; copy its shape.
 
-Tickets 07–09 move the other tables onto it. The last of them deletes `ui/Table.tsx` (`Table`/`TR`/`TH`/`TD`).
+Tickets 07–09 moved every other table onto it; `ui/Table.tsx` is gone, so every table is a `DataTable`.
 
 **Columns** are defined once, at module scope (or `useMemo` when they need props):
 
@@ -666,6 +666,23 @@ The rest are optional.
 - What a page on DataTable tests: its own wiring (its columns' sort and filter, URL state, the API calls of bulk and row actions, confirms). Not the table again.
 - In jsdom: body rows are `within(getByRole("table", { name: label })).getAllByRole("row").slice(1)`. The size Select is `combobox "Rows per page"` with options "50 per page". IntersectionObserver exists only if stubbed.
 
+### UI ticket 07: Provider tables on DataTable
+
+The Providers and Model Pools lists (`pages/providers/List.tsx`), Endpoints, Models, Rules and Pool Members are `DataTable`s. Each test file beside them (`List`, `Endpoints`, `Models`, `Rules`, `PoolMembers` `.test.tsx`) covers that page's wiring.
+
+- **Providers and Pools.** The default order (archived last, then Requests today, then name) is sorted into `data`. Header presses sort by any number; a missing number counts as -1. Two tables share the page, so the Pool columns carry `meta.label`s ("Pool name", "Pool success"...) to keep the "Sort by" names unique. Rows open their page through `onRowClick`. The hover "Test <name> in Chat" button stays in `rowActions`; there is no menu. Search is `?q=`.
+- **Endpoints, Rules.** Both use the default pages mode. Rules don't sort, since their order is the order they're tried; `?q=` searches them. Deletes go through `useConfirm`.
+- **Models.** Uses server paging (`useTablePaging("provider-models")`) with `manualFiltering`. `?q=` (debounced) and `?filter=` (`all`, `visible`, `discovered`, `added`, `hidden`, `gaps`) live in the URL and are passed to `GET /models`. The filter also goes in `columnFilters`, so a change goes back to page 1. The columns don't sort, because the server sorts by model. Bulk Hide/Show calls `POST /providers/<h>/models/bulk` once (`api.saveModels`).
+- **`phoneActions(row)`** (DataTable): controls that stay on a phone row even when the row opens on a tap, for example a row's Switch (Rules, Pool Members) or the Models menu (its details dialog has no menu). Presses on them don't open the row. The footer's pager group wraps under the size box on narrow screens.
+- **Reordering rows: `ui/RowOrder.tsx` on `ui/reorder-primitive.ts`.**
+  - Wrap the `DataTable` in `<RowOrder label value onValueChange={(keys, moved) => …} itemLabel>` and put `<RowHandle value={key} name={name}/>` in a cell. The handle is the reorder item (`createReorder` with `slot: "handle"`): Space picks up, the arrows, Home and End move it, Space drops, and Escape cancels. A pointer drag works too.
+  - `onValueChange` gets the held key as `moved`, so the save message names it ("acme moved to position 2").
+  - Pass `paging={{ mode: "none" }}`, so a drag reaches every place, and don't sort the columns.
+  - The handle's prop kind is `"string"`, not `"key"`: a `"key"` prop needs `api.internal.keyOf`, which the React adapter doesn't give.
+  - Inside a Skullet sample `RowHandle` renders a plain span, because the sample renders outside the Root.
+  - Agents see the group "Order of <pool>'s members" with the action `move(key, index)`. The handles aren't in the snapshot.
+- Pool Members' row menu is named "More for <provider> (<model>)". It holds Move up/down, Test in Chat, Open, and a danger Remove… that asks first.
+
 ### UI ticket 09: the Requests feed on DataTable
 
 - **Feed** (`pages/requests/Feed.tsx`): `DataTable id="requests"` in infinite mode over `useRequestFeed`'s rows (pages flattened, live rows first). Columns are display columns built from `url-state.ts` `COLUMNS`; `?hide=` is `columnVisibility`. The server filters (`manualFiltering`, `manualSorting`, no column sorting); the chips stay above the table. A row opens the Request sheet; its "Open Request <id>" button sits in the first shown plain-text column (Time unless hidden). The open Request is `activeRowId`, and stepping ↓ onto the last loaded row loads the older ones. "Load older Requests" is the load-more button. Arriving rows flash once (`useArrivals`, by `data-row-id`; ticket 18 owns that motion).
@@ -689,6 +706,15 @@ The rest are optional.
 - **Sign-in names** (agents match labels by word): "Change password…" opens the dialog whose button is "Save the new password"; the current browser's button is "Sign out this browser", the others "Sign out <browser>…" (with "signed in <date>" when two are the same kind); "Sign out the other browsers…".
 - `/states` shows DataTable loading, empty, no results, error, and a table with sort, bulk bar, row menu, details and pages.
 - Tests: `pages/gateway-keys/List.test.tsx`, `pages/settings/AdminTokens.test.tsx`, `AuditEntries.test.tsx`, `SignIn.test.tsx`, `pages/states/States.test.tsx` (incl. agent tests).
+
+### UI ticket 11: every record reference is a RecordLink
+
+- **Where**: the Requests feed (Caller → its Gateway Key, a Pool's model name → the Pool, Provider, key), the Request sheet's Details (Gateway Key shows the key's name: `caller.name`, linked by `gateway_key_id`, so a rename since still resolves) and Attempts (each card's key, and Provider / Endpoint / Upstream Key in its facts: `AttemptTarget` in `pages/requests/Attempts.tsx`, shared with the Route view), the Route view (cards and the Start and Attempt panels), a Pool's Route preview (each member's Provider on its card; the member panel's Provider, Endpoints and keys) and Members (Provider, the Gateway Keys that can use it), a Gateway Key's Access (Providers, Pools), Audit Entries (the changed record, also in an opened entry's list), the Upstream Key dialog (its Endpoints, worked-on Endpoints, Endpoint Gaps, "Open the Request") and a chat reply's Details (serving key, Endpoint). Every one is `RecordLink`; models aren't records (no sheet), so a model name stays text unless it names a Pool, and so do Failure Rules, Admin Tokens and settings.
+- **A link on a button** (canvas cards, an Attempt's header): the card is a `relative` box holding an `absolute inset-0` button (the select or toggle, with its `aria-label`, `aria-pressed`/`aria-expanded`) and the content; the RecordLink gets `relative` so it sits above the button and takes its own clicks. Never put a link inside a button: the feed's "Open Request" cell is now only a plain-text column (`OPENERS` in `Feed.tsx`), and a phone row that is one big button (the Requests feed) keeps names as text.
+- **Audit targets** (`changedRecord(resource, id, name)` in `pages/settings/Changes.tsx`): `provider`, `pool`, `gateway_key` (by ID), `upstream_key`/`endpoint` (`provider/name`), and `model_gap`/`endpoint_gap` open their Upstream Key; several changes under one Provider open the Provider.
+- **Links out of a modal dialog the URL holds** (`?key=` on the Keys tab): `<RecordLink drop={["key"]}>` drops those params from the link's href and on click (`useSheets().open(record, from, drop)`, `hrefFor(record, from, drop)`), so the sheet replaces the dialog; the entry is pushed, so Back or closing the sheet brings the dialog back.
+- Agents: an Attempt's header names its key too (its button's context), so an agent presses the link by `ref`.
+- Tests: `sheets/Links.test.tsx` (each place above, incl. the dialog round trip and an agent test), `pages/requests/RouteView.test.tsx`, `sheets/FeedSheets.test.tsx` (feed cells).
 
 ### UI ticket 20: Gateway Keys and Settings motion
 

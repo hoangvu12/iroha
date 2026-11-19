@@ -1,50 +1,81 @@
-import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Eraser, Eye, EyeOff, ListPlus, ListX, MessageCircle, MoreHorizontal, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
-import { useChatPanel } from "@/app/chat-panel";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
+import { Eraser, Eye, EyeOff, ListPlus, ListX, MessageCircle, MoreHorizontal, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { useChatActions } from "@/app/chat-panel";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
-import { Button, IconButton } from "@/ui/Button";
+import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { useConfirm } from "@/ui/Confirm";
-import { ConfirmDialog, Dialog } from "@/ui/Dialog";
+import { type ColumnFiltersState, DataTable, RowMenu, columnsFor, useTablePaging } from "@/ui/DataTable";
+import { Dialog } from "@/ui/Dialog";
 import { Field, Input, SearchInput } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
-import { EmptyState, ErrorState, NoResults } from "@/ui/States";
-import { Skeleton } from "@/ui/Skeleton";
-import { Table, TBody, TD, TH, THead, TR } from "@/ui/Table";
+import { EmptyState } from "@/ui/States";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { notify, notifyChange } from "@/ui/toast";
 import type { Facts, Model, ModelFilter } from "./api";
-import { calls, errorText, MODEL_PAGE, useKeys, useModels, useRefresh } from "./api";
+import { calls, errorText, MODEL_FILTERS, useKeys, useModels, useRefresh } from "./api";
 import { Pill, Segmented, Select } from "./controls";
 import { SAMPLE_MODEL_LIST } from "./samples";
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 const ctx = (n?: number) => (n ? compact.format(n) : "–");
 
-/** The Models tab (C08): what Callers see, Model Gaps, and the Owner's additions, hides and overrides. */
+const filterLabel: Record<ModelFilter, string> = {
+  all: "All",
+  visible: "Listed",
+  discovered: "Discovered",
+  added: "Added",
+  hidden: "Hidden",
+  gaps: "With Model Gaps",
+};
+const filterChip: Record<ModelFilter, string> = { ...filterLabel, all: "All models", visible: "Listed to Callers" };
+
+/** The text typed, once typing has paused for `ms`: what the server is asked for. */
+function useDebounced(value: string, ms = 250) {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+/**
+ * The Models tab (C08): what Callers see, Model Gaps, and the Owner's additions,
+ * hides and overrides. The server searches, filters and pages the list
+ * (thousands of models cost one page): `?q=` searches, `?filter=` filters;
+ * selected models are hidden or shown together through the bulk API.
+ */
 export function ModelsTab({ handle }: { handle: string }) {
-  const [q, setQ] = useState("");
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<ModelFilter>("all");
-  const [offset, setOffset] = useState(0);
-  const models = useModels(handle, { q: query, filter, offset });
+  const [params, setParams] = useSearchParams();
+  const q = params.get("q") ?? "";
+  const filter = (MODEL_FILTERS as string[]).includes(params.get("filter") ?? "") ? (params.get("filter") as ModelFilter) : "all";
+  const query = useDebounced(q.trim());
+  const [pagination, setPagination] = useTablePaging("provider-models");
+  const models = useModels(handle, { q: query, filter, offset: pagination.pageIndex * pagination.pageSize, limit: pagination.pageSize });
   const keys = useKeys(handle);
   const refresh = useRefresh();
   const phone = useIsPhone();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Model>();
-  const [resetting, setResetting] = useState(false);
   const confirm = useConfirm();
-  const chat = useChatPanel();
+  const chat = useChatActions();
+  const barSave = useSave({ describe: errorText });
+  const [busy, setBusy] = useState<"hide" | "show">();
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQuery(q.trim());
-      setOffset(0);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [q]);
+  const setParam = (k: string, v?: string) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (v) n.set(k, v);
+        else n.delete(k);
+        return n;
+      },
+      { replace: true },
+    );
+  const setFilter = (f: ModelFilter) => setParam("filter", f === "all" ? undefined : f);
 
   const totalKeys = keys.data?.length ?? 0;
   const data = models.data;
@@ -69,251 +100,305 @@ export function ModelsTab({ handle }: { handle: string }) {
     }
   };
 
+  // Hides or shows the selected models (on every page: the selection holds model IDs); the result shows in the bar.
+  const hideAll = (names: string[], hidden: boolean) => {
+    setBusy(hidden ? "hide" : "show");
+    void barSave
+      .run(
+        async () => {
+          const res = await calls.saveModels(handle, names.map((model) => ({ model, hidden })));
+          await refresh();
+          return res;
+        },
+        {
+          message: (res) => {
+            const n = res.succeeded;
+            const what = `${n} model${n === 1 ? "" : "s"} ${hidden ? "hidden" : "shown to Callers"}`;
+            return res.failed ? { message: `${what}; ${res.failed} refused`, tone: "bad" } : what;
+          },
+        },
+      )
+      .finally(() => setBusy(undefined));
+  };
+
   const menu = (m: Model) => (
-    <Menu>
-      <MenuIconTrigger icon={MoreHorizontal} label={`More for ${m.model}`} size="sm" />
-      <MenuContent>
-        <MenuItem icon={SlidersHorizontal} onSelect={() => setEditing(m)}>
-          Details…
+    <RowMenu name={m.model}>
+      <MenuItem icon={SlidersHorizontal} onSelect={() => setEditing(m)}>
+        Details…
+      </MenuItem>
+      <MenuItem icon={MessageCircle} onSelect={() => chat.open({ kind: "model", provider: handle, model: m.model })}>
+        Test in Chat
+      </MenuItem>
+      {m.hidden ? (
+        <MenuItem icon={Eye} onSelect={() => void change(m, { hidden: false }, `${m.model} shown to Callers`)}>
+          Show to Callers
         </MenuItem>
-        <MenuItem icon={MessageCircle} onSelect={() => chat.open({ kind: "model", provider: handle, model: m.model })}>
-          Test in Chat
+      ) : (
+        <MenuItem icon={EyeOff} onSelect={() => void change(m, { hidden: true }, `${m.model} hidden`)}>
+          Hide from Callers
         </MenuItem>
-        {m.hidden ? (
-          <MenuItem icon={Eye} onSelect={() => void change(m, { hidden: false }, `${m.model} shown to Callers`)}>
-            Show to Callers
+      )}
+      {m.added && m.discovered ? (
+        <MenuItem icon={ListX} onSelect={() => void change(m, { added: false }, `${m.model} no longer pinned`)}>
+          Unpin
+        </MenuItem>
+      ) : m.added ? (
+        <MenuItem
+          icon={ListX}
+          danger
+          onSelect={() =>
+            confirm.ask({
+              title: `Remove ${m.model} from ${handle}?`,
+              body: `Callers stop seeing ${m.model} in ${handle}'s model list. Undo brings it back.`,
+              confirmLabel: "Remove model",
+              onConfirm: async () => {
+                const res = await calls.saveModel(handle, { model: m.model, added: false });
+                refresh();
+                // Toast: the menu and the confirm have closed, and the row leaves the list.
+                notifyChange(`${m.model} removed`, res, { onUndone: refresh });
+              },
+            })
+          }
+        >
+          Remove from the list…
+        </MenuItem>
+      ) : (
+        <MenuItem icon={ListPlus} onSelect={() => void change(m, { added: true }, `${m.model} pinned to the list`)}>
+          Pin to the list
+        </MenuItem>
+      )}
+      {m.model_gaps.length > 0 && (
+        <>
+          <MenuSeparator />
+          <MenuItem icon={Eraser} onSelect={() => void clearGaps(m)}>
+            Clear Model Gaps
           </MenuItem>
-        ) : (
-          <MenuItem icon={EyeOff} onSelect={() => void change(m, { hidden: true }, `${m.model} hidden`)}>
-            Hide from Callers
-          </MenuItem>
-        )}
-        {m.added && m.discovered ? (
-          <MenuItem icon={ListX} onSelect={() => void change(m, { added: false }, `${m.model} no longer pinned`)}>
-            Unpin
-          </MenuItem>
-        ) : m.added ? (
-          <MenuItem
-            icon={ListX}
-            danger
-            onSelect={() =>
-              confirm.ask({
-                title: `Remove ${m.model} from ${handle}?`,
-                body: `Callers stop seeing ${m.model} in ${handle}'s model list. Undo brings it back.`,
-                confirmLabel: "Remove model",
-                onConfirm: async () => {
-                  const res = await calls.saveModel(handle, { model: m.model, added: false });
-                  refresh();
-                  // Toast: the menu and the confirm have closed, and the row leaves the list.
-                  notifyChange(`${m.model} removed`, res, { onUndone: refresh });
-                },
-              })
-            }
-          >
-            Remove from the list…
-          </MenuItem>
-        ) : (
-          <MenuItem icon={ListPlus} onSelect={() => void change(m, { added: true }, `${m.model} pinned to the list`)}>
-            Pin to the list
-          </MenuItem>
-        )}
-        {m.model_gaps.length > 0 && (
-          <>
-            <MenuSeparator />
-            <MenuItem icon={Eraser} onSelect={() => void clearGaps(m)}>
-              Clear Model Gaps
-            </MenuItem>
-          </>
-        )}
-      </MenuContent>
-    </Menu>
+        </>
+      )}
+    </RowMenu>
   );
 
   // With "With Model Gaps" shown, a cleared row leaves the list: then the menu's toast is the only place left.
-  const gapsCell = (m: Model) => <GapsCell handle={handle} m={m} onLeaves={filter === "gaps" ? () => void clearGaps(m) : undefined} />;
-
-  const tags = (m: Model) => (
-    <>
-      {m.hidden && <Pill>Hidden</Pill>}
-      {m.added && !m.discovered && <Pill>Added</Pill>}
-      {m.metadata.chat === "unsupported" && <Pill>Not chat</Pill>}
-    </>
+  const columns = useMemo(
+    () => modelColumns({ handle, totalKeys, onLeaves: filter === "gaps" ? (m) => void clearGaps(m) : undefined }),
+    [handle, totalKeys, filter], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // The filter is the server's; as a column filter it sends the table back to page 1 when it changes.
+  const columnFilters = useMemo<ColumnFiltersState>(() => (filter === "all" ? [] : [{ id: "model", value: filter }]), [filter]);
+  const chips = [
+    ...(query ? [{ label: `Search: ${query}`, onRemove: () => setParam("q") }] : []),
+    ...(filter !== "all" ? [{ label: filterChip[filter], onRemove: () => setFilter("all") }] : []),
+  ];
+  const counts = data?.counts;
+  const countOf = (f: ModelFilter) => (counts && f !== "all" ? counts[f] : 0);
 
-  return (
-    <section aria-label="Models">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <SearchInput
-          className="min-w-0 flex-1 md:max-w-[340px] md:flex-none"
-          placeholder={data ? `Search ${formatNumber(data.counts.all)} models` : "Search models"}
-          aria-label="Search models"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+  const toolbar = (
+    <>
+      {/* Phones: search and filter have the first line to themselves (C31); the rest wraps under them. */}
+      <div className={phone ? "flex w-full items-center gap-2" : "contents"}>
+      <SearchInput
+        className="min-w-0 flex-1 md:max-w-[300px] md:flex-none"
+        placeholder={data ? `Search ${formatNumber(data.counts.all)} models` : "Search models"}
+        aria-label="Search models"
+        value={q}
+        onChange={(e) => setParam("q", e.target.value)}
+      />
+      {phone && (
+        // The Select is w-full: its box sets the width.
+        <div className="w-32 shrink-0">
+          <Select<ModelFilter> aria-label="Show models" value={filter} onValueChange={setFilter} items={MODEL_FILTERS.map((f) => ({ value: f, label: f === "gaps" ? "Gaps" : filterLabel[f] }))} />
+        </div>
+      )}
+      </div>
+      {!phone && (
         <Segmented<ModelFilter>
           label="Show models"
           value={filter}
-          onChange={(v) => {
-            setFilter(v);
-            setOffset(0);
-          }}
-          items={[
-            { value: "all", label: "All" },
-            { value: "gaps", label: phone ? "Gaps" : "With Model Gaps" },
-            { value: "hidden", label: "Hidden" },
-          ]}
+          onChange={setFilter}
+          items={MODEL_FILTERS.map((f) => ({
+            value: f,
+            label: (
+              <>
+                {filterLabel[f]}
+                {countOf(f) > 0 && <span className="ml-1.5 text-fg-muted tabular">{formatNumber(countOf(f))}</span>}
+              </>
+            ),
+          }))}
         />
-        <div className="flex-1" />
-        {data?.last_refresh && (
-          <span className="text-[14px] text-fg-muted" title={data.last_refresh.summary}>
-            {data.last_refresh.outcome === "failed" ? "Refresh failed " : "Updated "}
-            {timeAgo(data.last_refresh.at)}
+      )}
+      <div className="flex-1" />
+      {data?.last_refresh && (
+        <span className="text-[14px] text-fg-muted" title={data.last_refresh.summary}>
+          {data.last_refresh.outcome === "failed" ? "Refresh failed " : "Updated "}
+          {timeAgo(data.last_refresh.at)}
+        </span>
+      )}
+      <ToolbarActions onAdd={() => setAdding(true)} onReset={() => askReset()} />
+    </>
+  );
+
+  const askReset = () =>
+    confirm.ask({
+      title: "Forget discovered models?",
+      body: `Iroha forgets every model ${handle}'s lists named and reads them again on the next refresh. Models you added, hid or gave details to stay.`,
+      confirmLabel: "Forget them",
+      onConfirm: async () => {
+        const r = await calls.resetModels(handle);
+        refresh();
+        // Toast: the confirm dialog has closed.
+        notify.success(`${r.removed.length} discovered model${r.removed.length === 1 ? "" : "s"} forgotten; ${r.kept} kept`);
+      },
+    });
+
+  return (
+    <section aria-label="Models">
+      <DataTable<Model>
+        id="provider-models"
+        label="Models"
+        columns={columns}
+        // Waits for the keys too, so "Keys with access" arrives filled in. A new page or filter keeps the rows (dimmed).
+        data={keys.isPending ? undefined : data?.models}
+        sample={SAMPLE_MODEL_LIST.models}
+        getRowId={(m) => m.model}
+        rowName={(m) => m.model}
+        error={models.isError ? models.error : undefined}
+        errorTitle="Couldn't load the models"
+        onRetry={() => void models.refetch()}
+        toolbar={toolbar}
+        search={query}
+        columnFilters={columnFilters}
+        manualFiltering
+        filterChips={chips}
+        onClearFilters={() =>
+          setParams(
+            (p) => {
+              const n = new URLSearchParams(p);
+              n.delete("q");
+              n.delete("filter");
+              return n;
+            },
+            { replace: true },
+          )
+        }
+        noResultsTitle="No models match"
+        paging={{ mode: "server", pagination, onPaginationChange: setPagination, rowCount: data?.total ?? 0 }}
+        dimmed={models.isPlaceholderData}
+        bulk={({ ids }) => (
+          <>
+            <Button icon={EyeOff} onClick={() => hideAll(ids, true)} loading={busy === "hide"} size={phone ? "sm" : "md"}>
+              Hide
+            </Button>
+            <Button icon={Eye} onClick={() => hideAll(ids, false)} loading={busy === "show"} size={phone ? "sm" : "md"}>
+              Show
+            </Button>
+            <SaveStatus save={barSave} saving={false} className="ml-1" />
+            <SaveError save={barSave} />
+          </>
+        )}
+        rowActions={menu}
+        onRowClick={setEditing}
+        phoneRow={(m) => <ModelLine m={m} />}
+        // The details dialog has no menu: on phones the row keeps its ⋯.
+        phoneActions={menu}
+        empty={
+          <EmptyState
+            icon={ListPlus}
+            title="No models yet"
+            description={
+              data?.discovery === "none" ? `${handle} doesn't discover models. Add the ones Callers may ask for.` : "Refresh the list to read it from the Provider, or add models yourself."
+            }
+            action={<Button onClick={() => setAdding(true)}>Add model</Button>}
+          />
+        }
+        footer={({ shown, from, to }) => (
+          <span className="tabular">
+            {from}–{to} of {formatNumber(shown)} model{shown === 1 ? "" : "s"}
           </span>
         )}
-        <Button icon={Plus} onClick={() => setAdding(true)}>
-          Add model
-        </Button>
-        <Menu>
-          <MenuIconTrigger icon={MoreHorizontal} label="More model list actions" bordered />
-          <MenuContent>
-            <MenuItem icon={RotateCcw} danger onSelect={() => setResetting(true)}>
-              Forget discovered models…
-            </MenuItem>
-          </MenuContent>
-        </Menu>
-      </div>
-
-      {models.isError ? (
-        <ErrorState title="Couldn't load the models" error={models.error} onRetry={() => void models.refetch()} />
-      ) : (
-      // Waits for the keys too, so "Keys with access" arrives filled in. A new page or filter keeps the rows (dimmed).
-      <Skeleton
-        data={keys.isPending ? undefined : data}
-        sample={SAMPLE_MODEL_LIST}
-        id={phone ? "provider-models:phone" : "provider-models"}
-        label="Loading models"
-      >
-      {(data) => data && data.total === 0 && !query && filter === "all" ? (
-        <EmptyState
-          icon={ListPlus}
-          title="No models yet"
-          description={
-            data.discovery === "none"
-              ? `${handle} doesn't discover models. Add the ones Callers may ask for.`
-              : "Refresh the list to read it from the Provider, or add models yourself."
-          }
-          action={<Button onClick={() => setAdding(true)}>Add model</Button>}
-        />
-      ) : data && data.models.length === 0 ? (
-        <NoResults
-          title="No models match"
-          filters={[
-            ...(query ? [{ label: `Search: ${query}`, onRemove: () => setQ("") }] : []),
-            ...(filter !== "all" ? [{ label: filter === "gaps" ? "With Model Gaps" : "Hidden", onRemove: () => setFilter("all") }] : []),
-          ]}
-          onClear={() => {
-            setQ("");
-            setFilter("all");
-          }}
-        />
-      ) : data && phone ? (
-        <ul className={cn("divide-y divide-border border-y border-border", models.isPlaceholderData && "opacity-60")}>
-          {data.models.map((m) => (
-            <li key={m.id} className="flex items-center gap-3 py-3">
-              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setEditing(m)}>
-                <span className="flex items-center gap-2">
-                  <span className="truncate font-mono text-[15px]">{m.model}</span>
-                  {tags(m)}
-                </span>
-                <span className="block text-[14px] text-fg-muted">
-                  {ctx(m.metadata.context_length)} context · {m.model_gaps.length ? `Model Gap on ${m.model_gaps.length}` : "no Model Gaps"}
-                </span>
-              </button>
-              {menu(m)}
-            </li>
-          ))}
-        </ul>
-      ) : data ? (
-        <div className={cn(models.isPlaceholderData && "opacity-60")}>
-          <Table>
-            <THead>
-              <tr>
-                <TH>Model</TH>
-                <TH align="right" className="w-[10%]">
-                  Context
-                </TH>
-                <TH align="right" className="w-[14%]">
-                  Keys with access
-                </TH>
-                <TH className="w-[18%] pl-6">Model Gaps</TH>
-                <TH className="w-10">
-                  <span className="sr-only">Actions</span>
-                </TH>
-              </tr>
-            </THead>
-            <TBody>
-              {data.models.map((m) => (
-                <TR key={m.id} interactive onClick={() => setEditing(m)} className={cn(m.hidden && "text-fg-muted")}>
-                  <TD>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-mono text-[14px]">{m.model}</span>
-                      {tags(m)}
-                    </span>
-                  </TD>
-                  <TD align="right">{ctx(m.metadata.context_length)}</TD>
-                  <TD align="right">{totalKeys ? `${totalKeys - m.model_gaps.length} of ${totalKeys}` : "–"}</TD>
-                  <TD className="pl-6" onClick={(e) => e.stopPropagation()}>
-                    {gapsCell(m)}
-                  </TD>
-                  <TD align="right" onClick={(e) => e.stopPropagation()}>
-                    {menu(m)}
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </div>
-      ) : null}
-      </Skeleton>
-      )}
-
-      {data && data.total > 0 && (
-        <div className="mt-4 flex items-center justify-between">
-          <span className="text-[14px] text-fg-muted tabular">
-            {data.offset + 1}–{data.offset + data.models.length} of {formatNumber(data.total)}
-          </span>
-          {data.total > MODEL_PAGE && (
-            <span className="flex gap-2">
-              <IconButton icon={ChevronLeft} label="Previous page" bordered disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - MODEL_PAGE))} />
-              <IconButton
-                icon={ChevronRight}
-                label="Next page"
-                bordered
-                disabled={offset + MODEL_PAGE >= data.total}
-                onClick={() => setOffset((o) => o + MODEL_PAGE)}
-              />
-            </span>
-          )}
-        </div>
-      )}
+      />
 
       {confirm.dialog}
       <AddModelDialog handle={handle} open={adding} onOpenChange={setAdding} />
       <ModelDialog handle={handle} model={editing} onClose={() => setEditing(undefined)} />
-      <ConfirmDialog
-        open={resetting}
-        onOpenChange={setResetting}
-        title="Forget discovered models?"
-        body={`Iroha forgets every model ${handle}'s lists named and reads them again on the next refresh. Models you added, hid or gave details to stay.`}
-        confirmLabel="Forget them"
-        onConfirm={async () => {
-          const r = await calls.resetModels(handle);
-          refresh();
-          // Toast: the confirm dialog has closed.
-          notify.success(`${r.removed.length} discovered model${r.removed.length === 1 ? "" : "s"} forgotten; ${r.kept} kept`);
-        }}
-      />
     </section>
+  );
+}
+
+function ToolbarActions({ onAdd, onReset }: { onAdd: () => void; onReset: () => void }) {
+  return (
+    <>
+      <Button icon={Plus} onClick={onAdd}>
+        Add model
+      </Button>
+      <Menu>
+        <MenuIconTrigger icon={MoreHorizontal} label="More model list actions" bordered />
+        <MenuContent>
+          <MenuItem icon={RotateCcw} danger onSelect={onReset}>
+            Forget discovered models…
+          </MenuItem>
+        </MenuContent>
+      </Menu>
+    </>
+  );
+}
+
+const tags = (m: Model) => (
+  <>
+    {m.hidden && <Pill>Hidden</Pill>}
+    {m.added && !m.discovered && <Pill>Added</Pill>}
+    {m.metadata.chat === "unsupported" && <Pill>Not chat</Pill>}
+  </>
+);
+
+// The server sorts the list by model ID and cuts it into pages, so no column sorts here.
+const col = columnsFor<Model>();
+function modelColumns({ handle, totalKeys, onLeaves }: { handle: string; totalKeys: number; onLeaves?: (m: Model) => void }) {
+  return col.columns([
+    col.accessor("model", {
+      header: "Model",
+      enableSorting: false,
+      meta: { opens: true },
+      cell: ({ row }) => (
+        <span className={cn("flex min-w-0 items-center gap-2", row.original.hidden && "text-fg-muted")}>
+          <span className="truncate font-mono text-[14px]">{row.original.model}</span>
+          {tags(row.original)}
+        </span>
+      ),
+    }),
+    col.accessor((m) => m.metadata.context_length ?? 0, {
+      id: "context",
+      header: "Context",
+      enableSorting: false,
+      meta: { align: "right", width: "w-[10%]" },
+      cell: ({ row }) => ctx(row.original.metadata.context_length),
+    }),
+    col.display({
+      id: "keys",
+      header: "Keys with access",
+      meta: { align: "right", width: "w-[14%]" },
+      cell: ({ row }) => (totalKeys ? `${totalKeys - row.original.model_gaps.length} of ${totalKeys}` : "–"),
+    }),
+    col.display({
+      id: "gaps",
+      header: "Model Gaps",
+      meta: { width: "w-[18%] pl-6", className: "pl-6" },
+      cell: ({ row }) => <GapsCell handle={handle} m={row.original} onLeaves={onLeaves && (() => onLeaves(row.original))} />,
+    }),
+  ]);
+}
+
+/** Phones (C31): a model in two lines. */
+function ModelLine({ m }: { m: Model }) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className="flex items-center gap-2">
+        <span className="truncate font-mono text-[15px]">{m.model}</span>
+        {tags(m)}
+      </span>
+      <span className="block text-[14px] text-fg-muted">
+        {ctx(m.metadata.context_length)} context · {m.model_gaps.length ? `Model Gap on ${m.model_gaps.length}` : "no Model Gaps"}
+      </span>
+    </span>
   );
 }
 

@@ -346,6 +346,25 @@ test("phones get two-line rows: tap opens, Select shows checkboxes", async () =>
   expect(screen.getByRole("checkbox", { name: "Select banana" }).getAttribute("aria-checked")).toBe("true");
 });
 
+test("phones: phoneActions sit beside a row that opens, and their presses don't open it", async () => {
+  vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("max-width"), media: q, addEventListener() {}, removeEventListener() {} }));
+  const user = userEvent.setup();
+  const opened = vi.fn();
+  const eaten = vi.fn();
+  render(
+    <Fruits
+      onRowClick={(f) => opened(f.name)}
+      phoneRow={(f) => <span>{f.name}</span>}
+      phoneActions={(f) => <Button onClick={() => eaten(f.name)}>Eat {f.name}</Button>}
+    />,
+  );
+  const item = within(screen.getByRole("list", { name: "Fruit" })).getAllByRole("listitem")[0];
+  expect(within(item).getByRole("button", { name: "Open apple" })).toBeTruthy();
+  await user.click(within(item).getByRole("button", { name: "Eat apple" }));
+  expect(eaten).toHaveBeenCalledWith("apple");
+  expect(opened).not.toHaveBeenCalled();
+});
+
 test("an agent sorts, selects, opens a row's menu and pages", async () => {
   const ate = vi.fn();
   render(

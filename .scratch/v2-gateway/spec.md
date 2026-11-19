@@ -240,6 +240,9 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 - Shared test chat: a right-side panel available on every page, expandable to full page, not modal, no tabs; settings behind the composer's model button; filled in by Test buttons; earlier chats in a dropdown.
 - Gateway Keys: list, a create dialog (name; Everything or Only some Providers and Pools, each Provider narrowable to models) and a key page holding settings such as prompt capture and a danger zone.
 - Requests: stats row for the current filters, live feed with configurable columns, a drawer with Details, Attempts and Captured tabs stepping with arrow keys, and a full-page Route view (chain of Attempt cards).
+- Settings: Admin Tokens and Audit Entries (with revert), reached from the Owner row.
+- Confirmation: only delete and revoke ask first (revoke requires typing the name); disable, enable and clearing Model Gaps act at once and offer Undo through Audit revert.
+- Phone: the sidebar becomes a bottom tab bar; Settings sits behind the avatar.
 - Logos: Providers by logo domain (Owner-editable); Pools by the model maker inferred from the model name (Owner-editable). Fetched through Iroha, never hot-linked from the browser to third parties.
 - Owner login with a password; sessions last 30 days.
 
@@ -266,7 +269,7 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 - Balance or usage polling of Providers (DeepAI, MiniMax, Z.ai and others).
 - Gateway Key rate or token limits.
 - CORS origins on Gateway Keys.
-- Overview page and charts (beyond the Requests stats row). Audit Entries and Admin Tokens stay API-only unless a Settings screen is designed later.
+- Overview page and charts (beyond the Requests stats row).
 - Upstream Accounts and Management Key scopes.
 - Multiple Owners or tenants.
 - Any pipeline for gathering Upstream Keys from third parties; Iroha only holds keys the Owner is entitled to use.

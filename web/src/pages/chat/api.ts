@@ -62,7 +62,7 @@ export type ModelChoices = {
   suggested?: string;
 };
 
-export type Snippets = { url: string; curl: string; python: string; typescript: string; key_env: boolean; note?: string };
+export type Snippets = { url: string; curl: string; python: string; typescript: string; key_env: boolean };
 
 /** Searches what can be picked; `prefer` (a `<handle>/` or a Pool) is listed first. */
 export function useModelChoices(q: string, as: string | undefined, prefer?: string, enabled = true) {

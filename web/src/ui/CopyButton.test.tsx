@@ -47,6 +47,66 @@ test("a copy button copies its value and says Copied in place, then goes back", 
   expect(button.hasAttribute("data-copy")).toBe(false);
 });
 
+/** jsdom lays nothing out: give every element the width of its text (7 px a letter) and record width animations. */
+function measureByText() {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const width = (this.textContent ?? "").length * 7;
+    return { width, height: 16, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 16, toJSON: () => ({}) } as DOMRect;
+  });
+  const animate = vi.fn((..._args: Parameters<Element["animate"]>) => ({ cancel() {} }) as Animation);
+  Object.defineProperty(HTMLElement.prototype, "animate", { value: animate, configurable: true, writable: true });
+  // The motion tokens as the production build writes them (minified: ".2s", not "200ms").
+  document.documentElement.style.setProperty("--duration-indicator", ".2s");
+  document.documentElement.style.setProperty("--ease-out", "cubic-bezier(.23, 1, .32, 1)");
+  return animate;
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(HTMLElement.prototype, "animate");
+  document.documentElement.removeAttribute("style");
+});
+
+test("at rest the button holds just Copy: nothing keeps the width of Copied", async () => {
+  measureByText();
+  render(<CopyButton value="gk_secret" what="Gateway Key" />);
+  const button = screen.getByRole("button", { name: "Copy the Gateway Key" });
+  expect(button.textContent).toBe("Copy");
+  // No hidden "Copied" reserving space (the gap the Owner saw), no fixed width.
+  expect(button.querySelector("[data-reserve]")).toBeNull();
+  for (const el of button.querySelectorAll<HTMLElement>("*")) expect(el.style.width).toBe("");
+});
+
+test("changing to Copied and back slides the label's width instead of jumping", async () => {
+  const animate = measureByText();
+  const user = setup();
+  render(<CopyButton value="gk_secret" what="Gateway Key" />);
+  const button = screen.getByRole("button", { name: "Copy the Gateway Key" });
+  expect(animate).not.toHaveBeenCalled();
+  await user.click(button);
+  await waitFor(() => expect(button.textContent).toBe("Copied"));
+  expect(animate).toHaveBeenCalledTimes(1);
+  const [frames, options] = animate.mock.calls[0];
+  expect(frames).toEqual([{ width: "28px" }, { width: "42px" }]);
+  expect(options).toMatchObject({ duration: 200, easing: "cubic-bezier(.23, 1, .32, 1)" });
+  act(() => void vi.advanceTimersByTime(COPIED_MS));
+  expect(button.textContent).toBe("Copy");
+  expect(animate.mock.calls[1][0]).toEqual([{ width: "42px" }, { width: "28px" }]);
+});
+
+test("under reduced motion the label changes at once", async () => {
+  const animate = measureByText();
+  const matchMedia = vi.spyOn(window, "matchMedia").mockImplementation(
+    (query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList,
+  );
+  const user = setup();
+  render(<CopyButton value="x" what="Base URL" />);
+  const button = screen.getByRole("button", { name: "Copy the Base URL" });
+  await user.click(button);
+  await waitFor(() => expect(button.textContent).toBe("Copied"));
+  expect(animate).not.toHaveBeenCalled();
+  matchMedia.mockRestore();
+});
+
 test("without the Clipboard API it copies through a hidden textarea and keeps focus", async () => {
   const user = setup();
   render(<CopyButton value="http://iroha.local/v1" what="Base URL" />);

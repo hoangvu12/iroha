@@ -97,7 +97,7 @@ func Routes(ms *models.Store, keys *gatewaykeys.Store, db *store.DB) []api.Route
 			Summary: "Write curl, Python and TypeScript snippets sending a test's request to the Gateway",
 			Description: "The snippets send what POST /api/test would send for these settings, but as a Caller: to the global route of the Shape, " +
 				"with a Gateway Key (the secret of as when given, else read from the IROHA_KEY environment variable). " +
-				"Pinning to an Upstream Key or Endpoint is test-only and not carried (note says so).",
+				"Pinning to an Upstream Key or Endpoint is test-only and not carried.",
 			Query: []api.Param{
 				{Name: "model", Required: true, Description: "A Pool name or <provider>/<model>."},
 				{Name: "shape", Enum: []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini"}, Description: "Default openai-chat."},
@@ -107,8 +107,8 @@ func Routes(ms *models.Store, keys *gatewaykeys.Store, db *store.DB) []api.Route
 				{Name: "tool_check", Type: "boolean", Description: "Offer the test tool get_weather."},
 				{Name: "stream", Type: "boolean", Description: "Default true."},
 				{Name: "as", Description: "A Gateway Key (name or ID) whose secret the snippets use."},
-				{Name: "upstream_key", Description: "A pinned Upstream Key; only noted."},
-				{Name: "endpoint", Description: "A pinned Endpoint; only noted."},
+				{Name: "upstream_key", Description: "A pinned Upstream Key; accepted and ignored (a Caller cannot pin)."},
+				{Name: "endpoint", Description: "A pinned Endpoint; accepted and ignored (a Caller cannot pin)."},
 				{Name: "base_url", Description: "Iroha's public base URL. Default: the scheme and host this call reached."},
 			},
 			Response: Snippets{},

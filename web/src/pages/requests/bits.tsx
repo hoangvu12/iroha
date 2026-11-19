@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ProviderTile } from "@/ui/LogoTile";
 import { StatusDot, type Tone } from "@/ui/bits";
 import { cn } from "@/ui/cn";
+import { Code, type Lang, langOf } from "@/ui/highlight";
 import { ScrollArea } from "@/ui/ScrollArea";
 import type { RequestRecord, Shape } from "./api";
 
@@ -221,14 +222,21 @@ export function pretty(text: string): string {
   }
 }
 
-/** Code and JSON in a Scroll Area: wraps by default, `nowrap` scrolls sideways too; `maxHeight={false}` shows it all. `className` places the block. */
+/**
+ * Code and JSON in a Scroll Area, highlighted as `lang` (`auto`: JSON or a
+ * stream when it looks like one; long text stays plain, see `ui/highlight`).
+ * Wraps by default, `nowrap` scrolls sideways too; `maxHeight={false}` shows
+ * it all. `className` places the block.
+ */
 export function CodeBlock({
   children,
+  lang = "auto",
   className,
   maxHeight = "max-h-[420px]",
   nowrap,
 }: {
-  children: ReactNode;
+  children: string;
+  lang?: Lang | "auto";
   className?: string;
   maxHeight?: string | false;
   nowrap?: boolean;
@@ -236,7 +244,7 @@ export function CodeBlock({
   return (
     <ScrollArea axis={nowrap ? "both" : "y"} className={cn("rounded-lg border border-border bg-subtle", className)} viewportClassName={maxHeight || undefined}>
       <pre className={cn("px-4 py-3 font-mono text-[12.5px] leading-relaxed text-fg", nowrap ? "whitespace-pre" : "whitespace-pre-wrap break-words")}>
-        {children}
+        <Code text={children} lang={lang === "auto" ? langOf(children) : lang} />
       </pre>
     </ScrollArea>
   );

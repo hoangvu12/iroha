@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -13,17 +14,20 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/ids"
+	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
 // keySnapshot is what an Audit Entry records of an Upstream Key: its
-// configuration, not last_used_at (nor, from ticket 05, its Key State).
+// configuration (disabled included), not last_used_at nor its runtime Key
+// State (invalid, cooling).
 type keySnapshot struct {
 	ID         string    `json:"id"`
 	ProviderID string    `json:"provider_id"`
 	Provider   string    `json:"provider"`
 	Name       string    `json:"name"`
 	Secret     string    `json:"secret"`
+	Disabled   bool      `json:"disabled"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 
@@ -35,9 +39,9 @@ var KeyResource = audit.Register(&audit.Resource[keySnapshot]{
 	Load: func(ctx context.Context, q audit.Querier, id string) (*keySnapshot, error) {
 		var s keySnapshot
 		var created int64
-		err := q.QueryRowContext(ctx, `SELECT k.id, k.provider_id, p.handle, k.name, k.secret, k.created_at
+		err := q.QueryRowContext(ctx, `SELECT k.id, k.provider_id, p.handle, k.name, k.secret, k.disabled, k.created_at
 			FROM upstream_keys k JOIN providers p ON p.id = k.provider_id WHERE k.id = ?`, id).
-			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Name, &s.Secret, &created)
+			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Name, &s.Secret, &s.Disabled, &created)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -52,9 +56,9 @@ var KeyResource = audit.Register(&audit.Resource[keySnapshot]{
 		if err := childNameFree(ctx, tx, "upstream_keys", "Upstream Key", s.ProviderID, s.Name, id); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO upstream_keys (id, provider_id, name, secret, created_at) VALUES (?, ?, ?, ?, ?)
-			ON CONFLICT (id) DO UPDATE SET name = excluded.name, secret = excluded.secret`,
-			id, s.ProviderID, s.Name, s.Secret, store.Millis(s.CreatedAt))
+		_, err := tx.ExecContext(ctx, `INSERT INTO upstream_keys (id, provider_id, name, secret, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET name = excluded.name, secret = excluded.secret, disabled = excluded.disabled`,
+			id, s.ProviderID, s.Name, s.Secret, s.Disabled, store.Millis(s.CreatedAt))
 		return err
 	},
 })
@@ -68,8 +72,9 @@ type CreateUpstreamKey struct {
 
 // UpdateUpstreamKey is the body of PATCH /api/providers/{provider}/keys/{key}.
 type UpdateUpstreamKey struct {
-	Name   *string `json:"name,omitempty"`
-	Secret *string `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless."`
+	Name    *string `json:"name,omitempty"`
+	Secret  *string `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling."`
+	Enabled *bool   `json:"enabled,omitempty" doc:"false disables the key (no traffic until enabled); true enables it."`
 }
 
 // UpstreamKeyResult is the response of a single Upstream Key change.
@@ -112,21 +117,8 @@ func (h handlers) keyRoutes() []api.Route {
 				if err != nil {
 					return nil, err
 				}
-				rows, err := h.db.QueryContext(c.R.Context(), `SELECT `+keyColumns+` FROM upstream_keys k JOIN providers p ON p.id = k.provider_id
-					WHERE k.provider_id = ? ORDER BY k.created_at, k.rowid`, p.id)
-				if err != nil {
-					return nil, err
-				}
-				defer rows.Close()
-				out := UpstreamKeyList{UpstreamKeys: []UpstreamKey{}}
-				for rows.Next() {
-					k, err := scanKey(rows)
-					if err != nil {
-						return nil, err
-					}
-					out.UpstreamKeys = append(out.UpstreamKeys, k)
-				}
-				return out, rows.Err()
+				keys, err := listKeys(c.R.Context(), h.db, p.id, h.db.Clock().Now())
+				return UpstreamKeyList{UpstreamKeys: keys}, err
 			},
 		},
 		{
@@ -142,7 +134,7 @@ func (h handlers) keyRoutes() []api.Route {
 				if err != nil {
 					return nil, err
 				}
-				return readKey(c.R.Context(), h.db, id)
+				return readKey(c.R.Context(), h.db, id, h.db.Clock().Now())
 			},
 		},
 		{
@@ -157,14 +149,19 @@ func (h handlers) keyRoutes() []api.Route {
 					return nil, err
 				}
 				var out UpstreamKey
+				var p ref
+				var sl stateLogs
 				res, err := h.tr.Mutate(c, "upstream_key.create", "Added", func(m *audit.Mutation) error {
-					p, err := resolveProvider(m.Ctx, m.Tx, c.Path("provider"))
-					if err != nil {
+					var err error
+					if p, err = resolveProvider(m.Ctx, m.Tx, c.Path("provider")); err != nil {
 						return err
 					}
-					out, err = h.upsertKey(m, p, in)
+					out, err = h.upsertKey(m, p, in, &sl)
 					return err
 				})
+				if err == nil && !res.DryRun {
+					sl.emit(h.log, p.handle)
+				}
 				return UpstreamKeyResult{Result: res, UpstreamKey: out}, err
 			},
 		},
@@ -183,14 +180,19 @@ func (h handlers) keyRoutes() []api.Route {
 				if err != nil {
 					return nil, err
 				}
-				return audit.Bulk(h.tr, c, "upstream_key.create", "Added", in.Items, func(m *audit.Mutation, in CreateUpstreamKey) (UpstreamKey, error) {
-					return h.upsertKey(m, p, in)
+				var sl stateLogs
+				res, err := audit.Bulk(h.tr, c, "upstream_key.create", "Added", in.Items, func(m *audit.Mutation, in CreateUpstreamKey) (UpstreamKey, error) {
+					return h.upsertKey(m, p, in, &sl)
 				})
+				if err == nil && !res.DryRun {
+					sl.emit(h.log, p.handle)
+				}
+				return res, err
 			},
 		},
 		{
 			Method: http.MethodPatch, Path: base + "/{key}", Tag: tag,
-			Summary: "Rename an Upstream Key or replace its secret",
+			Summary: "Rename, enable or disable an Upstream Key, or replace its secret",
 			Query:   []api.Param{audit.DryRun},
 			Request: UpdateUpstreamKey{}, Response: UpstreamKeyResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -198,22 +200,11 @@ func (h handlers) keyRoutes() []api.Route {
 				if err := c.Decode(&in); err != nil {
 					return nil, err
 				}
-				var out UpstreamKey
-				res, err := h.tr.Mutate(c, "upstream_key.update", "Edited", func(m *audit.Mutation) error {
-					p, err := resolveProvider(m.Ctx, m.Tx, c.Path("provider"))
-					if err != nil {
-						return err
-					}
-					id, err := resolveChild(m.Ctx, m.Tx, "upstream_keys", "Upstream Key", "keys", p, c.Path("key"))
-					if err != nil {
-						return err
-					}
-					out, err = h.updateKey(m, p, id, in)
-					return err
-				})
-				return UpstreamKeyResult{Result: res, UpstreamKey: out}, err
+				return h.updateOne(c, "upstream_key.update", "Edited", in)
 			},
 		},
+		h.enableRoute(true), h.enableRoute(false),
+		h.bulkEnableRoute(true), h.bulkEnableRoute(false),
 		{
 			Method: http.MethodDelete, Path: base + "/{key}", Tag: tag,
 			Summary:     "Delete an Upstream Key",
@@ -256,6 +247,87 @@ func (h handlers) keyRoutes() []api.Route {
 	}
 }
 
+// updateOne applies in to the key the call addresses as one audited change.
+func (h handlers) updateOne(c *api.Call, action, verb string, in UpdateUpstreamKey) (UpstreamKeyResult, error) {
+	var out UpstreamKey
+	var p ref
+	var sl stateLogs
+	res, err := h.tr.Mutate(c, action, verb, func(m *audit.Mutation) error {
+		var err error
+		if p, err = resolveProvider(m.Ctx, m.Tx, c.Path("provider")); err != nil {
+			return err
+		}
+		id, err := resolveChild(m.Ctx, m.Tx, "upstream_keys", "Upstream Key", "keys", p, c.Path("key"))
+		if err != nil {
+			return err
+		}
+		out, err = h.updateKey(m, p, id, in, &sl)
+		return err
+	})
+	if err == nil && !res.DryRun {
+		sl.emit(h.log, p.handle)
+	}
+	return UpstreamKeyResult{Result: res, UpstreamKey: out}, err
+}
+
+func enableWords(enable bool) (word, verb string) {
+	if enable {
+		return "enable", "Enabled"
+	}
+	return "disable", "Disabled"
+}
+
+// enableRoute is POST .../keys/{key}/enable or /disable.
+func (h handlers) enableRoute(enable bool) api.Route {
+	word, verb := enableWords(enable)
+	desc := "A disabled key gets no traffic and shows the Key State disabled until enabled. Nothing in the background ever disables a key."
+	if enable {
+		desc = "The key takes traffic again, unless it is also invalid or cooling (its state then says which)."
+	}
+	return api.Route{
+		Method: http.MethodPost, Path: "/api/providers/{provider}/keys/{key}/" + word, Tag: "Upstream Keys",
+		Summary: verb[:len(verb)-1] + " an Upstream Key", Description: desc,
+		Query: []api.Param{audit.DryRun}, Response: UpstreamKeyResult{},
+		Handle: func(c *api.Call) (any, error) {
+			return h.updateOne(c, "upstream_key."+word, verb, UpdateUpstreamKey{Enabled: &enable})
+		},
+	}
+}
+
+// bulkEnableRoute is POST .../keys/bulk/enable or /bulk/disable.
+func (h handlers) bulkEnableRoute(enable bool) api.Route {
+	word, verb := enableWords(enable)
+	return api.Route{
+		Method: http.MethodPost, Path: "/api/providers/{provider}/keys/bulk/" + word, Tag: "Upstream Keys",
+		Summary:     verb[:len(verb)-1] + " many Upstream Keys of a Provider, each by name or ID",
+		Description: `Body {"items": ["key-1", "uk_..."]}. One Audit Entry covers them all, so one revert undoes it.`,
+		Query:       []api.Param{audit.DryRun},
+		Request:     audit.BulkRequest[string]{}, Response: audit.BulkResult[UpstreamKey]{},
+		Handle: func(c *api.Call) (any, error) {
+			var in audit.BulkRequest[string]
+			if err := c.Decode(&in); err != nil {
+				return nil, err
+			}
+			p, err := resolveProvider(c.R.Context(), h.db, c.Path("provider"))
+			if err != nil {
+				return nil, err
+			}
+			var sl stateLogs
+			res, err := audit.Bulk(h.tr, c, "upstream_key."+word, verb, in.Items, func(m *audit.Mutation, s string) (UpstreamKey, error) {
+				id, err := resolveChild(m.Ctx, m.Tx, "upstream_keys", "Upstream Key", "keys", p, s)
+				if err != nil {
+					return UpstreamKey{}, err
+				}
+				return h.updateKey(m, p, id, UpdateUpstreamKey{Enabled: &enable}, &sl)
+			})
+			if err == nil && !res.DryRun {
+				sl.emit(h.log, p.handle)
+			}
+			return res, err
+		},
+	}
+}
+
 // secretFree refuses a secret another key of the same Provider holds.
 func secretFree(ctx context.Context, q audit.Querier, p ref, secret, id string) error {
 	if secret == "" {
@@ -273,7 +345,7 @@ func secretFree(ctx context.Context, q audit.Querier, p ref, secret, id string) 
 		"Provider %s already holds this secret as Upstream Key %q.", p.handle, other)
 }
 
-func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey) (UpstreamKey, error) {
+func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey, logs *stateLogs) (UpstreamKey, error) {
 	secret := ""
 	if in.Secret != nil {
 		var err error
@@ -292,7 +364,7 @@ func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey) (Ups
 			if err := m.Track(KeyResource, id); err != nil {
 				return UpstreamKey{}, err
 			}
-			return readKey(m.Ctx, m.Tx, id)
+			return readKey(m.Ctx, m.Tx, id, m.Now)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return UpstreamKey{}, err
@@ -307,7 +379,7 @@ func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey) (Ups
 		var id string
 		err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM upstream_keys WHERE provider_id = ? AND name = ?`, p.id, name).Scan(&id)
 		if err == nil {
-			return h.updateKey(m, p, id, UpdateUpstreamKey{Secret: in.Secret})
+			return h.updateKey(m, p, id, UpdateUpstreamKey{Secret: in.Secret}, logs)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return UpstreamKey{}, err
@@ -324,7 +396,7 @@ func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey) (Ups
 		id, p.id, name, secret, store.Millis(m.Now)); err != nil {
 		return UpstreamKey{}, err
 	}
-	return readKey(m.Ctx, m.Tx, id)
+	return readKey(m.Ctx, m.Tx, id, m.Now)
 }
 
 // nextKeyName is the first free key-N, counting from the number of keys + 1.
@@ -346,8 +418,12 @@ func nextKeyName(ctx context.Context, tx *sql.Tx, providerID string) (string, er
 	}
 }
 
-func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstreamKey) (UpstreamKey, error) {
+func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstreamKey, logs *stateLogs) (UpstreamKey, error) {
 	if err := m.Track(KeyResource, id); err != nil {
+		return UpstreamKey{}, err
+	}
+	before, err := readKey(m.Ctx, m.Tx, id, m.Now)
+	if err != nil {
 		return UpstreamKey{}, err
 	}
 	if in.Name != nil {
@@ -372,7 +448,49 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 		in.Name, in.Secret, id); err != nil {
 		return UpstreamKey{}, err
 	}
-	return readKey(m.Ctx, m.Tx, id)
+	if in.Secret != nil && *in.Secret != before.Secret {
+		if err := keystate.Reset(m.Ctx, m.Tx, id, m.Now); err != nil {
+			return UpstreamKey{}, err
+		}
+	}
+	if in.Enabled != nil && *in.Enabled != before.Enabled {
+		if err := setEnabled(m, id, *in.Enabled); err != nil {
+			return UpstreamKey{}, err
+		}
+	}
+	after, err := readKey(m.Ctx, m.Tx, id, m.Now)
+	if err == nil {
+		logs.add(before, after)
+	}
+	return after, err
+}
+
+// setEnabled enables or disables a key, recording who disabled it.
+func setEnabled(m *audit.Mutation, id string, enabled bool) error {
+	var err error
+	if enabled {
+		_, err = m.Tx.ExecContext(m.Ctx, `UPDATE upstream_keys SET disabled = 0, disabled_by = '', disabled_at = NULL WHERE id = ?`, id)
+	} else {
+		_, err = m.Tx.ExecContext(m.Ctx, `UPDATE upstream_keys SET disabled = 1, disabled_by = ?, disabled_at = ? WHERE id = ?`,
+			m.Actor.Name, store.Millis(m.Now), id)
+	}
+	return err
+}
+
+// stateLogs collects the Key State changes of a mutation, logged as
+// key.state once it committed.
+type stateLogs struct{ changes [][2]UpstreamKey }
+
+func (l *stateLogs) add(before, after UpstreamKey) {
+	if l != nil && (before.State.State != after.State.State || before.State.Reason != after.State.Reason) {
+		l.changes = append(l.changes, [2]UpstreamKey{before, after})
+	}
+}
+
+func (l *stateLogs) emit(log *slog.Logger, handle string) {
+	for _, ch := range l.changes {
+		keystate.LogChange(log, keystate.Key{ID: ch[1].ID, Name: ch[1].Name, Provider: handle}, ch[0].State.State, ch[1].State.State, ch[1].State.Reason)
+	}
 }
 
 func (h handlers) deleteKey(m *audit.Mutation, p ref, s string) (UpstreamKey, error) {
@@ -380,7 +498,7 @@ func (h handlers) deleteKey(m *audit.Mutation, p ref, s string) (UpstreamKey, er
 	if err != nil {
 		return UpstreamKey{}, err
 	}
-	out, err := readKey(m.Ctx, m.Tx, id)
+	out, err := readKey(m.Ctx, m.Tx, id, m.Now)
 	if err != nil {
 		return out, err
 	}

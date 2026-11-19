@@ -5,6 +5,7 @@ package requests
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/shape"
@@ -31,6 +32,7 @@ type Request struct {
 	State      string     `json:"state" enum:"in_progress,completed"`
 	Status     int        `json:"status" doc:"HTTP status the Caller received; 0 while in progress."`
 	Error      *Failure   `json:"error,omitempty" doc:"Why the Request failed, when Iroha refused or failed it."`
+	Summary    string     `json:"summary,omitempty" doc:"One line saying what happened at each Attempt, for Requests with a failed Attempt or more than one Attempt."`
 
 	Caller Caller `json:"caller"`
 
@@ -86,7 +88,18 @@ type Attempt struct {
 	FirstByteMs   *int64       `json:"first_byte_ms,omitempty"`
 	DurationMs    *int64       `json:"duration_ms,omitempty"`
 	Usage         *usage.Usage `json:"usage,omitempty"`
+
+	// Set on failed Attempts.
+	Rule           string            `json:"rule,omitempty" doc:"The Failure Rule the failure matched; absent when none did."`
+	Outcome        string            `json:"outcome,omitempty" enum:"invalid,cooling_key,cooling_key_model,model_gap,retry_elsewhere,fail_request" doc:"What the failure meant."`
+	Reason         string            `json:"reason,omitempty" doc:"What the Provider answered, in one line."`
+	Action         string            `json:"action,omitempty" doc:"What Iroha did about it (Key State change, next candidate)."`
+	FailureHeaders map[string]string `json:"failure_headers,omitempty" doc:"The upstream response headers of a failed Attempt."`
+	FailureBody    string            `json:"failure_body,omitempty" doc:"The upstream response body of a failed Attempt (at most 64 KiB)."`
 }
+
+// MaxFailureBody caps a stored failure body.
+const MaxFailureBody = 64 << 10
 
 // Recorder writes Requests and Attempts. Writes never use the Caller's
 // context, so a Caller going away cannot stop its Request being recorded.
@@ -113,12 +126,23 @@ func (rc *Recorder) Begin(ctx context.Context, r *Request) error {
 func (rc *Recorder) Attempt(ctx context.Context, id string, a Attempt) error {
 	ctx = context.WithoutCancel(ctx)
 	in, out, cache, reasoning := usageArgs(a.Usage)
+	headers := ""
+	if len(a.FailureHeaders) > 0 {
+		b, _ := json.Marshal(a.FailureHeaders)
+		headers = string(b)
+	}
+	body := a.FailureBody
+	if len(body) > MaxFailureBody {
+		body = body[:MaxFailureBody]
+	}
 	return rc.db.Tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO attempts (request_id, seq, started_at, provider_id, provider_handle, endpoint_id, endpoint_name, endpoint_url,
-			upstream_key_id, upstream_key_name, wire_model, shape, status, error, first_byte_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			upstream_key_id, upstream_key_name, wire_model, shape, status, error, first_byte_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens,
+			rule, outcome, reason, action, failure_headers, failure_body)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, a.Seq, store.Millis(a.StartedAt), a.ProviderID, a.Provider, a.EndpointID, a.Endpoint, a.EndpointURL,
-			a.UpstreamKeyID, a.UpstreamKey, a.WireModel, string(a.Shape), a.Status, a.Error, a.FirstByteMs, a.DurationMs, in, out, cache, reasoning); err != nil {
+			a.UpstreamKeyID, a.UpstreamKey, a.WireModel, string(a.Shape), a.Status, a.Error, a.FirstByteMs, a.DurationMs, in, out, cache, reasoning,
+			a.Rule, a.Outcome, a.Reason, a.Action, headers, body); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE requests SET attempt_count = attempt_count + 1 WHERE id = ?`, id)
@@ -143,9 +167,9 @@ func (rc *Recorder) Finish(ctx context.Context, r *Request) error {
 		_, err := tx.ExecContext(ctx, `UPDATE requests SET finished_at = ?, state = ?, status = ?, error_code = ?, error_message = ?,
 			model = ?, stream = ?, shape_out = ?, provider_id = ?, provider_handle = ?, endpoint_id = ?, endpoint_name = ?,
 			upstream_key_id = ?, upstream_key_name = ?, wire_model = ?, first_byte_ms = ?, duration_ms = ?,
-			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, reasoning_tokens = ? WHERE id = ?`,
+			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, reasoning_tokens = ?, summary = ? WHERE id = ?`,
 			finished, r.State, r.Status, code, msg, r.Model, r.Stream, string(r.ShapeOut), r.ProviderID, r.Provider, r.EndpointID, r.Endpoint,
-			r.UpstreamKeyID, r.UpstreamKey, r.WireModel, r.FirstByteMs, r.DurationMs, in, out, cache, reasoning, r.ID)
+			r.UpstreamKeyID, r.UpstreamKey, r.WireModel, r.FirstByteMs, r.DurationMs, in, out, cache, reasoning, r.Summary, r.ID)
 		return err
 	})
 }

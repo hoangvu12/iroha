@@ -4,17 +4,22 @@
 // (Provider, Endpoint, Upstream Key, wire model) to try. It does no I/O and
 // reads no clock; the only state it consults is the Rotation it is handed.
 //
-// Ticket 04 order: Providers in the order given (Pool members later); within
-// a Provider only Endpoints speaking the Caller's Shape (translation, ticket
+// Order: Providers in the order given (Pool members later); within a
+// Provider only Endpoints speaking the Caller's Shape (translation, ticket
 // 13, adds other Endpoints after them); Upstream Keys round-robin, each key
-// paired with every such Endpoint in configured order. Later tickets add
-// exclusions (Key States, Model Gaps, Endpoint restrictions) and tiers
-// (known carriers first) here, and nowhere else.
+// paired with every such Endpoint in configured order.
+//
+// Excluded (ticket 05): disabled and invalid keys, keys cooling at
+// Request.Now, and keys cooling for the wire model of that Endpoint. Each
+// exclusion is reported as a Skip. Later tickets add exclusions (Model Gaps,
+// Endpoint restrictions) and tiers (known carriers first) here, and nowhere
+// else.
 package planner
 
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/shape"
 )
@@ -23,6 +28,7 @@ import (
 type Request struct {
 	Shape shape.Shape // the Caller's Shape
 	Model string      // the model as the Caller named it, without any Provider handle
+	Now   time.Time   // the time Key States are judged at
 }
 
 // Provider is the routing view of one Provider.
@@ -31,6 +37,9 @@ type Provider struct {
 	Handle    string
 	Endpoints []Endpoint
 	Keys      []Key
+	// Budget overrides; zero means the Gateway's default.
+	MaxAttempts int
+	FirstByte   time.Duration
 }
 
 // Endpoint is one URL of a Provider.
@@ -49,11 +58,27 @@ type Endpoint struct {
 	Renames map[string]string
 }
 
-// Key is one Upstream Key. An empty Secret sends no auth at all.
+// Key is one Upstream Key with its Key State. An empty Secret sends no auth
+// at all.
 type Key struct {
-	ID     string
-	Name   string
-	Secret string
+	ID       string
+	Name     string
+	Secret   string
+	Disabled bool
+	Invalid  bool
+	// CoolingUntil is the end of the key's own latest cooling, which may be
+	// past; zero when the key has not been cooling since it last served.
+	CoolingUntil time.Time
+	// ModelCooling maps wire models to the end of the key's latest cooling
+	// for that model, which may be past.
+	ModelCooling map[string]time.Time
+}
+
+// Recovering reports whether a success with this key on model has a
+// cooling to clear.
+func (k *Key) Recovering(model string) bool {
+	_, ok := k.ModelCooling[model]
+	return ok || !k.CoolingUntil.IsZero()
 }
 
 // Candidate is one Attempt Iroha may make.
@@ -64,21 +89,43 @@ type Candidate struct {
 	WireModel string // the model name sent on this Endpoint
 }
 
-// Reasons a plan is empty.
+// Reasons a plan is empty. All but Cooling mean nothing can serve the
+// Request until the Owner changes something.
 const (
 	NoEndpoint    = "no_endpoint"     // no Endpoint speaks the Caller's Shape
 	NoUpstreamKey = "no_upstream_key" // the Provider holds no Upstream Keys
+	NoUsableKey   = "no_usable_key"   // every Upstream Key is disabled or invalid
+	Cooling       = "cooling"         // every usable key is cooling; Empty.Until says until when
+)
+
+// Reasons a key is skipped.
+const (
+	SkipDisabled     = "disabled"
+	SkipInvalid      = "invalid"
+	SkipCooling      = "cooling"
+	SkipCoolingModel = "cooling_model"
 )
 
 // Empty explains why nothing can serve the Request.
 type Empty struct {
 	Code    string
 	Message string
+	Until   time.Time // Cooling: when the first key is usable again
+}
+
+// Skip is a key left out of the plan, and why.
+type Skip struct {
+	Provider *Provider
+	Key      *Key
+	Model    string    // the wire model, for SkipCoolingModel
+	Reason   string    // one of the Skip* constants
+	Until    time.Time // cooling end
 }
 
 // Result is the plan: Candidates in the order to try, or why there is none.
 type Result struct {
 	Candidates []Candidate
+	Skipped    []Skip // keys left out, once per key and reason
 	Empty      *Empty // set when Candidates is empty
 }
 
@@ -91,6 +138,7 @@ type Rotation interface {
 // Plan orders the candidates for req across providers.
 func Plan(req Request, providers []Provider, rot Rotation) Result {
 	var out []Candidate
+	var skipped []Skip
 	var empty *Empty
 	for pi := range providers {
 		p := &providers[pi]
@@ -117,17 +165,71 @@ func Plan(req Request, providers []Provider, rot Rotation) Result {
 		for i := range n {
 			k := &p.Keys[(start+i)%n]
 			for _, ep := range eps {
-				out = append(out, Candidate{Provider: p, Endpoint: ep, Key: k, WireModel: wireModel(ep, req.Model)})
+				wm := wireModel(ep, req.Model)
+				if s := skip(k, wm, req.Now); s != nil {
+					s.Provider = p
+					skipped = addSkip(skipped, *s)
+					continue
+				}
+				out = append(out, Candidate{Provider: p, Endpoint: ep, Key: k, WireModel: wm})
 			}
 		}
 	}
 	if len(out) > 0 {
-		return Result{Candidates: out}
+		return Result{Candidates: out, Skipped: skipped}
+	}
+	if len(skipped) > 0 {
+		// Cooling (servable soon) beats a never-servable reason of another Provider.
+		if e := emptyFromSkips(skipped); empty == nil || e.Code == Cooling {
+			empty = e
+		}
 	}
 	if empty == nil {
 		empty = &Empty{Code: NoEndpoint, Message: "No Provider was given to plan for."}
 	}
-	return Result{Empty: empty}
+	return Result{Skipped: skipped, Empty: empty}
+}
+
+// skip says why key k cannot serve wire model wm at now, or nil.
+func skip(k *Key, wm string, now time.Time) *Skip {
+	switch {
+	case k.Disabled:
+		return &Skip{Key: k, Reason: SkipDisabled}
+	case k.Invalid:
+		return &Skip{Key: k, Reason: SkipInvalid}
+	case k.CoolingUntil.After(now):
+		return &Skip{Key: k, Reason: SkipCooling, Until: k.CoolingUntil}
+	}
+	if until, ok := k.ModelCooling[wm]; ok && until.After(now) {
+		return &Skip{Key: k, Reason: SkipCoolingModel, Model: wm, Until: until}
+	}
+	return nil
+}
+
+func addSkip(list []Skip, s Skip) []Skip {
+	for _, x := range list {
+		if x.Key == s.Key && x.Reason == s.Reason && x.Model == s.Model {
+			return list
+		}
+	}
+	return append(list, s)
+}
+
+// emptyFromSkips explains a plan whose every key was skipped: cooling until
+// the earliest end when any key is cooling, else nothing usable.
+func emptyFromSkips(skipped []Skip) *Empty {
+	var until time.Time
+	var handle string
+	for _, s := range skipped {
+		if (s.Reason == SkipCooling || s.Reason == SkipCoolingModel) && (until.IsZero() || s.Until.Before(until)) {
+			until, handle = s.Until, s.Provider.Handle
+		}
+	}
+	if !until.IsZero() {
+		return &Empty{Code: Cooling, Until: until,
+			Message: fmt.Sprintf("Every usable Upstream Key of %s is cooling; the first is usable again at %s.", handle, until.UTC().Format(time.RFC3339))}
+	}
+	return &Empty{Code: NoUsableKey, Message: fmt.Sprintf("Every Upstream Key of %s is disabled or invalid.", skipped[0].Provider.Handle)}
 }
 
 func wireModel(ep *Endpoint, model string) string {

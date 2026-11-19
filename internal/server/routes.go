@@ -26,7 +26,7 @@ func (s *Server) routes() []api.Route {
 		logs.Routes(s.logs),
 		audit.Routes(s.audit),
 		admintokens.Routes(s.audit, s.db),
-		providers.Routes(s.audit, s.db),
+		providers.Routes(s.audit, s.db, s.log),
 		gatewaykeys.Routes(s.audit, s.db),
 		requests.Routes(s.db),
 		gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db)}).Routes(),

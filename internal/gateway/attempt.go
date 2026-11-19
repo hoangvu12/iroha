@@ -12,12 +12,15 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
+	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/requests"
+	"github.com/hoangvu12/iroha/internal/rules"
 	"github.com/hoangvu12/iroha/internal/usage"
 )
 
@@ -115,43 +118,73 @@ func prepareChatBody(body []byte, cr chatRequest, wireModel string) (out []byte,
 	return out, injected
 }
 
-// attemptChat makes one Attempt of a Chat Completions Request and relays
-// the answer to the Caller.
-func (x *exchange) attemptChat(seq int, c planner.Candidate, body []byte, cr chatRequest) {
+// errFirstByte cancels an Attempt that reached the Request's first-byte deadline.
+var errFirstByte = errors.New("no response within the Request's time budget")
+
+// deadlineContext is parent, cancelled with errFirstByte when the clock
+// reaches deadline unless disarm is called first. release frees it.
+func deadlineContext(parent context.Context, c clock.Clock, deadline time.Time) (ctx context.Context, disarm, release func()) {
+	ctx, cancel := context.WithCancelCause(parent)
+	t := c.NewTimer(deadline.Sub(c.Now()))
+	stop := make(chan struct{})
+	var once sync.Once
+	go func() {
+		select {
+		case <-t.C():
+			cancel(errFirstByte)
+		case <-stop:
+			t.Stop()
+		case <-ctx.Done():
+			t.Stop()
+		}
+	}()
+	disarm = func() { once.Do(func() { close(stop) }) }
+	return ctx, disarm, func() { disarm(); cancel(context.Canceled) }
+}
+
+// attemptChat makes one Attempt of a Chat Completions Request. A 2xx
+// answer is relayed to the Caller and the Request is answered (failure is
+// nil); so is a fault no other candidate can fix (a broken Endpoint, a
+// redirect) or the Caller going away. Any other outcome returns the failure
+// for the Failure Rules, with nothing sent to the Caller. The Attempt is
+// returned for recording; the caller records it.
+func (x *exchange) attemptChat(seq int, c planner.Candidate, body []byte, cr chatRequest, deadline time.Time) (a requests.Attempt, failure *rules.Failure) {
 	g := x.g
 	started := g.clock.Now()
-	a := requests.Attempt{Seq: seq, StartedAt: started.UTC(), ProviderID: c.Provider.ID, Provider: c.Provider.Handle,
+	a = requests.Attempt{Seq: seq, StartedAt: started.UTC(), ProviderID: c.Provider.ID, Provider: c.Provider.Handle,
 		EndpointID: c.Endpoint.ID, Endpoint: c.Endpoint.Name, EndpointURL: c.Endpoint.URL,
 		UpstreamKeyID: c.Key.ID, UpstreamKey: c.Key.Name, WireModel: c.WireModel, Shape: c.Endpoint.Shape}
 	x.rec.ProviderID, x.rec.Provider = c.Provider.ID, c.Provider.Handle
 	x.rec.EndpointID, x.rec.Endpoint = c.Endpoint.ID, c.Endpoint.Name
 	x.rec.UpstreamKeyID, x.rec.UpstreamKey = c.Key.ID, c.Key.Name
 	x.rec.WireModel, x.rec.ShapeOut = c.WireModel, c.Endpoint.Shape
-	defer func() {
-		a.DurationMs = ms(g.clock.Now().Sub(started))
-		x.recordAttempt(a)
-	}()
+	defer func() { a.DurationMs = ms(g.clock.Now().Sub(started)) }()
 	handle := c.Provider.Handle
+	f := &rules.Failure{Provider: handle, Host: hostOf(c.Endpoint.URL)}
 
+	ctx, disarm, release := deadlineContext(x.ctx, g.clock, deadline)
+	defer release()
 	out, injected := prepareChatBody(body, cr, c.WireModel)
-	req, err := outbound(x.ctx, c, x.r.Header, out, opChat, cr.stream)
+	req, err := outbound(ctx, c, x.r.Header, out, opChat, cr.stream)
 	if err != nil {
 		a.Error = err.Error()
 		x.fail(api.Errorf(http.StatusBadGateway, "endpoint_misconfigured",
 			"Ask the Owner to fix the Endpoint (GET /api/providers/"+handle+"/endpoints).", "%s", a.Error))
-		return
+		return a, nil
 	}
 	resp, err := g.http.Do(req)
 	if err != nil {
 		a.Error = transportError(err)
-		if x.ctx.Err() != nil {
+		switch {
+		case x.ctx.Err() != nil:
 			x.callerGone()
-			return
+			return a, nil
+		case context.Cause(ctx) == errFirstByte:
+			a.Error = fmt.Sprintf("no response within the time budget (%s)", deadline.Sub(x.start).Round(time.Second))
+			f.Timeout = true
 		}
-		x.fail(api.Errorf(http.StatusBadGateway, "upstream_unreachable",
-			"Retry in a moment; if it keeps failing, check the Endpoint URL with GET /api/providers/"+handle+"/endpoints.",
-			"Provider %s could not be reached: %s", handle, a.Error))
-		return
+		f.Err = a.Error
+		return a, f
 	}
 	defer resp.Body.Close()
 	a.Status = resp.StatusCode
@@ -163,12 +196,23 @@ func (x *exchange) attemptChat(seq int, c planner.Candidate, body []byte, cr cha
 		x.fail(api.Errorf(http.StatusBadGateway, "upstream_redirect",
 			"Ask the Owner to set the Endpoint URL to where the Provider redirects; Iroha never follows redirects.",
 			"Provider %s answered %d, a redirect.", handle, resp.StatusCode))
-		return
+		return a, nil
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// A failure: read it (within the budget) for the rules and the record.
+		data, err := io.ReadAll(io.LimitReader(resp.Body, requests.MaxFailureBody))
+		if err != nil {
+			a.Error = "reading the error body: " + transportError(err)
+		}
+		f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), data
+		a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(data)
+		return a, f
+	}
+	disarm() // the first byte arrived: the answer may now take its time
 
 	t := &chatRelay{model: cr.model, dropUsageChunk: injected}
 	var res relayResult
-	if cr.stream && resp.StatusCode < 300 && isEventStream(resp.Header) {
+	if cr.stream && isEventStream(resp.Header) {
 		res = x.relayStream(resp, t.data)
 	} else {
 		res = x.relayBuffered(resp, t.body)
@@ -179,9 +223,27 @@ func (x *exchange) attemptChat(seq int, c planner.Candidate, body []byte, cr cha
 		a.FirstByteMs = ms(res.firstByte.Sub(started))
 		x.rec.FirstByteMs = ms(res.firstByte.Sub(x.start))
 	}
-	if resp.StatusCode >= 400 && x.rec.Error == nil {
-		x.rec.Error = &requests.Failure{Code: "upstream_error", Message: fmt.Sprintf("Provider %s answered %d.", handle, resp.StatusCode)}
+	return a, nil
+}
+
+// failureHeaders flattens response headers for the record, without cookies.
+func failureHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, vs := range h {
+		if strings.EqualFold(k, "Set-Cookie") {
+			continue
+		}
+		out[k] = strings.Join(vs, ", ")
 	}
+	return out
+}
+
+func hostOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // recordAttempt stores a finished Attempt and logs it.
@@ -196,6 +258,9 @@ func (x *exchange) recordAttempt(a requests.Attempt) {
 		"seq", a.Seq, "endpoint", a.Endpoint, "upstream_key", a.UpstreamKey, "wire_model", a.WireModel, "status", a.Status, "duration_ms", *a.DurationMs}
 	if a.Error != "" {
 		attrs = append(attrs, "error", a.Error)
+	}
+	if a.Outcome != "" {
+		attrs = append(attrs, "rule", a.Rule, "outcome", a.Outcome, "reason", a.Reason, "action", a.Action)
 	}
 	x.g.log.Info("attempt finished", attrs...)
 }

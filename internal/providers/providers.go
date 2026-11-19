@@ -17,6 +17,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/clock"
+	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/shape"
 	"github.com/hoangvu12/iroha/internal/store"
@@ -31,8 +32,37 @@ type Provider struct {
 	Archived         bool       `json:"archived" doc:"An archived Provider refuses Callers and keeps its handle reserved."`
 	CallerPath       string     `json:"caller_path" doc:"Base path Callers use for this Provider, e.g. /providers/acme/v1."`
 	CreatedAt        time.Time  `json:"created_at"`
+	Budget           Budget     `json:"budget" doc:"The Request budget for this Provider."`
 	Endpoints        []Endpoint `json:"endpoints"`
 	UpstreamKeyCount int        `json:"upstream_key_count"`
+}
+
+// Budget is a Provider's Request budget.
+type Budget struct {
+	MaxAttempts      int  `json:"max_attempts" doc:"Attempts per Request at most."`
+	FirstByteSeconds int  `json:"first_byte_seconds" doc:"Seconds a Request may wait for the first upstream byte, across its Attempts."`
+	Overridden       bool `json:"overridden" doc:"true when either value is this Provider's own rather than the default."`
+}
+
+// Request budget defaults and limits (spec "Request handling").
+const (
+	DefaultMaxAttempts = 3
+	MaxAttemptsLimit   = 10
+	DefaultFirstByte   = 60 * time.Second
+	// FirstByteCeiling is the hard ceiling of any Request's wait for a first
+	// byte, kept under the 100 s edge cutoff in front of Iroha.
+	FirstByteCeiling = 95 * time.Second
+)
+
+// EffectiveBudget applies the defaults to a Provider's overrides (0 = default).
+func EffectiveBudget(maxAttempts int, firstByte time.Duration) (int, time.Duration) {
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultMaxAttempts
+	}
+	if firstByte <= 0 {
+		firstByte = DefaultFirstByte
+	}
+	return maxAttempts, min(firstByte, FirstByteCeiling)
 }
 
 // Endpoint is an Endpoint as the API returns it.
@@ -47,12 +77,15 @@ type Endpoint struct {
 
 // UpstreamKey is an Upstream Key as the API returns it, secret included.
 type UpstreamKey struct {
-	ID         string     `json:"id"`
-	Provider   string     `json:"provider" doc:"Handle of the Provider."`
-	Name       string     `json:"name"`
-	Secret     string     `json:"secret" doc:"The key itself; empty for a keyless slot (no auth header is sent)."`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty" doc:"Last Attempt with this key, to the minute; absent when never used."`
+	ID            string                  `json:"id"`
+	Provider      string                  `json:"provider" doc:"Handle of the Provider."`
+	Name          string                  `json:"name"`
+	Secret        string                  `json:"secret" doc:"The key itself; empty for a keyless slot (no auth header is sent)."`
+	Enabled       bool                    `json:"enabled" doc:"false: the Owner disabled the key; its state is disabled."`
+	State         keystate.State          `json:"state" doc:"The key's one Key State and why it is in it."`
+	CoolingModels []keystate.ModelCooling `json:"cooling_models" doc:"Models this key is cooling for while it serves the others."`
+	CreatedAt     time.Time               `json:"created_at"`
+	LastUsedAt    *time.Time              `json:"last_used_at,omitempty" doc:"Last Attempt with this key, to the minute; absent when never used."`
 }
 
 // HandleMaxLen is the longest handle.
@@ -104,13 +137,16 @@ type queryer interface {
 func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	var p Provider
 	var created int64
-	err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at,
+	var maxAttempts, firstByte int
+	err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds,
 		(SELECT count(*) FROM upstream_keys k WHERE k.provider_id = providers.id)
 		FROM providers WHERE id = ?`, id).
-		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &p.UpstreamKeyCount)
+		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &maxAttempts, &firstByte, &p.UpstreamKeyCount)
 	if err != nil {
 		return p, err
 	}
+	n, d := EffectiveBudget(maxAttempts, time.Duration(firstByte)*time.Second)
+	p.Budget = Budget{MaxAttempts: n, FirstByteSeconds: int(d / time.Second), Overridden: maxAttempts > 0 || firstByte > 0}
 	p.CreatedAt = store.FromMillis(created)
 	p.CallerPath = "/providers/" + p.Handle + "/v1"
 	p.Endpoints, err = listEndpoints(ctx, q, id)
@@ -149,23 +185,79 @@ func readEndpoint(ctx context.Context, q queryer, id string) (Endpoint, error) {
 	return scanEndpoint(q.QueryRowContext(ctx, `SELECT `+endpointColumns+` FROM endpoints e JOIN providers p ON p.id = e.provider_id WHERE e.id = ?`, id))
 }
 
-const keyColumns = `k.id, p.handle, k.name, k.secret, k.created_at, k.last_used_at`
+const keyColumns = `k.id, p.handle, k.name, k.secret, k.created_at, k.last_used_at, k.disabled, k.disabled_by, k.disabled_at`
 
-func scanKey(row interface{ Scan(...any) error }) (UpstreamKey, error) {
+// scanKey reads a key row; its Key State is filled in by withState.
+func scanKey(row interface{ Scan(...any) error }) (UpstreamKey, *keystate.OwnerDisabled, error) {
 	var k UpstreamKey
 	var created int64
-	var used sql.NullInt64
-	err := row.Scan(&k.ID, &k.Provider, &k.Name, &k.Secret, &created, &used)
+	var used, disabledAt sql.NullInt64
+	var disabled bool
+	var disabledBy string
+	err := row.Scan(&k.ID, &k.Provider, &k.Name, &k.Secret, &created, &used, &disabled, &disabledBy, &disabledAt)
 	k.CreatedAt = store.FromMillis(created)
 	if used.Valid {
 		at := store.FromMillis(used.Int64)
 		k.LastUsedAt = &at
 	}
-	return k, err
+	k.Enabled = !disabled
+	if disabled {
+		return k, &keystate.OwnerDisabled{By: disabledBy, At: store.NullMillis(disabledAt)}, err
+	}
+	return k, nil, err
 }
 
-func readKey(ctx context.Context, q queryer, id string) (UpstreamKey, error) {
-	return scanKey(q.QueryRowContext(ctx, `SELECT `+keyColumns+` FROM upstream_keys k JOIN providers p ON p.id = k.provider_id WHERE k.id = ?`, id))
+// withState sets the visible Key State of k from its record at now.
+func withState(k UpstreamKey, d *keystate.OwnerDisabled, rec keystate.Record, now time.Time) UpstreamKey {
+	k.State, k.CoolingModels = keystate.View(d, rec, now)
+	return k
+}
+
+func readKey(ctx context.Context, q queryer, id string, at time.Time) (UpstreamKey, error) {
+	k, d, err := scanKey(q.QueryRowContext(ctx, `SELECT `+keyColumns+` FROM upstream_keys k JOIN providers p ON p.id = k.provider_id WHERE k.id = ?`, id))
+	if err != nil {
+		return k, err
+	}
+	rec, err := keystate.ForKey(ctx, q, id)
+	if err != nil {
+		return k, err
+	}
+	return withState(k, d, rec, at), nil
+}
+
+// listKeys reads every key of a Provider with its Key State.
+func listKeys(ctx context.Context, q queryer, providerID string, at time.Time) ([]UpstreamKey, error) {
+	rows, err := q.QueryContext(ctx, `SELECT `+keyColumns+` FROM upstream_keys k JOIN providers p ON p.id = k.provider_id
+		WHERE k.provider_id = ? ORDER BY k.created_at, k.rowid`, providerID)
+	if err != nil {
+		return nil, err
+	}
+	type item struct {
+		k UpstreamKey
+		d *keystate.OwnerDisabled
+	}
+	var items []item
+	for rows.Next() {
+		k, d, err := scanKey(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		items = append(items, item{k, d})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	recs, err := keystate.ForProvider(ctx, q, providerID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UpstreamKey, 0, len(items))
+	for _, it := range items {
+		out = append(out, withState(it.k, it.d, recs[it.k.ID], at))
+	}
+	return out, nil
 }
 
 // ref is a resolved Provider: its ID and handle.
@@ -218,14 +310,16 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 	if CheckHandle(handle) != nil {
 		return r, false, nil
 	}
-	err = s.db.QueryRowContext(ctx, `SELECT id, handle, enabled, archived FROM providers WHERE handle = ?`, handle).
-		Scan(&r.ID, &r.Handle, &r.Enabled, &r.Archived)
+	var firstByte int
+	err = s.db.QueryRowContext(ctx, `SELECT id, handle, enabled, archived, max_attempts, first_byte_seconds FROM providers WHERE handle = ?`, handle).
+		Scan(&r.ID, &r.Handle, &r.Enabled, &r.Archived, &r.MaxAttempts, &firstByte)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, false, nil
 	}
 	if err != nil {
 		return r, false, err
 	}
+	r.FirstByte = time.Duration(firstByte) * time.Second
 	rows, err := s.db.QueryContext(ctx, `SELECT id, name, url, shape, auth_style, auth_param, static_headers, renames
 		FROM endpoints WHERE provider_id = ? ORDER BY created_at, rowid`, r.ID)
 	if err != nil {
@@ -253,19 +347,44 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 	if err := rows.Err(); err != nil {
 		return r, false, err
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT id, name, secret FROM upstream_keys WHERE provider_id = ? ORDER BY created_at, rowid`, r.ID)
+	rows, err = s.db.QueryContext(ctx, `SELECT id, name, secret, disabled FROM upstream_keys WHERE provider_id = ? ORDER BY created_at, rowid`, r.ID)
 	if err != nil {
 		return r, false, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var k planner.Key
-		if err := rows.Scan(&k.ID, &k.Name, &k.Secret); err != nil {
+		if err := rows.Scan(&k.ID, &k.Name, &k.Secret, &k.Disabled); err != nil {
+			rows.Close()
 			return r, false, err
 		}
 		r.Keys = append(r.Keys, k)
 	}
-	return r, true, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return r, false, err
+	}
+	recs, err := keystate.ForProvider(ctx, s.db, r.ID)
+	if err != nil {
+		return r, false, err
+	}
+	for i := range r.Keys {
+		k := &r.Keys[i]
+		rec, ok := recs[k.ID]
+		if !ok {
+			continue
+		}
+		k.Invalid = rec.Invalid()
+		if rec.Key != nil && rec.Key.State == keystate.Cooling {
+			k.CoolingUntil = rec.Key.Until
+		}
+		for _, m := range rec.Models {
+			if k.ModelCooling == nil {
+				k.ModelCooling = map[string]time.Time{}
+			}
+			k.ModelCooling[m.Model] = m.Until
+		}
+	}
+	return r, true, nil
 }
 
 // lastUsedGranularity limits last_used_at writes to one per key per minute.

@@ -2,3 +2,11 @@
 .scratch/v2-gateway/design/v2-directions/references/
 .scratch/v2-gateway/design/v2-clean/reference-sheets/
 .scratch/v2-gateway/design/v2-directions/reference-sheets/
+
+# Build output and local databases
+/iroha
+/iroha.exe
+/bin/
+*.db
+*.db-shm
+*.db-wal

@@ -800,3 +800,35 @@ Built into `DataTable` and the shared controls, so a page needs nothing:
 - **Pool Route**: the live bar over the canvas stays on one row (the note truncates; the Shape select's width is set by a box around it, because `Select` is `w-full` inside), so it never covers the Start card. Cards change only border and ring on hover and selection (`hover` timing).
 - **No motion**: polled numbers and Key States, the side panel's swap when a card is picked, a press scale on cards, sorting and filters.
 - **Checking**: `iroha-v2-notes/v2-ui/shots/17/check17.mjs <url> <password> <out>` takes the shots and probes each motion. `HEADED=1 TRACE=1 CPU=4` adds a frame trace that runs each step with motion and again with every transition off.
+
+### UI ticket 32: caching
+
+Findings, sources and the Owner's open choices are in `docs/research/ui-caching.md`.
+
+**HTTP caching rules:**
+
+| What | `Cache-Control` | Where it's set |
+|---|---|---|
+| The app page | `no-cache` and an ETag | `internal/webui` |
+| `/assets/*` | `public, max-age=31536000, immutable` and an ETag | `internal/webui` |
+| `/brand/*` | `public, max-age=86400` and an ETag | `internal/webui` |
+| A missing file | `no-store`, so Cloudflare never keeps a `.js` 404 | `internal/webui` |
+| Every `/api/` answer, errors included | `no-store` (secrets; the UI's cache is TanStack Query) | `api.Router.ServeHTTP` |
+| A Provider's or Pool's logo | `private, no-cache` and an ETag (the URL stays the same when the logo domain or maker changes) | `logos` |
+| `/api/logos?...` previews | `private, max-age=3600` | `logos` |
+
+- A Raw route may override the `/api/` default by setting its own header, as logos do.
+- Tests: `server TestAdminAPIAnswersAreNeverStored`, `webui TestUICachingAndPathsThatClimbOutOfTheBundle`, `logos TestARecordsLogoIsRevalidatedSoADomainChangeShowsAtOnce`.
+
+**Refreshing after a change.** Each area's helper (`useRefresh`, `useInvalidateKeys`, `useInvalidateAll`) refreshes everything the change can show in:
+- other pages' lists, including the chat's `["test-models"]` and `["providers-page", "gateway-keys"]` (Send as);
+- open sheets.
+
+A change that can touch any record uses `refreshConfiguration` (`api/refresh.ts`). It invalidates every query except `session`, `readyz`, `requests` and `logo-check`. Today that is only Revert on Audit Entries.
+
+A new query family that isn't configuration goes in that file's `NOT_CONFIGURATION` list. Tests: `pages/settings/revert-refresh.test.tsx`, `pages/gateway-keys/invalidate.test.tsx`, `pages/providers/refresh.test.tsx`.
+
+**Other client behaviour:**
+- **Polls stop in a hidden tab.** `refetchInterval` does this by default. The Requests feed's own `changed_after` loop pauses while `document.hidden` and catches up on `visibilitychange` (`pages/requests/live-hidden.test.tsx`). A new hand-written poll must do the same.
+- **After a deploy.** `app/stale-chunks.ts` (installed in `main.tsx`) reloads the tab once on `vite:preloadError`, which fires when a lazy page or sheet chunk the new build removed fails to load. A second failure within 10 s doesn't reload again (`sessionStorage`).
+- **Checking.** `iroha-v2-notes/v2-ui/shots/32/check32.mjs <url> <password> <out>` records what each load fetched (first, normal reload, hard reload) and simulates a removed chunk. `probe32.mjs` measures the bytes over the wire, because CDP doesn't flag module scripts served from cache.

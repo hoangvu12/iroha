@@ -46,7 +46,7 @@ func TestRetentionRunsEveryHourAndLogsEachRun(t *testing.T) {
 
 	var list jobs.JobList
 	srv.Admin.Get("/api/jobs").Expect(200).JSON(&list)
-	if len(list.Jobs) != 1 {
+	if len(list.Jobs) != 2 || list.Jobs[1].Name != "model_refresh" {
 		t.Fatalf("jobs = %+v", list.Jobs)
 	}
 	j := list.Jobs[0]
@@ -58,7 +58,7 @@ func TestRetentionRunsEveryHourAndLogsEachRun(t *testing.T) {
 	// Nothing runs at startup or before the hour.
 	srv.Clock.Advance(59 * time.Minute)
 	srv.SettleJobs()
-	if ev := srv.Logs("kind=job.run"); len(ev) != 0 {
+	if ev := runs(srv, "kind=job.run"); len(ev) != 0 {
 		t.Fatalf("job ran early: %+v", ev)
 	}
 
@@ -73,7 +73,7 @@ func TestRetentionRunsEveryHourAndLogsEachRun(t *testing.T) {
 	if !j.NextRunAt.Equal(testkit.Epoch.Add(2 * time.Hour)) {
 		t.Fatalf("next run = %v", j.NextRunAt)
 	}
-	ev := srv.Logs("kind=job.run")
+	ev := runs(srv, "kind=job.run")
 	if len(ev) != 1 || ev[0].Level != "info" || ev[0].Attrs["job"] != "retention" || ev[0].Attrs["trigger"] != "schedule" ||
 		ev[0].Attrs["outcome"] != "ok" || ev[0].Attrs["log_events"] != float64(0) || !ev[0].Time.Equal(testkit.Epoch.Add(time.Hour)) {
 		t.Fatalf("job.run events = %+v", ev)
@@ -161,13 +161,25 @@ func TestRetentionDeletesWhatIsOlderThanEachSetting(t *testing.T) {
 		t.Fatalf("the startup event outlived its retention: %+v", ev)
 	}
 	// Each run is logged, dry runs included.
-	ev := srv.Logs("kind=job.run&since=1m")
+	ev := runs(srv, "kind=job.run&since=1m")
 	if len(ev) == 0 || ev[0].Attrs["trigger"] != "manual" || ev[0].Attrs["dry_run"] != false {
 		t.Fatalf("job.run events = %+v", ev)
 	}
-	if dryEv := srv.Logs("kind=job.run&since=1m&limit=10"); !hasDry(dryEv) {
+	if dryEv := runs(srv, "kind=job.run&since=1m&limit=50"); !hasDry(dryEv) {
 		t.Fatalf("the dry run was not logged: %+v", dryEv)
 	}
+}
+
+// runs reads job.run events of the retention job only (the daily model
+// refresh runs beside it).
+func runs(srv *testkit.Server, query string) []logs.Event {
+	var out []logs.Event
+	for _, e := range srv.Logs(query) {
+		if e.Attrs["job"] == "retention" {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func hasDry(ev []logs.Event) bool {

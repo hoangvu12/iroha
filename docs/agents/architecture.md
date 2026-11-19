@@ -148,6 +148,12 @@ Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `ech
 - UI: Add Provider's "No key needed" switch (Endpoint `auth_style: none`), "Add keyless key" in the Keys tab's empty state and Add keys dialog (`calls.addKeylessKey`).
 - Tests: `gateway/keyless_test.go`, `models/keyless_test.go`, `v1import/keyless_test.go` (the test chat, 23, included).
 
+### Ticket 31: Idempotency-Key and the replay pause
+
+- **Idempotency-Key**: `newExchange` mints a UUID (`ids.UUID`) when the Caller sent no `Idempotency-Key`; `attempt` sets it on every outbound Attempt (a Caller's value is forwarded like any header). Key tests send none.
+- **Replay pause**: a 5xx replay is queued with `notBefore` = failure time + `replayPause` (250 ms x 2^(n-1) up to 8 s, jitter x0.5-1.5; a longer `Retry-After`/`Retry-After-Ms` wins up to 60 s). Before the replay `serve` sleeps on the injected clock until then (`pauseUntil`; the Caller leaving ends it as `caller_gone`). A replay whose `notBefore` is not before the first-byte deadline is skipped.
+- **Tests that replay a 5xx** now wait on the fake clock. If the test is not about the pause, call `srv.SkipShortWaits(time.Second)` first (testkit moves the clock to any timer due within that window; keep it below waits the test drives, such as the 10 s stream commit). Tests about the pause use `srv.Clock.BlockUntilDue` and `Advance` (`gateway TestAReplayOnTheSameKeyWaitsFirst`). `clock.Fake.Next` reports the earliest pending timer.
+
 ### Ticket 30: structured output and search results
 
 - **Structured output** (`translate/format.go`): two codec hooks. `readFormat` (Caller side) reads the Caller's JSON schema or JSON mode from the decoded request into a Shape-neutral `outputFormat` (the schema kept as raw bytes); `writeFormat` (Endpoint side) writes it into the converted request before `prepareRequest`. Chat, Responses and Anthropic Endpoints always get Iroha's version, replacing RelayKit's where it had one, so the schema's properties keep the Caller's order (`toMap` would sort them; a `json.RawMessage` or an ordered `object` inside the map is written as is). A Gemini Endpoint keeps RelayKit's `responseSchema` when it wrote one, else gets `responseJsonSchema`. Toward Anthropic, `anthropicSchema` fits the schema to Anthropic's subset as its SDKs do (unsupported keywords into the description, `additionalProperties: false`, `oneOf` → `anyOf`) with a `schema_keyword_moved` diagnostic; JSON mode is dropped with `unsupported_response_format`. A schema with no name gets `response` toward OpenAI.

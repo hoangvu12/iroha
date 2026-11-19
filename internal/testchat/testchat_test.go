@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/testchat"
@@ -67,6 +68,7 @@ func TestPinningSendsEveryAttemptToOneKeyOrEndpoint(t *testing.T) {
 	// key-2 disabled: still tried when pinned. Two 500s: the Request fails
 	// with both Attempts on key-2 (replayed once), never key-1 or key-3.
 	srv.Admin.Post("/api/providers/acme/keys/key-2/disable", nil).OK()
+	srv.SkipShortWaits(time.Second) // the pause before a replay (ticket 31)
 	up.Default(up.Error(500, "boom"))
 	other.Default(other.Error(500, "boom"))
 	resp := srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/m", "upstream_key": "key-2", "stream": false})).Expect(502)

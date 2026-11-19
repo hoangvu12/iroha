@@ -31,6 +31,11 @@ type exchange struct {
 	// pool is the Model Pool the Caller named, if any: its budget override
 	// applies across its members (budget.go).
 	pool *pools.Routing
+	// idempotencyKey is minted per Request when the Caller sent no
+	// Idempotency-Key, and sent on every Attempt (attempt), so a Provider
+	// that honours it never bills a replayed Attempt twice. Empty when the
+	// Caller's own value is forwarded.
+	idempotencyKey string
 	// test is set on a test send (testrun.go): its recorded Caller and pins.
 	test *testRun
 
@@ -48,6 +53,9 @@ func (g *Gateway) newExchange(w http.ResponseWriter, r *http.Request, sh shape.S
 	now := g.clock.Now()
 	x := &exchange{g: g, w: w, r: r, ctx: r.Context(), start: now,
 		rec: requests.Request{ID: ids.New("req"), StartedAt: now.UTC(), Route: r.URL.Path, ShapeIn: sh}}
+	if r.Header.Get(idempotencyHeader) == "" {
+		x.idempotencyKey = ids.UUID()
+	}
 	w.Header().Set("X-Request-Id", x.rec.ID)
 	return x
 }

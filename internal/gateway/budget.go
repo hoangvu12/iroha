@@ -2,12 +2,14 @@ package gateway
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
+	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/planner"
@@ -24,7 +26,8 @@ import (
 // Failure Rules; its outcome changes the key's Key State and says whether
 // to move on. A key that was refused (invalid, cooling, Model Gap) is not
 // tried again in this Request; a 5xx may be replayed once on the same key
-// and Endpoint after every other candidate, but a timeout never is.
+// and Endpoint after every other candidate, once a pause has passed
+// (replayPause), but a timeout never is.
 
 // stop reasons of the loop.
 const (
@@ -45,6 +48,55 @@ type tried struct {
 type queued struct {
 	c      planner.Candidate
 	replay bool
+	// notBefore is when a replay may go: its failure plus replayPause.
+	notBefore time.Time
+}
+
+// The pause before a replay (FAIL-83, TIME-09): 250 ms doubling with each
+// replay of the Request, at most 8 s, jittered x0.5-1.5. A Retry-After on
+// the failed answer wins when it asks for longer, up to 60 s.
+const (
+	replayBase          = 250 * time.Millisecond
+	replayMax           = 8 * time.Second
+	replayRetryAfterMax = 60 * time.Second
+)
+
+// replayPause is the pause before the n-th replay (from 1) of a Request
+// after an answer with header h.
+func replayPause(n int, h http.Header, now time.Time) time.Duration {
+	d := replayBase << min(n-1, 5)
+	d = min(d, replayMax)
+	d = time.Duration(float64(d) * (0.5 + rand.Float64()))
+	if ra := askedWait(h, now); ra > d {
+		d = min(ra, replayRetryAfterMax)
+	}
+	return d
+}
+
+// askedWait is how long the answer asks to wait (Retry-After-Ms, else
+// Retry-After in seconds or as a date); 0 when it does not say.
+func askedWait(h http.Header, now time.Time) time.Duration {
+	if h == nil {
+		return 0
+	}
+	if v := strings.TrimSpace(h.Get("Retry-After-Ms")); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
+			return time.Duration(n * float64(time.Millisecond))
+		}
+	}
+	if t, ok := rules.ParseReset(h.Get("Retry-After"), now); ok && t.After(now) {
+		return t.Sub(now)
+	}
+	return 0
+}
+
+// pauseUntil waits on the clock until t, or until the Caller leaves (false).
+func (x *exchange) pauseUntil(t time.Time) bool {
+	d := t.Sub(x.g.clock.Now())
+	if d <= 0 {
+		return true
+	}
+	return clock.Sleep(x.ctx, x.g.clock, d) == nil
 }
 
 // serve runs the budget loop over the plan's candidates and answers the
@@ -85,6 +137,17 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 			stop = stopTime
 			break
 		}
+		if q.replay {
+			// A replay that could only go at the deadline is not made.
+			if !q.notBefore.Before(deadline) {
+				continue
+			}
+			if !x.pauseUntil(q.notBefore) {
+				x.stopped()
+				x.summarize(failed, nil, "")
+				return
+			}
+		}
 		seq++
 		if seq == 1 {
 			x.noteProvider(c.Provider)
@@ -116,7 +179,8 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 			pairOut[pair] = true
 			if t.decision.Status >= 500 && !replayed[pair] {
 				replayed[pair] = true
-				queue = append(queue, queued{c: c, replay: true})
+				now := g.clock.Now()
+				queue = append(queue, queued{c: c, replay: true, notBefore: now.Add(replayPause(len(replayed), t.failure.Header, now))})
 			}
 		default: // invalid, cooling, Model Gap: this key is out for this Request
 			keyOut[c.Key.ID] = true

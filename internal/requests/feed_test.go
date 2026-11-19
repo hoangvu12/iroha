@@ -122,6 +122,7 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 		}
 	}
 	// A 500 is retried on the next try; the Request counts as retried and succeeded.
+	srv.SkipShortWaits(time.Second) // the pause before the replay
 	up.Enqueue(up.Error(500, "boom"), up.Text("ok"))
 	alice.Post(chatPath, `{"model":"gpt-z","messages":[]}`).Expect(200)
 	if s := statsOf(t, srv, "retried=true"); s.Requests != 1 || s.Retried != 1 || s.Succeeded != 1 {

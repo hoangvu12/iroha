@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
@@ -158,6 +159,7 @@ func TestAnHTMLPageSentWith200IsAFailedAttemptWhenTranslating(t *testing.T) {
 	}
 
 	// Every key answers a page: a 502 in Anthropic's envelope.
+	srv.SkipShortWaits(time.Second) // the pause before the replay
 	up.Default(html)
 	var e confAnthropicError
 	resp := caller.Post(messagesPath, messages("m")).Expect(502).JSON(&e)

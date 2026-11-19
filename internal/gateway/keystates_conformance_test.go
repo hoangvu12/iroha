@@ -337,6 +337,7 @@ func TestAKeyAddedDuringARequestIsNotUsedByIt(t *testing.T) {
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
+	srv.SkipShortWaits(time.Second) // the pause before the replay
 	hold := make(chan struct{})
 	up.Enqueue(up.Error(500, "boom").HoldUntil(hold))
 	done := make(chan *testkit.Response, 1)
@@ -382,6 +383,7 @@ func TestADeadEndpointFailsOverToALiveOneWithoutAReplay(t *testing.T) {
 	}
 
 	// The live Endpoint's 5xx is replayed once; the dead one never is.
+	srv.SkipShortWaits(time.Second) // the pause before the replay
 	live.Enqueue(live.Error(500, "boom"), live.Error(500, "boom"))
 	var e callerError
 	caller.Post(chatPath, chat("gpt-x")).Expect(502).JSON(&e)

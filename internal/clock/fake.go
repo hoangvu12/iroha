@@ -95,6 +95,19 @@ func (f *Fake) BlockUntil(ctx context.Context, n int) error {
 	}
 }
 
+// Next reports when the earliest pending timer or ticker fires; ok is false
+// when none is pending.
+func (f *Fake) Next() (at time.Time, ok bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, w := range f.waiters {
+		if !ok || w.at.Before(at) {
+			at, ok = w.at, true
+		}
+	}
+	return at, ok
+}
+
 // BlockUntilDue waits until a timer or ticker is pending that fires at or
 // before t. Use it when code under test re-arms a timer after one fired,
 // before the next Advance: a count of waiters cannot tell a re-armed timer

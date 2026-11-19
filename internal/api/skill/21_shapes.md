@@ -1,0 +1,11 @@
+## Shapes and translation
+
+A Caller may speak OpenAI Chat Completions (`/providers/<handle>/v1/chat/completions`) or Anthropic Messages (`/providers/<handle>/v1/messages`, the route Claude Code and the Anthropic SDK use with `ANTHROPIC_BASE_URL=<iroha>/providers/<handle>`; they send the Gateway Key as `x-api-key`, which works). The Shape a Caller speaks need not match the Provider's:
+
+- **Passthrough first.** When the Provider has an Endpoint speaking the Caller's Shape with a usable key, the body goes through unchanged apart from the model (renames) and, toward Anthropic, an `anthropic-version: 2023-06-01` header when the Caller sent none.
+- **Translation second.** Only when no Endpoint of the Caller's Shape can serve (none exists, or its keys are disabled, invalid, cooling, gapped or restricted elsewhere) are Endpoints of another Shape used. Today Iroha translates between OpenAI Chat and Anthropic Messages, both ways, streamed and not: messages and system prompts, tools and tool calls (names an upstream would reject, such as `fs.read`, are sanitised and given back as the Caller wrote them), images (data URLs inline; image URLs become Anthropic URL sources, Iroha downloads nothing), reasoning (`reasoning_effort` <-> `thinking.budget_tokens` / `output_config.effort`, and thinking <-> `reasoning_content` in answers), stop reasons and token usage. A thinking block's signature cannot cross to OpenAI Chat.
+- `GET /api/requests/<id>` shows `shape_in` (the Caller's Shape) and `shape_out` (the serving Endpoint's); each Attempt's `shape` is its Endpoint's.
+- `400 untranslatable_request`: the body could not be read as the Caller's Shape for translation; fix it as the message says. No Provider was called.
+- A translated stream that the Provider breaks off, or that carries a Provider error event, ends with the Caller's error event (`upstream_stream_broken`, `upstream_stream_error`); nothing is invented to make it look complete.
+
+Errors on `/v1/messages` use Anthropic's envelope, `{"type": "error", "error": {"type": "rate_limit_error", "message", "code", "hint", "request_id", "details"}}`: `error.type` follows the HTTP status as Anthropic's SDKs expect, and `code` is the same Iroha code as above. Streams on `/v1/messages` are kept alive with Anthropic `ping` events and end a failure with an `event: error`.

@@ -163,14 +163,19 @@ func TestARestrictedKeyIsNeverSentToOtherEndpoints(t *testing.T) {
 		t.Fatalf("us got %s, eu got %d", bearers(us, 0), eu.Count())
 	}
 
-	// Restricted to an Endpoint of another Shape, the key is out: nothing serves.
-	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "claude", "url": "https://claude.example/v1", "shape": "anthropic-messages"}).Expect(201)
+	// Restricted to an Endpoint of another Shape, the key serves only
+	// through translation (ticket 13), and only on that Endpoint.
+	claude := testkit.NewAnthropic(t)
+	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "claude", "url": claude.URL(), "shape": "anthropic-messages"}).Expect(201)
 	srv.Admin.Patch("/api/providers/acme/keys/plan", map[string]any{"endpoints": []string{"claude"}}).Expect(200)
 	srv.Admin.Delete("/api/providers/acme/keys/any").Expect(200)
-	var ce callerError
-	caller.Post(chatPath, chat("m")).Expect(503).JSON(&ce)
-	if ce.Error.Code != "no_candidate" || ce.Error.Details.Reason != "no_usable_key" || !strings.Contains(ce.Error.Message, "restricted") {
-		t.Fatalf("restricted away: %+v", ce.Error)
+	before := eu.Count() + us.Count()
+	resp := caller.Post(chatPath, chat("m")).Expect(200)
+	if claude.Count() != 1 || claude.Last().Bearer() != "sk-test-plan" || eu.Count()+us.Count() != before {
+		t.Fatalf("claude got %d, eu+us got %d more", claude.Count(), eu.Count()+us.Count()-before)
+	}
+	if r := readRequest(t, srv, resp.Header.Get("X-Request-Id")); r.Endpoint != "claude" || r.ShapeOut != "anthropic-messages" {
+		t.Fatalf("request = %+v", r)
 	}
 }
 

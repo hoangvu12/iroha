@@ -16,6 +16,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/modelmeta"
+	"github.com/hoangvu12/iroha/internal/modelrefresh"
 	"github.com/hoangvu12/iroha/internal/models"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/requests"
@@ -42,6 +43,7 @@ func (s *Server) routes() []api.Route {
 		jobs.Routes(s.jobs),
 		failurerules.Routes(s.audit, s.db),
 		models.Routes(s.audit, s.models()),
+		modelrefresh.Routes(s.refresh),
 		s.gateway().Routes(),
 		s.gateway().AdminRoutes(),
 	)
@@ -102,8 +104,8 @@ func (s *Server) gateway() *gateway.Gateway {
 	return s.gw
 }
 
-// models builds the model list store once (routes, Gateway, later the
-// daily refresh job of ticket 20).
+// models builds the model list store once (routes, Gateway, the daily
+// refresh job).
 func (s *Server) models() *models.Store {
 	if s.modelStore == nil {
 		s.modelStore = models.New(models.Options{DB: s.db, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db),

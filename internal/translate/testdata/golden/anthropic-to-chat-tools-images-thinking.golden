@@ -1,0 +1,185 @@
+== request sent upstream ==
+{
+  "max_tokens": 2000,
+  "messages": [
+    {
+      "content": "Be terse.",
+      "role": "system"
+    },
+    {
+      "content": [
+        {
+          "text": "Weather in Hanoi? And what is in these?",
+          "type": "text"
+        },
+        {
+          "image_url": {
+            "url": "data:image/png;base64,iVBORw0KGgo="
+          },
+          "type": "image_url"
+        },
+        {
+          "image_url": {
+            "url": "https://example.com/cat.jpg"
+          },
+          "type": "image_url"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Let me check.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"city\":\"Hanoi\"}",
+            "name": "get_weather"
+          },
+          "id": "toolu_1",
+          "type": "function"
+        },
+        {
+          "function": {
+            "arguments": "{\"title\":\"x\"}",
+            "name": "mcp__github__create_issue"
+          },
+          "id": "toolu_2",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "31C sunny",
+      "name": "get_weather",
+      "role": "tool",
+      "tool_call_id": "toolu_1"
+    },
+    {
+      "content": "created #7",
+      "name": "mcp__github__create_issue",
+      "role": "tool",
+      "tool_call_id": "toolu_2"
+    }
+  ],
+  "model": "glm-4.6-plus",
+  "parallel_tool_calls": false,
+  "reasoning_effort": "low",
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "function": {
+        "description": "Get weather",
+        "name": "get_weather",
+        "parameters": {
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "name": "mcp__github__create_issue",
+        "parameters": {
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "content": [
+    {
+      "thinking": "The user wants Hue too.",
+      "type": "thinking"
+    },
+    {
+      "text": "It is sunny.",
+      "type": "text"
+    },
+    {
+      "id": "call_9",
+      "input": {
+        "title": "Hue"
+      },
+      "name": "mcp__github__create.issue",
+      "type": "tool_use"
+    }
+  ],
+  "id": "chatcmpl-c1",
+  "model": "glm-4.6",
+  "role": "assistant",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 10,
+    "input_tokens": 40,
+    "output_tokens": 20
+  }
+}
+== stream to the Caller ==
+event: message_start
+data: {"message":{"content":[],"id":"chatcmpl-c1","model":"glm-4.6","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":0,"output_tokens":0}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"thinking":"","type":"thinking"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"thinking":"thinking...","type":"thinking_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"It is ","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"text":"sunny.","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":1,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"id":"call_9","input":{},"name":"mcp__github__create.issue","type":"tool_use"},"index":2,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"partial_json":"{\"title\":","type":"input_json_delta"},"index":2,"type":"content_block_delta"}
+
+event: content_block_delta
+data: {"delta":{"partial_json":"\"Hue\"}","type":"input_json_delta"},"index":2,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":2,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"tool_use","stop_sequence":null},"type":"message_delta","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":10,"input_tokens":40,"output_tokens":20}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

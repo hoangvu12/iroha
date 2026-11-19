@@ -42,8 +42,9 @@ Release:
                        --version, which must match its --version output)
   --timeout SECONDS    how long to wait for readiness, default 60
   --keep N             database backups to keep on the server, default 5
-  --no-ui              skip the UI build (npm in web/); the binary then serves
-                       a "UI not built" page. Ignored with --binary
+  --no-ui              ship without the UI: skip the UI build (npm in web/)
+                       and accept a release whose /readyz reports "ui": false.
+                       Without it such a release is refused and rolled back
 
 Modes:
   --install-unit       also install or update the systemd unit (needs root
@@ -265,6 +266,7 @@ say "uploading to $TARGET:$DIR/.deploy/"
 upload "${uploads[@]}"
 
 say "deploying on $HOST"
+[ "$NO_UI" = 0 ] || remote_args+=(--allow-no-ui)
 set +e
 remote bash "$DIR/.deploy/remote.sh" deploy "${remote_args[@]}" \
 	--version "$VERSION" --timeout "$TIMEOUT" --keep "$KEEP"

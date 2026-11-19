@@ -1,0 +1,62 @@
+{
+  "from": "anthropic-messages",
+  "to": "openai-chat",
+  "model": "glm-4.6",
+  "wire_model": "glm-4.6-plus",
+  "request": {
+    "model": "glm-4.6",
+    "max_tokens": 2000,
+    "stream": true,
+    "thinking": {"type": "enabled", "budget_tokens": 1000},
+    "system": [{"type": "text", "text": "Be terse.", "cache_control": {"type": "ephemeral"}}],
+    "metadata": {"user_id": "caller-123"},
+    "tools": [
+      {"name": "get_weather", "description": "Get weather", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}}},
+      {"name": "mcp__github__create.issue", "input_schema": {"type": "object", "properties": {"title": {"type": "string"}}}}
+    ],
+    "tool_choice": {"type": "auto", "disable_parallel_tool_use": true},
+    "messages": [
+      {"role": "user", "content": [
+        {"type": "text", "text": "Weather in Hanoi? And what is in these?"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}},
+        {"type": "image", "source": {"type": "url", "url": "https://example.com/cat.jpg"}}
+      ]},
+      {"id": "msg_replayed_turn", "role": "assistant", "content": [
+        {"type": "thinking", "thinking": "need tool", "signature": "sig"},
+        {"type": "text", "text": "Let me check."},
+        {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Hanoi"}},
+        {"type": "tool_use", "id": "toolu_2", "name": "mcp__github__create.issue", "input": {"title": "x"}}
+      ]},
+      {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "toolu_1", "content": "31C sunny"},
+        {"type": "tool_result", "tool_use_id": "toolu_2", "content": [{"type": "text", "text": "created #7"}]}
+      ]}
+    ]
+  },
+  "answer": {
+    "id": "chatcmpl-c1",
+    "object": "chat.completion",
+    "created": 1767225600,
+    "model": "glm-4.6-plus",
+    "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
+      "role": "assistant",
+      "reasoning_content": "The user wants Hue too.",
+      "content": "It is sunny.",
+      "tool_calls": [
+        {"id": "call_9", "type": "function", "function": {"name": "mcp__github__create_issue", "arguments": "{\"title\":\"Hue\"}"}}
+      ]
+    }}],
+    "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70,
+      "prompt_tokens_details": {"cached_tokens": 10}, "completion_tokens_details": {"reasoning_tokens": 5}}
+  },
+  "stream": [
+    {"id": "chatcmpl-c1", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6-plus", "choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": "thinking..."}, "finish_reason": null}]},
+    {"id": "chatcmpl-c1", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6-plus", "choices": [{"index": 0, "delta": {"content": "It is "}, "finish_reason": null}]},
+    {"id": "chatcmpl-c1", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6-plus", "choices": [{"index": 0, "delta": {"content": "sunny."}, "finish_reason": null}]},
+    {"id": "chatcmpl-c1", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6-plus", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_9", "type": "function", "function": {"name": "mcp__github__create_issue", "arguments": "{\"title\":"}}]}, "finish_reason": null}]},
+    {"id": "chatcmpl-c1", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6-plus", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "\"Hue\"}"}}]}, "finish_reason": null}]},
+    {"id": "chatcmpl-c1", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6-plus", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+    {"id": "chatcmpl-c1", "object": "chat.completion.chunk", "created": 1767225600, "model": "glm-4.6-plus", "choices": [], "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70, "prompt_tokens_details": {"cached_tokens": 10}, "completion_tokens_details": {"reasoning_tokens": 5}}},
+    "[DONE]"
+  ]
+}

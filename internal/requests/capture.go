@@ -139,12 +139,20 @@ func isEventStream(contentType string) bool {
 	return err == nil && mt == "text/event-stream"
 }
 
-// reassemble turns a streamed answer into one answer: for OpenAI Chat a
-// chat.completion object, otherwise the list of event payloads.
+// reassemblers turn the event payloads of a stream in one Shape into the
+// whole answer that Shape would have given; ok is false when the stream
+// does not parse.
+var reassemblers = map[shape.Shape]func(payloads [][]byte) (b []byte, ok bool){
+	shape.OpenAIChat:        reassembleChat,
+	shape.AnthropicMessages: reassembleAnthropic,
+}
+
+// reassemble turns a streamed answer into one answer in the Shape's own
+// form, otherwise the list of event payloads.
 func reassemble(sh shape.Shape, stream []byte) []byte {
 	payloads := eventPayloads(stream)
-	if sh == shape.OpenAIChat {
-		if b, ok := reassembleChat(payloads); ok {
+	if f := reassemblers[sh]; f != nil {
+		if b, ok := f(payloads); ok {
 			return b
 		}
 	}
@@ -271,6 +279,102 @@ func reassembleChat(payloads [][]byte) ([]byte, bool) {
 	out["choices"] = list
 	b, err := json.Marshal(out)
 	return b, err == nil
+}
+
+// reassembleAnthropic merges Anthropic Messages events into one message:
+// message_start's message, each content block with its deltas applied
+// (text, thinking and signature continued, tool input parsed from its JSON
+// fragments), message_delta's stop reason and usage.
+func reassembleAnthropic(payloads [][]byte) ([]byte, bool) {
+	var msg map[string]any
+	var blocks []map[string]any
+	partial := map[int]string{} // tool input JSON per block
+	for _, p := range payloads {
+		var ev struct {
+			Type         string          `json:"type"`
+			Index        int             `json:"index"`
+			Message      map[string]any  `json:"message"`
+			ContentBlock map[string]any  `json:"content_block"`
+			Delta        map[string]any  `json:"delta"`
+			Usage        map[string]any  `json:"usage"`
+			Error        json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal(p, &ev) != nil {
+			return nil, false
+		}
+		switch ev.Type {
+		case "message_start":
+			msg = ev.Message
+		case "content_block_start":
+			for len(blocks) <= ev.Index {
+				blocks = append(blocks, nil)
+			}
+			blocks[ev.Index] = ev.ContentBlock
+		case "content_block_delta":
+			if ev.Index >= len(blocks) || blocks[ev.Index] == nil {
+				return nil, false
+			}
+			b := blocks[ev.Index]
+			switch ev.Delta["type"] {
+			case "text_delta":
+				b["text"] = str(b["text"]) + str(ev.Delta["text"])
+			case "thinking_delta":
+				b["thinking"] = str(b["thinking"]) + str(ev.Delta["thinking"])
+			case "signature_delta":
+				b["signature"] = str(b["signature"]) + str(ev.Delta["signature"])
+			case "input_json_delta":
+				partial[ev.Index] += str(ev.Delta["partial_json"])
+			}
+		case "message_delta":
+			if msg == nil {
+				return nil, false
+			}
+			for k, v := range ev.Delta {
+				msg[k] = v
+			}
+			if u, ok := msg["usage"].(map[string]any); ok {
+				for k, v := range ev.Usage {
+					if v != nil {
+						u[k] = v
+					}
+				}
+			} else if ev.Usage != nil {
+				msg["usage"] = ev.Usage
+			}
+		case "error":
+			if msg == nil {
+				msg = map[string]any{}
+			}
+			msg["error"] = ev.Error
+		}
+	}
+	if msg == nil {
+		return nil, false
+	}
+	content := make([]any, 0, len(blocks))
+	for i, b := range blocks {
+		if b == nil {
+			continue
+		}
+		if js, ok := partial[i]; ok {
+			var input any
+			if js == "" {
+				input = map[string]any{}
+			} else if json.Unmarshal([]byte(js), &input) != nil {
+				input = js // cut off mid-JSON: keep what came
+			}
+			b["input"] = input
+		}
+		content = append(content, b)
+	}
+	msg["content"] = content
+	b, err := json.Marshal(msg)
+	return b, err == nil
+}
+
+func str(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 // firstWins are identifying fields that repeat across chunks rather than continue.

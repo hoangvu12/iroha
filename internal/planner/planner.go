@@ -7,10 +7,10 @@
 // Order: Providers in the order given (Pool members later). Within a
 // Provider, Endpoints come in tiers (endpointTiers) and the first tier that
 // yields any candidate is the one used, so a later tier is reached only when
-// nothing in an earlier one can serve. Today the one tier is the Endpoints
-// speaking the Caller's Shape; translation (ticket 13) appends the other
-// Endpoints as a second tier. Within a tier, Upstream Keys round-robin, each
-// key paired with every Endpoint of the tier it may use, in configured order;
+// nothing in an earlier one can serve: first the Endpoints speaking the
+// Caller's Shape, then those speaking a Shape the Gateway translates it to
+// (Request.Translate). Within a tier, Upstream Keys round-robin, each key
+// paired with every Endpoint of the tier it may use, in configured order;
 // then keys whose discovered list names the wire model (Key.Carries) move
 // ahead of the others, each group keeping that order.
 //
@@ -35,6 +35,9 @@ type Request struct {
 	Shape shape.Shape // the Caller's Shape
 	Model string      // the model as the Caller named it, without any Provider handle
 	Now   time.Time   // the time Key States are judged at
+	// Translate lists the other Shapes the Gateway can translate the
+	// Caller's Shape to; Endpoints speaking them form the second tier.
+	Translate []shape.Shape
 }
 
 // Provider is the routing view of one Provider.
@@ -194,7 +197,7 @@ func Plan(req Request, providers []Provider, rot Rotation) Result {
 		tiers := endpointTiers(p, req)
 		if len(tiers) == 0 {
 			if empty == nil {
-				empty = &Empty{Code: NoEndpoint, Message: fmt.Sprintf("Provider %s has no Endpoint speaking %s.", p.Handle, req.Shape)}
+				empty = &Empty{Code: NoEndpoint, Message: noEndpoint(p, req)}
 			}
 			continue
 		}
@@ -238,21 +241,34 @@ func Plan(req Request, providers []Provider, rot Rotation) Result {
 }
 
 // endpointTiers groups p's Endpoints in the order they are tried; Plan uses
-// the first tier that yields a candidate. Ticket 13 appends the Endpoints of
-// the other Shapes as a second tier, which gives "translate only when no
-// same-Shape Endpoint has a candidate" (restricted, cooling and disabled
-// keys included) without touching Plan.
+// the first tier that yields a candidate. The first tier speaks the Caller's
+// Shape (passthrough); the second speaks a Shape in req.Translate, which
+// gives "translate only when no same-Shape Endpoint has a candidate"
+// (restricted, cooling and disabled keys included).
 func endpointTiers(p *Provider, req Request) [][]*Endpoint {
-	var same []*Endpoint
+	var same, other []*Endpoint
 	for ei := range p.Endpoints {
-		if p.Endpoints[ei].Shape == req.Shape {
-			same = append(same, &p.Endpoints[ei])
+		switch ep := &p.Endpoints[ei]; {
+		case ep.Shape == req.Shape:
+			same = append(same, ep)
+		case slices.Contains(req.Translate, ep.Shape):
+			other = append(other, ep)
 		}
 	}
-	if len(same) == 0 {
-		return nil
+	var tiers [][]*Endpoint
+	for _, t := range [][]*Endpoint{same, other} {
+		if len(t) > 0 {
+			tiers = append(tiers, t)
+		}
 	}
-	return [][]*Endpoint{same}
+	return tiers
+}
+
+func noEndpoint(p *Provider, req Request) string {
+	if len(req.Translate) == 0 {
+		return fmt.Sprintf("Provider %s has no Endpoint speaking %s.", p.Handle, req.Shape)
+	}
+	return fmt.Sprintf("Provider %s has no Endpoint speaking %s or a Shape Iroha translates it to.", p.Handle, req.Shape)
 }
 
 // planTier pairs p's keys, round-robin from start, with the Endpoints of one

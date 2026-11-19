@@ -1,0 +1,31 @@
+{
+  "from": "anthropic-messages",
+  "to": "openai-chat",
+  "model": "gpt-5",
+  "wire_model": "gpt-5",
+  "request": {
+    "model": "gpt-5",
+    "max_tokens": 4096,
+    "stream": true,
+    "output_config": {"effort": "high"},
+    "system": "Be terse.",
+    "stop_sequences": ["END"],
+    "temperature": 0.5,
+    "messages": [{"role": "user", "content": "Say hello"}]
+  },
+  "answer": {
+    "id": "chatcmpl-2",
+    "object": "chat.completion",
+    "created": 1767225600,
+    "model": "gpt-5-2026-01-01",
+    "choices": [{"index": 0, "finish_reason": "length", "message": {"role": "assistant", "content": "Hello wor"}}],
+    "usage": {"prompt_tokens": 9, "completion_tokens": 3, "total_tokens": 12}
+  },
+  "stream": [
+    {"id": "chatcmpl-2", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-5-2026-01-01", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]},
+    {"id": "chatcmpl-2", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-5-2026-01-01", "choices": [{"index": 0, "delta": {"content": "Hello"}, "finish_reason": null}]},
+    {"id": "chatcmpl-2", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-5-2026-01-01", "choices": [{"index": 0, "delta": {"content": " world"}, "finish_reason": null}]},
+    {"id": "chatcmpl-2", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-5-2026-01-01", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+    "[DONE]"
+  ]
+}

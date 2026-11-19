@@ -47,9 +47,9 @@ type queued struct {
 	replay bool
 }
 
-// serve runs the budget loop over the plan's candidates for a Chat
-// Completions Request and answers the Caller.
-func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest) {
+// serve runs the budget loop over the plan's candidates and answers the
+// Caller, whatever its Shape.
+func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerRequest) {
 	g := x.g
 	first := cands[0].Provider
 	maxAttempts, _ := providers.EffectiveBudget(first.MaxAttempts, first.FirstByte)
@@ -90,7 +90,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest)
 		if seq == 1 {
 			x.noteProvider(c.Provider)
 		}
-		a, f := x.attemptChat(seq, c, body, cr, deadline)
+		a, f := x.attempt(seq, c, body, cr, deadline)
 		if f == nil { // answered
 			x.recordAttempt(a)
 			if a.Status >= 200 && a.Status < 300 && c.Key.Recovering(c.WireModel) {
@@ -115,7 +115,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr chatRequest)
 			stop = stopRule
 		case rules.RetryElsewhere:
 			pairOut[pair] = true
-			if f.Status >= 500 && !replayed[pair] {
+			if t.decision.Status >= 500 && !replayed[pair] {
 				replayed[pair] = true
 				queue = append(queue, queued{c: c, replay: true})
 			}
@@ -268,7 +268,7 @@ func (x *exchange) failAll(failed []tried, stop string, maxAttempts int) {
 			"Provider %s refused %s on every key tried: %s", handle, last.attempt.WireModel, last.decision.Reason)
 		details["reason"] = planner.ModelGap
 	case last.decision.Outcome == rules.FailRequest:
-		status := last.failure.Status
+		status := last.decision.Status // an error sent inside a 200 answer: the status it stands for
 		if status < 400 || status > 599 {
 			status = http.StatusBadGateway
 		}

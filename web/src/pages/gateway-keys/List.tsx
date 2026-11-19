@@ -4,7 +4,7 @@ import { Copy, KeyRound, MessageCircle, Plus, Settings2, Trash2, Ban } from "luc
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
-import { formatNumber, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { useUrlParams } from "@/lib/url-state";
 import { shortDate, shortSecret } from "@/pages/settings/format";
@@ -17,8 +17,8 @@ import { Mono } from "@/ui/bits";
 import { ToolbarSearch } from "@/ui/Input";
 import { MenuItem, MenuSeparator } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
-import { Tip } from "@/ui/Tooltip";
 import { type GatewayKey, useGatewayKeys } from "./api";
+import { RequestsCount } from "./bits";
 import { SAMPLE_GATEWAY_KEYS } from "./samples";
 import { useKeyQuestions } from "./confirm";
 import { CreateDialog } from "./CreateDialog";
@@ -28,9 +28,6 @@ import { scopeDetail, scopeSummary } from "./scope";
 // readable key, access, last use and recent Requests; ?q= searches by name or
 // key, ?sort=&dir= sorts. A row opens the key's page. Revoke… and Delete… ask
 // first (UI ticket 21). Revoked keys fold under the table into their own.
-
-/** Where a key's Requests of the last 24 hours are listed. */
-export const requestsHref = (k: GatewayKey) => `/requests?caller=${encodeURIComponent(k.name)}&range=24h`;
 
 const keyHref = (k: GatewayKey) => `/gateway-keys/${encodeURIComponent(k.id)}`;
 
@@ -73,7 +70,7 @@ const columns = col.columns([
     // The busiest first, then by name.
     sortFn: (a, b) => b.original.recent_requests - a.original.recent_requests || natural(a.original.name, b.original.name),
     meta: { align: "right" },
-    cell: ({ row }) => <Recent k={row.original} />,
+    cell: ({ row }) => <RequestsCount k={row.original} />,
   }),
 ]);
 
@@ -231,17 +228,6 @@ function OpenLink({ k }: { k: GatewayKey }) {
 
 function LastUsed({ k }: { k: GatewayKey }) {
   return <span title={k.last_used_at ? new Date(k.last_used_at).toLocaleString() : undefined}>{k.last_used_at ? timeAgo(k.last_used_at) : "Never"}</span>;
-}
-
-function Recent({ k }: { k: GatewayKey }) {
-  if (k.recent_requests === 0) return <span className="text-fg-muted">0</span>;
-  return (
-    <Tip label={`Open ${k.name}'s Requests of the last 24 hours`} type="description">
-      <Link to={requestsHref(k)} className="hover:underline">
-        {formatNumber(k.recent_requests)}
-      </Link>
-    </Tip>
-  );
 }
 
 function KeyMenu({ k, onRevoke, onDelete }: { k: GatewayKey } & Actions) {

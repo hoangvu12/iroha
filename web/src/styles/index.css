@@ -43,6 +43,14 @@
   --selected: #eff4fe;        /* selected table rows */
   --overlay: rgb(0 0 0 / 0.12);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.08);
+  /* Code highlighting (ui/highlight.tsx), readable on --bg-subtle and --bg-muted */
+  --code-key: #0550ae;
+  --code-string: #116329;
+  --code-number: #953800;
+  --code-literal: #8250df;
+  --code-keyword: #cf222e;
+  --code-function: #6639ba;
+  --code-comment: #6b6b6f;
 }
 
 .dark {
@@ -72,6 +80,13 @@
   --selected: #15213a;
   --overlay: rgb(0 0 0 / 0.55);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
+  --code-key: #79c0ff;
+  --code-string: #7ee787;
+  --code-number: #ffa657;
+  --code-literal: #d2a8ff;
+  --code-keyword: #ff7b72;
+  --code-function: #d2a8ff;
+  --code-comment: #8b8b93;
 }
 
 @theme inline {
@@ -102,6 +117,13 @@
   --color-info-tint: var(--info-tint);
   --color-selected: var(--selected);
   --color-overlay: var(--overlay);
+  --color-code-key: var(--code-key);
+  --color-code-string: var(--code-string);
+  --color-code-number: var(--code-number);
+  --color-code-literal: var(--code-literal);
+  --color-code-keyword: var(--code-keyword);
+  --color-code-function: var(--code-function);
+  --color-code-comment: var(--code-comment);
   --shadow-elevated: var(--shadow);
 }
 

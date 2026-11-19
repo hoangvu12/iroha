@@ -604,11 +604,17 @@ func TestSnippetsRunUnchangedAgainstIroha(t *testing.T) {
 		})
 	}
 
-	// Without as, the key comes from IROHA_KEY; pins are noted.
+	// Without as, the key comes from IROHA_KEY; pins are test-only and not carried.
 	var sn testchat.Snippets
-	srv.Admin.Get("/api/test/snippets?model=acme/m&upstream_key=key-1&base_url=" + url.QueryEscape(srv.URL)).OK().JSON(&sn)
-	if !sn.KeyEnv || !strings.Contains(sn.Curl, "$IROHA_KEY") || !strings.Contains(sn.Python, `os.environ["IROHA_KEY"]`) || !strings.Contains(sn.Note, "key-1") {
+	resp := srv.Admin.Get("/api/test/snippets?model=acme/m&upstream_key=key-1&base_url=" + url.QueryEscape(srv.URL)).OK()
+	resp.JSON(&sn)
+	if !sn.KeyEnv || !strings.Contains(sn.Curl, "$IROHA_KEY") || !strings.Contains(sn.Python, `os.environ["IROHA_KEY"]`) {
 		t.Fatalf("snippets %+v", sn)
+	}
+	var fields map[string]any
+	resp.JSON(&fields)
+	if _, ok := fields["note"]; ok || strings.Contains(sn.Curl+sn.Python+sn.TypeScript, "key-1") {
+		t.Fatalf("a pin shows in the snippets: %v", fields)
 	}
 
 	// A real shell, when there is one.

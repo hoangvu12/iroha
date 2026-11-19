@@ -158,7 +158,7 @@ export function Headers({ headers }: { headers: Record<string, string> }) {
   const names = Object.keys(headers).sort();
   return (
     <Disclosure className="mt-3" triggerClassName="text-[13px]" summary={`Response headers (${names.length})`}>
-      <CodeBlock className="mt-2">{names.map((n) => `${n}: ${headers[n]}`).join("\n")}</CodeBlock>
+      <CodeBlock className="mt-2" lang="headers">{names.map((n) => `${n}: ${headers[n]}`).join("\n")}</CodeBlock>
     </Disclosure>
   );
 }

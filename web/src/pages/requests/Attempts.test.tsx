@@ -70,7 +70,18 @@ test("an Attempt's response headers fold on the collapse recipe (the shared Disc
   expect(headers.getAttribute("aria-expanded")).toBe("false");
   await user.click(headers);
   expect(headers.getAttribute("aria-expanded")).toBe("true");
-  expect(screen.getByText(/retry-after: 30/)).toBeTruthy();
+  const block = headers.closest("[data-slot=collapsible]")!.querySelector("pre")!;
+  expect(block.textContent).toBe("retry-after: 30");
+  // Highlighted: each header's name is a key.
+  expect(block.querySelector('[data-token="key"]')?.textContent).toBe("retry-after");
+});
+
+test("an upstream error body is pretty-printed and highlighted as JSON", () => {
+  render(view(failedThenServed));
+  const panel = card(1).closest("li")!.querySelector("[data-slot=collapsible-panel]")!;
+  const body = panel.querySelector("pre")!;
+  expect(body.textContent).toBe('{\n  "error": "slow down"\n}');
+  expect([...body.querySelectorAll("[data-token]")].map((e) => `${e.getAttribute("data-token")} ${e.textContent}`)).toEqual(['key "error"', 'string "slow down"']);
 });
 
 test("an agent opens an Attempt by its name", async () => {

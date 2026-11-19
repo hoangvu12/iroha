@@ -55,6 +55,7 @@ export function SetupPage() {
               autoFocus
               autoComplete="off"
               spellCheck={false}
+              enterKeyHint="next"
               className="font-mono"
               placeholder="iroha_admin_..."
               value={token}
@@ -63,12 +64,20 @@ export function SetupPage() {
           )}
         </Field>
         <Field label="Password" hint={`At least ${MIN} characters.`} error={(tried && local.password) || server.password}>
-          {(p) => <PasswordInput {...p} autoComplete="new-password" value={password} onChange={(ev) => setPassword(ev.target.value)} />}
+          {(p) => (
+            <PasswordInput {...p} autoComplete="new-password" enterKeyHint="next" value={password} onChange={(ev) => setPassword(ev.target.value)} />
+          )}
         </Field>
         <Field label="Confirm password" error={tried ? local.confirm : undefined}>
-          {(p) => <PasswordInput {...p} autoComplete="new-password" value={confirm} onChange={(ev) => setConfirm(ev.target.value)} />}
+          {(p) => (
+            <PasswordInput {...p} autoComplete="new-password" enterKeyHint="go" value={confirm} onChange={(ev) => setConfirm(ev.target.value)} />
+          )}
         </Field>
-        {server.other && <p className="text-[13px] text-danger-text">{server.other}</p>}
+        {server.other && (
+          <p role="alert" className="text-[13px] text-danger-text transition-opacity duration-list-in ease-out starting:opacity-0">
+            {server.other}
+          </p>
+        )}
         <Button type="submit" variant="primary" size="lg" className="mt-1 w-full" loading={setUp.isPending}>
           Set password and sign in
         </Button>

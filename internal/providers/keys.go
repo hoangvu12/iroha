@@ -22,12 +22,12 @@ import (
 // configuration (disabled included), not last_used_at nor its runtime Key
 // State (invalid, cooling).
 type keySnapshot struct {
-	ID         string    `json:"id"`
-	ProviderID string    `json:"provider_id"`
-	Provider   string    `json:"provider"`
-	Name       string    `json:"name"`
-	Secret     string    `json:"secret"`
-	Disabled   bool      `json:"disabled"`
+	ID         string `json:"id"`
+	ProviderID string `json:"provider_id"`
+	Provider   string `json:"provider"`
+	Name       string `json:"name"`
+	Secret     string `json:"secret"`
+	Disabled   bool   `json:"disabled"`
 	// EndpointIDs is the restriction (sorted); empty: every Endpoint.
 	EndpointIDs []string  `json:"endpoint_ids,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -74,8 +74,8 @@ var KeyResource = audit.Register(&audit.Resource[keySnapshot]{
 // CreateUpstreamKey is the body of POST /api/providers/{provider}/keys and
 // each item of its bulk.
 type CreateUpstreamKey struct {
-	Name   string  `json:"name,omitempty" doc:"Unique within the Provider. Omit it to match by secret: a secret the Provider already holds answers that key unchanged, a new one gets the next free name key-N. Repeating a create with an existing name updates that key."`
-	Secret *string `json:"secret,omitempty" doc:"The key issued by the Provider. Omit (with a name) for a keyless slot that sends no auth header. Surrounding whitespace is trimmed."`
+	Name      string    `json:"name,omitempty" doc:"Unique within the Provider. Omit it to match by secret: a secret the Provider already holds answers that key unchanged, a new one gets the next free name key-N. Repeating a create with an existing name updates that key."`
+	Secret    *string   `json:"secret,omitempty" doc:"The key issued by the Provider. Omit (with a name) for a keyless slot that sends no auth header. Surrounding whitespace is trimmed."`
 	Endpoints *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs); it is never sent to the others. [] or omitted on a new key: every Endpoint."`
 }
 

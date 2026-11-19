@@ -198,4 +198,3 @@ func TestRenamesApplyPerAttemptSoFailoverSendsTheRightWireModel(t *testing.T) {
 		t.Fatalf("request = %+v", r)
 	}
 }
-

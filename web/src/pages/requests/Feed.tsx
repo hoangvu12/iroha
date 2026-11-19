@@ -61,7 +61,7 @@ export function RequestsFeed() {
         <ErrorState title="Couldn't load Requests" error={feed.pages.error} onRetry={() => void feed.pages.refetch()} />
       ) : rows.length === 0 ? (
         chips.length > 0 ? (
-          <NoResults title="No requests match these filters" description={noResultsLine(url)} filters={chips} onClear={url.clearFilters} />
+          <NoResults title="No requests match these filters" description={noResultsLine(url)} onClear={url.clearFilters} />
         ) : (
           <Empty url={url} />
         )

@@ -5,7 +5,7 @@ import { cn } from "@/ui/cn";
 import { EmptyState } from "@/ui/States";
 import type { Attempt, RequestRecord } from "./api";
 import { attemptFailed, explain, thenText } from "./attempt-info";
-import { Badge, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, statusText } from "./bits";
+import { Badge, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, statusText, Summary } from "./bits";
 
 /** The drawer's Attempts tab: the Request's summary, then each Attempt and what Iroha made of it. */
 export function AttemptList({ r, loading, onOpenRoute }: { r: RequestRecord; loading: boolean; onOpenRoute: () => void }) {
@@ -29,7 +29,7 @@ export function AttemptList({ r, loading, onOpenRoute }: { r: RequestRecord; loa
   return (
     <div>
       <div className="mb-4 flex items-start gap-3">
-        <p className="min-w-0 flex-1 text-[14.5px] text-fg-muted">{r.summary ?? attemptsLine(attempts)}</p>
+        <div className="min-w-0 flex-1 text-[14.5px] text-fg-muted">{r.summary ? <Summary text={r.summary} /> : attemptsLine(attempts)}</div>
         <Button size="sm" icon={RouteIcon} onClick={onOpenRoute}>
           Route view
         </Button>

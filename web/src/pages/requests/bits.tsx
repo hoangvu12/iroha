@@ -206,6 +206,18 @@ export function Row({ label, children, mono, className }: { label: ReactNode; ch
   );
 }
 
+/** A Request's one-line summary ("#1 team-10: 429 ...; #2 ...; stopped: ..."), one Attempt per line. */
+export function Summary({ text, className }: { text: string; className?: string }) {
+  const parts = text.split(/;\s+/).filter(Boolean);
+  return (
+    <ul className={cn("flex flex-col gap-1", className)}>
+      {parts.map((p, i) => (
+        <li key={i}>{p}</li>
+      ))}
+    </ul>
+  );
+}
+
 /** JSON text pretty-printed when it parses, as-is otherwise. */
 export function pretty(text: string): string {
   try {

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import { formatNumber } from "@/lib/format";
 import type { RequestRecord } from "./api";
-import { Fact, failed, longShape, msOrSecs, ProviderLogo, secs } from "./bits";
+import { Fact, failed, longShape, msOrSecs, ProviderLogo, secs, Summary } from "./bits";
 
 // The Details tab (C04): Route, Timing, Tokens. Shared by the drawer and the
 // Route view's Details tab.
@@ -35,7 +35,7 @@ export function RequestDetails({ r, onShowCaptured }: { r: RequestRecord; onShow
               <span className="ml-2">{r.error.message}</span>
             </p>
           )}
-          {r.summary && <p className={r.error ? "mt-1.5 text-fg-muted" : ""}>{r.summary}</p>}
+          {r.summary && <Summary text={r.summary} className={r.error ? "mt-1.5 text-fg-muted" : ""} />}
         </div>
       )}
       <Section title="Route">

@@ -16,7 +16,7 @@ import type { Attempt, RequestRecord } from "./api";
 import { useCopy, useRequest } from "./api";
 import { attemptFailed, explain, jumpLabel, thenText } from "./attempt-info";
 import { Headers, keyStateClass } from "./Attempts";
-import { Badge, clockMs, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, StatusPill, statusText, statusTone } from "./bits";
+import { Badge, clockMs, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, StatusPill, statusText, statusTone, Summary } from "./bits";
 import { CapturedView } from "./Captured";
 import { RequestDetails } from "./Details";
 
@@ -106,11 +106,14 @@ function TopBar({ id, r, tab, phone, onReplay }: { id: string; r?: RequestRecord
         ))}
       </nav>
       <div className="flex-1" />
-      {r?.captured && (
-        <Button icon={MessageCircle} onClick={onReplay} className={phone ? "hidden" : ""}>
-          Replay in Chat
-        </Button>
-      )}
+      {r?.captured &&
+        (phone ? (
+          <IconButton icon={MessageCircle} label="Replay in Chat" bordered onClick={onReplay} />
+        ) : (
+          <Button icon={MessageCircle} onClick={onReplay}>
+            Replay in Chat
+          </Button>
+        ))}
       <IconButton icon={Copy} label="Copy Request ID" bordered onClick={async () => (await copy(id)) && notify.copied("Request ID")} />
     </div>
   );
@@ -407,7 +410,11 @@ function SidePanel({ r, node, attempts, onClose }: { r: RequestRecord; node: Nod
             </Row>
           )}
           {r.error && <Row label="Message">{r.error.message}</Row>}
-          {r.summary && <Row label="Summary">{r.summary}</Row>}
+          {r.summary && (
+            <Row label="Summary">
+              <Summary text={r.summary} />
+            </Row>
+          )}
         </PanelSection>
       )}
       <PanelSection title="Answer">

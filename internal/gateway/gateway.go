@@ -124,7 +124,7 @@ const translationNote = "When the Provider has no usable Endpoint speaking this 
 
 const messagesDescription = "Anthropic Messages. Authenticate with \"x-api-key: <Gateway Key>\" (the Anthropic SDK and Claude Code default) or \"Authorization: Bearer <Gateway Key>\"; " +
 	"Caller credentials are never forwarded. On an Endpoint speaking Anthropic Messages the body passes through unchanged except the model, " +
-	"with anthropic-version 2023-06-01 added when you send none; the answer passes through with its model field set to the model you asked for. " +
+	"with anthropic-version " + shape.AnthropicVersion + " added when you send none; the answer passes through with its model field set to the model you asked for. " +
 	translationNote +
 	"Errors use the Anthropic envelope {\"type\":\"error\",\"error\":{\"type\",\"message\",\"code\",\"hint\",\"request_id\"}}. " +
 	"A stream with no upstream byte after 10 s is committed (200, ping events every 15 s of silence); failures after that arrive as a final error event."
@@ -323,12 +323,12 @@ func noCandidate(handle string, e *planner.Empty) *api.Error {
 	if e.Code == planner.Cooling {
 		until := e.Until.UTC().Format(time.RFC3339)
 		return api.Errorf(http.StatusServiceUnavailable, "keys_cooling", "Retry after "+until+" (see Retry-After); GET /api/providers/"+handle+"/summary (Admin Token) lists the coolings.",
-			"%s", e.Message).WithDetails(map[string]string{"reason": e.Code, "until": until})
+			"%s", e.Message).WithDetails(map[string]string{"reason": string(e.Code), "until": until})
 	}
 	if e.Code == planner.ModelGap {
 		until := e.Until.UTC().Format(time.RFC3339)
 		return api.Errorf(http.StatusNotFound, "model_unavailable", "Use another model; the Provider refused it to every usable key. The gaps expire by "+until+", or the Owner clears them (GET /api/providers/"+handle+"/model-gaps).",
-			"%s", e.Message).WithDetails(map[string]string{"reason": e.Code, "until": until})
+			"%s", e.Message).WithDetails(map[string]string{"reason": string(e.Code), "until": until})
 	}
 	hint := "Ask the Owner to add an Upstream Key to " + handle + " (POST /api/providers/" + handle + "/keys), or, when its Endpoints need no key, " +
 		"a keyless key ({\"name\": \"keyless\"}, or auth_style none on the Endpoint)."
@@ -338,7 +338,7 @@ func noCandidate(handle string, e *planner.Empty) *api.Error {
 	case planner.NoUsableKey:
 		hint = "Ask the Owner to enable a key, test an invalid one, or replace its secret (GET /api/providers/" + handle + "/keys shows each key's state and reason)."
 	}
-	return api.Errorf(http.StatusServiceUnavailable, "no_candidate", hint, "%s", e.Message).WithDetails(map[string]string{"reason": e.Code})
+	return api.Errorf(http.StatusServiceUnavailable, "no_candidate", hint, "%s", e.Message).WithDetails(map[string]string{"reason": string(e.Code)})
 }
 
 // maxCallerBody caps a Caller's request body.

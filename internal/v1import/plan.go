@@ -358,17 +358,17 @@ func authStyle(p V1Provider, n *notes) (style, param string) {
 	prefix := strings.TrimSpace(p.AuthPrefix)
 	switch {
 	case h == "authorization" && strings.EqualFold(prefix, "Bearer"):
-		return planner.AuthBearer, ""
+		return string(planner.AuthBearer), ""
 	case h == "x-api-key" && prefix == "":
-		return planner.AuthXAPIKey, ""
+		return string(planner.AuthXAPIKey), ""
 	case h != "" && prefix == "":
-		return planner.AuthHeader, p.AuthHeader
+		return string(planner.AuthHeader), p.AuthHeader
 	case h == "authorization":
 		n.add("Auth prefixes other than Bearer (sent as Bearer instead; check these Providers)", p.Handle+" ("+prefix+")")
-		return planner.AuthBearer, ""
+		return string(planner.AuthBearer), ""
 	default:
 		n.add("Auth prefixes on a custom header (the raw key is sent instead; check these Providers)", p.Handle)
-		return planner.AuthHeader, p.AuthHeader
+		return string(planner.AuthHeader), p.AuthHeader
 	}
 }
 

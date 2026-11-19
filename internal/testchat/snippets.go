@@ -79,7 +79,7 @@ func curlSnippet(b Built, url, secret string) string {
 	}
 	lines = append(lines, `  -H "Content-Type: application/json"`)
 	if b.Shape == shape.AnthropicMessages {
-		lines = append(lines, `  -H "anthropic-version: 2023-06-01"`)
+		lines = append(lines, `  -H "anthropic-version: `+shape.AnthropicVersion+`"`)
 	}
 	lines = append(lines, "  -d "+shellQuote(string(b.Body)))
 	return strings.Join(lines, " \\\n") + "\n"

@@ -88,7 +88,7 @@ var EndpointResource = audit.Register(&audit.Resource[endpointSnapshot]{
 		}
 		style := s.AuthStyle
 		if style == "" {
-			style = planner.AuthBearer
+			style = string(planner.AuthBearer)
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -195,7 +195,7 @@ const KeylessKeyName = "keyless"
 // same mutation: it has a Key State and Model Gaps like any other, and a
 // revert of the change removes it. nil when nothing was added.
 func addKeylessKey(m *audit.Mutation, p ref, e Endpoint) (*UpstreamKey, error) {
-	if e.AuthStyle != planner.AuthNone {
+	if planner.AuthStyle(e.AuthStyle) != planner.AuthNone {
 		return nil, nil
 	}
 	var n int
@@ -275,25 +275,11 @@ const (
 	maxRenames       = 1000
 )
 
-// authHeader is the header an auth style writes the secret into ("" for
-// query and none).
-func authHeader(style, param string) string {
-	switch style {
-	case planner.AuthBearer:
-		return "Authorization"
-	case planner.AuthXAPIKey:
-		return "x-api-key"
-	case planner.AuthHeader:
-		return param
-	}
-	return ""
-}
-
 // checkEndpoint validates the auth, static header and rename configuration
 // of an Endpoint as a whole.
 func checkEndpoint(e *Endpoint) error {
 	styleHint := "Use auth_style bearer, x-api-key, header (with auth_param naming the header), query (with auth_param naming the query parameter) or none."
-	switch e.AuthStyle {
+	switch planner.AuthStyle(e.AuthStyle) {
 	case planner.AuthBearer, planner.AuthXAPIKey, planner.AuthNone:
 		if e.AuthParam != "" {
 			return api.BadRequest(styleHint, "auth_param is only used with auth_style header or query.")
@@ -316,7 +302,7 @@ func checkEndpoint(e *Endpoint) error {
 	if len(e.StaticHeaders) > maxStaticHeaders {
 		return api.BadRequest("Send at most 32 static headers.", "static_headers has %d headers.", len(e.StaticHeaders))
 	}
-	slot := authHeader(e.AuthStyle, e.AuthParam)
+	slot, _ := planner.AuthStyle(e.AuthStyle).Slot(e.AuthParam) // "" for query and none
 	seen := map[string]string{}
 	for k, v := range e.StaticHeaders {
 		lk := strings.ToLower(k)
@@ -539,7 +525,7 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 	if in.Shape == nil {
 		return Endpoint{}, api.BadRequest("Send shape: openai-chat, openai-responses, anthropic-messages or gemini.", "shape is required for a new Endpoint.")
 	}
-	e := Endpoint{Name: in.Name, AuthStyle: planner.AuthBearer, StaticHeaders: map[string]string{}, Renames: map[string]string{}}
+	e := Endpoint{Name: in.Name, AuthStyle: string(planner.AuthBearer), StaticHeaders: map[string]string{}, Renames: map[string]string{}}
 	if err := applyEndpoint(&e, upd); err != nil {
 		return Endpoint{}, err
 	}
@@ -581,7 +567,7 @@ func applyEndpoint(e *Endpoint, in UpdateEndpoint) error {
 	}
 	if in.AuthStyle != nil {
 		s := strings.ToLower(strings.TrimSpace(*in.AuthStyle))
-		if s != e.AuthStyle && in.AuthParam == nil && s != planner.AuthHeader && s != planner.AuthQuery {
+		if st := planner.AuthStyle(s); s != e.AuthStyle && in.AuthParam == nil && st != planner.AuthHeader && st != planner.AuthQuery {
 			e.AuthParam = "" // the new style takes no parameter
 		}
 		e.AuthStyle = s

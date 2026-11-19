@@ -6,12 +6,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/clock"
+	"github.com/hoangvu12/iroha/internal/hosts"
 	"github.com/hoangvu12/iroha/internal/logs"
 )
 
@@ -176,7 +176,7 @@ func (s *Source) read(ctx context.Context, name string, prev *file) (*file, erro
 	var last error
 	for _, base := range s.o.Bases {
 		u := strings.TrimRight(base, "/") + "/" + name
-		host := hostOf(u)
+		host := hosts.Of(u)
 		f, notModified, err := s.get(ctx, u, base, name, prev)
 		if err != nil {
 			last = fmt.Errorf("%s from %s: %w", name, host, err)
@@ -237,12 +237,4 @@ func (s *Source) get(ctx context.Context, u, base, name string, prev *file) (*fi
 		return nil, false, fmt.Errorf("not a models.dev catalog: %w", err)
 	}
 	return f, false, nil
-}
-
-func hostOf(u string) string {
-	p, err := url.Parse(u)
-	if err != nil {
-		return ""
-	}
-	return p.Host
 }

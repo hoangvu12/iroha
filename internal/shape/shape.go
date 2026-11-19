@@ -24,3 +24,8 @@ func (s Shape) Valid() bool {
 	}
 	return false
 }
+
+// AnthropicVersion is the anthropic-version header Iroha sends Anthropic
+// Messages Endpoints when the Caller sends none (Attempts, key tests and
+// model lists alike).
+const AnthropicVersion = "2023-06-01"

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/clock"
+	"github.com/hoangvu12/iroha/internal/hosts"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/normalise"
 	"github.com/hoangvu12/iroha/internal/planner"
@@ -46,9 +46,6 @@ func opFor(sh shape.Shape, model string, stream bool) string {
 	}
 	return opChat
 }
-
-// anthropicVersion is sent to Anthropic Endpoints when the Caller sends none.
-const anthropicVersion = "2023-06-01"
 
 // idempotencyHeader carries one value per Request on every Attempt: the
 // Caller's own, else one Iroha mints (newExchange).
@@ -85,73 +82,42 @@ func forwardable(name string) bool {
 }
 
 // outbound builds the upstream request of one Attempt: the Endpoint's URL
-// plus op, the Caller's forwardable headers, the Endpoint's static headers,
-// then the Upstream Key per the Endpoint's auth style. A key with an empty
-// secret, or an Endpoint with auth style none, sends no credential at all;
-// a Caller header in the auth slot is dropped either way.
+// plus op, the Caller's forwardable headers, then the Endpoint's static
+// headers and the Upstream Key per its auth style (planner.Endpoint.Authorize).
+// A key with an empty secret, or an Endpoint with auth style none, sends no
+// credential at all; a Caller header in the auth slot is dropped either way.
 func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []byte, op string, stream bool) (*http.Request, error) {
 	ep := c.Endpoint
+	if err := ep.CheckAuth(); err != nil {
+		return nil, err
+	}
 	u, err := url.Parse(strings.TrimRight(ep.URL, "/") + op)
 	if err != nil {
 		return nil, fmt.Errorf("the Endpoint URL does not make a request: %w", err)
 	}
-	var slot, prefix string // the header the key goes in, and what precedes it
-	switch ep.AuthStyle {
-	case "", planner.AuthBearer:
-		slot, prefix = "Authorization", "Bearer "
-	case planner.AuthXAPIKey:
-		slot = "X-Api-Key"
-	case planner.AuthHeader:
-		slot = ep.AuthParam
-	case planner.AuthQuery, planner.AuthNone:
-	default:
-		return nil, fmt.Errorf("Endpoint %s uses auth style %q, which this version of Iroha cannot apply", ep.Name, ep.AuthStyle)
+	h := http.Header{}
+	for k, vs := range in {
+		if forwardable(k) {
+			h[k] = append([]string(nil), vs...)
+		}
 	}
-	if (ep.AuthStyle == planner.AuthHeader || ep.AuthStyle == planner.AuthQuery) && ep.AuthParam == "" {
-		return nil, fmt.Errorf("Endpoint %s uses auth style %s without auth_param", ep.Name, ep.AuthStyle)
+	if h.Get("Content-Type") == "" {
+		h.Set("Content-Type", "application/json")
 	}
-	send := !c.Key.Keyless(ep)
-	if send && ep.AuthStyle == planner.AuthQuery {
-		q := u.Query()
-		q.Set(ep.AuthParam, c.Key.Secret)
-		u.RawQuery = q.Encode()
+	if h.Get("Accept") == "" {
+		if stream {
+			h.Set("Accept", "text/event-stream")
+		} else {
+			h.Set("Accept", "application/json")
+		}
 	}
+	ep.Authorize(h, u, c.Key)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("the Endpoint URL does not make a request: %w", err)
 	}
-	for k, vs := range in {
-		if forwardable(k) && !strings.EqualFold(k, slot) {
-			req.Header[k] = append([]string(nil), vs...)
-		}
-	}
-	if req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if req.Header.Get("Accept") == "" {
-		if stream {
-			req.Header.Set("Accept", "text/event-stream")
-		} else {
-			req.Header.Set("Accept", "application/json")
-		}
-	}
-	setStatic(req.Header, ep.StaticHeaders)
-	if send && slot != "" {
-		req.Header.Set(slot, prefix+c.Key.Secret)
-	}
+	req.Header = h
 	return req, nil
-}
-
-// setStatic applies an Endpoint's static headers over h. An empty value
-// sends no such header (removing the Caller's), never "Name: ".
-func setStatic(h http.Header, static map[string]string) {
-	for k, v := range static {
-		if v == "" {
-			h.Del(k)
-		} else {
-			h.Set(k, v)
-		}
-	}
 }
 
 // preparePassthrough returns the body to send to an Endpoint speaking the
@@ -225,7 +191,7 @@ func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (
 	call := upstreamCall{header: x.r.Header, norm: normalise.For(c.Endpoint.URL, ep)}
 	if ep == shape.AnthropicMessages && call.header.Get("Anthropic-Version") == "" {
 		call.header = call.header.Clone()
-		call.header.Set("Anthropic-Version", anthropicVersion)
+		call.header.Set("Anthropic-Version", shape.AnthropicVersion)
 	}
 	if ep == cr.shape {
 		out, injected := preparePassthrough(body, cr, c.WireModel)
@@ -274,7 +240,7 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 	x.rec.WireModel, x.rec.ShapeOut = c.WireModel, c.Endpoint.Shape
 	defer func() { a.DurationMs = ms(g.clock.Now().Sub(started)) }()
 	handle := c.Provider.Handle
-	f := &rules.Failure{Provider: handle, Host: hostOf(c.Endpoint.URL)}
+	f := &rules.Failure{Provider: handle, Host: hosts.Of(c.Endpoint.URL)}
 
 	call, perr := x.prepare(c, body, cr)
 	if perr != nil {
@@ -403,14 +369,6 @@ func failureHeaders(h http.Header) map[string]string {
 	return out
 }
 
-func hostOf(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	return u.Hostname()
-}
-
 // recordAttempt stores a finished Attempt and logs it.
 func (x *exchange) recordAttempt(a requests.Attempt) {
 	x.rec.AttemptCount++
@@ -464,10 +422,7 @@ func transportError(err error) string {
 	return err.Error()
 }
 
-func isEventStream(h http.Header) bool {
-	mt, _, err := mime.ParseMediaType(h.Get("Content-Type"))
-	return err == nil && mt == "text/event-stream"
-}
+func isEventStream(h http.Header) bool { return requests.IsEventStream(h.Get("Content-Type")) }
 
 // relayResult is how relaying an answer went.
 type relayResult struct {

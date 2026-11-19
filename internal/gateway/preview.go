@@ -65,18 +65,18 @@ type PreviewCandidate struct {
 
 // PreviewSkip is a key left out of the plan.
 type PreviewSkip struct {
-	UpstreamKey string     `json:"upstream_key"`
-	Reason      string     `json:"reason" enum:"disabled,invalid,cooling,cooling_model,model_gap,restricted" doc:"cooling: the whole key; cooling_model: the key for this model; model_gap: the Provider refused this key the model; restricted: the key may not use the Endpoints that serve."`
-	Model       string     `json:"model,omitempty" doc:"The wire model, for cooling_model and model_gap."`
-	Until       *time.Time `json:"until,omitempty" doc:"When the cooling ends or the Model Gap expires."`
-	SecondsLeft int        `json:"seconds_left,omitempty" doc:"Whole seconds until then."`
+	UpstreamKey string             `json:"upstream_key"`
+	Reason      planner.SkipReason `json:"reason" enum:"disabled,invalid,cooling,cooling_model,model_gap,restricted" doc:"cooling: the whole key; cooling_model: the key for this model; model_gap: the Provider refused this key the model; restricted: the key may not use the Endpoints that serve."`
+	Model       string             `json:"model,omitempty" doc:"The wire model, for cooling_model and model_gap."`
+	Until       *time.Time         `json:"until,omitempty" doc:"When the cooling ends or the Model Gap expires."`
+	SecondsLeft int                `json:"seconds_left,omitempty" doc:"Whole seconds until then."`
 }
 
 // PreviewEmpty explains a planned member with no candidate.
 type PreviewEmpty struct {
-	Code    string     `json:"code" enum:"no_endpoint,no_upstream_key,no_usable_key,cooling,model_gap"`
-	Message string     `json:"message"`
-	Until   *time.Time `json:"until,omitempty"`
+	Code    planner.EmptyCode `json:"code" enum:"no_endpoint,no_upstream_key,no_usable_key,cooling,model_gap"`
+	Message string            `json:"message"`
+	Until   *time.Time        `json:"until,omitempty"`
 }
 
 // PreviewOutcome is the error a Caller would get before any Attempt.

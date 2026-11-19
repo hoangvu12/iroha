@@ -122,7 +122,7 @@ func (rc *Recorder) SaveCapture(ctx context.Context, id string, sh shape.Shape, 
 	reqTrunc, respTrunc, status, respType, reqType := c.req.truncated, c.resp.truncated, c.status, c.respType, c.reqType
 	c.mu.Unlock()
 	var stream []byte
-	if isEventStream(respType) {
+	if IsEventStream(respType) {
 		stream, respBody = respBody, reassemble(sh, respBody)
 	}
 	return rc.db.Tx(ctx, func(tx *sql.Tx) error {
@@ -140,13 +140,15 @@ func (c *Capture) Answer(sh shape.Shape) (int, []byte) {
 	c.mu.Lock()
 	body, status, respType := bytes.Clone(c.resp.buf.Bytes()), c.status, c.respType
 	c.mu.Unlock()
-	if isEventStream(respType) {
+	if IsEventStream(respType) {
 		body = reassemble(sh, body)
 	}
 	return status, body
 }
 
-func isEventStream(contentType string) bool {
+// IsEventStream reports whether contentType is a server-sent event stream
+// (parameters such as charset allowed). The Gateway uses it too.
+func IsEventStream(contentType string) bool {
 	mt, _, err := mime.ParseMediaType(contentType)
 	return err == nil && mt == "text/event-stream"
 }

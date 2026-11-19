@@ -315,41 +315,24 @@ func (s *Store) fetch(ctx context.Context, rt *providers.Routing, ep *planner.En
 }
 
 // discoveryRequest builds the GET of one page: the Endpoint's static
-// headers, then the key per the Endpoint's auth style (as on an Attempt).
+// headers, then the key per the Endpoint's auth style, as on an Attempt
+// (planner.Endpoint.Authorize).
 func discoveryRequest(ctx context.Context, ep *planner.Endpoint, k *planner.Key, raw string) (*http.Request, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("the discovery URL does not parse: %w", err)
 	}
-	send := !k.Keyless(ep)
-	if send && ep.AuthStyle == planner.AuthQuery {
-		q := u.Query()
-		q.Set(ep.AuthParam, k.Secret)
-		u.RawQuery = q.Encode()
+	h := http.Header{}
+	h.Set("Accept", "application/json")
+	if ep.Shape == shape.AnthropicMessages {
+		h.Set("Anthropic-Version", shape.AnthropicVersion)
 	}
+	ep.Authorize(h, u, k)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("the discovery URL does not make a request: %w", err)
 	}
-	req.Header.Set("Accept", "application/json")
-	if ep.Shape == shape.AnthropicMessages {
-		req.Header.Set("Anthropic-Version", "2023-06-01")
-	}
-	for name, v := range ep.StaticHeaders {
-		if v != "" { // an empty static header is never sent (as on an Attempt)
-			req.Header.Set(name, v)
-		}
-	}
-	if send {
-		switch ep.AuthStyle {
-		case "", planner.AuthBearer:
-			req.Header.Set("Authorization", "Bearer "+k.Secret)
-		case planner.AuthXAPIKey:
-			req.Header.Set("X-Api-Key", k.Secret)
-		case planner.AuthHeader:
-			req.Header.Set(ep.AuthParam, k.Secret)
-		}
-	}
+	req.Header = h
 	return req, nil
 }
 

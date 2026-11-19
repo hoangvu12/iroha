@@ -73,24 +73,12 @@ type Endpoint struct {
 	// AuthStyle is how the Upstream Key is sent: AuthBearer (also when
 	// empty), AuthXAPIKey, AuthHeader, AuthQuery or AuthNone; AuthParam
 	// names the header or query parameter for AuthHeader and AuthQuery.
-	AuthStyle     string
+	AuthStyle     AuthStyle
 	AuthParam     string
 	StaticHeaders map[string]string
 	// Renames maps a Caller-facing model name to the name this URL uses.
 	Renames map[string]string
 }
-
-// Auth styles of an Endpoint.
-const (
-	AuthBearer  = "bearer"    // Authorization: Bearer <secret>
-	AuthXAPIKey = "x-api-key" // x-api-key: <secret>
-	AuthHeader  = "header"    // <AuthParam>: <secret>
-	AuthQuery   = "query"     // ?<AuthParam>=<secret>
-	AuthNone    = "none"      // nothing, whatever the key holds
-)
-
-// AuthStyles lists every auth style.
-var AuthStyles = []string{AuthBearer, AuthXAPIKey, AuthHeader, AuthQuery, AuthNone}
 
 // WireModel is the model name this Endpoint uses for the Caller's model:
 // the rename applied after the Endpoint is chosen, so each Attempt sends
@@ -151,29 +139,35 @@ type Candidate struct {
 	WireModel string // the model name sent on this Endpoint
 }
 
+// EmptyCode says why a plan is empty.
+type EmptyCode string
+
 // Reasons a plan is empty. All but Cooling mean nothing can serve the
 // Request until the Owner changes something.
 const (
-	NoEndpoint    = "no_endpoint"     // no Endpoint speaks the Caller's Shape
-	NoUpstreamKey = "no_upstream_key" // the Provider holds no Upstream Keys
-	NoUsableKey   = "no_usable_key"   // every Upstream Key is disabled, invalid or restricted to other Endpoints
-	Cooling       = "cooling"         // every usable key is cooling; Empty.Until says until when
-	ModelGap      = "model_gap"       // every usable key has a Model Gap for the model; Empty.Until is the first expiry
+	NoEndpoint    EmptyCode = "no_endpoint"     // no Endpoint speaks the Caller's Shape
+	NoUpstreamKey EmptyCode = "no_upstream_key" // the Provider holds no Upstream Keys
+	NoUsableKey   EmptyCode = "no_usable_key"   // every Upstream Key is disabled, invalid or restricted to other Endpoints
+	Cooling       EmptyCode = "cooling"         // every usable key is cooling; Empty.Until says until when
+	ModelGap      EmptyCode = "model_gap"       // every usable key has a Model Gap for the model; Empty.Until is the first expiry
 )
+
+// SkipReason says why a key was left out of a plan.
+type SkipReason string
 
 // Reasons a key is skipped.
 const (
-	SkipDisabled     = "disabled"
-	SkipInvalid      = "invalid"
-	SkipCooling      = "cooling"
-	SkipCoolingModel = "cooling_model"
-	SkipModelGap     = "model_gap"
-	SkipRestricted   = "restricted" // restricted to Endpoints outside the tier that served (or to none that could)
+	SkipDisabled     SkipReason = "disabled"
+	SkipInvalid      SkipReason = "invalid"
+	SkipCooling      SkipReason = "cooling"
+	SkipCoolingModel SkipReason = "cooling_model"
+	SkipModelGap     SkipReason = "model_gap"
+	SkipRestricted   SkipReason = "restricted" // restricted to Endpoints outside the tier that served (or to none that could)
 )
 
 // Empty explains why nothing can serve the Request.
 type Empty struct {
-	Code     string
+	Code     EmptyCode
 	Message  string
 	Until    time.Time // Cooling: when the first key is usable again
 	Provider string    // handle of the Provider the explanation is about
@@ -183,8 +177,8 @@ type Empty struct {
 type Skip struct {
 	Provider *Provider
 	Key      *Key
-	Model    string    // the wire model, for SkipCoolingModel and SkipModelGap
-	Reason   string    // one of the Skip* constants
+	Model    string // the wire model, for SkipCoolingModel and SkipModelGap
+	Reason   SkipReason
 	Until    time.Time // cooling end, or when the Model Gap expires
 }
 

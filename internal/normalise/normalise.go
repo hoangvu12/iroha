@@ -23,9 +23,9 @@ package normalise
 import (
 	"bytes"
 	"encoding/json"
-	"net/url"
 	"strings"
 
+	"github.com/hoangvu12/iroha/internal/hosts"
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
@@ -101,7 +101,7 @@ type Set struct {
 // speaking sh.
 func For(endpointURL string, sh shape.Shape) Set {
 	s := Set{shape: sh}
-	host := hostOf(endpointURL)
+	host := hosts.Of(endpointURL)
 	for _, n := range Builtin {
 		if n.Shape == sh && matchesHost(n.Host, host) {
 			if s.on == nil {
@@ -116,7 +116,7 @@ func For(endpointURL string, sh shape.Shape) Set {
 // Applying lists the built-in normalisers that apply to an Endpoint.
 func Applying(endpointURL string, sh shape.Shape) []Normaliser {
 	var out []Normaliser
-	host := hostOf(endpointURL)
+	host := hosts.Of(endpointURL)
 	for _, n := range Builtin {
 		if n.Shape == sh && matchesHost(n.Host, host) {
 			out = append(out, n)
@@ -178,14 +178,6 @@ func (s Set) Stream() *Stream {
 		return nil
 	}
 	return &Stream{set: s, choices: map[int]*choiceState{}}
-}
-
-func hostOf(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	return strings.ToLower(u.Hostname())
 }
 
 // matchesHost reports whether host is one of hosts (comma-separated) or a

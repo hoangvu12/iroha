@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"sync"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
+	"github.com/hoangvu12/iroha/internal/hosts"
 	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logs"
 	"github.com/hoangvu12/iroha/internal/planner"
@@ -206,7 +206,7 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 	started := g.clock.Now()
 	actx, _, release := deadlineContext(ctx, g.clock, started.Add(keyTestTimeout))
 	defer release()
-	f := &rules.Failure{Provider: rt.Handle, Host: hostOf(ep.URL)}
+	f := &rules.Failure{Provider: rt.Handle, Host: hosts.Of(ep.URL)}
 	req, err := outbound(actx, c, header, body, op, false)
 	if err != nil {
 		return res, api.Conflict("endpoint_misconfigured", "Fix the Endpoint (GET /api/providers/"+rt.Handle+"/endpoints).", "%s", err.Error())
@@ -298,17 +298,17 @@ func testCall(sh shape.Shape, model string) (op string, body []byte, header http
 	var v map[string]any
 	switch sh {
 	case shape.OpenAIResponses:
-		op, v = "/responses", map[string]any{"model": model, "input": keyTestPrompt, "max_output_tokens": 16}
+		v = map[string]any{"model": model, "input": keyTestPrompt, "max_output_tokens": 16}
 	case shape.AnthropicMessages:
-		op, v = "/messages", map[string]any{"model": model, "max_tokens": 16, "messages": msgs}
-		header.Set("Anthropic-Version", "2023-06-01")
+		v = map[string]any{"model": model, "max_tokens": 16, "messages": msgs}
+		header.Set("Anthropic-Version", shape.AnthropicVersion)
 	case shape.Gemini:
-		op = "/models/" + url.PathEscape(model) + ":generateContent"
 		v = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": keyTestPrompt}}}},
 			"generationConfig": map[string]any{"maxOutputTokens": 16}}
 	default:
-		op, v = opChat, map[string]any{"model": model, "max_tokens": 16, "messages": msgs}
+		v = map[string]any{"model": model, "max_tokens": 16, "messages": msgs}
 	}
 	body, _ = json.Marshal(v)
+	op = opFor(sh, model, false)
 	return op, body, header
 }

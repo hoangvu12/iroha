@@ -21,11 +21,11 @@ import (
 
 // Options configure one import run.
 type Options struct {
-	V1DB      string // path to a copy of v1's iroha.db
-	MasterKey string // v1's IROHA_MASTER_KEY
-	URL       string // v2 base URL, e.g. http://127.0.0.1:8080
-	Token     string // v2 Admin Token
-	Apply     bool   // false: dry run, only GET requests are sent
+	V1DB      string       // path to a copy of v1's iroha.db
+	MasterKey string       // v1's IROHA_MASTER_KEY
+	URL       string       // v2 base URL, e.g. http://127.0.0.1:8080
+	Token     string       // v2 Admin Token
+	Apply     bool         // false: dry run, only GET requests are sent
 	HTTP      *http.Client // required: the client talking to v2
 	Out       io.Writer
 }

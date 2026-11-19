@@ -38,7 +38,7 @@ func TestPlan(t *testing.T) {
 		rot       planner.Rotation
 		model     string
 		want      string
-		empty     string
+		empty     planner.EmptyCode
 	}{
 		{"one endpoint, keys in order", []planner.Provider{{ID: "p", Handle: "p", Endpoints: []planner.Endpoint{chat}, Keys: keys("k1", "k2", "k3")}},
 			planner.Fixed(0), "glm", "k1@a:glm k2@a:glm k3@a:glm", ""},
@@ -91,7 +91,7 @@ func TestEndpointRestrictions(t *testing.T) {
 		keys  []planner.Key
 		want  string
 		skips string
-		empty string
+		empty planner.EmptyCode
 	}{
 		{"a restricted key only goes to its Endpoints", []planner.Endpoint{eu, us}, []planner.Key{key("plan", "ep_us"), key("any")},
 			"plan@us:glm-us any@eu:glm any@us:glm-us", "", ""},
@@ -111,7 +111,7 @@ func TestEndpointRestrictions(t *testing.T) {
 			}
 			var skips []string
 			for _, s := range r.Skipped {
-				skips = append(skips, s.Key.Name+":"+s.Reason)
+				skips = append(skips, s.Key.Name+":"+string(s.Reason))
 			}
 			if got := strings.Join(skips, " "); got != tc.skips {
 				t.Fatalf("skips = %q, want %q", got, tc.skips)
@@ -137,7 +137,7 @@ func TestTranslationIsTheSecondTier(t *testing.T) {
 		eps   []planner.Endpoint
 		keys  []planner.Key
 		want  string
-		empty string
+		empty planner.EmptyCode
 	}{
 		{"a same-Shape candidate wins", []planner.Endpoint{msgs, chat}, []planner.Key{key("k1")}, "k1@a:glm", ""},
 		{"no same-Shape Endpoint: translate", []planner.Endpoint{msgs, gem}, []planner.Key{key("k1")}, "k1@m:glm-m", ""},
@@ -201,7 +201,7 @@ func TestKeyStatesExcludeKeys(t *testing.T) {
 		keys      []planner.Key
 		want      string
 		skips     string
-		empty     string
+		empty     planner.EmptyCode
 		emptyTill time.Time
 	}{
 		{"usable keys only", []planner.Endpoint{chat}, []planner.Key{disabled, ok, invalid, cooling, cooled},
@@ -238,7 +238,7 @@ func TestKeyStatesExcludeKeys(t *testing.T) {
 			}
 			var skips []string
 			for _, s := range r.Skipped {
-				x := s.Key.Name + ":" + s.Reason
+				x := s.Key.Name + ":" + string(s.Reason)
 				if s.Model != "" {
 					x += ":" + s.Model
 				}

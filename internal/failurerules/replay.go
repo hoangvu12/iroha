@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/hoangvu12/iroha/internal/hosts"
 	"github.com/hoangvu12/iroha/internal/rules"
 	"github.com/hoangvu12/iroha/internal/store"
 )
@@ -89,7 +89,7 @@ func replay(ctx context.Context, q queryer, now, after *rules.Set, at time.Time)
 			return nil, err
 		}
 		a.StartedAt = store.FromMillis(started)
-		f := rules.Failure{Provider: a.Provider, Host: hostOf(endpointURL), Status: a.Status, Err: errText, Body: []byte(body),
+		f := rules.Failure{Provider: a.Provider, Host: hosts.Of(endpointURL), Status: a.Status, Err: errText, Body: []byte(body),
 			Timeout: a.Status == 0 && strings.HasPrefix(a.Reason, "timeout")}
 		if headers != "" {
 			var h map[string]string
@@ -130,12 +130,4 @@ func replay(ctx context.Context, q queryer, now, after *rules.Set, at time.Time)
 		return (b.After + b.Now) - (a.After + a.Now)
 	})
 	return out, nil
-}
-
-func hostOf(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	return u.Hostname()
 }

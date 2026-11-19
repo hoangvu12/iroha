@@ -1,10 +1,11 @@
 import type { ComponentType } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { announce } from "@ui-sdk/core";
 import { Check, CircleAlert, Copy } from "lucide-react";
 import { Button, IconButton } from "./Button";
 import { writeClipboard } from "./clipboard";
 import { cn } from "./cn";
+import { durationOf, easingOf } from "./motion";
 
 // Copying shows its result on the button that copied (spec: "Results show
 // where they happened"): the icon and label turn into "Copied" for a moment,
@@ -99,6 +100,8 @@ export function CopyButton({
   className?: string;
 }) {
   const { state, copy } = useCopy();
+  const text = state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : children;
+  const slide = useSlidingLabel(text);
   const name = label ?? `Copy the ${what}`;
   const press = (e: { stopPropagation: () => void }) => {
     e.stopPropagation();
@@ -120,13 +123,62 @@ export function CopyButton({
       />
     );
 
-  const text = state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : children;
   return (
-    <Button size={size} variant={variant} icon={copyIcon(state, glyph)} disabled={disabled} aria-label={name} data-copy={state} className={className} onClick={press}>
-      {/* Keeps the width of "Copied" so the button doesn't jump when it changes. */}
-      <span data-reserve="Copied" className="grid justify-items-start after:invisible after:col-start-1 after:row-start-1 after:content-[attr(data-reserve)]">
-        <span className="col-start-1 row-start-1">{text}</span>
+    <Button
+      size={size}
+      variant={variant}
+      icon={copyIcon(state, glyph)}
+      disabled={disabled}
+      aria-label={name}
+      data-copy={state}
+      className={className}
+      onClick={(e) => {
+        slide.remember();
+        press(e);
+      }}
+    >
+      {/* The outer span's width slides between the two words; the inner one is measured. */}
+      <span ref={slide.outer} className="inline-block overflow-hidden">
+        <span ref={slide.inner} className="inline-block">
+          {text}
+        </span>
       </span>
     </Button>
   );
+}
+
+/**
+ * A label that fits its words at rest and slides its width when they change
+ * ("Copy" -> "Copied"), so the button neither leaves a gap nor jumps. The
+ * width moves like a tab indicator's (`--duration-indicator`, `--ease-out`)
+ * and changes at once under reduced motion. `remember` measures the label
+ * just before a change (fonts may have loaded since the last one).
+ */
+function useSlidingLabel(text: string) {
+  const outer = useRef<HTMLSpanElement>(null);
+  const inner = useRef<HTMLSpanElement>(null);
+  const last = useRef(0);
+  const remember = useCallback(() => {
+    if (inner.current) last.current = inner.current.getBoundingClientRect().width;
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = outer.current;
+    let from = last.current;
+    remember();
+    const to = last.current;
+    if (!el || typeof el.animate !== "function") return;
+    // Interrupted mid-slide: start from where it is now.
+    const running = el.getAnimations();
+    if (running.length) {
+      from = el.getBoundingClientRect().width;
+      running.forEach((a) => a.cancel());
+    }
+    if (!from || !to || from === to || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // 0 when reduced motion zeroes the token: the width changes at once.
+    const duration = durationOf("--duration-indicator");
+    if (duration) el.animate([{ width: `${from}px` }, { width: `${to}px` }], { duration, easing: easingOf("--ease-out") });
+  }, [text, remember]);
+
+  return { outer, inner, remember };
 }

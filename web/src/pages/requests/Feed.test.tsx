@@ -36,7 +36,7 @@ function request(id: string, status = 200, startedAt = new Date().toISOString())
 }
 
 /** A fake Iroha: `list(params)` answers GET /api/requests; stats and filters are fixed. */
-function iroha(list: (p: URLSearchParams) => unknown | Promise<Response>, stats: unknown = STATS) {
+function iroha(list: (p: URLSearchParams) => unknown | Promise<Response>, stats: unknown = STATS, filters: unknown = { callers: [], providers: [], pools: [], models: [] }) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
     const url = new URL(String(input), "http://iroha.test");
     if (url.pathname === "/api/requests") {
@@ -44,7 +44,7 @@ function iroha(list: (p: URLSearchParams) => unknown | Promise<Response>, stats:
       return body instanceof Response ? body : json(body);
     }
     if (url.pathname === "/api/requests/stats") return json(stats);
-    if (url.pathname === "/api/requests/filters") return json({ callers: [], providers: [], pools: [], models: [] });
+    if (url.pathname === "/api/requests/filters") return json(filters);
     return json({});
   });
   vi.stubGlobal("fetch", fetch);
@@ -110,6 +110,25 @@ test("changing a filter keeps the rows on screen until the new ones arrive, with
   release(json({ requests: [request("req_ok", 200)], cursor: 2 }));
   await waitFor(() => expect(opener("req_ok")).toBeTruthy());
   expect(opener("req_failed")).toBeNull();
+});
+
+test("a Gateway Key's ID as the caller (its Requests count links so) filters by the ID and reads as the key's name", async () => {
+  const callers = [
+    { name: "linh", kind: "gateway_key", gateway_key_id: "gk_1", requests: 30 },
+    { name: "caller-2", kind: "gateway_key", gateway_key_id: "gk_2", requests: 20 },
+  ];
+  const fetch = iroha(() => ({ requests: [request("req_1")], cursor: 1 }), STATS, { callers, providers: [], pools: [], models: [] });
+  const user = userEvent.setup();
+  renderFeed("/requests?caller=gk_2&range=24h");
+
+  expect(await screen.findByRole("button", { name: "Remove filter Caller is caller-2" })).toBeTruthy();
+  expect(listCalls(fetch)[0].searchParams.get("caller")).toBe("gk_2");
+
+  // The Caller menu ticks the key by its name, with no extra entry for the ID.
+  await user.click(screen.getByRole("button", { name: /Filter/ }));
+  await user.click(await screen.findByRole("menuitem", { name: /Caller/ }));
+  expect((await screen.findByRole("menuitemradio", { name: /caller-2/ })).getAttribute("aria-checked")).toBe("true");
+  expect(screen.queryByRole("menuitemradio", { name: /gk_2/ })).toBeNull();
 });
 
 test("the first load shows a skeleton of the feed, labelled for screen readers", async () => {

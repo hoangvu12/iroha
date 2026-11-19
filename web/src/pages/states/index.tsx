@@ -199,7 +199,6 @@ function DemoTable(p: Partial<DataTableProps<DemoKey>> & { id: string }) {
       rowName={(k) => k.name}
       defaultSorting={BY_NAME}
       paging={{ mode: "none" }}
-      maxHeight="max-h-80"
       {...p}
     />
   );

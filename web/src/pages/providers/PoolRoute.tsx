@@ -235,19 +235,20 @@ function ProviderName({ handle }: { handle: string }) {
   );
 }
 
-function Tag({ children }: { children: ReactNode }) {
+export function Tag({ children }: { children: ReactNode }) {
   return <span className="shrink-0 rounded-md bg-muted px-2 py-0.5 text-[13px] text-fg-muted">{children}</span>;
 }
 
-function IconTile({ children }: { children: ReactNode }) {
+export function IconTile({ children }: { children: ReactNode }) {
   return <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-bg text-fg-muted">{children}</span>;
 }
 
-function Connector({ label }: { label?: string }) {
+/** The line between two cards; `short` for a long chain (the Rules flow). */
+export function Connector({ label, short }: { label?: string; short?: boolean }) {
   return (
     <div className="flex flex-col items-center" aria-hidden>
       <span className="size-2 rounded-full border border-border-strong bg-bg" />
-      <span className={cn("w-px bg-border-strong", label ? "h-4" : "h-12")} />
+      <span className={cn("w-px bg-border-strong", label ? "h-4" : short ? "h-5" : "h-12")} />
       {label && (
         <>
           <span className="rounded-full border border-border bg-bg px-3 py-1 text-[13.5px] text-fg-muted">{label}</span>

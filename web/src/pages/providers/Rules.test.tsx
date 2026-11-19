@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAgent } from "@ui-sdk/react/agent";
@@ -26,10 +26,22 @@ const rule = (name: string, i: number, o: Partial<Rule> = {}): Rule => ({
 
 const RULES = [rule("mine", 0, { source: "owner", hits: 3 }), rule("rate-limited", 1, { hits: 40 }), rule("server-error", 2, { enabled: false, hits: 0 })];
 
-function renderTab() {
+const FLOW_RULES = [
+  rule("rate-quota", 0, { source: "owner", provider: "acme", status: ["429", "5xx"], code: ["Throttling.RateQuota"], body: "quota", hits: 312, key_effect: "Cool 60 s", request_effect: "Try next key" }),
+  rule("mine", 1, {
+    source: "owner",
+    outcome: "fail_request",
+    key_effect: "No change",
+    request_effect: "Return to Caller",
+    overrides: { name: "mine", status: ["429"], outcome: "cooling_key" },
+  }),
+  rule("server-error", 2, { enabled: false, status: ["5xx"], outcome: "retry_elsewhere", key_effect: "No change", request_effect: "Try next key", hits: 0 }),
+];
+
+function renderTab(list: Rule[] = RULES) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (u, init) => {
-    if (String(u).startsWith("/api/rules?") || ((init?.method ?? "GET") === "GET" && String(u).startsWith("/api/rules"))) return answer({ rules: RULES });
-    return answer({ dry_run: false, audit_entry: "aud_1", changes: [], rule: RULES[0] });
+    if (String(u).startsWith("/api/rules?") || ((init?.method ?? "GET") === "GET" && String(u).startsWith("/api/rules"))) return answer({ rules: list });
+    return answer({ dry_run: false, audit_entry: "aud_1", changes: [], rule: list[0] });
   });
   vi.stubGlobal("fetch", fetch);
   render(
@@ -84,6 +96,85 @@ test("Delete… on the Owner's rule is red and asks, naming it", async () => {
   await screen.findByRole("alertdialog", { name: "Delete mine?" });
   await user.click(screen.getByRole("button", { name: "Delete rule" }));
   await waitFor(() => expect(calls(fetch, "DELETE")).toEqual(["/api/rules/mine"]));
+});
+
+// The Flow view (UI ticket 31): the same rules as the steps a failure falls through.
+const flow = () => screen.findByRole("list", { name: "Failure Rules, in the order they're tried" });
+const steps = () => within(screen.getByRole("list", { name: "Failure Rules, in the order they're tried" })).getAllByRole("listitem");
+
+test("Flow shows the rules as steps in the order they're tried, and the choice is remembered", async () => {
+  const user = userEvent.setup();
+  renderTab();
+  await screen.findByRole("table", { name: "Failure Rules" });
+  await user.click(screen.getByRole("radio", { name: "Flow" }));
+  await flow();
+  expect(screen.queryByRole("table", { name: "Failure Rules" })).toBeNull();
+  expect(steps().map((s) => within(s).getByRole("button", { name: /^Open / }).getAttribute("aria-label"))).toEqual(["Open mine", "Open rate-limited", "Open server-error"]);
+  expect(localStorage.getItem("iroha:rules:view")).toBe("flow");
+
+  // Back on the tab later, Flow is still the view.
+  cleanup();
+  renderTab();
+  await flow();
+});
+
+test("each step says what it matches and, on a match, what happens to the key and the Request", async () => {
+  localStorage.setItem("iroha:rules:view", "flow");
+  renderTab(FLOW_RULES);
+  await flow();
+  const [quota, mine, off] = steps();
+  expect(quota.textContent).toContain("429 or 5xx and code Throttling.RateQuota and body has “quota”");
+  expect(quota.textContent).toContain("Cool 60 s");
+  expect(quota.textContent).toContain("Try next key");
+  expect(quota.textContent).toContain("matches");
+  // The Owner's version of a built-in rule says it replaces it, and what the built-in did.
+  expect(within(mine).getByText("Replaces built-in")).toBeTruthy();
+  expect(mine.textContent).toContain("Built-in did: cool the key, 60 s");
+  expect(mine.textContent).toContain("Return to Caller");
+  // A switched-off rule is passed over.
+  expect(within(off).getByText("Off, skipped")).toBeTruthy();
+  expect(off.textContent).toContain("skipped");
+  expect(off.textContent).not.toContain("matches");
+  // Today's hits on each step.
+  expect(within(quota).getByText("312")).toBeTruthy();
+  // After the last rule: what happens when none matched.
+  expect(screen.getByText("No response or 5xx: try the next key")).toBeTruthy();
+  expect(screen.getByText("Anything else: return the error to the Caller")).toBeTruthy();
+});
+
+test("clicking a step opens the rule to edit, as a table row does", async () => {
+  const user = userEvent.setup();
+  localStorage.setItem("iroha:rules:view", "flow");
+  renderTab(FLOW_RULES);
+  await flow();
+  await user.click(screen.getByRole("button", { name: "Open mine" }));
+  expect(await screen.findByRole("dialog", { name: "Edit mine" })).toBeTruthy();
+});
+
+test("on a phone each step carries what a match does inside it, so the list still reads as a flow", async () => {
+  localStorage.setItem("iroha:rules:view", "flow");
+  vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(max-width: 767px)", media: q, addEventListener() {}, removeEventListener() {} }));
+  renderTab(FLOW_RULES);
+  await flow();
+  const [quota, , off] = steps();
+  expect(quota.textContent).toContain("If it matches");
+  expect(quota.textContent).toContain("Cool 60 s");
+  expect(off.textContent).toContain("Would, if it were on");
+});
+
+test("an agent switches to Flow and opens a rule from it", async () => {
+  renderTab();
+  await screen.findByRole("table", { name: "Failure Rules" });
+  const toFlow = await agent.act({ steps: [{ ref: "View", action: "setValue", args: ["flow"] }] });
+  expect(toFlow.ok, toFlow.error?.message).toBe(true);
+  await flow();
+  const entries = agent.snapshot().filter((e) => !e.offPage && e.component !== "more");
+  for (const e of entries) expect(e.label, `${e.component} ${e.ref} has no name`).toBeTruthy();
+  const labels = entries.map((e) => e.label);
+  for (const l of ["View", "Open mine", "Open rate-limited", "Open server-error", "server-error on"]) expect(labels, `${l} is missing`).toContain(l);
+  const run = await agent.act({ steps: [{ ref: "Open server-error", action: "press" }] });
+  expect(run.ok, run.error?.message).toBe(true);
+  expect(await screen.findByRole("dialog", { name: "Change server-error" })).toBeTruthy();
 });
 
 test("an agent opens a built-in rule to change it", async () => {

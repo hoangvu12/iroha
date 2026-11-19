@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowUp, ChevronDown, Code2, KeyRound, Link2, Maximize2, MessageCircle, Minimize2, Square, SquarePen, Trash2, Wrench, X } from "lucide-react";
 import { useChatPanel } from "@/app/chat-panel";
@@ -8,6 +8,7 @@ import { useIsPhone } from "@/lib/media";
 import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/ui/Menu";
+import { createScrollAreaController, ScrollArea } from "@/ui/ScrollArea";
 import { notify } from "@/ui/toast";
 import type { Settings } from "./api";
 import { bareModel } from "./api";
@@ -115,16 +116,10 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
   const [text, setText] = useState(chat.draft ?? "");
   const [picker, setPicker] = useState<View | null>(null);
   const [snippets, setSnippets] = useState(false);
-  const scroller = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
+  // The log follows the reply while it streams, unless the Owner scrolled up.
+  const [log] = useState(createScrollAreaController);
   const s = chat.settings;
   const change = (patch: Partial<Settings>) => setSettings(chat.id, patch);
-
-  // Follow the reply while it streams, unless the Owner scrolled up.
-  useLayoutEffect(() => {
-    const el = scroller.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  });
 
   const submit = (t = text) => {
     const v = t.trim();
@@ -134,7 +129,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
       return;
     }
     if (t === text) setText("");
-    stick.current = true;
+    log.scrollToEnd();
     void send(chat.id, v);
   };
 
@@ -155,15 +150,8 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
           </button>
         </div>
       )}
-      <div
-        ref={scroller}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        }}
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-5"
-      >
-        <div className={cn(column, "flex min-h-full flex-col gap-5")}>
+      <ScrollArea label="Messages" role="log" stickToEnd controller={log} className="flex-1" contentClassName="flex min-h-full flex-col px-4 py-5">
+        <div className={cn(column, "flex flex-1 flex-col gap-5")}>
           {chat.origin && (
             <p className="flex items-center justify-center gap-1.5 text-[13.5px] text-fg-muted">
               <Link2 size={14} className="shrink-0" /> <span className="truncate">Opened from {chat.origin}</span>
@@ -196,7 +184,7 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
             )
           )}
         </div>
-      </div>
+      </ScrollArea>
       <div className="shrink-0 px-3 pb-3 pt-1">
         <div className={cn(column, "relative")}>
           {picker && (

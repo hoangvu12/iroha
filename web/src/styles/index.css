@@ -133,6 +133,79 @@
   .tabular {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Fallback for anything still scrolling natively (the page itself, a
+     textarea): a thin rounded thumb, no track and no arrow buttons. Scroll
+     regions use ui/ScrollArea instead. Chrome ignores these once an element
+     sets scrollbar-width or scrollbar-color, so neither is set here. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--fg) 20%, transparent) padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--fg) 35%, transparent);
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--fg) 20%, transparent) transparent;
+    }
+  }
+
+  /* ui/ScrollArea's edge fades: the viewport fades out at an edge while more
+     content lies past it (UI SDK's overflow variables, taken from the root). */
+  .scroll-fade-y {
+    --scroll-area-overflow-y-start: inherit;
+    --scroll-area-overflow-y-end: inherit;
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      #000 min(1.5rem, var(--scroll-area-overflow-y-start, 0px)),
+      #000 calc(100% - min(1.5rem, var(--scroll-area-overflow-y-end, 0px))),
+      transparent
+    );
+  }
+  .scroll-fade-x {
+    --scroll-area-overflow-x-start: inherit;
+    --scroll-area-overflow-x-end: inherit;
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 min(1.5rem, var(--scroll-area-overflow-x-start, 0px)),
+      #000 calc(100% - min(1.5rem, var(--scroll-area-overflow-x-end, 0px))),
+      transparent
+    );
+  }
+  .scroll-fade-both {
+    mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        #000 min(1.5rem, var(--scroll-area-overflow-y-start, 0px)),
+        #000 calc(100% - min(1.5rem, var(--scroll-area-overflow-y-end, 0px))),
+        transparent
+      ),
+      linear-gradient(
+        to right,
+        transparent,
+        #000 min(1.5rem, var(--scroll-area-overflow-x-start, 0px)),
+        #000 calc(100% - min(1.5rem, var(--scroll-area-overflow-x-end, 0px))),
+        transparent
+      );
+    mask-composite: intersect;
+  }
 }
 
 @keyframes shimmer {

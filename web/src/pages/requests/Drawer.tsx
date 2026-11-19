@@ -7,8 +7,10 @@ import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
 import { IconButton } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { ScrollArea } from "@/ui/ScrollArea";
 import { ErrorState } from "@/ui/States";
 import { popupOpen } from "@/ui/popup";
+import { Tab as UITab, TabList, TabPanel, Tabs } from "@/ui/Tabs";
 import { notify } from "@/ui/toast";
 import type { RequestRecord } from "./api";
 import { useCopy, useRequest } from "./api";
@@ -102,7 +104,7 @@ export function RequestDrawer({
           <div className="skeleton h-3 w-32 rounded-full bg-muted" />
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
+        <ScrollArea className="flex-1" contentClassName="px-6 pb-10">
           <header className="flex items-start gap-3.5 pb-5 pt-6">
             {r.provider ? <ProviderLogo handle={r.provider} size={44} /> : null}
             <div className="min-w-0 flex-1">
@@ -111,33 +113,32 @@ export function RequestDrawer({
             </div>
             <StatusPill r={r} />
           </header>
-          <nav className="mb-6 flex gap-7 border-b border-border" aria-label="Request tabs">
-            {(
-              [
-                ["details", "Details"],
-                ["attempts", "Attempts"],
-                ["captured", "Captured"],
-              ] as const
-            ).map(([t, label]) => (
-              <button
-                key={t}
-                type="button"
-                aria-current={tab === t ? "page" : undefined}
-                onClick={() => setTab(t)}
-                className={cn(
-                  "-mb-px whitespace-nowrap border-b-2 pb-2.5 text-[15.5px] transition-colors",
-                  tab === t ? "border-fg text-fg" : "border-transparent text-fg-muted hover:text-fg",
-                )}
-              >
-                {label}
-                {t === "attempts" && <span className="ml-2 tabular text-fg-muted">{r.attempt_count}</span>}
-              </button>
-            ))}
-          </nav>
-          {tab === "details" && <RequestDetails r={r} onShowCaptured={() => setTab("captured")} />}
-          {tab === "attempts" && <AttemptList r={r} loading={!r.attempts && req.isFetching} onOpenRoute={openRoute} />}
-          {tab === "captured" && <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />}
-        </div>
+          <Tabs value={tab} onValueChange={(t) => t && setTab(t as Tab)}>
+            <TabList label="Request tabs" className="mb-6">
+              {(
+                [
+                  ["details", "Details"],
+                  ["attempts", "Attempts"],
+                  ["captured", "Captured"],
+                ] as const
+              ).map(([t, label]) => (
+                <UITab key={t} value={t}>
+                  {label}
+                  {t === "attempts" && <span className="ml-2 tabular text-fg-muted">{r.attempt_count}</span>}
+                </UITab>
+              ))}
+            </TabList>
+            <TabPanel value="details">
+              <RequestDetails r={r} onShowCaptured={() => setTab("captured")} />
+            </TabPanel>
+            <TabPanel value="attempts">
+              <AttemptList r={r} loading={!r.attempts && req.isFetching} onOpenRoute={openRoute} />
+            </TabPanel>
+            <TabPanel value="captured">
+              <CapturedView r={r} onReplay={() => chat.open({ kind: "request", request: r.id })} />
+            </TabPanel>
+          </Tabs>
+        </ScrollArea>
       )}
     </aside>
   );

@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { NavLink } from "react-router";
 import { cn } from "./cn";
 
 export type Tone = "green" | "amber" | "red" | "gray" | "blue";
@@ -45,29 +44,6 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
     >
       {children}
     </kbd>
-  );
-}
-
-/** Underline tabs (Provider: Keys / Endpoints / Models; Settings). Each tab is a route. */
-export function Tabs({ items }: { items: { to: string; label: ReactNode; end?: boolean }[] }) {
-  return (
-    <nav className="flex gap-6 overflow-x-auto border-b border-border">
-      {items.map((t) => (
-        <NavLink
-          key={t.to}
-          to={t.to}
-          end={t.end}
-          className={({ isActive }) =>
-            cn(
-              "-mb-px whitespace-nowrap border-b-2 pb-2.5 text-[15px] transition-colors",
-              isActive ? "border-fg text-fg" : "border-transparent text-fg-muted hover:text-fg",
-            )
-          }
-        >
-          {t.label}
-        </NavLink>
-      ))}
-    </nav>
   );
 }
 

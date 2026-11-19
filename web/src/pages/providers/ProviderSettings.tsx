@@ -7,21 +7,11 @@ import { Button } from "@/ui/Button";
 import { Mono } from "@/ui/bits";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { Input } from "@/ui/Input";
-import { LogoTile } from "@/ui/LogoTile";
 import { notify, notifyChange } from "@/ui/toast";
 import type { Provider } from "./api";
 import { calls, errorText, useRefresh } from "./api";
 import { SettingsCard, SettingsRow, Switch } from "./controls";
-
-/** Debounced value, for previews that fetch. */
-export function useDebounced<T>(v: T, ms = 400): T {
-  const [d, setD] = useState(v);
-  useEffect(() => {
-    const t = setTimeout(() => setD(v), ms);
-    return () => clearTimeout(t);
-  }, [v, ms]);
-  return d;
-}
+import { LogoInput } from "./LogoField";
 
 /** The Settings tab (C14): name, logo, on/off, the Provider route, and archiving. */
 export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
@@ -30,7 +20,6 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
   const [logo, setLogo] = useState(p.logo_domain_guessed ? "" : p.logo_domain);
   const [errors, setErrors] = useState<{ name?: string; logo?: string }>({});
   const [archiving, setArchiving] = useState(false);
-  const domain = useDebounced(logo.trim() || p.logo_domain);
 
   useEffect(() => {
     setName(p.name);
@@ -80,27 +69,22 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
           }
         >
           <form
-            className="flex w-full gap-2"
+            className="flex w-full items-start gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               if (logoChanged) void save({ logo_domain: logo.trim() }, logo.trim() ? `Logo domain set to ${logo.trim()}` : "Logo domain guessed again", "logo");
             }}
           >
-            <div className="relative w-full">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2">
-                <LogoTile name={p.handle} src={domain && domain !== "none" ? logoPreview({ domain }) : undefined} size={22} />
-              </span>
-              <Input
-                aria-label="Logo domain"
-                mono
-                className="pl-10"
-                spellCheck={false}
-                placeholder={p.logo_domain_guessed ? p.logo_domain || "example.com" : "example.com"}
-                value={logo}
-                onChange={(e) => setLogo(e.target.value)}
-                aria-invalid={!!errors.logo}
-              />
-            </div>
+            <LogoInput
+              label="Logo domain"
+              name={p.handle}
+              value={logo}
+              fallback={p.logo_domain}
+              previewUrl={(domain) => (domain.toLowerCase() === "none" ? undefined : logoPreview({ domain }))}
+              onChange={setLogo}
+              placeholder={p.logo_domain_guessed ? p.logo_domain || "example.com" : "example.com"}
+              invalid={!!errors.logo}
+            />
             {logoChanged && (
               <Button type="submit" variant="primary">
                 Save

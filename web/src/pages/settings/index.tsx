@@ -1,6 +1,6 @@
-import { Navigate, Route, Routes } from "react-router";
+import { Navigate, Route, Routes, useLocation } from "react-router";
 import { PageHeader } from "@/app/PageHeader";
-import { Tabs } from "@/ui/bits";
+import { RouteTabs } from "@/ui/Tabs";
 import { AdminTokensTab } from "./AdminTokens";
 import { useAdminTokens } from "./api";
 import { AuditEntriesTab } from "./AuditEntries";
@@ -12,12 +12,17 @@ import { SignInTab } from "./SignIn";
 
 export default function SettingsPage() {
   const tokens = useAdminTokens();
+  const tab = useLocation().pathname.split("/")[2] ?? "";
   return (
     <>
       <PageHeader title="Settings" description="Admin access to Iroha, and a record of every change" />
-      <Tabs
+      <RouteTabs
+        label="Settings sections"
+        value={tab}
+        panelClassName="pt-7"
         items={[
           {
+            value: "admin-tokens",
             to: "/settings/admin-tokens",
             label: (
               <>
@@ -26,11 +31,10 @@ export default function SettingsPage() {
               </>
             ),
           },
-          { to: "/settings/audit-entries", label: "Audit Entries" },
-          { to: "/settings/sign-in", label: "Sign-in" },
+          { value: "audit-entries", to: "/settings/audit-entries", label: "Audit Entries" },
+          { value: "sign-in", to: "/settings/sign-in", label: "Sign-in" },
         ]}
-      />
-      <div className="pt-7">
+      >
         <Routes>
           <Route index element={<Navigate to="admin-tokens" replace />} />
           <Route path="admin-tokens" element={<AdminTokensTab />} />
@@ -38,7 +42,7 @@ export default function SettingsPage() {
           <Route path="sign-in" element={<SignInTab />} />
           <Route path="*" element={<Navigate to="admin-tokens" replace />} />
         </Routes>
-      </div>
+      </RouteTabs>
     </>
   );
 }

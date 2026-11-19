@@ -45,7 +45,7 @@ export function SnippetDialog({ open, onOpenChange, settings, prompt }: { open: 
       {sn.isError ? (
         <ErrorState title="Couldn't write the snippet" error={sn.error} onRetry={() => void sn.refetch()} />
       ) : (
-        <CodeBlock className="max-h-[50dvh] whitespace-pre">{code ?? "…"}</CodeBlock>
+        <CodeBlock maxHeight="max-h-[50dvh]" nowrap>{code ?? "…"}</CodeBlock>
       )}
       {sn.data?.note && <p className="mt-3 text-[13.5px] text-fg-muted">{sn.data.note}</p>}
       {lang !== "curl" && (

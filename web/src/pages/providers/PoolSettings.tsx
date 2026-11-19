@@ -6,14 +6,13 @@ import { PageBody } from "@/app/PageBody";
 import { Button } from "@/ui/Button";
 import { TypeToConfirmDialog } from "@/ui/Dialog";
 import { Input } from "@/ui/Input";
-import { LogoTile } from "@/ui/LogoTile";
 import { notifyChange } from "@/ui/toast";
 import type { Pool } from "./api";
 import { calls, errorText, useRefresh } from "./api";
 import { SettingsCard, SettingsRow } from "./controls";
-import { useDebounced } from "./ProviderSettings";
+import { LogoInput } from "./LogoField";
 
-/** A Pool's settings: name, maker (its logo), budget, and deleting it. */
+/** A Pool's settings: name, logo (a maker or a website), budget, and deleting it. */
 export function PoolSettingsTab({ pool }: { pool: Pool }) {
   const refresh = useRefresh();
   const navigate = useNavigate();
@@ -23,7 +22,6 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
   const [firstByte, setFirstByte] = useState(pool.budget.first_byte_seconds ? String(pool.budget.first_byte_seconds) : "");
   const [error, setError] = useState<{ field: string; text: string }>();
   const [deleting, setDeleting] = useState(false);
-  const shownMaker = useDebounced(maker.trim() || pool.maker);
 
   useEffect(() => {
     setName(pool.name);
@@ -69,21 +67,30 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
         {err("name")}
         <SettingsRow
           title="Logo"
-          hint={pool.maker_guessed ? `The model maker's logo. ${pool.maker ? `${pool.maker} is guessed from the name and members.` : "None could be guessed."}` : "The model maker's logo; empty guesses it."}
+          hint={
+            pool.maker_guessed
+              ? `A model maker (openai) or a website (chatgpt.com). ${pool.maker ? `${pool.maker} is guessed from the name and members.` : "No maker could be guessed."}`
+              : "A model maker (openai) or a website (chatgpt.com); empty guesses the maker."
+          }
         >
           <form
-            className="flex w-full gap-2"
+            className="flex w-full items-start gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              void save("maker", { maker: maker.trim() }, maker.trim() ? `Maker set to ${maker.trim()}` : "Maker guessed again");
+              void save("maker", { maker: maker.trim() }, maker.trim() ? `Logo set to ${maker.trim()}` : "Maker guessed again");
             }}
           >
-            <div className="relative w-full">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2">
-                <LogoTile name={pool.name} shape="square" src={shownMaker ? logoPreview({ maker: shownMaker }) : undefined} size={22} />
-              </span>
-              <Input aria-label="Model maker" mono className="pl-10" spellCheck={false} placeholder={pool.maker || "zhipuai"} value={maker} onChange={(e) => setMaker(e.target.value)} />
-            </div>
+            <LogoInput
+              label="Maker or website"
+              name={pool.name}
+              shape="square"
+              value={maker}
+              fallback={pool.maker}
+              previewUrl={(v) => logoPreview({ maker: v })}
+              onChange={setMaker}
+              placeholder={pool.maker || "openai or chatgpt.com"}
+              invalid={error?.field === "maker"}
+            />
             {maker.trim() !== (pool.maker_guessed ? "" : pool.maker) && (
               <Button type="submit" variant="primary">
                 Save

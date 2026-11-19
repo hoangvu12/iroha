@@ -146,6 +146,64 @@ func TestAPoolLogoIsItsMakersMarkElseTheMakersSiteElseNone(t *testing.T) {
 	srv.Admin.Get("/api/pools/nope/logo").Expect(404)
 }
 
+func TestAPoolLogoIsAMakerOrAWebsite(t *testing.T) {
+	lg := testkit.NewLogos(t)
+	lg.SetMaker("openai", testkit.SVG)
+	lg.SetFavicon("chatgpt.com", testkit.PNG)
+	srv := testkit.Start(t, testkit.Options{Logos: lg})
+	provider(t, srv, "oai", "https://api.openai.com/v1", nil)
+	for _, name := range []string{"gpt-6.1-sol", "house-mix"} {
+		srv.Admin.Post("/api/pools", map[string]any{"name": name, "members": []any{map[string]any{"provider": "oai", "model": "m-" + name}}}).Expect(201)
+	}
+	type pool struct {
+		Maker        string `json:"maker"`
+		MakerGuessed bool   `json:"maker_guessed"`
+	}
+	var res struct{ Pool pool }
+
+	// A value with a dot is a website, looked up like a Provider's logo domain.
+	srv.Admin.Patch("/api/pools/gpt-6.1-sol", map[string]any{"maker": "chatgpt.com"}).Expect(200).JSON(&res)
+	if res.Pool.Maker != "chatgpt.com" || res.Pool.MakerGuessed {
+		t.Fatalf("pool = %+v", res.Pool)
+	}
+	if resp := srv.Admin.Get("/api/pools/gpt-6.1-sol/logo").Expect(200); !bytes.Equal(resp.Body, testkit.PNG) {
+		t.Fatalf("website logo = %q", resp.Body)
+	}
+	// A URL is read for its host; case is ignored.
+	srv.Admin.Patch("/api/pools/gpt-6.1-sol", map[string]any{"maker": " https://ChatGPT.com/c/123 "}).Expect(200).JSON(&res)
+	if res.Pool.Maker != "chatgpt.com" {
+		t.Fatalf("pool = %+v", res.Pool)
+	}
+	srv.Admin.Get("/api/pools/gpt-6.1-sol/logo").Expect(200)
+
+	// A maker still names the maker's mark, whatever its case.
+	srv.Admin.Patch("/api/pools/house-mix", map[string]any{"maker": "OpenAI"}).Expect(200).JSON(&res)
+	if res.Pool.Maker != "openai" {
+		t.Fatalf("pool = %+v", res.Pool)
+	}
+	if resp := srv.Admin.Get("/api/pools/house-mix/logo").Expect(200); !bytes.Equal(resp.Body, testkit.SVG) {
+		t.Fatalf("maker logo = %q", resp.Body)
+	}
+
+	// Empty still guesses (gpt -> openai).
+	srv.Admin.Patch("/api/pools/gpt-6.1-sol", map[string]any{"maker": ""}).Expect(200).JSON(&res)
+	if res.Pool.Maker != "openai" || !res.Pool.MakerGuessed {
+		t.Fatalf("pool = %+v", res.Pool)
+	}
+
+	// Websites that are not domains are refused, as for Providers.
+	for _, bad := range []string{"10.0.0.1", "localhost:8080", "user@example.com", "exa mple.com", "https://"} {
+		srv.Admin.Patch("/api/pools/house-mix", map[string]any{"maker": bad}).Expect(400)
+	}
+
+	// The preview takes what the field takes.
+	srv.Admin.Get("/api/logos?maker=chatgpt.com").Expect(200)
+	srv.Admin.Get("/api/logos?maker=https://chatgpt.com/").Expect(200)
+	srv.Admin.Get("/api/logos?maker=OpenAI").Expect(200)
+	srv.Admin.Get("/api/logos?maker=example.org").Expect(404)
+	srv.Admin.Get("/api/logos?maker=10.0.0.1").Expect(400)
+}
+
 func TestWithoutLogoSourcesNothingIsFetched(t *testing.T) {
 	srv := testkit.Start(t)
 	provider(t, srv, "zai", "https://api.z.ai/api/paas/v4", nil)

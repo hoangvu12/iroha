@@ -6,7 +6,7 @@ import { PageHeader } from "@/app/PageHeader";
 import { seg } from "@/api/client";
 import { useIsPhone } from "@/lib/media";
 import { Button, IconButton } from "@/ui/Button";
-import { Tabs } from "@/ui/bits";
+import { RouteTabs } from "@/ui/Tabs";
 import { ErrorState } from "@/ui/States";
 import { usePool } from "./api";
 import { PoolTile } from "./controls";
@@ -69,10 +69,14 @@ export function PoolPage() {
         <ErrorState title={`Couldn't load ${name}`} error={pool.error} onRetry={() => void pool.refetch()} />
       ) : (
         <>
-          <Tabs
+          <RouteTabs
+            label={`${name} sections`}
+            value={tab}
+            panelClassName="pt-6"
             items={[
-              { to: `/providers/pools/${seg(name)}/route`, label: "Route" },
+              { value: "route", to: `/providers/pools/${seg(name)}/route`, label: "Route" },
               {
+                value: "members",
                 to: `/providers/pools/${seg(name)}/members`,
                 label: (
                   <>
@@ -81,14 +85,13 @@ export function PoolPage() {
                   </>
                 ),
               },
-              { to: `/providers/pools/${seg(name)}/settings`, label: "Settings" },
+              { value: "settings", to: `/providers/pools/${seg(name)}/settings`, label: "Settings" },
             ]}
-          />
-          <div className="pt-6">
+          >
             {tab === "route" && <PoolRouteTab name={name} pool={p} onAdd={() => setAdding(true)} />}
             {tab === "members" && <PoolMembersTab name={name} pool={p} onAdd={() => setAdding(true)} />}
             {tab === "settings" && p && <PoolSettingsTab pool={p} />}
-          </div>
+          </RouteTabs>
           {p && <AddMemberDialog pool={p} open={adding} onOpenChange={setAdding} />}
         </>
       )}

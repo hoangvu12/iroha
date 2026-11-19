@@ -28,4 +28,4 @@ Owner request, 2026-11-20. Ticket 23 removes notes from the snippet dialog at th
 
 **Browser check** (headless Chrome, testkit seed with the fake OpenAI Chat upstream answering a `get_weather` call then text): light and dark desktop, the side panel, phone 390 px light and dark (no sideways scroll). A real round from an Anthropic Messages chat: "Call a tool" with none on turned all 6 on, the model's call went through Iroha, the follow-up carried Iroha's result, Details shows Tool call Passed and the follow-up Request. An old saved chat with `toolCheck: true` loads as "Tools, 1 on". Screenshots: `iroha-v2-notes/v2-ui/shots/29/`. The phone header's description first truncated; it wraps now.
 
-**Not done**: nothing deferred. `src/pages/requests/Feed.test.tsx` (numbered pages) timed out once in the full parallel web run and passes alone; not touched by this ticket.
+**Not done**: nothing deferred. `src/pages/requests/Feed.test.tsx` (numbered pages) times out (15 s) in the full parallel web run on this machine and passes alone; it fails the same way on v2-ui (7e223cb) without this ticket, so it is load-related and not this ticket's.

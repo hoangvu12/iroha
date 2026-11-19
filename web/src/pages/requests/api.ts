@@ -155,9 +155,15 @@ export function useRequestFeed(q: Query, live: boolean) {
     // The rows on screen are the previous filter's until the new page lands: nothing to poll for yet.
     if (!live || placeholder || cursor.current === undefined) return;
     let stopped = false;
+    let paused = false;
     let timer: ReturnType<typeof setTimeout>;
     const ctrl = new AbortController();
     const tick = async () => {
+      // A hidden tab doesn't poll (like refetchInterval elsewhere); it catches up when shown (UI ticket 32).
+      if (document.hidden) {
+        paused = true;
+        return;
+      }
       try {
         // Drain: a full page means more changes wait.
         for (let i = 0; i < 5 && !stopped; i++) {
@@ -181,10 +187,17 @@ export function useRequestFeed(q: Query, live: boolean) {
         if (!stopped) timer = setTimeout(tick, POLL_MS);
       }
     };
+    const onVisibility = () => {
+      if (document.hidden || !paused || stopped) return;
+      paused = false;
+      void tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     timer = setTimeout(tick, POLL_MS);
     return () => {
       stopped = true;
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
       ctrl.abort();
     };
   }, [live, qKey, firstPage, placeholder]); // q is read through qKey

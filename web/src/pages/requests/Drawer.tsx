@@ -12,7 +12,7 @@ import { IconButton } from "@/ui/Button";
 import { popupOpen } from "@/ui/popup";
 import { Skeleton } from "@/ui/Skeleton";
 import { Tab as UITab, TabList, TabPanel, Tabs } from "@/ui/Tabs";
-import { useRequest } from "./api";
+import { usePrefetchRequests, useRequest } from "./api";
 import { AttemptList } from "./Attempts";
 import { ProviderLogo, StatusPill, when } from "./bits";
 import { CapturedView } from "./Captured";
@@ -43,6 +43,8 @@ export function RequestSheet({ record, index, top }: SheetBodyProps<"request">) 
   const at = index === 0 ? rows.findIndex((x) => x.id === id) : -1;
   const prev = at > 0 ? rows[at - 1] : undefined;
   const next = at >= 0 && at < rows.length - 1 ? rows[at + 1] : undefined;
+  // ↑/↓ land on a Request already loaded, so the sheet's content swaps at once.
+  usePrefetchRequests(top ? [prev, next] : [], { captures: tab === "captured" });
   const step = (to: string) => sheets.replace(index, { kind: "request", id: to, tab: record.tab });
   const setTab = (t: RequestTab) => sheets.replace(index, { ...record, tab: t === "details" ? undefined : t });
 

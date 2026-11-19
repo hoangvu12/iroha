@@ -199,9 +199,10 @@ function RouteCanvas({ r, phone }: { r: RequestRecord; phone: boolean }) {
   );
 }
 
-// The selected step's panel fades in when it appears (after Close, or with the page); choosing
-// another card swaps its content at once, and Close takes it away at once (UI ticket 18).
-const panelFade = "transition-opacity duration-fade ease-out starting:opacity-0";
+// The selected step's panel comes in from the edge it sits on when it appears (after Close, or
+// with the page): shift + fade on the list tokens, a plain fade under reduced motion. Choosing
+// another card swaps its content at once; Close takes it away at once (UI ticket 18).
+const panelFade = "transition-[opacity,translate] duration-list-in ease-out starting:translate-x-(--motion-shift) starting:opacity-0";
 
 /** A step on the canvas: the whole card is the button that selects it; a record's name on it is a link of its own, above it. */
 function Card({ selected, onSelect, children, label }: { selected: boolean; onSelect: () => void; children: ReactNode; label: string }) {

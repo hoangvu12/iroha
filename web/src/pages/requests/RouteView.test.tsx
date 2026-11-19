@@ -61,7 +61,7 @@ test("the route's cards and the selected step link the records they name; a card
 // UI ticket 18: motion in the Route view. jsdom has no Tailwind, so this reads the classes on the real markup.
 const classesOf = (el: Element) => el.getAttribute("class")!.split(/\s+/);
 
-test("motion: a card's border and ring change together on the hover tokens; the panel fades in when it comes back, swaps at once, closes at once", async () => {
+test("motion: a card's border and ring change together on the hover tokens; the panel comes in from its edge when it comes back, swaps at once, closes at once", async () => {
   const user = userEvent.setup();
   renderWithSheets(page, "/requests/req_rv/route");
   const route = await screen.findByRole("group", { name: "Route of req_rv" });
@@ -70,7 +70,7 @@ test("motion: a card's border and ring change together on the hover tokens; the 
   expect(classesOf(card)).not.toContain("transition-shadow");
 
   const panel = screen.getByRole("region", { name: "Selected step" });
-  const fade = ["starting:opacity-0", "transition-opacity", "duration-fade", "ease-out"];
+  const fade = ["starting:opacity-0", "starting:translate-x-(--motion-shift)", "transition-[opacity,translate]", "duration-list-in", "ease-out"];
   const root = panel.closest("[data-step-panel]")!;
   for (const k of fade) expect(classesOf(root)).toContain(k);
   // Another card: the same panel, its content swapped (no entrance again).

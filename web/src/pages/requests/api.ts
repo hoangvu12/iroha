@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, seg } from "@/api/client";
 
 // Types and hooks of the Requests page. They mirror the Go types in
@@ -234,6 +234,25 @@ export function useRequest(id: string | undefined, seed?: RequestRecord) {
     placeholderData: seed && seed.id === id ? { ...seed, attempts: undefined } : undefined,
     refetchInterval: (query) => (query.state.data?.state === "in_progress" ? 2000 : false),
   });
+}
+
+/**
+ * Fetches these Requests ahead (the open one's neighbours in the feed), so ↑/↓ in the Request
+ * sheet lands on a Request already whole: its content swaps at once, with no skeleton fading
+ * out (UI ticket 18: keyboard stepping never animates). Fresh for a minute.
+ */
+export function usePrefetchRequests(rows: (Pick<RequestRecord, "id" | "captured"> | undefined)[], { captures = false } = {}) {
+  const client = useQueryClient();
+  const ids = rows.filter((r) => !!r).map((r) => r.id).join(" ");
+  // On the Captured tab, their captures too.
+  const caps = captures ? rows.filter((r) => !!r?.captured).map((r) => r!.id).join(" ") : "";
+  useEffect(() => {
+    const split = (s: string) => (s ? s.split(" ") : []);
+    for (const id of split(ids))
+      void client.prefetchQuery({ queryKey: keys.one(id), queryFn: ({ signal }) => api.get<RequestRecord>(`/api/requests/${seg(id)}`, { signal }), staleTime: 60_000 });
+    for (const id of split(caps))
+      void client.prefetchQuery({ queryKey: keys.capture(id), queryFn: ({ signal }) => api.get<Capture>(`/api/requests/${seg(id)}/capture`, { signal }), staleTime: Infinity });
+  }, [ids, caps, client]);
 }
 
 export function useCapture(id: string | undefined, captured: boolean) {

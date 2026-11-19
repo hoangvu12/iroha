@@ -223,6 +223,22 @@ func TestTheRoutePreviewShowsTheKeylessKey(t *testing.T) {
 	}
 }
 
+// The test chat (ticket 23) reaches a keyless Provider with no credential,
+// unpinned and pinned to the keyless key.
+func TestTheTestChatReachesAKeylessProviderWithNoCredential(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "local"}).Expect(201)
+	srv.Admin.Post("/api/providers/local/endpoints", map[string]any{"url": up.URL(), "shape": "openai-chat", "auth_style": "none"}).Expect(201)
+	for _, body := range []map[string]any{
+		{"model": "local/llama-3", "stream": false},
+		{"model": "local/llama-3", "upstream_key": "keyless"},
+	} {
+		srv.Admin.Post("/api/test", body).Expect(200)
+		noCredential(t, "test chat", up.Last())
+	}
+}
+
 // A Model Pool with a keyless member serves from it with no credential, and
 // a refusal there (the relay wanted a key after all) moves on to the next
 // member without marking the keyless key invalid.

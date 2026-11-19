@@ -146,7 +146,7 @@ Body edits are byte-preserving: `gateway/jsonedit.go` (`setField`, `field`, `ech
 - **Empty static header** = not sent, and drops the Caller's header of that name (`gateway.setStatic`, the same in `models.discoveryRequest`).
 - `KeyCounts.Keyless` (summary and overview) counts keys with no secret. The `no_upstream_key` hint names the keyless path.
 - UI: Add Provider's "No key needed" switch (Endpoint `auth_style: none`), "Add keyless key" in the Keys tab's empty state and Add keys dialog (`calls.addKeylessKey`).
-- Tests: `gateway/keyless_test.go`, `models/keyless_test.go`, `v1import/keyless_test.go`. The test chat (23) sends through the same gateway path, so it is covered by those tests.
+- Tests: `gateway/keyless_test.go`, `models/keyless_test.go`, `v1import/keyless_test.go` (the test chat, 23, included).
 
 ### Ticket 30: structured output and search results
 

@@ -8,8 +8,17 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A Provider with one `none`-auth Endpoint and no hand-made key serves a Caller end to end (test through the HTTP seam), and nothing upstream ever receives an auth header or query parameter
-- [ ] UI path to add a keyless Provider / key
-- [ ] Every path above has a keyless test or a note why it cannot differ
+- [x] A Provider with one `none`-auth Endpoint and no hand-made key serves a Caller end to end (test through the HTTP seam), and nothing upstream ever receives an auth header or query parameter
+- [x] UI path to add a keyless Provider / key
+- [x] Every path above has a keyless test or a note why it cannot differ
+
+## Comments
+
+- **Decision (in `docs/agents/architecture.md`, "Ticket 41"):** no implicit planner slot. Giving an Endpoint auth style `none` on a Provider with no Upstream Keys adds a real key `keyless` (empty secret) in the same Audit Entry (`EndpointResult.keyless_key`; one revert undoes both), so every key still has one Key State. Hand-made keyless keys (`{"name": ...}`) still work. The `no_upstream_key` hint now names the keyless path.
+- **Behaviour change:** a static header with an empty value is no longer sent as `Name:`. It is dropped, and it removes the Caller's header of that name (Attempts, key tests, discovery).
+- **UI:** "No key needed" switch in Add Provider; "Add keyless key" in the Keys empty state (per the design's EMPTY state) and in the Add keys dialog; keyless keys show "no secret"; toasts say when a keyless key was added. Checked in headless Chrome, desktop and phone.
+- **Audit, each with a test:** every auth style plus empty secret, on Attempts and key tests (`gateway TestAKeylessKeySendsNothingInEveryAuthStyle`); empty vs absent static headers (`TestAnEmptyStaticHeaderIsNotSent`); the end-to-end Provider with chat, stream, key test and discovery, plus the Caller's credential in Bearer, `x-api-key` and `?key=` (`TestAKeylessProviderServesWithNoKeyAddedByHand`); route preview (`TestTheRoutePreviewShowsTheKeylessKey`); Pools with a keyless member, including failover after a keyless 401 (`TestAPoolWithAKeylessMember`); discovery per Provider (existing `models TestKeylessDiscoverySendsNoCredential`) and per key (`models TestPerKeyDiscoveryReadsAKeylessKeysListWithNoCredential`); v1 import (`v1import TestAnImportedKeylessProviderServesWithNoCredential`; imported Endpoints keep v1's auth style with keyless keys, which sends nothing); summary and overview counts (`keys.keyless`).
+- **Test chat (23)** was not merged when this was done. It sends through the same gateway path, so the gateway tests above cover it.
+- **Known limit:** the auto key is unrestricted. If a keyless Provider later gains keyed Endpoints, it is also tried there, sends nothing, and a 401 is `retry_elsewhere`. Restrict or delete it then.

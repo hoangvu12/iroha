@@ -104,6 +104,17 @@ test("a long model list scrolls in the shared Scroll Area and draws the rows scr
   expect(within(dialog).queryByRole("checkbox", { name: "glm-000" })).toBeNull();
 });
 
+test("the model dialog scrolls as a page: picked chips flow in it, only the long model list scrolls on its own", async () => {
+  const user = userEvent.setup();
+  renderEditor({ all: false, providers: new Map([["zai", ["glm-001", "glm-002"]]]), pools: new Set() });
+  await user.click(await screen.findByRole("button", { name: "Models of zai: 2 models" }));
+  const dialog = await screen.findByRole("dialog", { name: "Models of zai" });
+  await within(dialog).findByRole("checkbox", { name: "glm-000" });
+  expect(within(dialog).getByRole("button", { name: "Remove glm-001" }).closest("[data-slot^=scroll-area]"), "chips in no scroll box").toBeNull();
+  const scrollers = dialog.querySelectorAll("[data-slot=scroll-area-viewport]");
+  expect([...scrollers].map((s) => s.getAttribute("aria-label"))).toEqual(["Models of zai"]);
+});
+
 test("an agent picks the scope by names alone", async () => {
   renderEditor({ ...emptyDraft(), all: true });
   const run = await agent.act({ steps: [{ ref: "Access", action: "setValue", args: ["some"] }] });

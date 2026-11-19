@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from "react";
+import type { MouseEvent, ReactNode, Ref } from "react";
 import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import {
@@ -13,7 +13,6 @@ import { Dialog as SdkDialog, DialogBackdrop, DialogClose, DialogContent, Dialog
 import { buttonClass, iconButtonClass } from "./Button";
 import { cn } from "./cn";
 import { Field, Input } from "./Input";
-import { ScrollArea } from "./ScrollArea";
 import { isApiError } from "@/api/client";
 
 // Dialogs grow from the middle and dim the page; the content keeps showing
@@ -24,12 +23,25 @@ import { isApiError } from "@/api/client";
 const backdropClass =
   "fixed inset-0 bg-overlay transition-opacity duration-dialog-in ease-out data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-dialog-out";
 
+// A tall dialog scrolls as a page (UI ticket 28, the "scrollable overlay" of
+// shadcn/ui #16): the content part is a transparent layer over the whole
+// window and is the scroll container (wheel anywhere, its scroll bar at the
+// window's edge, Page Down / Space from the body); the visible dialog
+// (`panelClass`) sits in it at its natural height, centred when it fits and
+// from the top padding when it doesn't. The page behind stays locked (UI SDK).
+// The layer itself scales and fades, so the dialog grows from the middle of
+// the window wherever it is scrolled to.
 const contentClass = cn(
-  "fixed inset-0 m-auto flex h-fit w-[calc(100vw-32px)] max-h-[calc(100dvh-32px)] flex-col",
-  "rounded-xl border border-border bg-elevated p-6 text-fg shadow-elevated outline-none",
+  "fixed inset-0 m-0 h-auto max-h-none w-auto max-w-none overflow-y-auto overscroll-contain bg-transparent p-0 text-fg outline-none",
   "transition-[opacity,scale] duration-dialog-in ease-out data-starting-style:scale-(--motion-scale-popup) data-starting-style:opacity-0",
   "data-ending-style:scale-(--motion-scale-popup) data-ending-style:opacity-0 data-ending-style:duration-dialog-out",
 );
+
+// The space around the dialog: 16 px at the sides, more above and below on
+// wider screens, and room for an on-screen keyboard (UI SDK's --keyboard-inset).
+const frameClass = "flex min-h-full items-center justify-center p-4 pb-[calc(16px+var(--keyboard-inset,0px))] md:py-12";
+
+const panelClass = "relative flex w-full flex-col rounded-xl border border-border bg-elevated p-6 text-fg shadow-elevated";
 
 const titleClass = "pr-8 text-[17px] font-semibold text-fg";
 const descriptionClass = "mt-2 text-sm text-fg-muted";
@@ -40,6 +52,31 @@ function useWhileOpen<T>(open: boolean, value: T): T {
   const last = useRef(value);
   if (open) last.current = value;
   return open ? value : last.current;
+}
+
+// The layer covers the window, so UI SDK sees every press as inside the
+// dialog: a press on the layer or the frame around the panel (not its scroll
+// bar) closes it here instead. It must start there too, so a text selection
+// dragged out of a field keeps the dialog open, as UI SDK's own check does.
+function useAroundPress(close: () => void) {
+  const frame = useRef<HTMLDivElement>(null);
+  const started = useRef(false);
+  const around = (e: MouseEvent<HTMLElement>) => {
+    const layer = e.currentTarget;
+    if (e.target !== layer && e.target !== frame.current) return false;
+    const bar = layer.offsetWidth - layer.clientWidth;
+    return !(bar > 0 && e.clientX >= layer.getBoundingClientRect().right - bar);
+  };
+  return {
+    frame,
+    onPointerDown: (e: MouseEvent<HTMLElement>) => {
+      started.current = e.button === 0 && around(e);
+    },
+    onClick: (e: MouseEvent<HTMLElement>) => {
+      if (started.current && around(e)) close();
+      started.current = false;
+    },
+  };
 }
 
 export function Dialog({
@@ -62,28 +99,29 @@ export function Dialog({
   closeButton?: boolean;
 }) {
   const shown = useWhileOpen(open, { title, description, children, footer });
+  const { frame, onPointerDown, onClick } = useAroundPress(() => onOpenChange(false));
   return (
     <SdkDialog open={open} onOpenChange={(o) => onOpenChange(o)}>
       <DialogBackdrop className={backdropClass} />
-      <DialogContent style={{ maxWidth: width }} className={contentClass}>
-        <DialogTitle className={titleClass}>{shown.title}</DialogTitle>
-        {shown.description && (
-          <DialogDescription render={<div />} className={descriptionClass}>
-            {shown.description}
-          </DialogDescription>
-        )}
-        {shown.children && (
-          <ScrollArea className="-mx-6 mt-4 min-h-0 flex-1" contentClassName="px-6 py-0.5">
-            {shown.children}
-          </ScrollArea>
-        )}
-        {shown.footer && <div className="mt-6 flex flex-wrap justify-end gap-2">{shown.footer}</div>}
-        {closeButton && (
-          // An icon button like any other (its press and hover); centred where the old 24 px one was.
-          <DialogClose aria-label="Close" className={iconButtonClass("sm", false, "absolute right-3.5 top-3.5")}>
-            <X size={16} aria-hidden />
-          </DialogClose>
-        )}
+      <DialogContent className={contentClass} onPointerDown={onPointerDown} onClick={onClick}>
+        <div ref={frame} className={frameClass}>
+          <div data-dialog-panel="" style={{ maxWidth: width }} className={panelClass}>
+            <DialogTitle className={titleClass}>{shown.title}</DialogTitle>
+            {shown.description && (
+              <DialogDescription render={<div />} className={descriptionClass}>
+                {shown.description}
+              </DialogDescription>
+            )}
+            {shown.children && <div className="mt-4">{shown.children}</div>}
+            {shown.footer && <div className="mt-6 flex flex-wrap justify-end gap-2">{shown.footer}</div>}
+            {closeButton && (
+              // An icon button like any other (its press and hover); centred where the old 24 px one was.
+              <DialogClose aria-label="Close" className={iconButtonClass("sm", false, "absolute right-3.5 top-3.5")}>
+                <X size={16} aria-hidden />
+              </DialogClose>
+            )}
+          </div>
+        </div>
       </DialogContent>
     </SdkDialog>
   );
@@ -136,42 +174,42 @@ function Confirmation({
       }}
     >
       <AlertDialogBackdrop className={backdropClass} />
-      <AlertDialogContent style={{ maxWidth: 480 }} initialFocus={initialFocus} className={contentClass}>
-        <AlertDialogTitle className={titleClass}>{shown.title}</AlertDialogTitle>
-        <AlertDialogDescription render={<div />} className={descriptionClass}>
-          {shown.body}
-        </AlertDialogDescription>
-        {shown.children && (
-          <ScrollArea className="-mx-6 mt-4 min-h-0 flex-1" contentClassName="px-6 py-0.5">
-            {shown.children}
-          </ScrollArea>
-        )}
-        {error && (
-          <p role="alert" className="mt-4 text-[13px] text-danger-text transition-opacity duration-list-in ease-out starting:opacity-0">
-            {error}
-          </p>
-        )}
-        <div className="mt-6 flex flex-wrap justify-end gap-2">
-          <AlertDialogClose className={buttonClass("secondary")}>Cancel</AlertDialogClose>
-          {/* While onConfirm runs the button dims at once (no spinner, not in the press transition). */}
-          <AlertDialogClose
-            ref={confirmRef}
-            value="confirm"
-            disabled={disabled}
-            data-agent-confirm={agentConfirm ?? (typeof title === "string" ? title : confirmLabel)}
-            className={buttonClass(danger ? "danger" : "primary", "md", "data-pending:opacity-70")}
-            action={async () => {
-              setError(undefined);
-              try {
-                await onConfirm();
-              } catch (e) {
-                setError(errorText(e));
-                throw e;
-              }
-            }}
-          >
-            {shown.confirmLabel}
-          </AlertDialogClose>
+      <AlertDialogContent initialFocus={initialFocus} className={contentClass}>
+        <div className={frameClass}>
+          <div data-dialog-panel="" style={{ maxWidth: 480 }} className={panelClass}>
+            <AlertDialogTitle className={titleClass}>{shown.title}</AlertDialogTitle>
+            <AlertDialogDescription render={<div />} className={descriptionClass}>
+              {shown.body}
+            </AlertDialogDescription>
+            {shown.children && <div className="mt-4">{shown.children}</div>}
+            {error && (
+              <p role="alert" className="mt-4 text-[13px] text-danger-text transition-opacity duration-list-in ease-out starting:opacity-0">
+                {error}
+              </p>
+            )}
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <AlertDialogClose className={buttonClass("secondary")}>Cancel</AlertDialogClose>
+              {/* While onConfirm runs the button dims at once (no spinner, not in the press transition). */}
+              <AlertDialogClose
+                ref={confirmRef}
+                value="confirm"
+                disabled={disabled}
+                data-agent-confirm={agentConfirm ?? (typeof title === "string" ? title : confirmLabel)}
+                className={buttonClass(danger ? "danger" : "primary", "md", "data-pending:opacity-70")}
+                action={async () => {
+                  setError(undefined);
+                  try {
+                    await onConfirm();
+                  } catch (e) {
+                    setError(errorText(e));
+                    throw e;
+                  }
+                }}
+              >
+                {shown.confirmLabel}
+              </AlertDialogClose>
+            </div>
+          </div>
         </div>
       </AlertDialogContent>
     </AlertDialog>

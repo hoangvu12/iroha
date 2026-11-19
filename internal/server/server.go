@@ -23,6 +23,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/audit"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/config"
+	"github.com/hoangvu12/iroha/internal/failurerules"
 	"github.com/hoangvu12/iroha/internal/gateway"
 	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/logs"
@@ -65,6 +66,7 @@ type Server struct {
 	jobs    *jobs.Runner
 	httpc   *http.Client
 	gw      *gateway.Gateway
+	rules   *failurerules.Store
 	started time.Time
 
 	migrations store.MigrationResult
@@ -135,6 +137,7 @@ func New(ctx context.Context, o Options) (*Server, error) {
 	}
 
 	s.audit = audit.New(db, s.log)
+	s.rules = failurerules.New(db, s.log)
 	s.owner = session.New(db, s.log)
 	s.jobs = jobs.NewRunner(db, s.log)
 	s.jobs.Add(retention.Job(db))

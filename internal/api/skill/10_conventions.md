@@ -50,4 +50,4 @@ Accepts `?dry_run=true` like every change.
 
 ### Errors
 
-Every error has the form `{"error": {"code", "message", "hint", "details"}}`. The `hint` names the next action; follow it. Common codes: `invalid_request` (400: fix the body or query), `not_found` (404), `name_taken` (409: pick another name), `audit_conflict`, `audit_irreversible`, `audit_already_reverted` (409), `admin_token_missing`, `admin_token_invalid`, `admin_token_revoked` (401), `internal` (500: retry once, then read `GET /api/logs?level=error&since=5m`).
+Every error has the form `{"error": {"code", "message", "hint", "details"}}`. The `hint` names the next action; follow it. Common codes: `invalid_request` (400: fix the body or query), `not_found` (404), `name_taken` (409: pick another name), `audit_conflict`, `audit_irreversible`, `audit_already_reverted`, `builtin_rule` (409), `admin_token_missing`, `admin_token_invalid`, `admin_token_revoked` (401), `internal` (500: retry once, then read `GET /api/logs?level=error&since=5m`).

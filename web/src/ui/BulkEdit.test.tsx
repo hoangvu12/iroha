@@ -115,7 +115,7 @@ test("bulkDone words a partial failure naming the rows that failed, keeping Undo
     ],
   };
   const d = bulkDone(res, ["team-1", "team-2", "team-3", "team-4", "team-5"], ["key", "keys"]);
-  expect(d).toEqual({ message: "2 keys changed, 1 already so; not changed: team-2 (No key team-2.), team-5 (Revoked.)", tone: "bad", entry: "aud_9" });
+  expect(d).toEqual({ message: "2 keys changed, 1 already so; not changed: team-2 (no longer exists), team-5 (Revoked.)", tone: "bad", entry: "aud_9" });
   expect(bulkDone({ ...res, failed: 0, succeeded: 5, items: res.items.map((i) => ({ ...i, ok: true, outcome: "updated" as const, error: undefined })) }, ["a", "b", "c", "d", "e"], ["key", "keys"])).toEqual({ message: "5 keys changed", entry: "aud_9" });
   expect(bulkDone({ dry_run: false, succeeded: 2, failed: 0, items: [{ index: 0, ok: true, outcome: "unchanged", changes: [] }, { index: 1, ok: true, outcome: "unchanged", changes: [] }] }, ["a", "b"], ["key", "keys"])).toEqual({ message: "Nothing changed: both keys already had that" });
 });

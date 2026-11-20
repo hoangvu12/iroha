@@ -172,7 +172,7 @@ test("a bulk edit that fails on some keys names them in the bar, with Undo for t
   const dialog = await screen.findByRole("dialog", { name: "Edit 3 keys" });
   await user.click(within(dialog).getByRole("checkbox", { name: "Enabled" })); // all on -> off
   await user.click(within(dialog).getByRole("button", { name: "Apply to 3 keys" }));
-  expect(await within(bar).findByText("2 keys changed; not changed: team-2 (No such key.)", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+  expect(await within(bar).findByText("2 keys changed; not changed: team-2 (no longer exists)", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
   expect(within(bar).getByRole("button", { name: /^Undo/ })).toBeTruthy();
 });
 

@@ -11,14 +11,14 @@ Then build it:
 
 **Blocked by:** 25 (select mode changes how rows are selected)
 
-**Status:** open
+**Status:** done
 
 Owner request, 2026-11-20.
 
-- [ ] Research written in Comments; fields per table listed
-- [ ] Reusable bulk-edit piece with mixed states; tests (mixed shown, untouched fields kept, Undo, partial failure; agent test)
-- [ ] Bulk update on the server where missing; Go tests; skill and OpenAPI updated
-- [ ] Checked in headless Chrome, light, dark and phone width
+- [x] Research written in Comments; fields per table listed
+- [x] Reusable bulk-edit piece with mixed states; tests (mixed shown, untouched fields kept, Undo, partial failure; agent test)
+- [x] Bulk update on the server where missing; Go tests; skill and OpenAPI updated
+- [x] Checked in headless Chrome, light, dark and phone width
 
 ## Comments
 
@@ -49,3 +49,31 @@ Rules taken from all of them:
 - **Partial failure**: the rows that worked stay changed (Undo reverts them); the result line turns red and names the rows that failed and why ("3 keys changed; team-4 wasn't: …"). Nothing is retried silently.
 
 Where it lives: a dialog, not a sheet. Sheets are for linked records in the URL (ticket 10, 27 moves *details* dialogs into sheets, but keeps create dialogs, confirms and pickers as dialogs); a bulk edit is a short form about the selection, gone once applied, like Add keys.
+
+### Fields per table
+
+- **Upstream Keys**: Enabled; Endpoints (only when the Provider has more than one). A key with no Endpoint list counts as "all Endpoints"; a result that covers every Endpoint is sent as `[]` (no restriction). This replaces the bulk menu's "Endpoints…", which started from the first selected key's list and overwrote the others. The single-key Endpoints dialog in the row menu stays.
+- **Models**: Hidden from Callers, Pinned to the list (`added`), Chat, Reasons before answering, Context window, Max output. Each model's other overrides are kept: metadata is rebuilt from that model's own overrides plus the changed fields. The selection can span server pages.
+- **Gateway Keys**: Capture prompts. Gateway Keys have no Enabled (revoke is the only off, and it can't be undone), and Scope is too rich for a mixed view; the API's `bulk/update` takes `scope` all the same.
+- **Pool Members**: On. Members have no weight; order is set by dragging. Sent as one Pool `PATCH` (one Audit Entry).
+- **Not done**: Endpoints have no Enabled field, and their other fields (URL, Shape, headers) differ per Endpoint by nature. Providers: nothing to share beyond archive, which has its own action. Names and secrets are never bulk-edited.
+
+### What was built
+
+- `web/src/ui/BulkEdit.tsx`: `BulkEdit` (the bar's "Edit…" plus a dialog with `boolean`, `select`, `text` and `set` fields, each tri-state), `bulkDone` (the bar message: "2 keys changed, 1 already so", "Nothing changed: …", or red with "not changed: team-2 (no longer exists), team-5 (Revoked.)", at most 3 names then "and N more"), `commonValue`, `applySet`. `Select` now takes `value: null` to show its placeholder.
+- Used by Keys, Models, Gateway Keys (new bulk selection) and Pool Members (new bulk selection), via `pages/providers/BulkEdits.tsx` and `pages/gateway-keys/List.tsx`; `/states` has a demo with all four kinds. The result shows in the bulk bar with Undo, which reverts the call's one Audit Entry.
+- Server: `POST /api/providers/{provider}/keys/bulk/update` (`{key, enabled?, endpoints?}`) and `POST /api/gateway-keys/bulk/update` (`{key, scope?, capture?}`), both on `audit.Bulk` (one Audit Entry, `dry_run`, revert, per-item failures). OpenAPI and `/skill.md` are generated from the routes; `internal/api/skill/10_conventions.md` got a paragraph on `bulk/update`. Models already had `POST /models/bulk`.
+- Docs: `docs/agents/architecture.md` "UI ticket 30".
+
+### Test-first
+
+The Go tests (`internal/providers/bulkedit_test.go`, `internal/gatewaykeys/bulkedit_test.go`: edits by name and ID, outcomes, a missing or revoked key fails by index, revert, dry run, unknown fields refused) were written first and failed (404) before the routes existed. `ui/BulkEdit.test.tsx` (helpers, mixed display, only changed fields sent, Keep as is, failure keeps the dialog, `bulkDone` wording, agent test) was written before the component, then the page tests (Keys: per-key Endpoints and partial failure; Models: across pages, overrides kept; Gateway Keys: capture; Pool Members: switch off). The `tdd` skill was not invoked.
+
+### Browser checks
+
+Headless Chrome against a throwaway seed (8 keys with mixed Endpoints and Enabled, 6 models with mixed hidden/metadata, 4 Gateway Keys with mixed capture, a 3-member Pool), light, dark and 390 px. Screenshots in `iroha-v2-notes/v2-ui/shots/30/` (plans `plan*.json`): the mixed dialog and its changed state, Apply with the bar result, Undo (team-1 and team-4 disabled, then back to Active), a partial failure (a key deleted while the dialog was open: "1 key changed, 1 already so; not changed: team-8 (…)"), Models, Gateway Keys, Pool Members, `/states`, phone. Found and fixed there: a key deleted meanwhile was named by the server's message with its ID; it now reads "(no longer exists)". On a phone a tall edit dialog scrolls as a page (ticket 28) to reach Apply.
+
+### Notes
+
+- Ticket 27 (details into sheets) will likely conflict in `pages/providers/Keys.tsx` (bulk bar, removed "Endpoints…" bulk menu item).
+- `pages/requests/Feed.test.tsx` "numbered pages … remembers it" failed once in three full runs under load and passes alone; untouched here.

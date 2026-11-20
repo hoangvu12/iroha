@@ -349,7 +349,10 @@ export function bulkDone(res: BulkResult<unknown>, names: string[], noun: Noun):
     }
     return { message: `${countOf(changed, noun)} changed${same ? `, ${same} already so` : ""}`, entry };
   }
-  const named = failed.slice(0, 3).map((i) => `${names[i.index] ?? `#${i.index + 1}`}${i.error?.message ? ` (${i.error.message})` : ""}`);
+  // A row deleted meanwhile is named by the list; the server's not_found
+  // message would repeat it by its ID.
+  const why = (i: (typeof failed)[number]) => (i.error?.code === "not_found" ? "no longer exists" : i.error?.message);
+  const named = failed.slice(0, 3).map((i) => `${names[i.index] ?? `#${i.index + 1}`}${why(i) ? ` (${why(i)})` : ""}`);
   const more = failed.length > 3 ? ` and ${failed.length - 3} more` : "";
   const head = changed ? `${countOf(changed, noun)} changed` : "Nothing changed";
   return { message: `${head}${same ? `, ${same} already so` : ""}; not changed: ${named.join(", ")}${more}`, tone: "bad", entry };

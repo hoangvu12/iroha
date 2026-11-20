@@ -222,7 +222,8 @@ test("the Owner switches the feed to numbered pages in the View menu, and this b
   );
   const user = userEvent.setup();
   const first = renderFeed();
-  await waitFor(() => expect(shownIds()).toHaveLength(100));
+  // Rows past the first 30 render in a transition after the reveal (UI ticket 26), slow in jsdom.
+  await waitFor(() => expect(shownIds()).toHaveLength(100), { timeout: 5000 });
   expect(screen.queryByRole("navigation", { name: "Pages of Requests" })).toBeNull();
 
   await user.click(screen.getByRole("button", { name: "View" }));

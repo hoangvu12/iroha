@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { Skeleton } from "skullet/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { SkeletonRoot } from "./skeletons";
+import type { RevealContext } from "skullet";
+import { SKELETON_REVEAL, SkeletonRoot, revealFor } from "./skeletons";
 import { ThemeProvider } from "./theme";
 
 afterEach(() => {
@@ -12,6 +13,40 @@ afterEach(() => {
 function skulletCSS() {
   return [...document.querySelectorAll("style")].map((s) => s.textContent ?? "").join("\n");
 }
+
+// UI ticket 26: Skullet's in-sequence reveal measures every piece of the content
+// between animations it starts, so a big table's reveal took a long task (1-2 s
+// at 4x CPU). Content of many pieces crossfades whole instead.
+const ctx = (o: Partial<RevealContext>): RevealContext => ({
+  content: document.createElement("div"),
+  reveal: document.createElement("div"),
+  waited: 1200,
+  input: false,
+  refetch: false,
+  height: 600,
+  pieces: 30,
+  ...o,
+});
+
+test("a reveal of many pieces (a big table) crossfades whole; a small one still comes in row by row", () => {
+  expect(typeof revealFor(ctx({ pieces: 30 })).order).toBe("function");
+  expect(typeof revealFor(ctx({ pieces: 60 })).order).toBe("function");
+  expect(revealFor(ctx({ pieces: 61 })).order).toBe("together");
+  expect(revealFor(ctx({ pieces: 716, height: 2632 })).order).toBe("together");
+  expect(revealFor(ctx({ pieces: 716 })).duration ?? 200).toBeGreaterThan(0);
+});
+
+test("a fast load or one during a gesture shows at once and a refetch crossfades quickly, whatever its size", () => {
+  expect(revealFor(ctx({ pieces: 716, waited: 80 })).duration).toBe(0);
+  expect(revealFor(ctx({ pieces: 716, input: true })).duration).toBe(0);
+  expect(revealFor(ctx({ pieces: 716, refetch: true }))).toMatchObject({ order: "together", duration: 120 });
+  expect(revealFor(ctx({ pieces: 2 })).order).toBe("together");
+});
+
+test("skeletons still wait 150 ms before they show", () => {
+  expect(SKELETON_REVEAL.hold).toBe(150);
+  expect(SKELETON_REVEAL.choose?.(ctx({ pieces: 716 })).order).toBe("together");
+});
 
 test("skeletons are drawn in Iroha's tokens and follow Iroha's theme, not the OS", () => {
   // The OS asks for dark; the Owner chose light in Settings.

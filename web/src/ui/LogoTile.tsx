@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { poolLogo, providerLogo } from "@/api/logos";
 import { cn } from "./cn";
 import { useIsSample } from "./Skeleton";
@@ -53,18 +53,32 @@ export function LogoTile({
         className,
       )}
     >
-      {showImg ? (
-        <img
-          src={src}
-          alt=""
-          className="size-[64%] object-contain"
-          onError={() => setFailed(src)}
-          onLoad={(e) => e.currentTarget.naturalWidth === 0 && setFailed(src)}
-          draggable={false}
-        />
-      ) : (
-        letter
-      )}
+      {showImg ? <Logo src={src} onFail={() => setFailed(src)} /> : letter}
     </span>
+  );
+}
+
+/**
+ * The image gets its source in an effect, after the rows around it are on the
+ * page (UI ticket 26): when content replaces a skeleton, Skullet gives every
+ * image still loading at that moment a shimmering block of its own, reading and
+ * writing layout for each in turn, which made the reveal of a table full of logos
+ * a long task. An image without a source isn't loading, so none hold the reveal
+ * back; the tile has its size and border either way.
+ */
+function Logo({ src, onFail }: { src: string; onFail: () => void }) {
+  const ref = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.src = src;
+  }, [src]);
+  return (
+    <img
+      ref={ref}
+      alt=""
+      className="size-[64%] object-contain"
+      onError={onFail}
+      onLoad={(e) => e.currentTarget.naturalWidth === 0 && onFail()}
+      draggable={false}
+    />
   );
 }

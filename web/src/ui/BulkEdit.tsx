@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format";
 import { type ReactNode, useId, useState } from "react";
 import { Pencil } from "lucide-react";
 import { errorText } from "@/api/client";
@@ -23,7 +24,7 @@ import { Select, type SelectOption } from "./Select";
 /** The row's noun, one and many: ["key", "keys"]. */
 export type Noun = [one: string, many: string];
 
-export const countOf = (n: number, noun: Noun) => `${n} ${n === 1 ? noun[0] : noun[1]}`;
+const countOf = (n: number, noun: Noun) => plural(n, ...noun);
 
 /** The value every row shares, or mixed (no rows count as mixed). */
 export type Common<V> = { mixed: true } | { mixed: false; value: V };

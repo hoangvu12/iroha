@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format";
 import { applySet, BulkEdit, type BulkChanges, type BulkField, bulkDone, type SetChange } from "@/ui/BulkEdit";
 import type { Save } from "@/ui/SaveStatus";
 import type { Facts, FactsPatch, Member, Model, Provider, UpstreamKey } from "./api";
@@ -132,7 +133,7 @@ export function MembersBulkEdit({ pool, rows, at, size }: { pool: string; rows: 
     await refresh();
     const n = now.filter((m) => picked.has(key(m)) && m.enabled !== on).length;
     if (n === 0) return { message: `Nothing changed: ${rows.length === 1 ? "it was" : "they were"} already ${on ? "on" : "off"}` };
-    return { message: `${n} member${n === 1 ? "" : "s"} switched ${on ? "on" : "off"}`, entry: res.audit_entry };
+    return { message: `${plural(n, "member")} switched ${on ? "on" : "off"}`, entry: res.audit_entry };
   };
   return <BulkEdit rows={rows} noun={["member", "members"]} fields={fields} at={at} onApply={apply} size={size} />;
 }

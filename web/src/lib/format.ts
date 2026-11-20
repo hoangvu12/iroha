@@ -8,6 +8,11 @@ export function formatNumber(n: number): string {
   return nf.format(n);
 }
 
+/** A count with its noun: (1, "key") -> "1 key"; (1200, "key") -> "1,200 keys"; (2, "entry", "entries"). */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${formatNumber(n)} ${n === 1 ? one : many}`;
+}
+
 /** 0.989 -> "98.9%"; 1 -> "100%". */
 export function formatPercent(ratio: number): string {
   const p = ratio * 100;

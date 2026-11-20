@@ -1,7 +1,7 @@
 import type { AriaAttributes, ReactNode } from "react";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { CircleX } from "lucide-react";
-import { formatNumber } from "@/lib/format";
+import { formatNumber, plural } from "@/lib/format";
 import { OUTCOME_KEY } from "@/lib/outcomes";
 import { StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
@@ -290,7 +290,7 @@ function Effect({ r }: { r: Pick<Rule, "key_effect" | "request_effect"> & { outc
 /** Today's hits: the count and a bar against the busiest rule, so the rules that fire stand out. */
 function Hits({ hits, most }: { hits: number; most: number }) {
   return (
-    <span className="flex w-20 shrink-0 flex-col items-end gap-1" title={`${formatNumber(hits)} hit${hits === 1 ? "" : "s"} today`}>
+    <span className="flex w-20 shrink-0 flex-col items-end gap-1" title={`${plural(hits, "hit")} today`}>
       <span className="text-[13px] text-fg-muted tabular">
         <span className={cn("text-[14px]", hits ? "font-semibold text-fg" : "text-fg-subtle")}>{formatNumber(hits)}</span> today
       </span>

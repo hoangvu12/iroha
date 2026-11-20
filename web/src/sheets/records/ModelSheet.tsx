@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Eye, EyeOff, ListPlus, ListX, MessageCircle, SlidersHorizontal } from "lucide-react";
 import { api, isApiError, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
-import { timeAgo } from "@/lib/format";
+import { plural, timeAgo } from "@/lib/format";
 import { calls, errorText, type Model, natural, usePools } from "@/pages/providers/api";
 import { useSheetRefresh } from "./refresh";
 import { factSource, ModelFields, modelForm, modelMetadata, tokens } from "@/pages/providers/Models";
@@ -113,7 +113,7 @@ function ModelDetails({ m, provider, refetch }: { m: Model; provider: string; re
   const change = (body: { hidden?: boolean; added?: boolean }, message: string) => void actionSave.run(() => calls.saveModel(provider, { model: m.model, ...body }), { message });
   const clearGaps = () =>
     void actionSave.run(() => calls.bulkKeys(provider, "clear-model-gaps", m.model_gaps, m.model), {
-      message: (r) => `Model Gaps of ${m.model} cleared on ${r.succeeded} key${r.succeeded === 1 ? "" : "s"}`,
+      message: (r) => `Model Gaps of ${m.model} cleared on ${plural(r.succeeded, "key")}`,
     });
 
   // Asks first; a model only the Owner added leaves the list, so its sheet closes and the result (with Undo) toasts.

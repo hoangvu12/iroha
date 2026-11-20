@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { api, isApiError, seg } from "@/api/client";
-import { formatNumber } from "@/lib/format";
+import { formatNumber, plural } from "@/lib/format";
 import { useUrlParams } from "@/lib/url-state";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
@@ -142,7 +142,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
           phoneRow={(r) => <RuleLine r={r} />}
           phoneActions={(r) => <RuleSwitch r={r} />}
           empty={<EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />}
-          footer={({ shown, total }) => (shown === total ? `${total} rule${total === 1 ? "" : "s"}, in the order they're tried` : `${shown} of ${total} rules`)}
+          footer={({ shown, total }) => (shown === total ? `${plural(total, "rule")}, in the order they're tried` : `${shown} of ${total} rules`)}
         />
       )}
 

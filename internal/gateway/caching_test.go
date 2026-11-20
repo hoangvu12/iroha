@@ -1,7 +1,6 @@
 package gateway_test
 
 import (
-	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -51,49 +50,6 @@ func TestSameShapePassthroughStaysByteForByteWithCachingOn(t *testing.T) {
 	}
 }
 
-// markerPlaces lists where an Anthropic request carries cache_control.
-func markerPlaces(t *testing.T, body []byte) []string {
-	t.Helper()
-	var req struct {
-		CacheControl json.RawMessage `json:"cache_control"`
-		Tools        []struct {
-			Name         string
-			CacheControl json.RawMessage `json:"cache_control"`
-		}
-		System []struct {
-			CacheControl json.RawMessage `json:"cache_control"`
-		}
-		Messages []struct {
-			Role    string
-			Content json.RawMessage
-		}
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		t.Fatalf("%v: %s", err, body)
-	}
-	var out []string
-	for _, tool := range req.Tools {
-		if tool.CacheControl != nil {
-			out = append(out, "tool "+tool.Name)
-		}
-	}
-	for range req.System {
-		if req.System[len(req.System)-1].CacheControl != nil {
-			out = append(out, "system")
-			break
-		}
-	}
-	for i, m := range req.Messages {
-		if strings.Contains(string(m.Content), "cache_control") {
-			out = append(out, m.Role+" "+string(rune('0'+i)))
-		}
-	}
-	if req.CacheControl != nil {
-		out = append(out, "top")
-	}
-	return out
-}
-
 func agentChat() map[string]any {
 	return map[string]any{"model": "claude-x", "max_tokens": 256, "user": "u-42",
 		"messages": []any{
@@ -115,7 +71,7 @@ func TestAChatCallerGetsCacheMarkersOnAnAnthropicEndpointUnlessTheyAreOff(t *tes
 		"usage":   map[string]any{"input_tokens": 5, "output_tokens": 1, "cache_creation_input_tokens": 3000}}))
 	resp := caller.Post(chatPath, agentChat()).Expect(200)
 	got := up.Last()
-	if p := strings.Join(markerPlaces(t, got.Body), ", "); p != "tool read, system, user 0" {
+	if p := strings.Join(testkit.CacheMarkers(t, got.Body), ", "); p != "tool:read=5m, system:You are an agent.=5m, user:hi=5m" {
 		t.Errorf("markers on %s:\n%s", p, got.Body)
 	}
 	var sent struct {
@@ -155,7 +111,7 @@ func TestAnthropicsOwnAPIGetsTheAutomaticTopLevelMarker(t *testing.T) {
 	srv := testkit.Start(t, testkit.Options{HTTPClient: up.Client()})
 	addCachingProvider(t, srv, "anthropic-messages", up.URLAt("api.anthropic.com"), map[string]any{"auth_style": "x-api-key"})
 	srv.Client(issue(t, srv, "pi", all)).Post(chatPath, agentChat()).Expect(200)
-	if p := strings.Join(markerPlaces(t, up.Last().Body), ", "); p != "top" {
+	if p := strings.Join(testkit.CacheMarkers(t, up.Last().Body), ", "); p != "top=5m" {
 		t.Errorf("markers on %s", p)
 	}
 	var ep struct {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hoangvu12/iroha/internal/shape"
+	"github.com/hoangvu12/iroha/internal/testkit"
 	"github.com/hoangvu12/iroha/internal/translate"
 )
 
@@ -39,41 +40,6 @@ func object(t *testing.T, b []byte) map[string]any {
 	return m
 }
 
-// markers lists the cache_control objects of an Anthropic request in
-// prompt order, each as "<where>=<ttl>" ("5m" when it names none), the
-// top-level one last as "top".
-func markers(req map[string]any) []string {
-	var out []string
-	add := func(where string, v any) {
-		cc, ok := v.(map[string]any)
-		if !ok {
-			return
-		}
-		ttl, _ := cc["ttl"].(string)
-		if ttl == "" {
-			ttl = "5m"
-		}
-		out = append(out, where+"="+ttl)
-	}
-	for _, tool := range asList(req["tools"]) {
-		add("tool:"+asString(asMap(tool)["name"]), asMap(tool)["cache_control"])
-	}
-	for _, b := range asList(req["system"]) {
-		add("system:"+asString(asMap(b)["text"]), asMap(b)["cache_control"])
-	}
-	for _, m := range asList(req["messages"]) {
-		for _, b := range asList(asMap(m)["content"]) {
-			text := asString(asMap(b)["text"])
-			if text == "" {
-				text = asString(asMap(b)["type"])
-			}
-			add(asString(asMap(m)["role"])+":"+text, asMap(b)["cache_control"])
-		}
-	}
-	add("top", req["cache_control"])
-	return out
-}
-
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
 func asList(v any) []any         { l, _ := v.([]any); return l }
 func asString(v any) string      { s, _ := v.(string); return s }
@@ -83,7 +49,7 @@ func asString(v any) string      { s, _ := v.(string); return s }
 func TestMarkersAreAddedOnTheLastToolSystemBlockAndMessage(t *testing.T) {
 	_, o := golden(t, "chat-to-anthropic-cache-markers-added")
 	req := object(t, o.request)
-	got := strings.Join(markers(req), ", ")
+	got := strings.Join(testkit.CacheMarkers(t, o.request), ", ")
 	if want := "tool:write_file=5m, system:You are a coding agent.=5m, user:Now explain it.=5m"; got != want {
 		t.Errorf("markers %s, want %s", got, want)
 	}
@@ -105,7 +71,7 @@ func TestMarkersAreAddedOnTheLastToolSystemBlockAndMessage(t *testing.T) {
 func TestCallerMarkersAreKeptClampedToFourWithLongerLifetimesFirst(t *testing.T) {
 	_, o := golden(t, "chat-to-anthropic-caller-markers")
 	req := object(t, o.request)
-	got := strings.Join(markers(req), ", ")
+	got := strings.Join(testkit.CacheMarkers(t, o.request), ", ")
 	// Six Caller markers: the two earliest (the system blocks, one of them
 	// 1 h) are dropped, and the 1 h marker after 5 min ones becomes 5 min.
 	want := "user:First question=5m, assistant:First answer=5m, user:Second question=5m, user:with a long file=5m"
@@ -120,7 +86,7 @@ func TestCallerMarkersAreKeptClampedToFourWithLongerLifetimesFirst(t *testing.T)
 func TestTopLevelMarkerForAnthropicsOwnAPI(t *testing.T) {
 	_, o := golden(t, "responses-to-anthropic-cache-top-level")
 	req := object(t, o.request)
-	if got := strings.Join(markers(req), ", "); got != "top=5m" {
+	if got := strings.Join(testkit.CacheMarkers(t, o.request), ", "); got != "top=5m" {
 		t.Errorf("markers %s, want only the top-level one", got)
 	}
 	if u := asString(asMap(req["metadata"])["user_id"]); u != "hashed-user-9" {
@@ -134,7 +100,7 @@ func TestTopLevelMarkerForAnthropicsOwnAPI(t *testing.T) {
 
 func TestTopOnlyEndpointsGetOneTopLevelMarker(t *testing.T) {
 	_, o := golden(t, "gemini-to-anthropic-cache-top-only")
-	if got := strings.Join(markers(object(t, o.request)), ", "); got != "top=5m" {
+	if got := strings.Join(testkit.CacheMarkers(t, o.request), ", "); got != "top=5m" {
 		t.Errorf("markers %s", got)
 	}
 }

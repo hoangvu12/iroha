@@ -144,8 +144,10 @@ export function SheetStackProvider({ children }: { children: ReactNode }) {
       },
       close: (index) => {
         const cur = latest.current.stack;
-        if (cur.length === 0) return;
-        write(cur.slice(0, index ?? cur.length - 1), "close");
+        const keep = index ?? cur.length - 1;
+        // Nothing above `index` (a click that already closed them): no history step.
+        if (cur.length === 0 || keep >= cur.length) return;
+        write(cur.slice(0, keep), "close");
       },
       replace: (index, record) => {
         const cur = latest.current.stack;

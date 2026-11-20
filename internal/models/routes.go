@@ -153,6 +153,14 @@ func Routes(tr *audit.Trail, s *Store) []api.Route {
 			Handle:   h.list,
 		},
 		{
+			Method: http.MethodGet, Path: base + "/{model...}", Tag: tag,
+			Summary: "Read one model of a Provider's model list, by model ID",
+			Description: "The entry as GET /api/providers/{provider}/models lists it: flags, the Endpoints and keys whose lists name it, Model Gaps and metadata with its sources. " +
+				"The model ID may hold slashes, as is or escaped (meta-llama/llama-3.3-70b). A model the list doesn't hold is 404 not_found.",
+			Response: Model{},
+			Handle:   h.one,
+		},
+		{
 			Method: http.MethodPost, Path: base, Tag: tag,
 			Summary: "Add, hide or show one model of a Provider, or override its metadata, by model ID",
 			Description: "`{\"model\": \"x\"}` adds a model discovery does not find; refreshes never remove it. `{\"model\": \"x\", \"hidden\": true}` hides any model, even one never discovered: " +
@@ -335,6 +343,24 @@ func (h handlers) list(c *api.Call) (any, error) {
 		out.Models = match[offset:min(offset+limit, len(match))]
 	}
 	return out, nil
+}
+
+func (h handlers) one(c *api.Call) (any, error) {
+	ctx := c.R.Context()
+	p, err := resolve(ctx, h.s.db, c.Path("provider"))
+	if err != nil {
+		return nil, err
+	}
+	model := c.Path("model")
+	m, ok, err := readEntry(ctx, h.s.db, p.id, model, h.s.clock.Now())
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, api.NotFound(fmt.Sprintf("GET /api/providers/%s/models?q=... searches the list; POST /api/providers/%s/models {\"model\": %q} adds it.", p.handle, p.handle, model),
+			"%s's model list has no model %q.", p.handle, model)
+	}
+	return m, nil
 }
 
 func contains(list []string, s string) bool {

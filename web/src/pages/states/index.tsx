@@ -8,7 +8,8 @@ import { ConfirmAction, useConfirm } from "@/ui/Confirm";
 import { CopyButton } from "@/ui/CopyButton";
 import { type DataTableProps, type SortingState, DataTable, RowMenu, columnsFor } from "@/ui/DataTable";
 import { Input } from "@/ui/Input";
-import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
+import { type Done, type Save, SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
+import { BulkEdit, type BulkField } from "@/ui/BulkEdit";
 import { Switch } from "@/ui/Switch";
 import { ConfirmDialog, TypeToConfirmDialog } from "@/ui/Dialog";
 import { LogoTile } from "@/ui/LogoTile";
@@ -227,8 +228,30 @@ function NoResultsDemo() {
   );
 }
 
+/** UI ticket 30: every kind of bulk field, with values the demo keys disagree on; Apply waits, then says what it would do. */
+const demoFields: BulkField<DemoKey>[] = [
+  { kind: "boolean", id: "enabled", label: "Enabled", on: "enabled", get: (k) => k.state !== "Disabled", hint: "A disabled key gets no traffic." },
+  { kind: "select", id: "tier", label: "Tier", get: (k) => (Number(k.id.slice(1)) % 3 ? "standard" : "priority"), options: [{ value: "standard", label: "Standard" }, { value: "priority", label: "Priority" }] },
+  { kind: "text", id: "note", label: "Note", get: (k) => (Number(k.id.slice(1)) % 2 ? "shared" : "own") },
+  { kind: "set", id: "endpoints", label: "Endpoints", get: (k) => (Number(k.id.slice(1)) % 2 ? ["eu", "us"] : ["eu"]), options: ["eu", "us", "asia"].map((e) => ({ value: e, label: e, detail: `https://${e}.example.com/v1` })) },
+];
+
+function DemoBulkEdit({ rows, at }: { rows: DemoKey[]; at: Save }) {
+  return (
+    <BulkEdit
+      rows={rows}
+      noun={["key", "keys"]}
+      fields={demoFields}
+      at={at}
+      size="sm"
+      onApply={(c) => new Promise<Done>((ok) => setTimeout(() => ok({ message: `${rows.length} keys changed (${Object.keys(c).join(", ")})` }), 500))}
+    />
+  );
+}
+
 function TableDemo() {
   const confirm = useConfirm();
+  const barSave = useSave();
   const askDelete = (names: string[]) =>
     confirm.ask({
       title: names.length === 1 ? `Delete ${names[0]}?` : `Delete ${names.length} keys?`,
@@ -245,9 +268,11 @@ function TableDemo() {
         bulk={({ rows }) => (
           <>
             <Button size="sm">Test</Button>
+            <DemoBulkEdit rows={rows} at={barSave} />
             <Button size="sm" danger onClick={() => askDelete(rows.map((k) => k.name))}>
               Delete…
             </Button>
+            <SaveStatus save={barSave} saving={false} className="ml-1" />
           </>
         )}
         rowActions={(k) => (

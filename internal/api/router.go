@@ -79,6 +79,12 @@ func (rt *Router) Routes() []Route {
 // ServeHTTP dispatches to the matching route. Unknown /api/ paths and wrong
 // methods get JSON errors with a hint instead of the ServeMux text pages.
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		// Admin answers hold configuration and secrets, and the UI keeps its
+		// own cache: no browser or proxy stores them. A Raw route may say
+		// otherwise (logos do).
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	if _, pattern := rt.mux.Handler(r); pattern != "" {
 		rt.mux.ServeHTTP(w, r)
 		return

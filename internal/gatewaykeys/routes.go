@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
@@ -84,6 +85,13 @@ type UpdateGatewayKey struct {
 	Name    *string `json:"name,omitempty"`
 	Scope   *Scope  `json:"scope,omitempty" doc:"Replaces the whole scope."`
 	Capture *bool   `json:"capture,omitempty" doc:"true: store the full prompt and response of this key's later Requests; false: stop storing them (captures already stored stay until they expire)."`
+}
+
+// BulkUpdateGatewayKey is one item of POST /api/gateway-keys/bulk/update.
+type BulkUpdateGatewayKey struct {
+	Key     string `json:"key" doc:"The key to change, by name or ID."`
+	Scope   *Scope `json:"scope,omitempty" doc:"Replaces the whole scope; omit to keep it."`
+	Capture *bool  `json:"capture,omitempty" doc:"Store the full prompt and response of this key's later Requests (true) or stop (false); omit to keep it."`
 }
 
 // GatewayKeyResult is the response of a single Gateway Key change.
@@ -221,6 +229,31 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 					return err
 				})
 				return GatewayKeyResult{Result: res, GatewayKey: out}, err
+			},
+		},
+		{
+			Method: http.MethodPost, Path: "/api/gateway-keys/bulk/update", Tag: tag,
+			Summary: "Change the scope or prompt capture of many Gateway Keys in one change",
+			Description: `Body {"items": [{"key": "discord-bot", "capture": true}, {"key": "gk_...", "capture": true}]}. ` +
+				"Each item names one key (name or ID) and only the fields to change; fields left out stay as that key has them. " +
+				"Names are changed one key at a time (PATCH). Each item is applied or refused on its own; one Audit Entry covers them all, so one revert undoes it.",
+			Query:   []api.Param{audit.DryRun},
+			Request: audit.BulkRequest[BulkUpdateGatewayKey]{}, Response: audit.BulkResult[GatewayKey]{},
+			Handle: func(c *api.Call) (any, error) {
+				var in audit.BulkRequest[BulkUpdateGatewayKey]
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				return audit.Bulk(h.tr, c, "gateway_key.update", "Edited", in.Items, func(m *audit.Mutation, it BulkUpdateGatewayKey) (GatewayKey, error) {
+					if strings.TrimSpace(it.Key) == "" {
+						return GatewayKey{}, api.BadRequest(`Name the key in each item: {"key": "discord-bot", ...}.`, "An item has no key.")
+					}
+					id, err := Resource.Resolve(m.Ctx, m.Tx, it.Key)
+					if err != nil {
+						return GatewayKey{}, err
+					}
+					return h.update(m, id, UpdateGatewayKey{Scope: it.Scope, Capture: it.Capture})
+				})
 			},
 		},
 		{

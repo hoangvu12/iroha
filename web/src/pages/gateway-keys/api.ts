@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, seg } from "@/api/client";
-import type { AuditResult } from "@/api/types";
+import type { AuditResult, BulkResult } from "@/api/types";
 
 // Types and hooks of the Gateway Keys page. They mirror the Go types in
 // internal/gatewaykeys (GET /api/gateway-keys), and read the Providers,
@@ -59,11 +59,17 @@ export function useGatewayKey(ref: string) {
   });
 }
 
-/** After any change (or its Undo) every list and key page refetches. */
+/**
+ * After any change (or its Undo) every list and key page refetches, and so do the other places
+ * listing Gateway Keys or their scopes: the chat's Send as and model choices, a Pool's Members tab.
+ */
 export function useInvalidateKeys() {
   const qc = useQueryClient();
   // Resolves once the refetches are in, so an inline result shows on fresh data.
-  return () => Promise.all([qc.invalidateQueries({ queryKey: keys.all }), qc.invalidateQueries({ queryKey: ["audit-entries"] })]);
+  return () =>
+    Promise.all(
+      [keys.all, ["audit-entries"], ["providers-page", "gateway-keys"], ["test-models"]].map((k) => qc.invalidateQueries({ queryKey: k })),
+    );
 }
 
 export function useCreateKey() {
@@ -82,6 +88,9 @@ export function useUpdateKey() {
     onSettled: done,
   });
 }
+
+/** Edits many keys (by name or ID) in one change and one Audit Entry; fields an item leaves out stay as that key has them (UI ticket 30). */
+export const editKeys = (items: { key: string; capture?: boolean; scope?: Scope }[]) => api.post<BulkResult<GatewayKey>>("/api/gateway-keys/bulk/update", { items });
 
 export function useRevokeKey() {
   const done = useInvalidateKeys();

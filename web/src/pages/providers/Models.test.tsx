@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAgent } from "@ui-sdk/react/agent";
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "@/ui/toast";
 import type { Model } from "./api";
 import { ModelsTab } from "./Models";
+import { SheetStackProvider } from "@/sheets/stack";
 
 const agent = createAgent();
 const { openChat } = vi.hoisted(() => ({ openChat: vi.fn() }));
@@ -70,8 +71,10 @@ function renderTab(all: Model[] = TWO, url = "/providers/acme/models") {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={[url]}>
-        <ModelsTab handle="acme" />
-        <Where />
+        <SheetStackProvider>
+          <ModelsTab handle="acme" />
+          <Where />
+        </SheetStackProvider>
       </MemoryRouter>
       <Toaster />
     </QueryClientProvider>,
@@ -143,6 +146,31 @@ test("selected models are hidden together through the bulk API, with the result 
   expect(await within(bar).findByText("2 models hidden", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
 });
 
+test("Edit… works on models selected on several pages: mixed values shown, and each model keeps its own other overrides", async () => {
+  const user = userEvent.setup();
+  const all = many(30).map((m, i) => (i === 0 ? { ...m, overrides: { context_length: 8000, chat: "ok" as const } } : i === 26 ? { ...m, hidden: true, overrides: { chat: "ok" as const } } : m));
+  const fetch = renderTab(all);
+  await user.click(await screen.findByRole("checkbox", { name: "Select m-0001" }));
+  await user.click(screen.getByRole("button", { name: "Page 2" }));
+  await user.click(await screen.findByRole("checkbox", { name: "Select m-0027" }));
+  const bar = screen.getByRole("group", { name: "2 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 2 models" });
+  expect(within(dialog).getByRole("checkbox", { name: "Hidden from Callers" }).getAttribute("aria-checked")).toBe("mixed");
+  expect(within(dialog).getByRole("combobox", { name: "Chat" }).textContent).toContain("Chats");
+  expect((within(dialog).getByRole("textbox", { name: "Context window" }) as HTMLInputElement).placeholder).toBe("Mixed");
+  await user.type(within(dialog).getByRole("textbox", { name: "Max output" }), "4096");
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 2 models" }));
+  await waitFor(() => expect(posts(fetch)).toHaveLength(1));
+  expect(JSON.parse(String(posts(fetch)[0][1]?.body))).toEqual({
+    items: [
+      { model: "m-0001", metadata: { context_length: 8000, chat: "ok", max_output_tokens: 4096 } },
+      { model: "m-0027", metadata: { chat: "ok", max_output_tokens: 4096 } },
+    ],
+  });
+  expect(await within(bar).findByText("2 models changed", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+});
+
 test("removing a model the Owner added is red and asks first, naming the model; Cancel keeps it", async () => {
   const user = userEvent.setup();
   const fetch = renderTab();
@@ -183,36 +211,12 @@ test("Test in Chat on a model row opens the chat on that model of this Provider"
   expect(openChat).toHaveBeenCalledExactlyOnceWith({ kind: "model", provider: "acme", model: "pinned-model" });
 });
 
-test("clicking a model's row, or its name, opens its details", async () => {
+test("clicking a model's row, or its name, opens its sheet (UI ticket 33: it was a dialog)", async () => {
   const user = userEvent.setup();
   renderTab();
   await user.click(await screen.findByRole("button", { name: "Open pinned-model" }));
-  expect(await screen.findByRole("dialog", { name: "pinned-model" })).toBeTruthy();
-});
-
-// Motion (UI ticket 17): the details dialog stays mounted while it leaves, so its exit plays.
-test("closing a model's details plays the dialog's exit, still showing that model", async () => {
-  const user = userEvent.setup();
-  renderTab();
-  await user.click(await screen.findByRole("button", { name: "Open pinned-model" }));
-  const dialog = await screen.findByRole("dialog", { name: "pinned-model" });
-  let end = () => {};
-  const finished = new Promise<void>((r) => (end = r));
-  const running = { finished, effect: { getComputedTiming: () => ({ endTime: 60_000, localTime: 0 }) } } as unknown as Animation;
-  const before = Element.prototype.getAnimations;
-  Element.prototype.getAnimations = function (this: Element) {
-    return this === dialog ? [running] : [];
-  };
-  try {
-    await user.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(dialog.isConnected).toBe(true);
-    expect(dialog.hasAttribute("data-ending-style")).toBe(true);
-    expect(within(dialog).getByText("pinned-model")).toBeTruthy();
-    await act(async () => end());
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  } finally {
-    Element.prototype.getAnimations = before;
-  }
+  await waitFor(() => expect(new URLSearchParams(where()).getAll("sheet")).toEqual(["model:acme/pinned-model"]));
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 test("an agent finds the model controls, pages, and tests a model from its row menu", async () => {

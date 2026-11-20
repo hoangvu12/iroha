@@ -1,11 +1,12 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAgent } from "@ui-sdk/react/agent";
 import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "@/ui/toast";
-import type { UpstreamKey } from "./api";
+import type { Endpoint, Provider, UpstreamKey } from "./api";
+import { SheetStackProvider } from "@/sheets/stack";
 import { KeysTab } from "./Keys";
 
 let approve = false;
@@ -37,19 +38,28 @@ function Where() {
   return <output aria-label="Where">{l.search}</output>;
 }
 
-function renderTab(keys: UpstreamKey[], url = "/providers/acme/keys") {
+function renderTab(keys: UpstreamKey[], url = "/providers/acme/keys", { provider, refuse = [] }: { provider?: Provider; refuse?: number[] } = {}) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (u, init) => {
     const path = String(u);
     if (path.startsWith("/api/providers/acme/keys") && (init?.method ?? "GET") === "GET") return answer({ upstream_keys: keys });
-    const items: string[] = JSON.parse(String(init?.body ?? "{}")).items ?? [];
-    return answer({ dry_run: false, audit_entry: "aud_1", succeeded: items.length, failed: 0, items: items.map((_, index) => ({ index, ok: true, outcome: "updated", changes: [] })) });
+    const items: unknown[] = JSON.parse(String(init?.body ?? "{}")).items ?? [];
+    const ok = (i: number) => !refuse.includes(i);
+    return answer({
+      dry_run: false,
+      audit_entry: "aud_1",
+      succeeded: items.filter((_, i) => ok(i)).length,
+      failed: refuse.length,
+      items: items.map((_, index) => (ok(index) ? { index, ok: true, outcome: "updated", changes: [] } : { index, ok: false, error: { code: "not_found", message: "No such key." }, changes: [] })),
+    });
   });
   vi.stubGlobal("fetch", fetch);
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={[url]}>
-        <KeysTab handle="acme" adding={false} setAdding={() => {}} />
-        <Where />
+        <SheetStackProvider>
+          <KeysTab handle="acme" provider={provider} adding={false} setAdding={() => {}} />
+          <Where />
+        </SheetStackProvider>
       </MemoryRouter>
       <Toaster />
     </QueryClientProvider>,
@@ -115,6 +125,60 @@ test("selecting keys shows the bulk bar; Disable calls the bulk API and shows it
   expect(await within(bar).findByText("2 keys disabled", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
 });
 
+const endpoint = (name: string): Endpoint => ({
+  id: `ep_${name}`,
+  provider: "acme",
+  name,
+  url: `https://${name}.example.com/v1`,
+  shape: "openai-chat",
+  auth_style: "bearer",
+  static_headers: {},
+  renames: {},
+  discovery_url: "",
+  created_at: "2026-11-19T00:00:00Z",
+});
+const acme = { handle: "acme", endpoints: [endpoint("eu"), endpoint("us"), endpoint("asia")] } as Provider;
+
+test("Edit… shows mixed values for the selected keys and sends one bulk update with only what changed, each key's own Endpoints kept", async () => {
+  const user = userEvent.setup();
+  const fetch = renderTab([key(1, { endpoints: ["eu"] }), key(2, { enabled: false }), key(3)], undefined, { provider: acme });
+  await user.click(await screen.findByRole("checkbox", { name: "Select all rows on this page" }));
+  const bar = screen.getByRole("group", { name: "3 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 3 keys" });
+  expect(within(dialog).getByRole("checkbox", { name: "Enabled" }).getAttribute("aria-checked")).toBe("mixed");
+  // team-2 and team-3 may use every Endpoint, team-1 only eu.
+  expect(within(dialog).getByRole("checkbox", { name: "eu" }).getAttribute("aria-checked")).toBe("true");
+  expect(within(dialog).getByRole("checkbox", { name: "us" }).getAttribute("aria-checked")).toBe("mixed");
+  // Take asia off every key; leave Enabled alone.
+  await user.click(within(dialog).getByRole("checkbox", { name: "asia" }));
+  await user.click(within(dialog).getByRole("checkbox", { name: "asia" }));
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 3 keys" }));
+  await waitFor(() =>
+    expect(posts(fetch)).toEqual([
+      [
+        "/api/providers/acme/keys/bulk/update",
+        { items: [{ key: "key_1", endpoints: ["eu"] }, { key: "key_2", endpoints: ["eu", "us"] }, { key: "key_3", endpoints: ["eu", "us"] }] },
+      ],
+    ]),
+  );
+  expect(await within(bar).findByText("3 keys changed", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+  expect(within(bar).getByRole("button", { name: "Undo: 3 keys changed" })).toBeTruthy();
+});
+
+test("a bulk edit that fails on some keys names them in the bar, with Undo for the rest", async () => {
+  const user = userEvent.setup();
+  renderTab([key(1), key(2), key(3)], undefined, { refuse: [1] });
+  await user.click(await screen.findByRole("checkbox", { name: "Select all rows on this page" }));
+  const bar = screen.getByRole("group", { name: "3 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 3 keys" });
+  await user.click(within(dialog).getByRole("checkbox", { name: "Enabled" })); // all on -> off
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 3 keys" }));
+  expect(await within(bar).findByText("2 keys changed; not changed: team-2 (no longer exists)", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+  expect(within(bar).getByRole("button", { name: /^Undo/ })).toBeTruthy();
+});
+
 test("Delete… in the bulk menu is red and asks first, naming the count; Cancel deletes nothing", async () => {
   const user = userEvent.setup();
   const fetch = renderTab([key(1), key(2), key(3)]);
@@ -149,12 +213,20 @@ test("a row's menu: Test in Chat opens the chat on the key; Delete… asks, nami
   await waitFor(() => expect(posts(fetch)).toEqual([["/api/providers/acme/keys/bulk/delete", { items: ["team-2"] }]]));
 });
 
-test("clicking a row, or its name with the keyboard, opens the key", async () => {
+test("clicking a row, or its name with the keyboard, opens the key's sheet", async () => {
   const user = userEvent.setup();
   renderTab([key(1), key(2)]);
   await user.click(within((await screen.findAllByRole("row"))[2]).getByText("Active"));
-  expect(where()).toContain("key=team-2");
-  expect(await screen.findByRole("dialog", { name: "team-2" })).toBeTruthy();
+  await waitFor(() => expect(decodeURIComponent(where())).toBe("?sheet=key:acme/team-2"));
+  await user.click(screen.getByRole("button", { name: "Open team-1" }));
+  await waitFor(() => expect(decodeURIComponent(where())).toBe("?sheet=key:acme/team-1"));
+  // No key dialog any more (UI ticket 27).
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("an old link to a key's dialog (?key=) opens its sheet instead", async () => {
+  renderTab([key(1), key(2)], "/providers/acme/keys?sort=state&key=team-1");
+  await waitFor(() => expect(decodeURIComponent(where())).toBe("?sort=state&sheet=key:acme/team-1"));
 });
 
 test("an agent filters, selects and tests keys, and needs a person to delete one", async () => {
@@ -180,31 +252,4 @@ test("an agent filters, selects and tests keys, and needs a person to delete one
   const remove = { steps: [{ ref: "More for team-3", action: "press", args: ["Delete…"] }, { ref: "Delete team-3?", action: "press", args: ["Delete key"] }] };
   expect((await agent.act(remove)).ok).toBe(false);
   expect(posts(fetch).some(([u]) => u.endsWith("/delete"))).toBe(false);
-});
-
-// Motion (UI ticket 17): the key dialog stays mounted while it leaves, so the
-// dialog recipe's exit plays (it used to vanish), showing the key it was about.
-test("closing a key's dialog plays its exit, still showing that key, then it goes", async () => {
-  let end = () => {};
-  const finished = new Promise<void>((r) => (end = r));
-  const running = { finished, effect: { getComputedTiming: () => ({ endTime: 60_000, localTime: 0 }) } } as unknown as Animation;
-  const before = Element.prototype.getAnimations;
-  try {
-    const user = userEvent.setup();
-    renderTab([key(1), key(2)], "/providers/acme/keys?key=team-1");
-    const dialog = await screen.findByRole("dialog", { name: "team-1" });
-    // From here on the dialog's exit runs until the test ends it (jsdom has no transitions).
-    Element.prototype.getAnimations = function (this: Element) {
-      return this === dialog ? [running] : [];
-    };
-    await user.click(within(dialog).getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(where()).not.toContain("key="));
-    expect(dialog.isConnected).toBe(true);
-    expect(dialog.hasAttribute("data-ending-style")).toBe(true);
-    expect(within(dialog).getByRole("heading", { name: "team-1" })).toBeTruthy();
-    await act(async () => end());
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  } finally {
-    Element.prototype.getAnimations = before;
-  }
 });

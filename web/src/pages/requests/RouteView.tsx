@@ -452,7 +452,7 @@ function AttemptPanel({ a, next, onClose }: { a: Attempt; next?: Attempt; onClos
         <AttemptTarget a={a} />
         <Row label="Shape">{longShape(a.shape)}</Row>
         <Row label="Model sent" mono>
-          {a.wire_model}
+          {a.wire_model ? <RecordLink record={rec.model(a.provider, a.wire_model)}>{a.wire_model}</RecordLink> : a.wire_model}
         </Row>
         {servedModel(a) && (
           <Row label="Model served" mono>

@@ -5,6 +5,7 @@ Each Provider keeps a model list. An entry has three independent flags: **discov
 ```
 POST /api/providers/acme/models/refresh                       discover now (dry_run=true: say what would be read)
 GET  /api/providers/acme/models?q=glm&filter=visible&limit=100 search, filter (all, visible, discovered, added, hidden, gaps) and page
+GET  /api/providers/acme/models/meta-llama/llama-3.3-70b        one entry by model ID (slashes as is or escaped); 404 when the list doesn't hold it
 POST /api/providers/acme/models   {"model": "glm-4.6"}                 add a model discovery misses; refreshes never remove it
 POST /api/providers/acme/models   {"model": "old-model", "hidden": true} hide any model, even one never discovered
 POST /api/providers/acme/models   {"model": "old-model", "hidden": false} show it again ({"added": false} undoes an addition)

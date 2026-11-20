@@ -131,11 +131,23 @@ test("Escape on the page closes the top sheet; page shortcuts still see no popup
 
 test("Open page goes to the record's full page and closes the stack", async () => {
   const user = userEvent.setup();
+  renderWithSheets(<Page />, "/page?sheet=key:acme/team-5&sheet=provider:acme");
+  const providerSheet = await screen.findByRole("dialog", { name: "Provider acme" });
+  const open = within(providerSheet).getByRole("link", { name: "Open page" });
+  expect(open.getAttribute("href")).toBe("/providers/acme/keys");
+  await user.click(open);
+  await waitFor(() => expect(where()).toBe("/providers/acme/keys"));
+  await waitFor(() => expect(sheets()).toHaveLength(0));
+});
+
+test("an Upstream Key's page is the Keys tab with its sheet: Open page keeps that sheet and closes the rest", async () => {
+  const user = userEvent.setup();
   renderWithSheets(<Page />, "/page?sheet=provider:acme&sheet=key:acme/team-5");
   const keySheet = await screen.findByRole("dialog", { name: "Upstream Key team-5" });
   const open = within(keySheet).getByRole("link", { name: "Open page" });
-  expect(open.getAttribute("href")).toBe("/providers/acme/keys?key=team-5");
+  expect(open.getAttribute("href")).toBe("/providers/acme/keys?sheet=key%3Aacme%2Fteam-5");
   await user.click(open);
-  await waitFor(() => expect(where()).toBe("/providers/acme/keys?key=team-5"));
-  await waitFor(() => expect(sheets()).toHaveLength(0));
+  await waitFor(() => expect(where()).toBe("/providers/acme/keys?sheet=key:acme/team-5"));
+  await waitFor(() => expect(sheets()).toHaveLength(1));
+  expect(screen.getByRole("dialog", { name: "Upstream Key team-5" })).toBe(keySheet);
 });

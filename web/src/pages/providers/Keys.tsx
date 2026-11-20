@@ -1,12 +1,9 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CircleCheck,
-  CircleSlash,
   Copy,
   Eraser,
-  Eye,
-  EyeOff,
   KeyRound,
   MessageCircle,
   MoreHorizontal,
@@ -17,12 +14,15 @@ import {
   Waypoints,
 } from "lucide-react";
 import { useChatActions } from "@/app/chat-panel";
-import { rec, RecordLink } from "@/sheets/RecordLink";
+import { useLocation, useNavigate } from "react-router";
+import { rec } from "@/sheets/RecordLink";
+import { readStack, writeStack } from "@/sheets/records";
+import { useMaybeSheets } from "@/sheets/stack";
 import type { BulkResult } from "@/api/types";
-import { formatDate, formatDuration, timeAgo } from "@/lib/format";
+import { formatDuration, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { useUrlParams } from "@/lib/url-state";
-import { Button, IconButton, TextButton } from "@/ui/Button";
+import { Button, TextButton } from "@/ui/Button";
 import { Mono, StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
 import { useConfirm } from "@/ui/Confirm";
@@ -31,24 +31,26 @@ import { type ColumnFiltersState, type SortingState, DataTable, RowMenu, columns
 import { type Done, type Save, SaveError, SaveStatus, toastDone, useSave } from "@/ui/SaveStatus";
 import { ScrollArea } from "@/ui/ScrollArea";
 import { Dialog } from "@/ui/Dialog";
-import { Field, Input, ToolbarSearch } from "@/ui/Input";
+import { ToolbarSearch } from "@/ui/Input";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { notify, notifyChange } from "@/ui/toast";
 import type { KeyTestBulk, KeyTestResult, Provider, UpstreamKey } from "./api";
 import { calls, errorText, maskSecret, natural, useKeys, useRefresh } from "./api";
 import { Reveal } from "@/ui/Reveal";
-import { appearClass, Checkbox, KeyStateLabel, Pill, ringRoom, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
+import { appearClass, Checkbox, KeyStateLabel, Pill, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
 import { SAMPLE_KEYS } from "./samples";
+import { KeysBulkEdit } from "./BulkEdits";
 
 // The Keys tab (C01, C11, C20; phones C31): one line per Upstream Key in the
 // shared DataTable, sorted, filtered, searched and paged; selecting keys turns
-// the toolbar into "N selected" with Test, Disable and a ⋯ menu. Every bulk
+// the toolbar into "N selected" with Test, Disable, Edit… (UI ticket 30) and a ⋯ menu. Every bulk
 // action calls the bulk API and shows per-key results when any key failed. Its
 // result (with Undo, an Audit revert) shows where it was asked for: in the
-// selection bar, or in the key's dialog; from a row's menu, which has closed, it
-// toasts. Deletes ask first (UI ticket 21).
-// ?q= searches, ?state= filters, ?sort=&dir= sorts; ?key=<name> opens a key.
+// selection bar; from a row's menu, which has closed, it toasts. Deletes ask
+// first (UI ticket 21). A row opens the key's sheet, which does the rest
+// (sheets/records/KeySheet.tsx, UI ticket 27).
+// ?q= searches, ?state= filters, ?sort=&dir= sorts; ?key=<name> (an old link) opens the key's sheet.
 
 type StateFilter = "all" | "active" | "cooling" | "invalid" | "disabled" | "gaps";
 type Sort = "name" | "state" | "used";
@@ -116,12 +118,25 @@ export function KeysTab({
   const sort = (params.get("sort") as Sort) || "name";
   const desc = params.get("dir") === "desc";
   const openKey = params.get("key");
+  const sheets = useMaybeSheets();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // A key opens in its sheet (UI ticket 27); links from when it opened in a dialog (?key=<name>) open the sheet.
+  useEffect(() => {
+    if (!openKey) return;
+    const p = new URLSearchParams(location.search);
+    p.delete("key");
+    const search = writeStack(`?${p}`, [...readStack(location.search), rec.key(handle, openKey)]);
+    navigate({ pathname: location.pathname, search, hash: location.hash }, { replace: true, state: location.state });
+  }, [openKey, handle, location, navigate]);
 
   const [results, setResults] = useState<Results>();
   const [restricting, setRestricting] = useState<string[]>();
   const [busy, setBusy] = useState<string>();
   // Results of what the selection bar did show in the bar.
-  const barSave = useSave({ describe: errorText });
+  // `refresh`: its Undo shows the keys as they were back at once.
+  const barSave = useSave({ refresh, describe: errorText });
   const emptySave = useSave({ describe: errorText });
   const copied = useCopy();
 
@@ -201,7 +216,9 @@ export function KeysTab({
         refresh();
         // Toast: the confirm dialog has closed and the rows are gone; Undo after a delete.
         reportBulk(res, names, "deleted", setResults, refresh);
-        if (names.includes(openKey ?? "")) setParam("key");
+        // A deleted key's sheet closes with it.
+        const at = sheets?.stack.findIndex((e) => e.record.kind === "key" && e.record.provider === handle && names.includes(e.record.key)) ?? -1;
+        if (at >= 0) sheets?.close(at);
       },
     });
   };
@@ -225,7 +242,7 @@ export function KeysTab({
   };
 
   const keyActions: KeyActions = {
-    open: (k) => setParam("key", k.name),
+    open: (k) => sheets?.open(rec.key(handle, k.name)),
     test: (k, at) => void test([k.name], at),
     chat: (k) => chat.open({ kind: "upstream_key", provider: handle, key: k.name }),
     toggle: (k, at) => void bulk(k.enabled ? "disable" : "enable", [k.name], k.enabled ? "disabled" : "enabled", at),
@@ -240,7 +257,6 @@ export function KeysTab({
     ...(q ? [{ label: `Search: ${q}`, onRemove: () => setParam("q") }] : []),
     ...(filter !== "all" ? [{ label: filterLabel[filter], onRemove: () => setParam("state") }] : []),
   ];
-  const detail = openKey ? byName.get(openKey) : undefined;
   const multipleEndpoints = (provider?.endpoints.length ?? 0) > 1;
 
   const bulkBar = (rows: UpstreamKey[]) => {
@@ -254,17 +270,14 @@ export function KeysTab({
         <Button icon={Pause} onClick={() => void bulk("disable", names, "disabled", barSave)} loading={busy === "disable"} size={phone ? "sm" : "md"}>
           Disable
         </Button>
+        {/* Enabled and Endpoints with mixed values shown (UI ticket 30); it replaces the bulk "Endpoints…", which started from the first key. */}
+        <KeysBulkEdit handle={handle} provider={provider} rows={rows} at={barSave} size={phone ? "sm" : "md"} />
         <Menu>
           <MenuIconTrigger icon={MoreHorizontal} label="More actions for the selected keys" bordered copy={copied.state} />
           <MenuContent align="start">
             <MenuItem icon={CircleCheck} onSelect={() => void bulk("enable", names, "enabled", barSave)}>
               Enable
             </MenuItem>
-            {multipleEndpoints && (
-              <MenuItem icon={Plug} onSelect={() => setRestricting(names)}>
-                Endpoints…
-              </MenuItem>
-            )}
             <MenuItem icon={Eraser} onSelect={() => void bulk("clear-model-gaps", names, "cleared of Model Gaps", barSave)}>
               Clear Model Gaps
             </MenuItem>
@@ -391,16 +404,6 @@ export function KeysTab({
         onResults={setResults}
         onKeyless={addKeyless}
         keylessPending={busy === "keyless"}
-      />
-      <KeyDialog
-        handle={handle}
-        k={detail}
-        missing={!!openKey && !keys.isPending && !detail ? openKey : undefined}
-        provider={provider}
-        onClose={() => setParam("key")}
-        onRenamed={(n) => setParam("key", n)}
-        actions={keyActions}
-        testing={busy === "test"}
       />
       <EndpointsDialog
         handle={handle}
@@ -541,8 +544,8 @@ function KeyLine({ k }: { k: UpstreamKey }) {
 
 // ---- Results of bulk actions ----
 
-type ResultRow = { name: string; ok: boolean; text: ReactNode; tone?: "green" | "red" | "gray" };
-type Results = { title: string; summary: string; rows: ResultRow[] };
+export type ResultRow = { name: string; ok: boolean; text: ReactNode; tone?: "green" | "red" | "gray" };
+export type Results = { title: string; summary: string; rows: ResultRow[] };
 
 /** A bulk change's result (with its Audit Entry for Undo); shows per-key results when any key failed. */
 function bulkDone(res: BulkResult<UpstreamKey>, items: string[], past: string, show: (r: Results) => void): Done | undefined {
@@ -564,17 +567,17 @@ function bulkDone(res: BulkResult<UpstreamKey>, items: string[], past: string, s
 }
 
 /** A bulk change whose place is gone (a dialog that closed): its toast. */
-function reportBulk(res: BulkResult<UpstreamKey>, items: string[], past: string, show: (r: Results) => void, refresh: () => void) {
+export function reportBulk(res: BulkResult<UpstreamKey>, items: string[], past: string, show: (r: Results) => void, refresh: () => void) {
   const d = bulkDone(res, items, past, show);
   // Toast: the dialog it came from (a confirm, the Endpoints dialog) has closed, so the result has no place left.
   if (d) toastDone(d, refresh);
 }
 
-function testFailure(r: KeyTestResult): string {
+export function testFailure(r: KeyTestResult): string {
   return [r.status ? String(r.status) : "No answer", r.reason].filter(Boolean).join(" ");
 }
 
-function testResults(res: KeyTestBulk, items: string[]): Results {
+export function testResults(res: KeyTestBulk, items: string[]): Results {
   return {
     title: `Tested ${items.length} key${items.length === 1 ? "" : "s"}`,
     summary: `${res.passed} passed, ${res.failed} failed.`,
@@ -826,7 +829,7 @@ function AddKeysDialog({
 
 // ---- Endpoints a key may use ----
 
-function EndpointsDialog({
+export function EndpointsDialog({
   handle,
   provider,
   names,
@@ -925,314 +928,9 @@ function EndpointsDialog({
   );
 }
 
-// ---- One key ----
+// ---- One key: its sheet (sheets/records/KeySheet.tsx) ----
 
-function KeyDialog({
-  handle,
-  k: current,
-  missing,
-  provider,
-  onClose,
-  onRenamed,
-  actions,
-  testing,
-}: {
-  handle: string;
-  k?: UpstreamKey;
-  missing?: string;
-  provider?: Provider;
-  onClose: () => void;
-  onRenamed: (name: string) => void;
-  actions: KeyActions;
-  testing: boolean;
-}) {
-  const refresh = useRefresh();
-  const [shown, setShown] = useState(false);
-  const [name, setName] = useState("");
-  const [secret, setSecret] = useState<string>();
-  // The dialog stays open, so results show in it: a rename beside the Name
-  // field, a new secret under the key, everything else in the footer.
-  const nameSave = useSave({ refresh, describe: errorText });
-  const secretSave = useSave({ refresh, describe: errorText });
-  const actionSave = useSave({ describe: errorText });
-
-  // A key opened (not one closing): start from it.
-  useEffect(() => {
-    if (!current) return;
-    setName(current.name);
-    setSecret(undefined);
-    nameSave.clear();
-    secretSave.clear();
-    actionSave.clear();
-    setShown(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id]);
-
-  // Motion: the dialog stays mounted while it leaves, still about the key (or
-  // missing name) it showed, so the dialog recipe's exit plays.
-  const open = !!missing || !!current;
-  const last = useRef<{ missing?: string; k?: UpstreamKey }>({});
-  if (open) last.current = { missing, k: current };
-  const gone = open ? missing : last.current.missing;
-  const k = open ? current : last.current.k;
-
-  if (gone)
-    return (
-      <Dialog open={open} onOpenChange={(o) => !o && onClose()} title={`No key ${gone}`} description={`${handle} has no Upstream Key named ${gone}. It may have been renamed or deleted.`} />
-    );
-  if (!k) return null;
-
-  const rename = (to: string) =>
-    void nameSave.run(
-      async () => {
-        const res = await calls.updateKey(handle, k.name, { name: to });
-        onRenamed(to);
-        return res;
-      },
-      { message: `Renamed to ${to}` },
-    );
-  const replace = (to: string) =>
-    void secretSave.run(
-      async () => {
-        const res = await calls.updateKey(handle, k.name, { secret: to });
-        setSecret(undefined);
-        return res;
-      },
-      { message: "Key replaced" },
-    );
-
-  const clearGap = (model?: string) =>
-    void actionSave.run(
-      async () => {
-        const res = await calls.clearKeyGaps(handle, k.name, model);
-        await refresh();
-        return res;
-      },
-      { message: model ? `Model Gap for ${model} cleared` : "Model Gaps cleared" },
-    );
-
-  const clearEndpointGap = (endpoint?: string) =>
-    void actionSave.run(
-      async () => {
-        const res = await calls.clearEndpointGaps(handle, k.name, endpoint);
-        await refresh();
-        return res;
-      },
-      { message: endpoint ? `Endpoint Gap on ${endpoint} cleared` : "Endpoint Gaps cleared" },
-    );
-
-  const eps = provider?.endpoints ?? [];
-  const s = k.state;
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()} title={k.name} description={`Upstream Key of ${handle}`} width={600}>
-      <div className="flex flex-col gap-6">
-        <section>
-          <h3 className="mb-2 text-[14px] font-semibold">State</h3>
-          <div className="rounded-lg border border-border px-4 py-3">
-            <div className="flex items-center gap-3 text-[15px]">
-              <KeyStateLabel state={s} />
-              {s.since && <span className="text-[13.5px] text-fg-muted">since {timeAgo(s.since)}</span>}
-            </div>
-            {s.reason && <p className="mt-1.5 text-[14px] text-fg-muted">{s.reason}</p>}
-            {(s.rule || s.request_id) && (
-              <p className="mt-1.5 flex flex-wrap gap-x-4 text-[13.5px] text-fg-muted">
-                {s.rule && <span>Rule: {s.rule}</span>}
-                {s.request_id && (
-                  <RecordLink record={rec.request(s.request_id)} drop={DIALOG}>
-                    Open the Request
-                  </RecordLink>
-                )}
-              </p>
-            )}
-          </div>
-        </section>
-
-        <section>
-          <h3 className="mb-2 text-[14px] font-semibold">Key</h3>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-subtle py-1 pl-3 pr-1">
-            <Mono className="min-w-0 flex-1 break-all py-1 text-fg">{k.secret ? (shown ? k.secret : maskSecret(k.secret)) : "Keyless: no key is sent"}</Mono>
-            {k.secret && <IconButton icon={shown ? EyeOff : Eye} label={shown ? "Hide the key" : "Show the key"} size="sm" onClick={() => setShown((x) => !x)} />}
-            {k.secret && <CopyButton icon value={k.secret} what="Key" label="Copy the key" />}
-            <Button size="sm" variant="ghost" onClick={() => setSecret(secret === undefined ? "" : undefined)}>
-              {secret !== undefined ? "Cancel" : k.secret ? "Replace" : "Add a secret"}
-            </Button>
-          </div>
-          <Reveal open={secret !== undefined} label="New key" className={ringRoom}>
-            <form
-              className="flex gap-2 pt-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                replace((secret ?? "").trim());
-              }}
-            >
-              <Input mono autoFocus placeholder="The new key" value={secret ?? ""} onChange={(e) => setSecret(e.target.value)} aria-label="New key" aria-invalid={!!secretSave.error} />
-              <Button type="submit" variant="primary" loading={secretSave.pending} disabled={!secret?.trim()}>
-                Save
-              </Button>
-            </form>
-          </Reveal>
-          <SaveStatus save={secretSave} saving={false} className="mt-2" />
-          <SaveError save={secretSave} className="mt-2" />
-        </section>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (name.trim() && name.trim() !== k.name) rename(name.trim());
-          }}
-        >
-          <Field label="Name" hint="Unique within the Provider; Requests and Audit Entries show it." error={nameSave.error}>
-            {(p) => (
-              <div className="flex flex-wrap items-center gap-2">
-                <Input {...p} mono className="min-w-48 flex-1" autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} />
-                {name.trim() !== k.name ? (
-                  <Button type="submit" variant="primary" loading={nameSave.pending}>
-                    Rename
-                  </Button>
-                ) : (
-                  <SaveStatus save={nameSave} className="shrink-0" />
-                )}
-              </div>
-            )}
-          </Field>
-        </form>
-
-        {(k.model_gaps.length > 0 || k.cooling_models.length > 0) && (
-          <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-[14px] font-semibold">Models this key can't serve now</h3>
-              {k.model_gaps.length > 1 && (
-                <TextButton className="text-[13.5px]" onClick={() => void clearGap()}>
-                  Clear all Model Gaps
-                </TextButton>
-              )}
-            </div>
-            <ul className="divide-y divide-border rounded-lg border border-border text-[14px]">
-              {k.model_gaps.map((g) => (
-                <li key={`g${g.model}`} className="flex items-start gap-3 px-4 py-2.5">
-                  <StatusDot tone="blue" className="mt-1.5" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-mono">{g.model}</span>
-                    <span className="block text-fg-muted">
-                      Model Gap: {g.reason}. Ends {formatDate(g.expires_at)}.
-                    </span>
-                  </span>
-                  <TextButton className="shrink-0" aria-label={`Clear the Model Gap for ${g.model}`} onClick={() => void clearGap(g.model)}>
-                    Clear
-                  </TextButton>
-                </li>
-              ))}
-              {k.cooling_models.map((c) => (
-                <CoolingRow key={`c${c.model}`} model={c.model} reason={c.reason} until={c.until} />
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {(eps.length > 1 || k.endpoint_gaps.length > 0) && (
-          <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-[14px] font-semibold">Endpoints</h3>
-              <TextButton className="text-[13.5px]" aria-label={`Change the Endpoints of ${k.name}`} onClick={() => actions.endpoints(k)}>
-                Change
-              </TextButton>
-            </div>
-            <p className="text-[14px] text-fg-muted">
-              {k.endpoints.length ? (
-                <>
-                  Only <EndpointNames handle={handle} names={k.endpoints} />
-                </>
-              ) : (
-                "Every Endpoint"
-              )}
-              {k.worked_on.length > 0 && (
-                <>
-                  . Worked on <EndpointNames handle={handle} names={k.worked_on.map((w) => w.endpoint)} />.
-                </>
-              )}
-            </p>
-            {k.endpoint_gaps.length > 0 && (
-              <>
-                <ul className="mt-2 divide-y divide-border rounded-lg border border-border text-[14px]">
-                  {k.endpoint_gaps.map((g) => (
-                    <li key={g.endpoint_id} className="flex items-start gap-3 px-4 py-2.5">
-                      <StatusDot tone="blue" className="mt-1.5" />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex min-w-0 font-medium">
-                          <RecordLink record={rec.endpoint(handle, g.endpoint)} drop={DIALOG}>
-                            {g.endpoint}
-                          </RecordLink>
-                        </span>
-                        <span className="block text-fg-muted">Endpoint Gap: {g.reason}. Not sent there until cleared; a passing test there clears it.</span>
-                      </span>
-                      <TextButton className="shrink-0" aria-label={`Clear the Endpoint Gap on ${g.endpoint}`} onClick={() => void clearEndpointGap(g.endpoint)}>
-                        Clear
-                      </TextButton>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-2 flex justify-end">
-                  <Button size="sm" icon={Waypoints} onClick={() => actions.restrictToWorking(k, actionSave)}>
-                    Restrict to working Endpoints
-                  </Button>
-                </div>
-              </>
-            )}
-          </section>
-        )}
-
-        <dl className="grid grid-cols-2 gap-4 text-[14px]">
-          <div>
-            <dt className="text-fg-muted">Added</dt>
-            <dd>{formatDate(k.created_at)}</dd>
-          </div>
-          <div>
-            <dt className="text-fg-muted">Last used</dt>
-            <dd>{k.last_used_at ? timeAgo(k.last_used_at) : "Never"}</dd>
-          </div>
-        </dl>
-      </div>
-
-      <div className="mt-7 flex flex-wrap items-center gap-2 border-t border-border pt-5">
-        <Button variant="ghost" danger icon={Trash2} onClick={() => actions.remove(k)}>
-          Delete…
-        </Button>
-        <div className="flex-1" />
-        <Button icon={k.enabled ? Pause : CircleSlash} onClick={() => actions.toggle(k, actionSave)}>
-          {k.enabled ? "Disable" : "Enable"}
-        </Button>
-        <Button icon={MessageCircle} onClick={() => actions.chat(k)}>
-          Test in Chat
-        </Button>
-        <Button variant="primary" icon={Play} loading={testing} onClick={() => actions.test(k, actionSave)}>
-          Test
-        </Button>
-      </div>
-      {/* Its own line under the buttons that caused it, so a long result never squeezes them. */}
-      <div className="mt-3 flex min-h-5 flex-wrap items-center justify-end gap-x-2 empty:hidden">
-        <SaveStatus save={actionSave} saving={false} />
-        <SaveError save={actionSave} />
-      </div>
-    </Dialog>
-  );
-}
-
-/** The key's dialog is in the URL (?key=): a link out of it closes it, and Back reopens it. */
-const DIALOG = ["key"];
-
-/** "main, intl": each Endpoint's name a link to its sheet. */
-function EndpointNames({ handle, names }: { handle: string; names: string[] }) {
-  return names.map((n, i) => (
-    <span key={n}>
-      {i > 0 && ", "}
-      <RecordLink record={rec.endpoint(handle, n)} drop={DIALOG} className="align-bottom">
-        {n}
-      </RecordLink>
-    </span>
-  ));
-}
-
-function CoolingRow({ model, reason, until }: { model: string; reason: string; until: string }) {
+export function CoolingRow({ model, reason, until }: { model: string; reason: string; until: string }) {
   const left = Math.max(0, Math.round((new Date(until).getTime() - Date.now()) / 1000));
   return (
     <li className="flex items-start gap-3 px-4 py-2.5">

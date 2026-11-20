@@ -381,6 +381,26 @@
     visibility: hidden;
   }
 }
+/* A skeleton drawn from a big table's remembered shape (UI ticket 26: the feed's
+   100 rows were 1,414 bones, 1.6 s to draw and a shimmer repainting them all)
+   is cut at a window's height: Skullet draws no bone outside an element that
+   clips, so only what can be seen is drawn and swept. The rows below arrive with
+   the content, out of view. */
+[skullet-loading] :is(.table-scroller, ul[data-rows]) {
+  max-height: 100vh !important;
+  overflow: hidden !important;
+}
+/* Rows past the first 30 aren't laid out or walked at all. */
+[skullet-loading] [data-rows] > :nth-child(n + 31) {
+  display: none !important;
+}
+/* The sweep repaints every bone on the main thread each frame (a background
+   animated per bone); a sample (at most 20 rows) keeps it, a skeleton of more
+   rows (a big table's remembered shape, hundreds of bones) pulses instead: opacity,
+   composited, no paint. Skullet reads this when it draws. */
+[skullet-loading]:has([data-rows] > :nth-child(21)) {
+  --skullet-animation: pulse;
+}
 .skeleton-fill,
 .skeleton-fill :is([skullet-pane], [skullet-loading], [skullet-ghost]) {
   display: flex;

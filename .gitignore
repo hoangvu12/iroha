@@ -16,3 +16,6 @@
 !/internal/webui/dist/.gitkeep
 /web/node_modules/
 
+
+# TypeScript incremental build cache
+*.tsbuildinfo

@@ -51,6 +51,7 @@ import { Pager } from "./Pagination";
 import { ScrollArea } from "./ScrollArea";
 import { Select } from "./Select";
 import { Skeleton } from "./Skeleton";
+import { useRevealRows } from "./reveal-rows";
 import { ErrorState, type FilterChip, NoResults } from "./States";
 
 export type { ColumnFiltersState, PaginationState, RowSelectionState, SortingState, ColumnVisibilityState as VisibilityState, RowData } from "@tanstack/react-table";
@@ -382,6 +383,8 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const filteredRows = table.getFilteredRowModel().rows;
   const shown = paging.mode === "server" ? paging.rowCount : filteredRows.length;
   const pageRows = table.getRowModel().rows;
+  // Many rows arriving over the skeleton: a screenful comes with the reveal, the rest right after (UI ticket 26).
+  const shownRows = useRevealRows(pageRows, loading);
   // Rows the server filtered can be none because of the filters; loaded rows filtered here can't.
   const serverFiltered = !!props.manualFiltering || paging.mode === "server";
   const filtered = serverFiltered && (search.trim() !== "" || (props.columnFilters?.length ?? 0) > 0 || (props.filterChips?.length ?? 0) > 0);
@@ -485,7 +488,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     if (!active || loading) return;
     const el = rootRef.current?.querySelector<HTMLElement>(`[data-rows] > [data-row-id="${CSS.escape(active)}"]`);
     el?.scrollIntoView?.({ block: "nearest" });
-  }, [active, loading, phone]);
+  }, [active, loading, phone, shownRows.length]);
 
   // Rows added or removed after an action enter and leave; only tables holding all their rows (server pages and the live feed don't).
   const rowMotion = useRowMotion({ data, getRowId, enabled: (paging.mode === "pages" || paging.mode === "none") && !props.dimmed, root: rootRef });
@@ -525,7 +528,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
         </thead>
         <tbody data-rows="">
           {/* One flat list keyed by row ID, so a row arriving on top doesn't remount the rows under it; rows leaving are put back where they were. */}
-          {rowMotion.withLeaving(pageRows.map((row, index) => {
+          {rowMotion.withLeaving(shownRows.map((row, index) => {
             const r = row.original;
             const name = rowName(r);
             const selected = row.getIsSelected();
@@ -585,7 +588,7 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
       {/* Sticks to the top of the page while the list scrolls under it. */}
       {pill && <div className="pointer-events-none sticky top-3 z-[2] flex h-0 justify-center">{pill}</div>}
       <ul data-rows="" aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && dimClass)}>
-        {rowMotion.withLeaving(pageRows.map((row, index) => {
+        {rowMotion.withLeaving(shownRows.map((row, index) => {
           const r = row.original;
           const name = rowName(r);
           const selected = row.getIsSelected();

@@ -426,6 +426,61 @@ test("loading shows the skeleton, an error shows Try again, no rows shows the em
   expect(screen.queryByRole("table")).toBeNull();
 });
 
+// UI ticket 26: a click on a skeleton's row opened a sheet for the sample record.
+test("the skeleton's sample rows open nothing: no row, Open button, row menu or checkbox reacts", async () => {
+  const opened = vi.fn();
+  const menu = vi.fn();
+  const { container } = render(
+    <Fruits
+      data={undefined}
+      onRowClick={opened}
+      bulk={() => null}
+      rowActions={(f) => (
+        <RowMenu name={f.name}>
+          <MenuItem onSelect={() => menu(f.name)}>Eat</MenuItem>
+        </RowMenu>
+      )}
+    />,
+  );
+  const sampleRows = container.querySelectorAll("[skullet-loading] tbody tr");
+  expect(sampleRows.length).toBe(SAMPLE.length);
+  for (const row of sampleRows) {
+    for (const el of [row, ...row.querySelectorAll("td, button, [role=checkbox]")]) {
+      fireEvent.pointerDown(el);
+      fireEvent.mouseDown(el);
+      fireEvent.click(el);
+      fireEvent.keyDown(el, { key: "Enter" });
+      fireEvent.keyDown(el, { key: " " });
+    }
+  }
+  expect(opened).not.toHaveBeenCalled();
+  expect(menu).not.toHaveBeenCalled();
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(screen.queryByRole("button", { name: /Clear selection/ })).toBeNull();
+});
+
+// UI ticket 26: a hundred rows replacing a skeleton were one long task (render,
+// Skullet's reveal and its copy of the rows); the first screenful comes with the
+// reveal and the rest are added right after, in a transition.
+test("many rows arriving over a skeleton: a screenful comes with the reveal, the rest right after", async () => {
+  const footer = ({ shown }: { shown: number }) => `${shown} fruit`;
+  const { rerender } = render(<Fruits data={undefined} paging={{ mode: "none" }} footer={footer} />);
+  rerender(<Fruits data={many(100)} paging={{ mode: "none" }} footer={footer} />);
+  expect(bodyRows()).toHaveLength(30);
+  expect(names().slice(0, 3)).toEqual(["fruit-001", "fruit-002", "fruit-003"]);
+  // The footer counts every row from the start.
+  expect(screen.getByText("100 fruit")).toBeTruthy();
+  await waitFor(() => expect(bodyRows()).toHaveLength(100));
+});
+
+test("rows that are there from the start, or few, all come at once", () => {
+  const { rerender } = render(<Fruits data={many(100)} paging={{ mode: "none" }} />);
+  expect(bodyRows()).toHaveLength(100);
+  rerender(<Fruits data={undefined} key="b" paging={{ mode: "none" }} />);
+  rerender(<Fruits data={many(30)} key="b" paging={{ mode: "none" }} />);
+  expect(bodyRows()).toHaveLength(30);
+});
+
 test("expandable rows: the chevron shows the details under the row", async () => {
   const user = userEvent.setup();
   render(<Fruits renderExpanded={(f) => <p>{f.name} weighs {f.weight} g</p>} />);

@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -82,18 +81,11 @@ func (g *Gateway) classifyRoute(c *api.Call) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	list := "GET /api/providers/" + rt.Handle + "/endpoints"
 	ep := &planner.Endpoint{}
 	switch {
 	case in.Endpoint != "":
-		ep = nil
-		for i := range rt.Endpoints {
-			if e := &rt.Endpoints[i]; e.ID == in.Endpoint || (ep == nil && e.Name == in.Endpoint) {
-				ep = e
-			}
-		}
-		if ep == nil {
-			return nil, api.NotFound("List them with "+list+"; address one by its name or ID.", "Provider %s has no Endpoint named %q or with that ID.", rt.Handle, in.Endpoint)
+		if ep, err = endpointOf(&rt, in.Endpoint); err != nil {
+			return nil, err
 		}
 	case len(rt.Endpoints) > 0:
 		ep = &rt.Endpoints[0]
@@ -115,23 +107,9 @@ func (g *Gateway) classifyRoute(c *api.Call) (any, error) {
 	d := noCredential(g.rules().Classify(f, now), planner.Candidate{Endpoint: ep, Key: key})
 	out.Rule, out.Outcome, out.Status, out.Reason = d.Rule, d.Outcome, d.Status, d.Reason
 	out.Embedded = embedded
-	out.RequestEffect = "Return to Caller"
-	if d.Outcome.Retries() {
-		out.RequestEffect = "Try next key"
-	}
-	forModel := ""
-	if d.Outcome == rules.CoolingKeyModel || d.Outcome == rules.ModelGap {
-		forModel = " for the model"
-		if in.Model != "" {
-			forModel = " for " + in.Model
-		}
-	}
-	switch d.Outcome {
-	case rules.Invalid:
-		out.KeyEffect = "Mark invalid"
-	case rules.ModelGap:
-		out.KeyEffect = "Record Model Gap" + forModel
-	case rules.CoolingKey, rules.CoolingKeyModel:
+	out.RequestEffect = d.Outcome.RequestEffect()
+	cool := ""
+	if d.Outcome.Cools() {
 		until := keystate.FirstCooling(d, now)
 		out.CoolingSeconds = int((until.Sub(now) + time.Second - 1) / time.Second)
 		switch {
@@ -142,10 +120,9 @@ func (g *Gateway) classifyRoute(c *api.Call) (any, error) {
 		default:
 			out.CoolingFrom = "default"
 		}
-		out.KeyEffect = "Cool " + durationWords(out.CoolingSeconds) + forModel
-	default:
-		out.KeyEffect = "No change"
+		cool = rules.Seconds(out.CoolingSeconds)
 	}
+	out.KeyEffect = rules.KeyEffect(d.Outcome, cool, in.Model)
 	return out, nil
 }
 
@@ -192,20 +169,4 @@ func contentTypeOf(body string) string {
 		return "application/json"
 	}
 	return "text/plain; charset=utf-8"
-}
-
-// durationWords is a cooling time as the rules list words it: 30 s, 15 min,
-// 2 h, 1 h 30 min.
-func durationWords(s int) string {
-	switch {
-	case s < 120:
-		return fmt.Sprintf("%d s", s)
-	case s < 3600 && s%60 == 0:
-		return fmt.Sprintf("%d min", s/60)
-	case s < 3600:
-		return fmt.Sprintf("%d min %d s", s/60, s%60)
-	case s%3600 == 0:
-		return fmt.Sprintf("%d h", s/3600)
-	}
-	return fmt.Sprintf("%d h %d min", s/3600, s%3600/60)
 }

@@ -103,7 +103,8 @@ test("the result is said in words and the path lights up to the rule that matche
   await user.click(within(p).getByRole("button", { name: "429 rate limit" }));
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   const said = await within(p).findByRole("status");
-  expect(said.textContent).toContain("Rule 3, rate-limited, matches: the key cools for this model for 30 s (the time the response names); the Request tries the next key.");
+  // The server's own words for the effects (key_effect, request_effect), never re-worded here.
+  expect(said.textContent).toContain("Rule 3, rate-limited, matches. Upstream Key: Cool 30 s for the model (the time the response names). Request: Try next key.");
   expect(said.textContent).toContain("429 rate_limit_exceeded: Rate limit reached");
   const [owner, off, rate, server] = steps();
   // Passed on the way: didn't match; a switched-off rule stays skipped.
@@ -127,7 +128,7 @@ test("no match lights the End card with the engine's fallback", async () => {
   await user.type(within(p).getByRole("textbox", { name: "Status" }), "418");
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   const said = await within(p).findByRole("status");
-  expect(said.textContent).toContain("No rule matches, so the fallback decides: the key is unchanged; the error goes back to the Caller.");
+  expect(said.textContent).toContain("No rule matches, so the fallback decides. Upstream Key: No change. Request: Return to Caller.");
   const end = screen.getByRole("group", { name: "No rule matched" });
   expect(end.getAttribute("aria-current")).toBe("step");
   for (const s of steps().filter((s) => !s.textContent?.includes("Off, skipped"))) expect(within(s).getByText("Didn't match")).toBeTruthy();

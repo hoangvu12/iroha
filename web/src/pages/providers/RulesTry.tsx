@@ -7,7 +7,6 @@ import { Field, Input } from "@/ui/Input";
 import type { Classification, Endpoint, FailureInput, Rule } from "./api";
 import { calls, errorText } from "./api";
 import { appearClass, Select } from "./controls";
-import { coolFor } from "./RulesFlow";
 
 // Try a failure (UI ticket 34): the Owner types an answer from the Provider and
 // the server says what the live Failure Rules decide for it
@@ -65,21 +64,10 @@ export function parseHeaders(text: string): Record<string, string> | undefined {
 /** The result in words, as the Owner reads it above the flow. `n` is the matched rule's step number. */
 export function sayResult(c: Classification, n?: number): string {
   if (!c.failure) return "Not a failure: Iroha relays this answer to the Caller; no rule is tried.";
-  const time = c.cooling_seconds ? coolFor(c.cooling_seconds) : "60 s";
+  // The effects are the server's words (as the rules list shows them); only where a cooling time came from is added.
   const from = c.cooling_from === "response" ? " (the time the response names)" : c.cooling_from === "default" ? " (the default; repeats double it, up to 1 h)" : "";
-  const key =
-    c.outcome === "invalid"
-      ? "the key is marked invalid"
-      : c.outcome === "cooling_key"
-        ? `the key cools for ${time}${from}`
-        : c.outcome === "cooling_key_model"
-          ? `the key cools for this model for ${time}${from}`
-          : c.outcome === "model_gap"
-            ? "the key gets a Model Gap for this model"
-            : "the key is unchanged";
-  const request = c.outcome === "fail_request" ? "the error goes back to the Caller" : "the Request tries the next key";
   const who = !c.rule ? "No rule matches, so the fallback decides" : n ? `Rule ${n}, ${c.rule}, matches` : `Rule ${c.rule} matches`;
-  return `${who}: ${key}; ${request}.`;
+  return `${who}. Upstream Key: ${c.key_effect}${from}. Request: ${c.request_effect}.`;
 }
 
 /**

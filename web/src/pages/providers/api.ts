@@ -169,7 +169,8 @@ export type ModelList = {
 
 export type RefreshResult = { summary: string; outcome: string; added: string[]; removed: string[]; discovered: number };
 
-export type Outcome = "invalid" | "cooling_key" | "cooling_key_model" | "model_gap" | "retry_elsewhere" | "fail_request";
+export type { Outcome } from "@/lib/outcomes";
+import type { Outcome } from "@/lib/outcomes";
 export const OUTCOMES: { value: Outcome; label: string; hint: string }[] = [
   { value: "cooling_key", label: "Cool the key", hint: "Rate limits and quotas: the key rests, then comes back." },
   { value: "cooling_key_model", label: "Cool the key for this model", hint: "A per-model limit: the key keeps serving other models." },
@@ -202,12 +203,14 @@ export type Rule = RuleFields & {
   last_hit_at?: string;
   order: number;
   overrides?: RuleFields & { name: string };
+  /** With overrides: what the replaced built-in did to the key, in the words of key_effect. */
+  builtin_key_effect?: string;
 };
 
 export type Replay = { attempts: number; changed: number; since: string; rules: { rule: string; now: number; after: number }[] };
 
 /** A failure the Owner types, for POST /api/providers/{p}/rules/classify (UI ticket 34). Status 0: no response. */
-export type FailureInput = { status: number; body?: string; headers?: Record<string, string>; model?: string; endpoint?: string };
+export type FailureInput = { status: number; body?: string; headers?: Record<string, string>; model?: string; endpoint?: string; translated?: boolean };
 
 /** What the live Failure Rules decide for a FailureInput (Go `gateway.Classification`). */
 export type Classification = {

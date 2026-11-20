@@ -102,8 +102,8 @@ export const SAMPLE_RULES: Rule[] = [
   source: "builtin",
   status: ["429"],
   outcome: "cooling_key",
-  key_effect: "Cools for 60 s",
-  request_effect: "Tries the next key",
+  key_effect: "Cool 60 s",
+  request_effect: "Try next key",
   hits: 12,
   order: i,
 }));

@@ -19,6 +19,10 @@ When a skill says "publish to the issue tracker," create the relevant file under
 
 When a skill says "fetch the relevant ticket," read the referenced issue path or number.
 
+## Verification
+
+A ticket is done only after an agent that did not write it has run the change with the `verify-iroha` skill (`.claude/skills/verify-iroha/`) and written its verdict, `PASS`, `PASS+NOTES` or `FAIL`, with evidence under `## Comments`. The author's tests and a review of the diff don't count as a verdict. On `FAIL` the author fixes and a verifier runs again. A ticket that changes nothing a running Iroha can show (docs, tests only) says so instead of a verdict.
+
 ## Blocking and frontier
 
 A ticket is unblocked when every ticket listed by `Blocked by:` is complete. The frontier is every incomplete, unblocked ticket, considered in numeric order.

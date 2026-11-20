@@ -1,6 +1,6 @@
 # Agent practices from pstack
 
-Status: open
+Status: done
 
 Two practices from `docs/research/pstack-agent-practices.md` ("What we could copy", items 1, 4 and 5), chosen by the Owner:
 

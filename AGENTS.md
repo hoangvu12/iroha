@@ -10,6 +10,10 @@ Issues and specs are tracked as Local Markdown under `.scratch/<feature>/`. See 
 
 This is a single-context repository. See `docs/agents/domain.md`.
 
+### Verification
+
+A ticket is done only when an agent that did not write it has run the change with the `verify-iroha` skill and left a verdict in the ticket. See "Verification" in `docs/agents/issue-tracker.md`. `go run ./cmd/iroha-dev` starts a local Iroha with fake upstreams and demo data.
+
 ### Architecture
 
 Read `docs/agents/architecture.md` before changing code: package map, how to add a route, a migration and a log event kind, and how to test with `internal/testkit`.

@@ -41,21 +41,22 @@ func failureBody(resp *http.Response) ([]byte, error) {
 // to stream), a whole answer a normaliser finds is a failure sent as a
 // success (normaliseBody), or, when the answer must be translated, a whole
 // body that is not JSON (an HTML page sent with 200), which the Failure
-// Rules read as a 502.
-func answerFailure(resp *http.Response, stream bool, norm normalise.Set, translated bool) []byte {
+// Rules read as a 502. embedded is true only for the first: an error inside
+// the answer.
+func answerFailure(resp *http.Response, stream bool, norm normalise.Set, translated bool) (body []byte, embedded bool) {
 	if body := embeddedError(resp, stream); body != nil {
-		return body
+		return body, true
 	}
 	if stream && isEventStream(resp.Header) {
-		return nil
+		return nil, false
 	}
 	if body := normaliseBody(resp, norm); body != nil {
-		return body
+		return body, false
 	}
 	if translated {
-		return notJSON(resp)
+		return notJSON(resp), false
 	}
-	return nil
+	return nil, false
 }
 
 // embeddedError returns the error a 2xx answer carries instead of an answer,

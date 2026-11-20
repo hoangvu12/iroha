@@ -290,7 +290,7 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 
 	// A 2xx answer may still be a failure (answerFailure); it then fails the
 	// Attempt like any other.
-	if body := answerFailure(resp, cr.stream, call.norm, call.tr != nil); body != nil {
+	if body, _ := answerFailure(resp, cr.stream, call.norm, call.tr != nil); body != nil {
 		f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), body
 		a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(body)
 		return a, f

@@ -139,6 +139,36 @@ func TestClassifyReadsErrorsInside2xxAnswersAndStreamsAsAnAttemptDoes(t *testing
 	}
 }
 
+// Review fixes (UI batch 2): embedded only for an error inside a 2xx, and
+// translated reads an answer the Gateway would translate.
+func TestClassifySaysEmbeddedOnlyForAnErrorInsideA2xxAndReadsTranslatedAnswers(t *testing.T) {
+	srv := testkit.Start(t)
+	addProvider(t, srv, "acme", "https://api.z.ai/api/paas/v4", "sk-test-a")
+
+	// A normaliser's failure in a 200 answer is a failure, but no error was inside it.
+	c := classify(t, srv, map[string]any{"status": 200, "body": `{"choices":[{"index":0,"finish_reason":"network_error","message":{"role":"assistant","content":"half"}}]}`})
+	if !c.Failure || c.Embedded {
+		t.Fatalf("normaliser failure = %+v", c)
+	}
+
+	// An HTML page sent with 200 is relayed on passthrough (the default)...
+	page := map[string]any{"status": 200, "body": "<html><body>Sign in</body></html>"}
+	if c := classify(t, srv, page); c.Failure || c.RequestEffect != "Relay the answer" {
+		t.Fatalf("HTML on passthrough = %+v", c)
+	}
+	// ...and read as a 502 when the answer must be translated.
+	page["translated"] = true
+	c = classify(t, srv, page)
+	if !c.Failure || c.Embedded || c.Status != 502 || c.Rule != "server-error" || c.RequestEffect != "Try next key" {
+		t.Fatalf("HTML on a translated path = %+v", c)
+	}
+	// An error inside a 200 is still embedded when translated.
+	c = classify(t, srv, map[string]any{"status": 200, "body": `{"error":{"code":429,"message":"Too many requests"}}`, "translated": true})
+	if !c.Failure || !c.Embedded || c.Status != 429 {
+		t.Fatalf("error inside a translated 200 = %+v", c)
+	}
+}
+
 func TestClassifyAppliesHostScopesAndKeylessEndpointsOfTheProvider(t *testing.T) {
 	srv := testkit.Start(t)
 	addProvider(t, srv, "acme", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "sk-test-a")

@@ -30,6 +30,7 @@ type ClassifyFailure struct {
 	Body        string            `json:"body,omitempty" doc:"The response body as the Provider sent it: JSON, text, an HTML page or a server-sent event stream (data: lines). A 2xx body is read as an Attempt reads it: an error inside it is a failure."`
 	Headers     map[string]string `json:"headers,omitempty" doc:"Response headers, such as Retry-After. Without Content-Type, a body starting with data:, event: or : is read as an event stream, one starting with { or [ as JSON."`
 	Timeout     bool              `json:"timeout,omitempty" doc:"With status 0: no response arrived within the time budget."`
+	Translated  bool              `json:"translated,omitempty" doc:"true: the answer would be translated to the Caller's Shape (the Caller used another Shape than the Endpoint's), so a whole 2xx body that is not JSON (an HTML page) is a failure, read as a 502. Default false: passthrough, where such a body is relayed as it came."`
 	Model       string            `json:"model,omitempty" doc:"The model the Attempt asked for; named in the result's key_effect for per-model outcomes."`
 	Endpoint    string            `json:"endpoint,omitempty" doc:"Name or ID of the Endpoint that answered; rules limited to a host match on its host. Default: the Provider's first Endpoint."`
 	UpstreamKey string            `json:"upstream_key,omitempty" doc:"Name or ID of the Upstream Key that was sent. A keyless key (empty secret), like an Endpoint with auth style none, sent no credential, so an invalid verdict becomes retry_elsewhere as in an Attempt."`
@@ -45,7 +46,7 @@ type Classification struct {
 	Rule           string        `json:"rule,omitempty" doc:"The Failure Rule that matched; empty when none did (5xx and no response then retry elsewhere, anything else fails the Request)."`
 	Outcome        rules.Outcome `json:"outcome,omitempty" enum:"invalid,cooling_key,cooling_key_model,model_gap,retry_elsewhere,fail_request"`
 	Status         int           `json:"status" doc:"The status the failure was read as: the upstream status, or for an error inside a 2xx answer the status the error stands for; 0 for no response."`
-	Embedded       bool          `json:"embedded" doc:"true when the error came inside a 2xx answer."`
+	Embedded       bool          `json:"embedded" doc:"true when an error came inside a 2xx answer (not for a 2xx failing otherwise: a normaliser's finding, or a body that is not JSON on a translated path)."`
 	Reason         string        `json:"reason,omitempty" doc:"The one line the Requests page shows for such a failed Attempt."`
 	KeyEffect      string        `json:"key_effect" doc:"What happens to the Upstream Key, in words: Mark invalid, Cool 30 s (for the model), Record Model Gap (for the model), No change. Mark invalid on an Endpoint where a key that works elsewhere is refused becomes an Endpoint Gap."`
 	RequestEffect  string        `json:"request_effect" enum:"Try next key,Return to Caller,Relay the answer" doc:"What happens to the Request."`
@@ -104,7 +105,7 @@ func (g *Gateway) classifyRoute(c *api.Call) (any, error) {
 		}
 	}
 	out := Classification{DryRun: dry, Provider: rt.Handle, Endpoint: ep.Name, Host: hosts.Of(ep.URL), Failure: true}
-	f, failed := readFailure(in, *ep)
+	f, failed, embedded := readFailure(in, *ep)
 	if !failed {
 		out.Failure, out.Status, out.KeyEffect, out.RequestEffect = false, in.Status, "No change", "Relay the answer"
 		return out, nil
@@ -113,7 +114,7 @@ func (g *Gateway) classifyRoute(c *api.Call) (any, error) {
 	now := g.clock.Now()
 	d := noCredential(g.rules().Classify(f, now), planner.Candidate{Endpoint: ep, Key: key})
 	out.Rule, out.Outcome, out.Status, out.Reason = d.Rule, d.Outcome, d.Status, d.Reason
-	out.Embedded = in.Status >= 200 && in.Status < 300
+	out.Embedded = embedded
 	out.RequestEffect = "Return to Caller"
 	if d.Outcome.Retries() {
 		out.RequestEffect = "Try next key"
@@ -149,14 +150,15 @@ func (g *Gateway) classifyRoute(c *api.Call) (any, error) {
 }
 
 // readFailure builds the upstream answer the Owner typed and reads it as an
-// Attempt on ep does. failed is false for a 2xx answer that is no failure.
-func readFailure(in ClassifyFailure, ep planner.Endpoint) (f rules.Failure, failed bool) {
+// Attempt on ep does. failed is false for a 2xx answer that is no failure;
+// embedded is true when the failure is an error inside a 2xx answer.
+func readFailure(in ClassifyFailure, ep planner.Endpoint) (f rules.Failure, failed, embedded bool) {
 	if in.Status == 0 {
 		what := "no response"
 		if in.Timeout {
 			what = "no response within the time budget"
 		}
-		return rules.Failure{Timeout: in.Timeout, Err: what}, true
+		return rules.Failure{Timeout: in.Timeout, Err: what}, true, false
 	}
 	h := http.Header{}
 	for k, v := range in.Headers {
@@ -168,15 +170,15 @@ func readFailure(in ClassifyFailure, ep planner.Endpoint) (f rules.Failure, fail
 	resp := &http.Response{StatusCode: in.Status, Header: h, Body: io.NopCloser(strings.NewReader(in.Body))}
 	if in.Status < 200 || in.Status >= 300 {
 		body, _ := failureBody(resp) // reading a string cannot fail
-		return rules.Failure{Status: in.Status, Header: h, Body: body}, true
+		return rules.Failure{Status: in.Status, Header: h, Body: body}, true, false
 	}
-	// A pasted stream is the answer to a streamed request; passthrough, as
-	// the Caller's Shape is not known.
-	body := answerFailure(resp, isEventStream(h), normalise.For(ep.URL, ep.Shape), false)
+	// A pasted stream is the answer to a streamed request; passthrough
+	// unless the Owner says the answer would be translated.
+	body, embedded := answerFailure(resp, isEventStream(h), normalise.For(ep.URL, ep.Shape), in.Translated)
 	if body == nil {
-		return rules.Failure{}, false
+		return rules.Failure{}, false, false
 	}
-	return rules.Failure{Status: in.Status, Header: h, Body: body}, true
+	return rules.Failure{Status: in.Status, Header: h, Body: body}, true, embedded
 }
 
 // contentTypeOf guesses a typed body's Content-Type: an event stream, JSON

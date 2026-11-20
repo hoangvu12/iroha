@@ -21,13 +21,22 @@ import { Reveal, riseIn } from "@/ui/Reveal";
 import { appearClass, Checkbox, Pill, ringRoom, Segmented, Select, Switch } from "./controls";
 import { RulesFlow } from "./RulesFlow";
 import { SAMPLE_RULES } from "./samples";
+import { rec } from "@/sheets/RecordLink";
+import { startEditing } from "@/sheets/records/editing";
+import { useMaybeSheets } from "@/sheets/stack";
 
 /** The Rules tab (C09): which Failure Rules decide this Provider's failures, in order, and how often each did today. */
 export function RulesTab({ handle, adding, setAdding }: { handle: string; adding: boolean; setAdding: (o: boolean) => void }) {
   const rules = useRules(handle);
   const refresh = useRefresh();
   const confirm = useConfirm();
-  const [editing, setEditing] = useState<Rule>();
+  const sheets = useMaybeSheets();
+  // An existing rule opens in its sheet, from a row or a Flow step (UI ticket 33); Edit… opens it on its fields.
+  const open = (r: Rule, edit = false) => {
+    const record = rec.rule(handle, r.name);
+    if (edit) startEditing(record);
+    sheets?.open(record);
+  };
   const { params, setParam } = useUrlParams();
   const q = params.get("q") ?? "";
   const setQ = (v: string) => setParam("q", v);
@@ -40,12 +49,13 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
   // Asks first, naming the rule; the result (with Undo) toasts, since the confirm has closed.
   const askDelete = (r: Rule) =>
     confirm.ask({
-      title: r.overrides ? `Restore the built-in ${r.name}?` : `Delete ${r.name}?`,
-      body: r.overrides ? "Your version goes and the built-in rule decides again. Undo brings yours back." : "Failures it matched fall to the next rule. Undo brings it back.",
-      confirmLabel: r.overrides ? "Restore built-in" : "Delete rule",
+      ...deleteQuestion(r),
       onConfirm: async () => {
         const res = await calls.deleteRule(r.name);
         refresh();
+        // A deleted rule's sheet, if open, closes with it.
+        const at = r.overrides ? -1 : (sheets?.stack.findIndex((s) => s.record.kind === "rule" && s.record.provider === handle && s.record.rule === r.name) ?? -1);
+        if (at >= 0) sheets?.close(at);
         // Toast: the confirm dialog has closed; Undo after a delete.
         notifyChange(r.overrides ? `${r.name} restored` : `${r.name} deleted`, res, { onUndone: refresh });
       },
@@ -53,7 +63,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
 
   const menu = (r: Rule) => (
     <RowMenu name={r.name}>
-      <MenuItem icon={Pencil} onSelect={() => setEditing(r)}>
+      <MenuItem icon={Pencil} onSelect={() => open(r, true)}>
         {r.source === "builtin" ? "Change (as your rule)…" : "Edit…"}
       </MenuItem>
       {r.source === "owner" && (
@@ -85,7 +95,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
             style={{ backgroundImage: "radial-gradient(var(--border-strong) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
           >
             <Skeleton data={rules.data} sample={SAMPLE_RULES} id={stacked ? "rules-flow:stacked" : "rules-flow"} label="Loading the rules">
-              {(list) => <RulesFlow handle={handle} rules={list} onOpen={setEditing} aside={(r) => <RuleSwitch r={r} />} stacked={stacked} />}
+              {(list) => <RulesFlow handle={handle} rules={list} onOpen={(r) => open(r)} aside={(r) => <RuleSwitch r={r} />} stacked={stacked} />}
             </Skeleton>
           </div>
         )
@@ -115,7 +125,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
           onClearFilters={() => setQ("")}
           noResultsTitle="No rules match"
           rowActions={menu}
-          onRowClick={setEditing}
+          onRowClick={(r) => open(r)}
           phoneRow={(r) => <RuleLine r={r} />}
           phoneActions={(r) => <RuleSwitch r={r} />}
           empty={<EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />}
@@ -124,8 +134,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
       )}
 
       {confirm.dialog}
-      <RuleDialog handle={handle} open={adding} onOpenChange={setAdding} />
-      <RuleDialog handle={handle} rule={editing} open={!!editing} onOpenChange={(o) => !o && setEditing(undefined)} />
+      <AddRuleDialog handle={handle} open={adding} onOpenChange={setAdding} />
     </section>
   );
 }
@@ -231,7 +240,7 @@ function RuleLine({ r }: { r: Rule }) {
 }
 
 /** A rule's On switch: shows its new state while it saves (and the result is read out); a failure puts it back and shows under it. */
-function RuleSwitch({ r }: { r: Rule }) {
+export function RuleSwitch({ r }: { r: Rule }) {
   const refresh = useRefresh();
   const saving = useSave({ refresh, describe: errorText });
   return (
@@ -252,47 +261,41 @@ function matchText(r: Rule): string {
   return parts.join(" ");
 }
 
+
 const list = (s: string) =>
   s
     .split(/[,\s]+/)
     .map((x) => x.trim())
     .filter(Boolean);
 
-function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule?: Rule; open: boolean; onOpenChange: (o: boolean) => void }) {
-  const refresh = useRefresh();
-  const empty = { name: "", status: "", code: "", body: "", outcome: "cooling_key" as Outcome, cooling: "", description: "", only: true };
-  const [f, setF] = useState(empty);
-  const [replay, setReplay] = useState<Replay>();
-  const [error, setError] = useState<string>();
-  const [pending, setPending] = useState<"check" | "save">();
+// A rule's fields, shared by Add rule (a dialog) and the rule's sheet, where an
+// existing rule is edited (UI ticket 33: it was the same dialog).
 
-  // Opening (or the rule changing) starts the form from it in the same render,
-  // so the dialog's first frame already shows its fields (Cool for, for a
-  // cooling rule, arrives with the dialog, not after it).
-  const [startedFrom, setStartedFrom] = useState<{ open: boolean; rule?: Rule }>({ open: false });
-  if (startedFrom.open !== open || startedFrom.rule !== rule) {
-    setStartedFrom({ open, rule });
-    if (open) {
-      setReplay(undefined);
-      setError(undefined);
-      setF(
-        rule
-          ? {
-              name: rule.name,
-              status: (rule.status ?? []).join(", "),
-              code: (rule.code ?? []).join(", "),
-              body: rule.body ?? "",
-              outcome: rule.outcome,
-              cooling: rule.cooling_seconds ? String(rule.cooling_seconds) : "",
-              description: rule.description ?? "",
-              only: rule.provider === handle,
-            }
-          : empty,
-      );
-    }
-  }
+export type RuleForm = { name: string; status: string; code: string; body: string; outcome: Outcome; cooling: string; description: string; only: boolean };
 
-  const fields = (): RuleFields => ({
+/** The form, started from `rule` (or empty, for a new rule). */
+export function ruleForm(handle: string, rule?: Rule): RuleForm {
+  if (!rule) return { name: "", status: "", code: "", body: "", outcome: "cooling_key", cooling: "", description: "", only: true };
+  return {
+    name: rule.name,
+    status: (rule.status ?? []).join(", "),
+    code: (rule.code ?? []).join(", "),
+    body: rule.body ?? "",
+    outcome: rule.outcome,
+    cooling: rule.cooling_seconds ? String(rule.cooling_seconds) : "",
+    description: rule.description ?? "",
+    only: rule.provider === handle,
+  };
+}
+
+/** What's missing from the form, said as what to do. */
+export function ruleProblem(f: RuleForm): string | undefined {
+  if (!f.name.trim()) return "Name the rule, e.g. rate-quota.";
+  if (!f.status.trim() && !f.code.trim() && !f.body.trim()) return "Say what it matches: a status, an error code or text in the body.";
+}
+
+function ruleFields(f: RuleForm, handle: string, rule?: Rule): RuleFields {
+  return {
     status: list(f.status),
     code: list(f.code),
     body: f.body.trim(),
@@ -301,38 +304,124 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
     description: f.description.trim(),
     provider: f.only ? handle : rule?.provider && rule.provider !== handle ? rule.provider : "",
     host: rule?.host,
-  });
+  };
+}
 
-  // Owner rules change in place; a built-in rule is changed by adding an owner rule of its name.
-  const send = (dry: boolean) =>
-    rule && rule.source === "owner" ? calls.updateRule(rule.name, fields(), dry) : calls.createRule({ name: f.name.trim(), ...fields() }, dry);
+/** Saves the form (or, `dry`, checks it against last week). Owner rules change in place; a built-in rule is changed by adding an owner rule of its name. */
+export function sendRule(f: RuleForm, handle: string, rule: Rule | undefined, dry: boolean) {
+  const fields = ruleFields(f, handle, rule);
+  return rule && rule.source === "owner" ? calls.updateRule(rule.name, fields, dry) : calls.createRule({ name: f.name.trim(), ...fields }, dry);
+}
+
+/** Restore the built-in (the Owner's version of one) or Delete (the Owner's own rule): the question, naming the rule. */
+export function deleteQuestion(r: Rule) {
+  return {
+    title: r.overrides ? `Restore the built-in ${r.name}?` : `Delete ${r.name}?`,
+    body: r.overrides ? "Your version goes and the built-in rule decides again. Undo brings yours back." : "Failures it matched fall to the next rule. Undo brings it back.",
+    confirmLabel: r.overrides ? "Restore built-in" : "Delete rule",
+  };
+}
+
+/** The rule's fields. `set` takes a change to some of them (a change drops an earlier replay). */
+export function RuleFormFields({ f, set, handle, isNew }: { f: RuleForm; set: (patch: Partial<RuleForm>) => void; handle: string; isNew: boolean }) {
+  const text = (k: "name" | "status" | "code" | "body" | "cooling" | "description") => (e: { target: { value: string } }) => set({ [k]: e.target.value });
+  const outcome = OUTCOMES.find((o) => o.value === f.outcome);
+  return (
+    <>
+      <Field label="Name" hint={isNew ? "Letters, digits, dots, dashes and underscores." : undefined}>
+        {(p) => <Input {...p} mono autoFocus={isNew} disabled={!isNew} spellCheck={false} placeholder="rate-quota" value={f.name} onChange={text("name")} />}
+      </Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Status" hint="429, 5xx, network or timeout; commas between.">
+          {(p) => <Input {...p} mono placeholder="429" value={f.status} onChange={text("status")} />}
+        </Field>
+        <Field label="Error code" hint="error.code or type; billing_* matches a prefix.">
+          {(p) => <Input {...p} mono placeholder="Throttling.RateQuota" value={f.code} onChange={text("code")} />}
+        </Field>
+      </div>
+      <Field label="Body contains" hint="A regular expression, case-insensitive.">
+        {(p) => <Input {...p} mono placeholder="quota exceeded" value={f.body} onChange={text("body")} />}
+      </Field>
+      {/* No row gap: on phones the gap above "Cool for" is inside its panel, so it opens and folds with it. */}
+      <div className="grid gap-x-4 sm:grid-cols-[1fr_160px]">
+        <Field label="Then" hint={outcome?.hint}>
+          {() => <Select value={f.outcome} onValueChange={(v) => set({ outcome: v as Outcome })} items={OUTCOMES} />}
+        </Field>
+        <Reveal open={f.outcome.startsWith("cooling")} label="Cooling time" className={ringRoom}>
+          <div className="pt-4 sm:pt-0">
+            <Field label="Cool for" hint="Seconds, when the reply names no reset time.">
+              {(p) => <Input {...p} inputMode="numeric" placeholder="60" value={f.cooling} onChange={text("cooling")} />}
+            </Field>
+          </div>
+        </Reveal>
+      </div>
+      <Field label="Description" hint="Optional: what it recognises and why.">
+        {(p) => <Input {...p} value={f.description} onChange={text("description")} />}
+      </Field>
+      <label className="flex items-center gap-3 text-[15px]">
+        <Checkbox label={`Only for ${handle}`} checked={f.only} onChange={(on) => set({ only: on })} />
+        Only for {handle}
+      </label>
+    </>
+  );
+}
+
+/** What a check against last week found. */
+export function ReplayNote({ replay }: { replay: Replay }) {
+  return (
+    <p className={cn("rounded-lg bg-subtle px-4 py-3 text-[14px]", riseIn)}>
+      {replay.attempts === 0
+        ? "No failed Attempts in the last 7 days to check it against."
+        : replay.changed === 0
+          ? `The last 7 days' ${formatNumber(replay.attempts)} failed Attempts would be decided the same way.`
+          : `${formatNumber(replay.changed)} of the last 7 days' ${formatNumber(replay.attempts)} failed Attempts would be decided differently.`}
+    </p>
+  );
+}
+
+/** Add rule. An existing rule is edited in its sheet (UI ticket 33). */
+function AddRuleDialog({ handle, open, onOpenChange }: { handle: string; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const refresh = useRefresh();
+  const [f, setF] = useState(() => ruleForm(handle));
+  const [replay, setReplay] = useState<Replay>();
+  const [error, setError] = useState<string>();
+  const [pending, setPending] = useState<"check" | "save">();
+
+  // Opening starts the form afresh in the same render, so the dialog's first frame already shows it.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    if (open) {
+      setReplay(undefined);
+      setError(undefined);
+      setF(ruleForm(handle));
+    }
+  }
 
   const run = async (dry: boolean) => {
-    if (!f.name.trim()) return setError("Name the rule, e.g. rate-quota.");
-    if (!f.status.trim() && !f.code.trim() && !f.body.trim()) return setError("Say what it matches: a status, an error code or text in the body.");
+    const problem = ruleProblem(f);
+    if (problem) return setError(problem);
     setPending(dry ? "check" : "save");
     setError(undefined);
     try {
       // POST /api/rules updates (or overrides) a rule of that name, so a new rule's name must be free.
-      if (!rule) {
-        const name = f.name.trim();
-        const taken = await api.get<Rule>(`/api/rules/${seg(name)}`).then(
-          (r) => r,
-          (e) => (isApiError(e) && e.status === 404 ? undefined : Promise.reject(e)),
+      const name = f.name.trim();
+      const taken = await api.get<Rule>(`/api/rules/${seg(name)}`).then(
+        (r) => r,
+        (e) => (isApiError(e) && e.status === 404 ? undefined : Promise.reject(e)),
+      );
+      if (taken)
+        return setError(
+          taken.source === "builtin"
+            ? `${name} is a built-in rule. Pick another name, or use Change on ${name} to replace it.`
+            : `A rule is already named ${name}${taken.provider && taken.provider !== handle ? ` (for ${taken.provider})` : ""}. Pick another name.`,
         );
-        if (taken)
-          return setError(
-            taken.source === "builtin"
-              ? `${name} is a built-in rule. Pick another name, or use Change on ${name} to replace it.`
-              : `A rule is already named ${name}${taken.provider && taken.provider !== handle ? ` (for ${taken.provider})` : ""}. Pick another name.`,
-          );
-      }
-      const res = await send(dry);
+      const res = await sendRule(f, handle, undefined, dry);
       if (dry) setReplay(res.replay);
       else {
         refresh();
         // Toast: the rule dialog closes on Save.
-        notifyChange(rule ? `${f.name.trim()} saved` : `${f.name.trim()} added`, res, { onUndone: refresh });
+        notifyChange(`${name} added`, res, { onUndone: refresh });
         onOpenChange(false);
       }
     } catch (e) {
@@ -342,18 +431,16 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
     }
   };
 
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => {
+  const set = (patch: Partial<RuleForm>) => {
     setReplay(undefined);
-    setF((x) => ({ ...x, [k]: e.target.value }));
+    setF((x) => ({ ...x, ...patch }));
   };
-  const outcome = OUTCOMES.find((o) => o.value === f.outcome);
 
   return (
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title={rule ? (rule.source === "builtin" ? `Change ${rule.name}` : `Edit ${rule.name}`) : "Add rule"}
-      description={rule?.source === "builtin" ? "Saving adds your own rule of this name, which replaces the built-in one until you restore it." : rule?.description}
+      title="Add rule"
       width={580}
       footer={
         <>
@@ -362,7 +449,7 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
             Check against last week
           </Button>
           <Button variant="primary" loading={pending === "save"} onClick={() => void run(false)}>
-            {rule ? "Save rule" : "Add rule"}
+            Add rule
           </Button>
         </>
       }
@@ -374,56 +461,8 @@ function RuleDialog({ handle, rule, open, onOpenChange }: { handle: string; rule
           void run(false);
         }}
       >
-        <Field label="Name" hint={rule ? undefined : "Letters, digits, dots, dashes and underscores."}>
-          {(p) => <Input {...p} mono autoFocus={!rule} disabled={!!rule} spellCheck={false} placeholder="rate-quota" value={f.name} onChange={set("name")} />}
-        </Field>
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Status" hint="429, 5xx, network or timeout; commas between.">
-            {(p) => <Input {...p} mono placeholder="429" value={f.status} onChange={set("status")} />}
-          </Field>
-          <Field label="Error code" hint="error.code or type; billing_* matches a prefix.">
-            {(p) => <Input {...p} mono placeholder="Throttling.RateQuota" value={f.code} onChange={set("code")} />}
-          </Field>
-        </div>
-        <Field label="Body contains" hint="A regular expression, case-insensitive.">
-          {(p) => <Input {...p} mono placeholder="quota exceeded" value={f.body} onChange={set("body")} />}
-        </Field>
-        {/* No row gap: on phones the gap above "Cool for" is inside its panel, so it opens and folds with it. */}
-        <div className="grid gap-x-4 md:grid-cols-[1fr_160px]">
-          <Field label="Then" hint={outcome?.hint}>
-            {() => <Select value={f.outcome} onValueChange={(v) => set("outcome")({ target: { value: v } })} items={OUTCOMES} />}
-          </Field>
-          <Reveal open={f.outcome.startsWith("cooling")} label="Cooling time" className={ringRoom}>
-            <div className="pt-4 md:pt-0">
-              <Field label="Cool for" hint="Seconds, when the reply names no reset time.">
-                {(p) => <Input {...p} inputMode="numeric" placeholder="60" value={f.cooling} onChange={set("cooling")} />}
-              </Field>
-            </div>
-          </Reveal>
-        </div>
-        <Field label="Description" hint="Optional: what it recognises and why.">
-          {(p) => <Input {...p} value={f.description} onChange={set("description")} />}
-        </Field>
-        <label className="flex items-center gap-3 text-[15px]">
-          <Checkbox
-            label={`Only for ${handle}`}
-            checked={f.only}
-            onChange={(on) => {
-              setReplay(undefined);
-              setF((x) => ({ ...x, only: on }));
-            }}
-          />
-          Only for {handle}
-        </label>
-        {replay && (
-          <p className={cn("rounded-lg bg-subtle px-4 py-3 text-[14px]", riseIn)}>
-            {replay.attempts === 0
-              ? "No failed Attempts in the last 7 days to check it against."
-              : replay.changed === 0
-                ? `The last 7 days' ${formatNumber(replay.attempts)} failed Attempts would be decided the same way.`
-                : `${formatNumber(replay.changed)} of the last 7 days' ${formatNumber(replay.attempts)} failed Attempts would be decided differently.`}
-          </p>
-        )}
+        <RuleFormFields f={f} set={set} handle={handle} isNew />
+        {replay && <ReplayNote replay={replay} />}
         {error && <p className={cn("text-[13px] text-danger-text", appearClass)}>{error}</p>}
         <button type="submit" hidden />
       </form>

@@ -29,7 +29,7 @@ export function matchWords(r: Pick<Rule, "status" | "code" | "body" | "header">)
   return parts.join(" and ");
 }
 
-const scopeWords = (r: Rule) => (r.provider ? `only ${r.provider}` : r.host ? `on ${r.host}` : undefined);
+export const scopeWords = (r: Rule) => (r.provider ? `only ${r.provider}` : r.host ? `on ${r.host}` : undefined);
 const outcomeLabel = (o: Outcome) => OUTCOMES.find((x) => x.value === o)?.label ?? o;
 
 /** What the replaced built-in rule did, with its cooling time, so an override that only changes the time still shows the change. */
@@ -80,7 +80,7 @@ export function RulesFlow({
       <ol aria-label="Failure Rules, in the order they're tried" className="flex w-full flex-col">
         {rules.map((r, i) => (
           <li key={r.name} className="flex flex-col items-center">
-            <Step r={r} n={i + 1} most={most} stacked={stacked} onOpen={() => onOpen(r)} aside={aside(r)} />
+            <RuleStep r={r} n={i + 1} most={most} stacked={stacked} onOpen={() => onOpen(r)} aside={aside(r)} />
             <Rail className={column} />
           </li>
         ))}
@@ -121,7 +121,12 @@ function Rail({ label, className }: { label?: string; className?: string }) {
   );
 }
 
-function Step({ r, n, most, stacked, onOpen, aside }: { r: Rule; n: number; most: number; stacked: boolean; onOpen: () => void; aside: ReactNode }) {
+/**
+ * One rule as a step of the flow. `onOpen` puts a button over the card (the
+ * Flow view opens the rule's sheet); the rule's sheet shows the step without
+ * it (UI ticket 33), stacked.
+ */
+export function RuleStep({ r, n, most, stacked, onOpen, aside }: { r: Rule; n: number; most: number; stacked: boolean; onOpen?: () => void; aside?: ReactNode }) {
   const off = !r.enabled;
   const scope = scopeWords(r);
   const card = (
@@ -129,12 +134,13 @@ function Step({ r, n, most, stacked, onOpen, aside }: { r: Rule; n: number; most
       data-off={off || undefined}
       className={cn(
         // As on the route view: hover changes border only (duration-hover); no press scale on a card.
-        "relative w-full rounded-xl border bg-bg shadow-sm transition-[border-color] duration-hover ease-[ease] hover:border-border-strong",
+        "relative w-full rounded-xl border bg-bg shadow-sm",
+        onOpen && "transition-[border-color] duration-hover ease-[ease] hover:border-border-strong",
         stacked ? "w-full max-w-[560px]" : "w-[520px] shrink-0",
         off ? "border-dashed border-border bg-bg/70 shadow-none" : "border-border",
       )}
     >
-      <SdkButton onClick={onOpen} aria-label={`Open ${r.name}`} className="absolute inset-0 rounded-xl outline-none focus-visible:outline-2 focus-visible:outline-info" />
+      {onOpen && <SdkButton onClick={onOpen} aria-label={`Open ${r.name}`} className="absolute inset-0 rounded-xl outline-none focus-visible:outline-2 focus-visible:outline-info" />}
       <div className={cn("flex gap-3 px-4 py-3", stacked ? "items-start" : "items-center")}>
         <span
           className={cn(

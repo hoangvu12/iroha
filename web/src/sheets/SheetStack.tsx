@@ -22,6 +22,8 @@ const bodies: { [K in SheetKind]: ComponentType<SheetBodyProps<K>> } = {
   endpoint: lazy(() => import("./records/EndpointSheet")),
   "gateway-key": lazy(() => import("./records/GatewayKeySheet")),
   pool: lazy(() => import("./records/PoolSheet")),
+  model: lazy(() => import("./records/ModelSheet")),
+  rule: lazy(() => import("./records/RuleSheet")),
 };
 
 export const SHEET_WIDTH = 540;

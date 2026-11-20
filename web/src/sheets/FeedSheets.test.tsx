@@ -73,6 +73,19 @@ test("a feed row's Caller, Pool, Provider and key are links to their sheets, not
   expect(screen.queryByRole("dialog", { name: "Request fast" })).toBeNull();
 });
 
+test("a Request asked of a Provider straight links its model to the model's sheet (UI ticket 33)", async () => {
+  const list = routes["GET /api/requests"];
+  const req3 = { ...req1, id: "req_3", model: "acme/gpt-fast", wire_model: "gpt-fast", pool: undefined };
+  routes["GET /api/requests"] = { requests: [req3], cursor: 1 };
+  try {
+    renderWithSheets(<RequestsFeed />, "/requests");
+    const row = within(await feedRow("req_3"));
+    expect(hrefOf(row.getByRole("link", { name: "acme/gpt-fast" }))).toBe("/requests?sheet=model:acme/gpt-fast");
+  } finally {
+    routes["GET /api/requests"] = list;
+  }
+});
+
 test("an old ?request= link opens the Request sheet and becomes ?sheet=", async () => {
   renderWithSheets(<RequestsFeed />, "/requests?range=24h&request=req_1");
   await screen.findByRole("dialog", { name: "Request fast" });

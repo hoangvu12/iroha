@@ -261,7 +261,7 @@ function memberColumns({ pending, flip }: { pending: boolean; flip: (m: Member, 
         </span>
       ),
     }),
-    col.display({ id: "model", header: "Model", meta: { className: "font-mono text-[13px]" }, cell: ({ row }) => row.original.model }),
+    col.display({ id: "model", header: "Model", meta: { className: "font-mono text-[13px]" }, cell: ({ row }) => <RecordLink record={rec.model(row.original.provider, row.original.model)}>{row.original.model}</RecordLink> }),
     col.display({ id: "active", header: "Active keys", meta: { align: "right" }, cell: ({ row }) => (row.original.activeKeys === undefined ? "–" : formatNumber(row.original.activeKeys)) }),
     col.display({ id: "requests", header: "Requests today", meta: { align: "right" }, cell: ({ row }) => formatNumber(row.original.requests) }),
     col.display({
@@ -289,7 +289,9 @@ function MemberLine({ r }: { r: MemberRow }) {
         <span className="flex min-w-0 text-[16px] font-medium">
           <RecordLink record={rec.provider(r.provider)}>{r.provider}</RecordLink>
         </span>
-        <span className="block truncate font-mono text-[13px] text-fg-muted">{r.model}</span>
+        <span className="flex min-w-0 font-mono text-[13px] text-fg-muted">
+          <RecordLink record={rec.model(r.provider, r.model)}>{r.model}</RecordLink>
+        </span>
       </span>
     </span>
   );

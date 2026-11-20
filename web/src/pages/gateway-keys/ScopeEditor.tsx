@@ -21,10 +21,11 @@ import { type Draft, modelsLabel } from "./scope";
 
 type SetDraft = Dispatch<SetStateAction<Draft>>;
 
-export function ScopeEditor({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
+/** `heading={false}` where the place already says Access (the Gateway Key sheet's section, UI ticket 33). */
+export function ScopeEditor({ draft, onChange, heading = true }: { draft: Draft; onChange: SetDraft; heading?: boolean }) {
   return (
     <div>
-      <p className="text-sm font-medium text-fg">Access</p>
+      {heading && <p className="text-sm font-medium text-fg">Access</p>}
       <RadioCards
         label="Access"
         value={draft.all ? "all" : "some"}

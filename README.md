@@ -56,6 +56,7 @@ The web UI is one client of the admin HTTP API. Agents use the same API with an 
 - `GLOSSARY.md` defines the terms used here.
 - `internal/api/skill/` is the source of `/skill.md`, the operating guide.
 - `docs/agents/architecture.md` is the package map, for people changing the code.
+- `go run ./cmd/iroha-dev` starts a local Iroha with fake upstreams and demo data for trying a change; `.claude/skills/verify-iroha/` is how an agent verifies one with it.
 - `docs/adr/` records the design decisions.
 - `deploy/` holds the deploy script and the systemd unit. The runbook is the "Deploying Iroha" section of `/skill.md`, and `deploy/deploy.sh --help` lists the options.
 

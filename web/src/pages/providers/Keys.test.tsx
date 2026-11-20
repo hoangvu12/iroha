@@ -224,6 +224,21 @@ test("clicking a row, or its name with the keyboard, opens the key's sheet", asy
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
+test("in select mode a click on a key's row toggles it, the bulk bar follows, and no sheet opens (UI ticket 25)", async () => {
+  const user = userEvent.setup();
+  renderTab([key(1), key(2), key(3)]);
+  await user.click(await screen.findByRole("checkbox", { name: "Select team-1" }));
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+  const team2 = rows().find((r) => within(r).queryByText("team-2"))!;
+  await user.click(within(team2).getByText("Active"));
+  expect(screen.getByRole("group", { name: "2 selected" })).toBeTruthy();
+  expect(screen.getByRole("checkbox", { name: "Select team-2" }).getAttribute("aria-checked")).toBe("true");
+  await user.click(within(team2).getByText("Active"));
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+  expect(decodeURIComponent(where())).not.toContain("sheet=");
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
 test("an old link to a key's dialog (?key=) opens its sheet instead", async () => {
   renderTab([key(1), key(2)], "/providers/acme/keys?sort=state&key=team-1");
   await waitFor(() => expect(decodeURIComponent(where())).toBe("?sort=state&sheet=key:acme/team-1"));

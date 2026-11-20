@@ -231,6 +231,21 @@ func checkInvariants(t *testing.T, gc goldenCase, o output) {
 		}
 	case shape.OpenAIResponses:
 		checkResponsesStream(t, gc, o.stream)
+		// The stream closes with the usage the whole answer reports (research
+		// prompt-caching 1.4: cached_tokens was 0 on the stream only).
+		if o.answer != nil {
+			blocks := strings.Split(strings.TrimSpace(string(o.stream)), "\n\n")
+			_, data, _ := strings.Cut(blocks[len(blocks)-1], "\ndata: ")
+			var ev, a struct {
+				Usage    json.RawMessage `json:"usage"`
+				Response struct {
+					Usage json.RawMessage `json:"usage"`
+				} `json:"response"`
+			}
+			if json.Unmarshal([]byte(data), &ev) != nil || json.Unmarshal(o.answer, &a) != nil || !bytes.Equal(ev.Response.Usage, a.Usage) {
+				t.Errorf("the stream closes with usage %s, the whole answer has %s", ev.Response.Usage, a.Usage)
+			}
+		}
 	case shape.Gemini:
 		finished := false
 		for _, e := range events {

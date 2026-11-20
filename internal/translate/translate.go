@@ -282,6 +282,12 @@ func (s *Stream) End(ctx context.Context) ([]byte, error) {
 	// through Chat would otherwise close with the last chunk's counts only
 	// (Anthropic's input tokens arrive in message_start).
 	if u := s.st.Usage(); u != nil {
+		// A step that already wrote the usage in Responses names (Chat ->
+		// Responses) converts it again from the Chat names when given it back,
+		// so the cache counts must be under both or they come out 0.
+		if u.InputTokensDetails != nil && u.PromptTokensDetails == (dto.InputTokenDetails{}) {
+			u.PromptTokensDetails = u.InputTokensDetails.Clone()
+		}
 		s.st.SetUsage(u)
 	}
 	res, err := relayconvert.FinalizeStreamResponse(ctx, s.t.metaOrEmpty(), s.st)

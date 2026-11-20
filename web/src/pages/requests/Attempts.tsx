@@ -1,5 +1,6 @@
 import { ChevronDown, Route as RouteIcon, Send } from "lucide-react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
+import { formatNumber } from "@/lib/format";
 import { rec, RecordLink } from "@/sheets/RecordLink";
 import { Button } from "@/ui/Button";
 import { Disclosure } from "@/ui/Disclosure";
@@ -124,6 +125,14 @@ export function AttemptFacts({ a, next, withSentTo = true }: { a: Attempt; next?
             </Row>
           )}
           {!e.failed && <Row label="First token">{secs(a.first_byte_ms)}</Row>}
+        </>
+      )}
+      {!e.failed && a.usage && (
+        <>
+          <Row label="Cache read">
+            {formatNumber(a.usage.cache_read)} of {formatNumber(a.usage.input)} input
+          </Row>
+          <Row label="Cache write">{formatNumber(a.usage.cache_write)}</Row>
         </>
       )}
     </dl>

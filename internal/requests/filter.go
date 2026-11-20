@@ -48,6 +48,8 @@ var filterParams = append([]api.Param{
 	{Name: "provider", Description: "Provider handle that served (or was named by) the Request. Repeat for any of several."},
 	{Name: "pool", Description: "Model Pool the Caller asked for. Repeat for any of several."},
 	{Name: "model", Description: "Model exactly as the Caller named it. Repeat for any of several."},
+	{Name: "upstream_key", Description: "Upstream Key that served the Request (its last Attempt's), by name or ID. Names are unique within a Provider only: add provider= to be sure. Repeat for any of several."},
+	{Name: "endpoint", Description: "Endpoint of the Request's last Attempt, by name or ID. Repeat for any of several."},
 	{Name: "status", Description: "HTTP status the Caller received: exact (429) or a class (2xx, 4xx, 5xx); `failed` is any status from 400 and interrupted Requests. Repeat for any of several."},
 	{Name: "affinity", Enum: AffinityModes, Description: "How the conversation chose its Upstream Key: on (ranked for the conversation), off (the Provider has affinity off), control (the round-robin half of affinity.experiment), none (no conversation). Compare on and control to measure the experiment. Repeat for any of several."},
 	{Name: "affinity_source", Enum: affinitySources, Description: "Where the conversation was found (see the Request's affinity.source). Repeat for any of several."},
@@ -92,6 +94,18 @@ func parseFilter(q url.Values, c clock.Clock, timeOnly bool) (filter, error) {
 		for _, p := range []struct{ param, col string }{{"provider", "provider_handle"}, {"pool", "pool"}, {"model", "model"}} {
 			if v := values(q, p.param); len(v) > 0 {
 				in(p.col, v)
+			}
+		}
+		for _, p := range []struct{ param, name, id string }{{"upstream_key", "upstream_key_name", "upstream_key_id"}, {"endpoint", "endpoint_name", "endpoint_id"}} {
+			if v := values(q, p.param); len(v) > 0 {
+				ph := strings.TrimSuffix(strings.Repeat("?, ", len(v)), ", ")
+				args := make([]any, 0, 2*len(v))
+				for range 2 {
+					for _, s := range v {
+						args = append(args, s)
+					}
+				}
+				f.add("("+p.name+" IN ("+ph+") OR "+p.id+" IN ("+ph+"))", args...)
 			}
 		}
 		for _, p := range []struct {

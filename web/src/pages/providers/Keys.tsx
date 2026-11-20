@@ -19,7 +19,7 @@ import { RecordLink, rec } from "@/sheets/RecordLink";
 import { readStack, writeStack } from "@/sheets/records";
 import { useMaybeSheets } from "@/sheets/stack";
 import type { BulkResult } from "@/api/types";
-import { formatDuration, timeAgo } from "@/lib/format";
+import { formatDuration, formatNumber, formatPercent, plural, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { useUrlParams } from "@/lib/url-state";
 import { Button, TextButton } from "@/ui/Button";
@@ -36,7 +36,8 @@ import { Menu, MenuContent, MenuItem, MenuSeparator, MenuIconTrigger } from "@/u
 import { EmptyState } from "@/ui/States";
 import { notify, notifyChange } from "@/ui/toast";
 import type { KeyTestBulk, KeyTestResult, Provider, UpstreamKey } from "./api";
-import { calls, errorText, maskSecret, natural, useKeys, useRefresh } from "./api";
+import type { StatsGroup } from "@/pages/requests/api";
+import { calls, errorText, maskSecret, natural, useKeyCache, useKeys, useRefresh } from "./api";
 import { Reveal } from "@/ui/Reveal";
 import { appearClass } from "@/ui/motion";
 import { Checkbox, KeyStateLabel, Pill, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
@@ -52,14 +53,22 @@ import { KeysBulkEdit } from "./BulkEdits";
 // first (UI ticket 21). A row opens the key's sheet, which does the rest
 // (sheets/records/KeySheet.tsx, UI ticket 27).
 // ?q= searches, ?state= filters, ?sort=&dir= sorts; ?key=<name> (an old link) opens the key's sheet.
+// "Cached, 24 h" is each key's cached share (cache read / input) over its Requests of the last day,
+// test Requests left out (prompt caching 01), so the Owner sees which keys get cache hits.
 
 type StateFilter = "all" | "active" | "cooling" | "invalid" | "disabled" | "gaps";
-type Sort = "name" | "state" | "used";
+type Sort = "name" | "state" | "cached" | "used";
 
 const stateOrder = { invalid: 0, cooling: 1, disabled: 2, active: 3 };
 
+/** Cache usage of the last 24 h by key ID (useKeyCache). */
+type KeyCache = Map<string, StatsGroup>;
+
+/** A key's cached share, undefined when it counted no input in the window. */
+const shareOf = (g?: StatsGroup) => (g && g.tokens.input > 0 ? g.tokens.cache_read / g.tokens.input : undefined);
+
 const col = columnsFor<UpstreamKey>();
-const columns = col.columns([
+const keyColumns = (cache: KeyCache) => col.columns([
   col.accessor("name", {
     header: "Name",
     sortFn: (a, b) => natural(a.original.name, b.original.name),
@@ -85,6 +94,14 @@ const columns = col.columns([
       </span>
     ),
   }),
+  col.accessor((k) => shareOf(cache.get(k.id)) ?? -1, {
+    id: "cached",
+    header: "Cached, 24 h",
+    // Best cached first, then keys without Requests in the window, by name.
+    sortFn: (a, b) => (shareOf(cache.get(b.original.id)) ?? -1) - (shareOf(cache.get(a.original.id)) ?? -1) || natural(a.original.name, b.original.name),
+    meta: { className: "whitespace-nowrap tabular" },
+    cell: ({ row }) => <CachedCell g={cache.get(row.original.id)} />,
+  }),
   col.accessor((k) => k.last_used_at ?? "", {
     id: "used",
     header: "Last used",
@@ -94,6 +111,17 @@ const columns = col.columns([
     cell: ({ row }) => (row.original.last_used_at ? timeAgo(row.original.last_used_at) : <span className="text-fg-muted">Never</span>),
   }),
 ]);
+
+/** "25.0%", with what it is made of on hover; a dash for a key with no input in the window. */
+function CachedCell({ g }: { g?: StatsGroup }) {
+  const share = shareOf(g);
+  if (!g || share === undefined) return <span className="text-fg-muted">–</span>;
+  return (
+    <span title={`${formatNumber(g.tokens.cache_read)} of ${formatNumber(g.tokens.input)} input tokens read from the cache, ${plural(g.requests, "Request")}`}>
+      {formatPercent(share)}
+    </span>
+  );
+}
 
 const searchKeys = (k: UpstreamKey, needle: string) => !needle || k.name.toLowerCase().includes(needle) || k.secret.toLowerCase().includes(needle);
 
@@ -109,6 +137,8 @@ export function KeysTab({
   setAdding: (o: boolean) => void;
 }) {
   const keys = useKeys(handle);
+  const cache = useKeyCache(handle);
+  const columns = useMemo(() => keyColumns(cache.data ?? new Map()), [cache.data]);
   const refresh = useRefresh();
   const phone = useIsPhone();
   const chat = useChatActions();
@@ -353,7 +383,8 @@ export function KeysTab({
         id="provider-keys"
         label="Upstream Keys"
         columns={columns}
-        data={keys.data}
+        // The cached column comes from another query: wait for it so nothing fills in later (a failed one shows dashes).
+        data={keys.data && !cache.isPending ? keys.data : undefined}
         sample={SAMPLE_KEYS}
         getRowId={(k) => k.id}
         rowName={(k) => k.name}

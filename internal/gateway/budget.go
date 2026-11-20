@@ -169,6 +169,13 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 			x.summarize(failed, &a, "")
 			return
 		}
+		if field := refusedAddition(f, x.added); field != "" { // caching.go
+			t := x.retryPlain(c, a, f, field)
+			x.recordAttempt(t.attempt)
+			failed = append(failed, t)
+			queue = append(queue[:i+1], append([]queued{{c: c}}, queue[i+1:]...)...)
+			continue
+		}
 		t := x.classify(set, c, a, f)
 		x.recordAttempt(t.attempt)
 		failed = append(failed, t)

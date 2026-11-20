@@ -49,6 +49,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 
 	"github.com/hoangvu12/iroha/internal/shape"
+	"github.com/hoangvu12/iroha/internal/usage"
 )
 
 func init() {
@@ -90,6 +91,9 @@ type Options struct {
 	// Stream: the Caller asked for a stream. Only a Shape whose body does
 	// not say so (Gemini, where the URL does) needs it.
 	Stream bool
+	// Caching is what Iroha adds for the Provider's prompt cache (cache.go);
+	// the zero value adds nothing.
+	Caching Caching
 }
 
 // Translation converts one Attempt: the Caller's request into the
@@ -104,11 +108,18 @@ type Translation struct {
 	// Diagnostics are RelayKit's notes on what the request conversion
 	// could not carry across ("code: message"), for the record.
 	Diagnostics []string
+	// Added names the fields Iroha put in the request for the prompt cache
+	// (cache.go) that the conversion alone would not have sent:
+	// cache_control, metadata, user, prompt_cache_key. A Provider refusing
+	// one of them can be asked again without them.
+	Added []string
+	usage *usage.Reader // the Endpoint's usage, for the cache counts RelayKit leaves out (cache.go)
 }
 
 // Error is a Caller's request that cannot be translated; the Caller must
-// change it. Other errors are Iroha's or the Provider's.
-type Error struct{ Message string }
+// change it. Other errors are Iroha's or the Provider's. Hint, when set,
+// says what to do instead.
+type Error struct{ Message, Hint string }
 
 func (e *Error) Error() string { return e.Message }
 
@@ -138,12 +149,16 @@ func New(from, to shape.Shape, o Options) (*Translation, error) {
 	if o.Now.IsZero() {
 		return nil, errors.New("translate: Options.Now is required")
 	}
-	return &Translation{caller: codecs[from], endpoint: codecs[to], o: o, names: toolNames{}}, nil
+	return &Translation{caller: codecs[from], endpoint: codecs[to], o: o, names: toolNames{}, usage: usage.NewReader(to)}, nil
 }
 
 // Request converts the Caller's body into the body for the Endpoint,
 // naming wireModel. An *Error means the body itself cannot be translated.
 func (t *Translation) Request(ctx context.Context, body []byte, wireModel string) ([]byte, error) {
+	fields := readCallerFields(body) // cache.go
+	if err := t.refuseStored(fields); err != nil {
+		return nil, err
+	}
 	if t.caller.rewrite != nil {
 		body = t.caller.rewrite(body)
 	}
@@ -177,6 +192,7 @@ func (t *Translation) Request(ctx context.Context, body []byte, wireModel string
 		t.endpoint.writeFormat(m, format, t)
 	}
 	t.endpoint.prepareRequest(m, t)
+	t.applyCaching(m, fields)
 	return marshal(m)
 }
 
@@ -186,6 +202,7 @@ func (t *Translation) Response(ctx context.Context, body []byte) ([]byte, error)
 	if err := json.Unmarshal(body, in); err != nil {
 		return nil, fmt.Errorf("the Provider's answer is not a valid %s answer: %w", t.endpoint.shape, err)
 	}
+	t.usage.Body(body)
 	t.endpoint.fixUpstream(in)
 	in, err := t.toChat(ctx, in) // hop.go
 	if err != nil {
@@ -200,6 +217,9 @@ func (t *Translation) Response(ctx context.Context, body []byte) ([]byte, error)
 		return nil, err
 	}
 	t.caller.tidyAnswer(m, t, res.Usage)
+	if t.caller.shape != shape.OpenAIResponses { // tidyResponse writes its own
+		t.writeCacheUsage(obj(m["usage"]))
+	}
 	return marshal(m)
 }
 
@@ -253,6 +273,7 @@ func (s *Stream) Event(ctx context.Context, data []byte) ([]byte, error) {
 	if ev.err != nil {
 		return nil, ev.err
 	}
+	s.t.usage.Event(data)
 	if ev.complete {
 		s.complete = true
 	}

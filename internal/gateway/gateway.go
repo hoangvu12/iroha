@@ -257,6 +257,7 @@ func (g *Gateway) run(x *exchange, caller gatewaykeys.Caller, resolve resolver) 
 		g.expireGaps(x, &rt.providers[i], now)
 	}
 	x.conv = g.conversationOf(x.ctx, r.Header, body, x.rec.Caller, rt)
+	x.model = rt.model
 	x.noteAffinity()
 	req := planRequest(sh, rt, now)
 	req.Affinity = x.conv.planned()

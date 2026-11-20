@@ -1,0 +1,26 @@
+{
+  "from": "openai-chat",
+  "to": "anthropic-messages",
+  "model": "sonnet",
+  "wire_model": "claude-sonnet-4-5",
+  "caching": {"markers": "blocks", "fields": true},
+  "request": {
+    "model": "sonnet",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "system", "content": [
+        {"type": "text", "text": "You are a coding agent.", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "Project rules: be terse.", "cache_control": {"type": "ephemeral", "ttl": "1h"}}
+      ]},
+      {"role": "user", "content": [{"type": "text", "text": "First question", "cache_control": {"type": "ephemeral"}}]},
+      {"role": "assistant", "content": [{"type": "text", "text": "First answer", "cache_control": {"type": "ephemeral"}}]},
+      {"role": "user", "content": [{"type": "text", "text": "Second question", "cache_control": {"type": "ephemeral", "ttl": "1h"}}]},
+      {"role": "assistant", "content": "Second answer"},
+      {"role": "user", "content": [
+        {"type": "text", "text": "Third question"},
+        {"type": "text", "text": "with a long file", "cache_control": {"type": "ephemeral"}}
+      ]}
+    ],
+    "prompt_cache_key": "pck-7"
+  }
+}

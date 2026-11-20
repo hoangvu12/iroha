@@ -45,8 +45,25 @@ export type Endpoint = {
   static_headers: Record<string, string>;
   renames: Record<string, string>;
   discovery_url: string;
+  /** Prompt caching 03: markers on requests Iroha translates for this Endpoint ("" Iroha's default). */
+  cache_markers?: CacheSetting;
+  /** Prompt caching 03: a prompt_cache_key made from the conversation ("" Iroha's default). */
+  send_prompt_cache_key?: CacheSetting;
+  /** What translated requests get for the prompt cache, from the settings, Shape and host. Read-only. */
+  caching?: { markers: string; prompt_cache_key: boolean; summary: string };
   created_at: string;
 };
+
+export type CacheSetting = "" | "on" | "off";
+
+/** An Endpoint's caching setting as the form's Select holds it ("default" for ""). */
+export const CACHE_SETTINGS: { value: "default" | "on" | "off"; label: string }[] = [
+  { value: "default", label: "Iroha's default" },
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+];
+
+export const cacheSettingLabel = (s?: CacheSetting) => CACHE_SETTINGS.find((c) => c.value === (s || "default"))!.label;
 
 export type Provider = {
   id: string;

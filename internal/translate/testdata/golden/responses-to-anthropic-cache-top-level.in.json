@@ -1,0 +1,25 @@
+{
+  "from": "openai-responses",
+  "to": "anthropic-messages",
+  "model": "claude-sonnet-4-5",
+  "wire_model": "claude-sonnet-4-5",
+  "caching": {"markers": "top_level", "fields": true},
+  "request": {
+    "model": "claude-sonnet-4-5",
+    "instructions": "You are terse.",
+    "max_output_tokens": 512,
+    "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Say hello"}]}],
+    "safety_identifier": "hashed-user-9",
+    "prompt_cache_key": "pck-9"
+  },
+  "answer": {
+    "id": "msg_01Top",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-4-5",
+    "content": [{"type": "text", "text": "Hello."}],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {"input_tokens": 3, "output_tokens": 2, "cache_creation_input_tokens": 1200, "cache_read_input_tokens": 800, "cache_creation": {"ephemeral_5m_input_tokens": 1200, "ephemeral_1h_input_tokens": 0}}
+  }
+}

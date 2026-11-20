@@ -224,8 +224,10 @@ func (w *chatWriter) end(u *dto.Usage) []byte {
 		if id == "" {
 			id = "chatcmpl-" + w.t.o.ID
 		}
+		cu := chatUsage(u)
+		w.t.writeCacheUsage(cu)
 		out = w.frame(map[string]any{"id": id, "object": "chat.completion.chunk", "created": w.t.o.Now.Unix(), "model": w.t.o.Model,
-			"choices": []any{}, "usage": chatUsage(u)})
+			"choices": []any{}, "usage": cu})
 	}
 	return append(out, "data: [DONE]\n\n"...)
 }

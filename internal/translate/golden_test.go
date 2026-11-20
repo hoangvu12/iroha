@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hoangvu12/iroha/internal/caching"
 	"github.com/hoangvu12/iroha/internal/shape"
 	"github.com/hoangvu12/iroha/internal/translate"
 )
@@ -36,6 +37,13 @@ type goldenCase struct {
 	// CallerStream: the Caller asked for a stream in its URL (Gemini's
 	// :streamGenerateContent), which its body cannot say.
 	CallerStream bool `json:"caller_stream"`
+	// Caching is what the Gateway asks translation to add for the prompt
+	// cache (prompt caching 03); absent: nothing, as before.
+	Caching struct {
+		Markers        caching.Markers `json:"markers"`
+		PromptCacheKey string          `json:"prompt_cache_key"`
+		Fields         bool            `json:"fields"`
+	} `json:"caching"`
 }
 
 var now = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -118,7 +126,8 @@ func indent(b []byte) string {
 func run(t *testing.T, gc goldenCase) output {
 	t.Helper()
 	ctx := context.Background()
-	opts := translate.Options{Model: gc.Model, ID: "req_golden", Now: now, Stream: gc.CallerStream}
+	opts := translate.Options{Model: gc.Model, ID: "req_golden", Now: now, Stream: gc.CallerStream,
+		Caching: translate.Caching{Markers: gc.Caching.Markers, PromptCacheKey: gc.Caching.PromptCacheKey, Fields: gc.Caching.Fields}}
 	tr, err := translate.New(gc.From, gc.To, opts)
 	if err != nil {
 		t.Fatal(err)

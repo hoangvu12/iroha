@@ -10,8 +10,8 @@ import { Field, Input } from "@/ui/Input";
 import { MenuItem, MenuSeparator } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
 import { notifyChange } from "@/ui/toast";
-import type { AuthStyle, Endpoint, Provider, Shape, UpstreamKey } from "./api";
-import { AUTH_STYLES, calls, errorText, natural, shapeLabel, SHAPES, useKeys, useRefresh } from "./api";
+import type { AuthStyle, CacheSetting, Endpoint, Provider, Shape, UpstreamKey } from "./api";
+import { AUTH_STYLES, CACHE_SETTINGS, calls, errorText, natural, shapeLabel, SHAPES, useKeys, useRefresh } from "./api";
 import { Reveal } from "@/ui/Reveal";
 import { appearClass } from "@/ui/motion";
 import { ringRoom, Select } from "./controls";
@@ -180,7 +180,12 @@ export const endpointFields = (endpoint?: Endpoint) => ({
   renames: Object.entries(endpoint?.renames ?? {})
     .map(([k, v]) => `${k} -> ${v}`)
     .join("\n"),
+  cache_markers: (endpoint?.cache_markers || "default") as CacheChoice,
+  send_prompt_cache_key: (endpoint?.send_prompt_cache_key || "default") as CacheChoice,
 });
+
+type CacheChoice = (typeof CACHE_SETTINGS)[number]["value"];
+const cacheSetting = (c: CacheChoice): CacheSetting => (c === "default" ? "" : c);
 
 export type EndpointForm = ReturnType<typeof endpointFields>;
 
@@ -201,6 +206,8 @@ export function endpointBody(f: EndpointForm, handle: string, existing: Endpoint
     discovery_url: f.discovery_url.trim(),
     static_headers: linesToMap(f.headers, HEADER_LINE),
     renames: linesToMap(f.renames, RENAME_LINE),
+    cache_markers: cacheSetting(f.cache_markers),
+    send_prompt_cache_key: cacheSetting(f.send_prompt_cache_key),
   };
   if (f.name.trim()) body.name = f.name.trim();
   return { body };
@@ -248,6 +255,15 @@ export function EndpointFields({ f, setF, isNew, wide = true }: { f: EndpointFor
       <Field label="Model renames" hint="One per line, as caller-model -> sent-model.">
         {(p) => <textarea {...p} rows={2} spellCheck={false} value={f.renames} onChange={set("renames")} className={textareaClass} />}
       </Field>
+      {/* Prompt caching 03: only requests Iroha translates get these; passthrough goes as the Caller wrote it. */}
+      <div className={cn("grid gap-4", pair)}>
+        <Field label="Cache markers" hint="On requests Iroha translates for this Endpoint. Off sends none.">
+          {() => <Select value={f.cache_markers} onValueChange={(v) => set("cache_markers")({ target: { value: v } })} items={CACHE_SETTINGS} />}
+        </Field>
+        <Field label="Send prompt_cache_key" hint="One per conversation, on translated OpenAI requests that have none.">
+          {() => <Select value={f.send_prompt_cache_key} onValueChange={(v) => set("send_prompt_cache_key")({ target: { value: v } })} items={CACHE_SETTINGS} />}
+        </Field>
+      </div>
     </>
   );
 }

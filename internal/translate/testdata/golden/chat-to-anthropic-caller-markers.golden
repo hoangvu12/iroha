@@ -1,0 +1,76 @@
+== request sent upstream ==
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": [
+        {
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "text": "First question",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "text": "First answer",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "text": "Second question",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": "Second answer",
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "text": "Third question",
+          "type": "text"
+        },
+        {
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "text": "with a long file",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "metadata": {
+    "user_id": "pck-7"
+  },
+  "model": "claude-sonnet-4-5",
+  "system": [
+    {
+      "text": "You are a coding agent.",
+      "type": "text"
+    },
+    {
+      "text": "Project rules: be terse.",
+      "type": "text"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import { MessageCircle, Pencil, Trash2 } from "lucide-react";
 import { api, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
 import { formatDate } from "@/lib/format";
-import { authStyleLabel, calls, type Endpoint, errorText, natural, shapeLabel, useKeys, useProvider } from "@/pages/providers/api";
+import { authStyleLabel, cacheSettingLabel, calls, type Endpoint, errorText, natural, shapeLabel, useKeys, useProvider } from "@/pages/providers/api";
 import { useSheetRefresh } from "./refresh";
 import { KeyStateLabel } from "@/pages/providers/controls";
 import { endpointBody, EndpointFields, endpointFields } from "@/pages/providers/Endpoints";
@@ -194,6 +194,16 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
             </Fact>
             <Fact label="Static headers">{Object.keys(e.static_headers ?? {}).length || none}</Fact>
             <Fact label="Model renames">{Object.keys(e.renames ?? {}).length || none}</Fact>
+            {/* Prompt caching 03; an older server sends none of it. */}
+            {e.caching && (
+              <>
+                <Fact label="Cache markers">{cacheSettingLabel(e.cache_markers)}</Fact>
+                <Fact label="Send prompt_cache_key">{cacheSettingLabel(e.send_prompt_cache_key)}</Fact>
+                <Fact label="Prompt cache" wide>
+                  {e.caching.summary}
+                </Fact>
+              </>
+            )}
             <Fact label="Added">{formatDate(e.created_at)}</Fact>
           </Facts>
           <SaveError save={saving} className="mt-3" />

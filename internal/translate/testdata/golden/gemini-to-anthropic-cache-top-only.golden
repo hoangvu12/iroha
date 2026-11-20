@@ -1,0 +1,20 @@
+== request sent upstream ==
+{
+  "cache_control": {
+    "type": "ephemeral"
+  },
+  "max_tokens": 64,
+  "messages": [
+    {
+      "content": "Capital of Vietnam?",
+      "role": "user"
+    }
+  ],
+  "model": "kimi-k2",
+  "system": [
+    {
+      "text": "Answer in one word.",
+      "type": "text"
+    }
+  ]
+}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
+	"github.com/hoangvu12/iroha/internal/caching"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/keystate"
 	"github.com/hoangvu12/iroha/internal/logos"
@@ -74,17 +75,33 @@ func EffectiveBudget(maxAttempts int, firstByte time.Duration) (int, time.Durati
 
 // Endpoint is an Endpoint as the API returns it.
 type Endpoint struct {
-	ID            string            `json:"id"`
-	Provider      string            `json:"provider" doc:"Handle of the Provider."`
-	Name          string            `json:"name"`
-	URL           string            `json:"url" doc:"Base URL including the version path; Iroha appends the operation path such as /chat/completions."`
-	Shape         string            `json:"shape" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks."`
-	AuthStyle     string            `json:"auth_style" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent: Authorization: Bearer, an x-api-key header, the header named auth_param, the query parameter named auth_param, or not at all. A key with an empty secret sends nothing in any style."`
-	AuthParam     string            `json:"auth_param,omitempty" doc:"Header name (auth_style header) or query parameter name (auth_style query)."`
-	StaticHeaders map[string]string `json:"static_headers" doc:"Headers sent on every Attempt to this Endpoint; they replace a Caller header of the same name. An empty value sends no such header."`
-	Renames       map[string]string `json:"renames" doc:"Model renames: the model a Caller names -> the model this URL is sent. Applied per Attempt, after the Endpoint is chosen."`
-	DiscoveryURL  string            `json:"discovery_url" doc:"Where this Endpoint's model list is read: empty for <url>/models, \"none\" to never ask it, or a URL."`
-	CreatedAt     time.Time         `json:"created_at"`
+	ID                 string            `json:"id"`
+	Provider           string            `json:"provider" doc:"Handle of the Provider."`
+	Name               string            `json:"name"`
+	URL                string            `json:"url" doc:"Base URL including the version path; Iroha appends the operation path such as /chat/completions."`
+	Shape              string            `json:"shape" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks."`
+	AuthStyle          string            `json:"auth_style" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent: Authorization: Bearer, an x-api-key header, the header named auth_param, the query parameter named auth_param, or not at all. A key with an empty secret sends nothing in any style."`
+	AuthParam          string            `json:"auth_param,omitempty" doc:"Header name (auth_style header) or query parameter name (auth_style query)."`
+	StaticHeaders      map[string]string `json:"static_headers" doc:"Headers sent on every Attempt to this Endpoint; they replace a Caller header of the same name. An empty value sends no such header."`
+	Renames            map[string]string `json:"renames" doc:"Model renames: the model a Caller names -> the model this URL is sent. Applied per Attempt, after the Endpoint is chosen."`
+	DiscoveryURL       string            `json:"discovery_url" doc:"Where this Endpoint's model list is read: empty for <url>/models, \"none\" to never ask it, or a URL."`
+	CacheMarkers       string            `json:"cache_markers" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint (prompt caching): \"\" Iroha's default for its Shape and host (see caching), on, or off (none are sent). Same-Shape requests pass through untouched."`
+	SendPromptCacheKey string            `json:"send_prompt_cache_key" enum:",on,off" doc:"Whether a request translated to this OpenAI-shaped Endpoint is sent a prompt_cache_key derived from its conversation (and user from an Anthropic Caller's metadata.user_id) when it has none: \"\" Iroha's default (on, except hosts known to refuse unknown fields), on, or off."`
+	Caching            EndpointCaching   `json:"caching" doc:"What requests translated to this Endpoint get for the Provider's prompt cache, from the two settings above, its Shape and host. Read-only."`
+	CreatedAt          time.Time         `json:"created_at"`
+}
+
+// EndpointCaching is the effect of an Endpoint's caching settings.
+type EndpointCaching struct {
+	Markers        string `json:"markers" enum:",strip,keep,blocks,top_level,top_only" doc:"\"\": as RelayKit converts (no markers toward Anthropic; toward OpenAI Chat an Anthropic Caller's message markers but not its system prompt's); strip: none; keep: the Caller's own; blocks: the Caller's, else the last tool, system block and message; top_level: the Caller's, else Anthropic's automatic top-level marker; top_only: one top-level marker."`
+	PromptCacheKey bool   `json:"prompt_cache_key" doc:"A prompt_cache_key derived from the conversation is sent when the request has none."`
+	Summary        string `json:"summary" doc:"The same in a sentence."`
+}
+
+// endpointCaching is the effect of e's caching settings.
+func endpointCaching(e Endpoint) EndpointCaching {
+	p := caching.For(shape.Shape(e.Shape), e.URL, e.CacheMarkers, e.SendPromptCacheKey)
+	return EndpointCaching{Markers: string(p.Markers), PromptCacheKey: p.PromptCacheKey, Summary: p.Describe(shape.Shape(e.Shape))}
 }
 
 // Discovery modes of a Provider.
@@ -220,16 +237,17 @@ func LogoDomain(ctx context.Context, db *store.DB, ref string) (string, error) {
 	return p.LogoDomain, err
 }
 
-const endpointColumns = `e.id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.discovery_url, e.created_at`
+const endpointColumns = `e.id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.discovery_url, e.cache_markers, e.send_prompt_cache_key, e.created_at`
 
 func scanEndpoint(row interface{ Scan(...any) error }) (Endpoint, error) {
 	var e Endpoint
 	var created int64
 	var headers, renames string
-	if err := row.Scan(&e.ID, &e.Provider, &e.Name, &e.URL, &e.Shape, &e.AuthStyle, &e.AuthParam, &headers, &renames, &e.DiscoveryURL, &created); err != nil {
+	if err := row.Scan(&e.ID, &e.Provider, &e.Name, &e.URL, &e.Shape, &e.AuthStyle, &e.AuthParam, &headers, &renames, &e.DiscoveryURL, &e.CacheMarkers, &e.SendPromptCacheKey, &created); err != nil {
 		return e, err
 	}
 	e.CreatedAt = store.FromMillis(created)
+	e.Caching = endpointCaching(e)
 	var err error
 	if e.StaticHeaders, err = decodeMap(headers); err != nil {
 		return e, fmt.Errorf("endpoint %s static_headers: %w", e.ID, err)
@@ -448,7 +466,7 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 		return r, false, err
 	}
 	r.FirstByte = time.Duration(firstByte) * time.Second
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url, cache_markers, send_prompt_cache_key
 		FROM endpoints WHERE provider_id = ? ORDER BY created_at, rowid`, r.ID)
 	if err != nil {
 		return r, false, err
@@ -457,7 +475,7 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 	for rows.Next() {
 		var e planner.Endpoint
 		var sh, headers, renames, discovery string
-		if err := rows.Scan(&e.ID, &e.Name, &e.URL, &sh, &e.AuthStyle, &e.AuthParam, &headers, &renames, &discovery); err != nil {
+		if err := rows.Scan(&e.ID, &e.Name, &e.URL, &sh, &e.AuthStyle, &e.AuthParam, &headers, &renames, &discovery, &e.CacheMarkers, &e.SendPromptCacheKey); err != nil {
 			rows.Close()
 			return r, false, err
 		}

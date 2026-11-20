@@ -1,0 +1,17 @@
+## Prompt caching across Shapes
+
+Passthrough (the Endpoint speaks the Caller's Shape) sends the Caller's body byte for byte: cache markers, `prompt_cache_key`, `user`, `metadata` and Gemini's `cachedContent` reach the Provider as written, and Iroha adds nothing. When Iroha translates, it adds what the Endpoint can use for its prompt cache:
+
+- **Toward Anthropic Messages** (from Chat, Responses or Gemini), cache markers:
+  - A Chat Caller's own markers, written as OpenRouter does (`cache_control` on content parts, on tools or on the request, `ttl` included), are kept on the blocks that carry the same text.
+  - With no markers of the Caller's, Iroha adds them: Anthropic's own API (`api.anthropic.com`) gets the automatic top-level `cache_control`; other Endpoints get one on the last tool, the last system block and the last message. Kimi/Moonshot Endpoints get only one top-level marker (they refuse others); DeepSeek's get none (it ignores them).
+  - Never more than 4 (the earliest are dropped), and never a 1 h marker after a 5 min one (it becomes 5 min), since Anthropic refuses both.
+  - The cache writes this causes cost more than normal input once (1.25x for 5 min); the next turn reads them at about 0.1x. Translated answers now report writes to the Caller: OpenAI `prompt_tokens_details.cache_write_tokens` (Chat), `input_tokens_details.cache_write_tokens` (Responses), Anthropic `cache_creation_input_tokens` (with `input_tokens` the uncached part).
+- **Toward OpenAI Chat from Anthropic Messages**: markers of messages are kept as before; the system prompt's markers are kept too (as text parts of the system message) where the Endpoint honours them: OpenRouter and Alibaba (Qwen) hosts, or `cache_markers: on`.
+- **Conversation fields**: `user`, else `safety_identifier`, else `prompt_cache_key` becomes Anthropic's `metadata.user_id`; an Anthropic Caller's plain `metadata.user_id` becomes OpenAI Chat's `user` (Claude Code's value is a session, not a user, and is left out).
+- **`prompt_cache_key`**: a request translated to an OpenAI Chat or Responses Endpoint that carries none is sent one made from its conversation (the same value Conversation Affinity ranks keys by: a UUID per conversation, Gateway Key, Provider and model; never from a plain user id). Turns of one conversation then reach the Provider's warm machines.
+- **Refused**: Gemini's `cachedContent` names a cache stored at Google that no other Shape can read; translating would silently lose that context, so such a request gets `400 untranslatable_request` when only Endpoints of another Shape can serve. Send the cached contents in the request, or use a Provider with a Gemini Endpoint.
+
+**Turning it off, per Endpoint** (`PATCH /api/providers/<p>/endpoints/<e>`): `cache_markers` (`""` Iroha's default, `on`, `off`: no markers at all) and `send_prompt_cache_key` (`""` default: on, except hosts known to refuse unknown fields such as Google's and Mistral's OpenAI APIs; `on`; `off`: no `prompt_cache_key` and no `user` added). The Endpoint's `caching` (`markers`, `prompt_cache_key`, `summary`) says what its translated requests get.
+
+**An Endpoint that refuses these fields** (a 400 or 422 naming `cache_control`, `prompt_cache_key`, `metadata` or `user`) is asked again at once, on the same key, without anything Iroha added, and gets nothing added for the rest of the Request. The first Attempt shows outcome `retry_elsewhere` and why; the key's state is unchanged. Set the Endpoint's setting `off` to skip that extra Attempt.

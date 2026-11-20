@@ -41,6 +41,14 @@ type exchange struct {
 	// conv is the conversation the Request belongs to (affinity.go), known
 	// once the route is resolved.
 	conv conversation
+	// model is the model asked of a single Provider (route.model), for the
+	// derived prompt_cache_key (caching.go).
+	model string
+	// added names what the last prepared Attempt's translation added for the
+	// prompt cache; plain holds Endpoints that refused such an addition in
+	// this Request and get none (caching.go).
+	added []string
+	plain map[string]bool
 
 	// mu guards what follows and every write to w, since a stream's keeper
 	// (stream.go) writes alongside the relay.

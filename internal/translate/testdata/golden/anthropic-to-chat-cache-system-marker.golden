@@ -1,0 +1,59 @@
+== request sent upstream ==
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "You are Claude Code.",
+          "type": "text"
+        },
+        {
+          "cache_control": {
+            "ttl": "1h",
+            "type": "ephemeral"
+          },
+          "text": "Long project instructions.",
+          "type": "text"
+        }
+      ],
+      "role": "system"
+    },
+    {
+      "content": [
+        {
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "text": "Hello",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "anthropic/claude-sonnet-4.5",
+  "prompt_cache_key": "c1a6f3b0-0000-5000-8000-000000000002",
+  "user": "user-7"
+}
+== answer to the Caller ==
+{
+  "content": [
+    {
+      "text": "Hi",
+      "type": "text"
+    }
+  ],
+  "id": "chatcmpl-9",
+  "model": "anthropic/claude-sonnet-4.5",
+  "role": "assistant",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation_input_tokens": 1990,
+    "cache_read_input_tokens": 1000,
+    "input_tokens": 10,
+    "output_tokens": 2
+  }
+}

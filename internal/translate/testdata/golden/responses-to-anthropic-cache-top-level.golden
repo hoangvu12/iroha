@@ -1,0 +1,65 @@
+== request sent upstream ==
+{
+  "cache_control": {
+    "type": "ephemeral"
+  },
+  "max_tokens": 512,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Say hello",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "metadata": {
+    "user_id": "hashed-user-9"
+  },
+  "model": "claude-sonnet-4-5",
+  "system": [
+    {
+      "text": "You are terse.",
+      "type": "text"
+    }
+  ]
+}
+== answer to the Caller ==
+{
+  "created_at": 1767225600,
+  "error": null,
+  "id": "resp_req_golden",
+  "incomplete_details": null,
+  "model": "claude-sonnet-4-5",
+  "object": "response",
+  "output": [
+    {
+      "content": [
+        {
+          "annotations": [],
+          "text": "Hello.",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_01Top_msg_0",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "status": "completed",
+  "usage": {
+    "input_tokens": 2003,
+    "input_tokens_details": {
+      "cache_write_tokens": 1200,
+      "cached_tokens": 800
+    },
+    "output_tokens": 2,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 2005
+  }
+}

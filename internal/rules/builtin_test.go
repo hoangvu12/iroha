@@ -33,6 +33,7 @@ const (
 	deepaiTheosShort       = `{"error":{"message":"You do not have enough Theos left for this request. Start a new conversation, or wait for your Theos to refresh at 2026-01-01T09:30:00+00:00.","type":"theos_insufficient","code":"theos_insufficient"}}`
 	deepaiCheckIn          = `{"error":{"message":"DeepAI models are temporarily unavailable. Try again later.","type":"check_in_refused","code":"check_in_refused"}}`
 	deepaiTooLarge         = `{"error":{"message":"This request needs about 21.10 Theos and this key has 8.20 left. Shorten the context or use another model.","code":"theos_request_too_large"}}`
+	cloudflareBlocked      = `{"type":"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1010/","title":"Error 1010: Access denied","status":403,"detail":"The site owner has blocked access based on your browser's signature.","error_code":1010,"error_name":"browser_signature_banned","owner_action_required":true}`
 )
 
 func zai(code string, extra ...string) []byte {
@@ -143,6 +144,7 @@ var quirkCases = []quirkCase{
 	{"theos cannot cover the request", "FAIL-38", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiTheosShort)}, "deepai-pool-spent", rules.CoolingKeyModel, 9*time.Hour + 30*time.Minute, 0, 0},
 	{"check-in refused", "FAIL-39", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiCheckIn)}, "deepai-check-in-refused", rules.RetryElsewhere, 0, 0, 0},
 	{"the proxy says the request is too big for the key", "USE-19", rules.Failure{Host: "deepai.internal", Status: 400, Body: []byte(deepaiTooLarge)}, "deepai-request-too-large", rules.RetryElsewhere, 0, 0, 0},
+	{"Cloudflare blocked the request's signature", "USE-20", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(cloudflareBlocked)}, "edge-blocked-request", rules.FailRequest, 0, 0, 0},
 
 	// Anthropic
 	{"400 credit balance too low", "FAIL-43", rules.Failure{Host: "api.anthropic.com", Status: 400, Body: []byte(anthropicCredit)}, "credit-balance-too-low", rules.CoolingKey, 0, billing, 0},

@@ -213,6 +213,18 @@ var Builtin = []Rule{
 		Description: "theos_request_too_large (the deepai-proxy's own answer: the request's prompt costs more than the Theos left on this key): the key is healthy, the request is too big. Try the next key and leave this one as it is.",
 	},
 	{
+		// USE-20: a Cloudflare block is about the request, not about the key. The
+		// site's edge refused the client's browser signature ("The site owner has
+		// blocked access based on your browser's signature"), which happens when the
+		// caller sends a User-Agent the site bans — Iroha forwards the Caller's
+		// headers. No other key would fare better, and cooling keys for it empties
+		// the pool for nothing.
+		Name: "edge-blocked-request", Status: []string{"403"},
+		Body:        `blocked access based on your browser's signature|browser_signature_banned|Error 1010`,
+		Outcome:     FailRequest,
+		Description: "A Cloudflare 1010 (\"The site owner has blocked access based on your browser's signature\"): the edge refused the request, not the key. Fail the Request with the edge's message; another key would be refused the same way.",
+	},
+	{
 		// FAIL-38, USE-17: DeepAI's daily Theos cannot cover the request; the
 		// message names the time the allowance refills. The deepai-proxy passes
 		// the upstream refusal through unchanged, so the code is the upstream's

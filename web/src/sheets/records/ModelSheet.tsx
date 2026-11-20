@@ -4,7 +4,8 @@ import { Eye, EyeOff, ListPlus, ListX, MessageCircle, SlidersHorizontal } from "
 import { api, isApiError, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
 import { timeAgo } from "@/lib/format";
-import { calls, errorText, type Model, natural, usePools, useRefresh } from "@/pages/providers/api";
+import { calls, errorText, type Model, natural, usePools } from "@/pages/providers/api";
+import { useSheetRefresh } from "./refresh";
 import { factSource, ModelFields, modelForm, modelMetadata, tokens } from "@/pages/providers/Models";
 import { Status } from "@/ui/bits";
 import { Button, TextButton } from "@/ui/Button";
@@ -62,8 +63,8 @@ export default function ModelSheet({ record }: SheetBodyProps<"model">) {
 
 /** A model named somewhere (a Request, a Pool member, a Gateway Key's scope) that the Provider's list doesn't hold. */
 function NotListed({ provider, model, refetch }: { provider: string; model: string; refetch: () => Promise<unknown> }) {
-  const refresh = useRefresh();
-  const saving = useSave({ refresh: () => Promise.all([refresh(), refetch()]), describe: errorText });
+  const { refresh } = useSheetRefresh(refetch);
+  const saving = useSave({ refresh, describe: errorText });
   return (
     <div className="p-6">
       <DialogTitle className="mb-2 break-words text-[17px] font-semibold">
@@ -88,8 +89,7 @@ function ModelDetails({ m, provider, refetch }: { m: Model; provider: string; re
   const chat = useChatActions();
   const confirm = useConfirm();
   const pools = usePools();
-  const refreshAll = useRefresh();
-  const refresh = () => Promise.all([refreshAll(), refetch()]);
+  const { refresh, refreshAll } = useSheetRefresh(refetch);
   const actionSave = useSave({ refresh, describe: errorText });
   const detailsSave = useSave({ refresh, describe: errorText });
   const [editing, setEditing] = useEditing(rec.model(provider, m.model));

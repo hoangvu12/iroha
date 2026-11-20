@@ -90,7 +90,6 @@ type UpdateGatewayKey struct {
 // BulkUpdateGatewayKey is one item of POST /api/gateway-keys/bulk/update.
 type BulkUpdateGatewayKey struct {
 	Key     string `json:"key" doc:"The key to change, by name or ID."`
-	Scope   *Scope `json:"scope,omitempty" doc:"Replaces the whole scope; omit to keep it."`
 	Capture *bool  `json:"capture,omitempty" doc:"Store the full prompt and response of this key's later Requests (true) or stop (false); omit to keep it."`
 }
 
@@ -233,10 +232,10 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/gateway-keys/bulk/update", Tag: tag,
-			Summary: "Change the scope or prompt capture of many Gateway Keys in one change",
+			Summary: "Change the prompt capture of many Gateway Keys in one change",
 			Description: `Body {"items": [{"key": "discord-bot", "capture": true}, {"key": "gk_...", "capture": true}]}. ` +
 				"Each item names one key (name or ID) and only the fields to change; fields left out stay as that key has them. " +
-				"Names are changed one key at a time (PATCH). Each item is applied or refused on its own; one Audit Entry covers them all, so one revert undoes it.",
+				"Names and scopes are changed one key at a time (PATCH). Each item is applied or refused on its own; one Audit Entry covers them all, so one revert undoes it.",
 			Query:   []api.Param{audit.DryRun},
 			Request: audit.BulkRequest[BulkUpdateGatewayKey]{}, Response: audit.BulkResult[GatewayKey]{},
 			Handle: func(c *api.Call) (any, error) {
@@ -252,7 +251,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 					if err != nil {
 						return GatewayKey{}, err
 					}
-					return h.update(m, id, UpdateGatewayKey{Scope: it.Scope, Capture: it.Capture})
+					return h.update(m, id, UpdateGatewayKey{Capture: it.Capture})
 				})
 			},
 		},

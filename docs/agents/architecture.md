@@ -854,7 +854,7 @@ Reverses "each table scrolls inside itself" (Owner, 2026-11-20). Built into `Dat
   - **Gateway Keys**: Capture prompts. Gateway Keys now have bulk selection.
   - **Pool Members**: On, sent as one Pool `PATCH`. Pool Members now have bulk selection, which adds a checkbox column.
   - `/states` has a demo with all four kinds.
-- **API**: `POST /api/providers/{provider}/keys/bulk/update` (items `{key, enabled?, endpoints?}`) and `POST /api/gateway-keys/bulk/update` (items `{key, scope?, capture?}`; a revoked key fails with `gateway_key_revoked`). Both use `audit.Bulk`, so each call gets one Audit Entry, `dry_run` and revert. Models use the existing `POST /models/bulk`.
+- **API**: `POST /api/providers/{provider}/keys/bulk/update` (items `{key, enabled?, endpoints?}`) and `POST /api/gateway-keys/bulk/update` (items `{key, capture?}`; a revoked key fails with `gateway_key_revoked`; scope is changed one key at a time, review fixes batch 2). Both use `audit.Bulk`, so each call gets one Audit Entry, `dry_run` and revert. Models use the existing `POST /models/bulk`.
 - Tests: `ui/BulkEdit.test.tsx` (helpers, mixed display, only changed fields sent, Keep as is, failure keeps the dialog, `bulkDone`, agent test), `Keys`, `Models`, `PoolMembers`, gateway-keys `List` `.test.tsx`; Go `providers/bulkedit_test.go`, `gatewaykeys/bulkedit_test.go`.
 
 ### UI ticket 28: tall dialogs scroll as a page

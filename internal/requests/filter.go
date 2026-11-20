@@ -2,6 +2,7 @@ package requests
 
 import (
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -50,9 +51,13 @@ var filterParams = append([]api.Param{
 	{Name: "upstream_key", Description: "Upstream Key that served the Request (its last Attempt's), by name or ID. Names are unique within a Provider only: add provider= to be sure. Repeat for any of several."},
 	{Name: "endpoint", Description: "Endpoint of the Request's last Attempt, by name or ID. Repeat for any of several."},
 	{Name: "status", Description: "HTTP status the Caller received: exact (429) or a class (2xx, 4xx, 5xx); `failed` is any status from 400 and interrupted Requests. Repeat for any of several."},
+	{Name: "affinity", Enum: AffinityModes, Description: "How the conversation chose its Upstream Key: on (ranked for the conversation), off (the Provider has affinity off), control (the round-robin half of affinity.experiment), none (no conversation). Compare on and control to measure the experiment. Repeat for any of several."},
+	{Name: "affinity_source", Enum: affinitySources, Description: "Where the conversation was found (see the Request's affinity.source). Repeat for any of several."},
 	{Name: "retried", Type: "boolean", Description: "true: only Requests with more than one Attempt; false: only those with at most one."},
 	{Name: "q", Description: "Text search: part of the Request ID, model, Caller name or Provider handle."},
 }, timeParams...)
+
+var affinitySources = []string{"header", "claude_code", "codex", "session_id", "opencode", "prompt_cache_key", "prefix", "none"}
 
 const timeHint = "Use an RFC 3339 time (2026-01-02T15:04:05Z) or a duration such as 1h."
 
@@ -101,6 +106,20 @@ func parseFilter(q url.Values, c clock.Clock, timeOnly bool) (filter, error) {
 					}
 				}
 				f.add("("+p.name+" IN ("+ph+") OR "+p.id+" IN ("+ph+"))", args...)
+			}
+		}
+		for _, p := range []struct {
+			param, col string
+			allowed    []string
+		}{{"affinity", "affinity", AffinityModes}, {"affinity_source", "affinity_source", affinitySources}} {
+			v := values(q, p.param)
+			for _, s := range v {
+				if !slices.Contains(p.allowed, s) {
+					return f, api.BadRequest("Use "+p.param+"="+strings.Join(p.allowed, ", or ")+".", "%s %q is not one of them.", p.param, s)
+				}
+			}
+			if len(v) > 0 {
+				in(p.col, v)
 			}
 		}
 		if v := values(q, "status"); len(v) > 0 {

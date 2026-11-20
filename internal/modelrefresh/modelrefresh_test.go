@@ -264,7 +264,8 @@ func TestARestartKeepsTheTimesAndSpreadsWhatFellDueWhileDown(t *testing.T) {
 func TestNoJobChangesOrDeletesUpstreamKeys(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
-	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme", "discovery": "key"}).Expect(201)
+	// Affinity off: keys in turn, so the 401 below lands on key-1.
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme", "discovery": "key", "affinity": "off"}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"url": up.URL(), "shape": "openai-chat"}).Expect(201)
 	for _, s := range []string{"sk-test-a", "sk-test-b", "sk-test-c", "sk-test-d"} {
 		srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": s}).Expect(201)

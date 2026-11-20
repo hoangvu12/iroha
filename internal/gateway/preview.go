@@ -6,9 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hoangvu12/iroha/internal/affinity"
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/planner"
+	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
@@ -20,15 +22,16 @@ import (
 
 // RoutePreview is the response of GET /api/route-preview.
 type RoutePreview struct {
-	Model   string          `json:"model" doc:"The model as asked: a Pool name or <provider>/<model>."`
-	Pool    string          `json:"pool,omitempty" doc:"The Pool's name, when model names one."`
-	Shape   shape.Shape     `json:"shape" doc:"The Caller Shape planned for."`
-	As      string          `json:"as,omitempty" doc:"The Gateway Key whose scope was applied; absent: no scope (everything)."`
-	At      time.Time       `json:"at" doc:"The time Key States were judged at."`
-	Budget  PreviewBudget   `json:"budget" doc:"The Request budget the first candidate would start (absent fields: nothing to try)."`
-	Members []PreviewMember `json:"members" doc:"Every member in Pool order (one for <provider>/<model>), switched-off and unusable ones included."`
-	Ready   int             `json:"ready" doc:"Candidates (key and Endpoint pairs) across all members, in the order of members[].candidates."`
-	Outcome *PreviewOutcome `json:"outcome,omitempty" doc:"Set when a Caller would be refused before any Attempt: the error it would get."`
+	Model    string          `json:"model" doc:"The model as asked: a Pool name or <provider>/<model>."`
+	Pool     string          `json:"pool,omitempty" doc:"The Pool's name, when model names one."`
+	Shape    shape.Shape     `json:"shape" doc:"The Caller Shape planned for."`
+	As       string          `json:"as,omitempty" doc:"The Gateway Key whose scope was applied; absent: no scope (everything)."`
+	Affinity string          `json:"affinity,omitempty" enum:"on,off,control" doc:"With ?affinity=: on when the members' keys are ranked for that conversation, off when every member has affinity off, control when the conversation falls in the round-robin half of affinity.experiment."`
+	At       time.Time       `json:"at" doc:"The time Key States were judged at."`
+	Budget   PreviewBudget   `json:"budget" doc:"The Request budget the first candidate would start (absent fields: nothing to try)."`
+	Members  []PreviewMember `json:"members" doc:"Every member in Pool order (one for <provider>/<model>), switched-off and unusable ones included."`
+	Ready    int             `json:"ready" doc:"Candidates (key and Endpoint pairs) across all members, in the order of members[].candidates."`
+	Outcome  *PreviewOutcome `json:"outcome,omitempty" doc:"Set when a Caller would be refused before any Attempt: the error it would get."`
 }
 
 // PreviewBudget is the budget of a previewed Request.
@@ -48,6 +51,7 @@ type PreviewMember struct {
 	Reason     string             `json:"reason,omitempty" doc:"The same in a sentence."`
 	Keys       int                `json:"keys" doc:"Upstream Keys of the Provider."`
 	ReadyKeys  int                `json:"ready_keys" doc:"Keys with at least one candidate."`
+	KeyOrder   string             `json:"key_order,omitempty" enum:"affinity,round_robin" doc:"How this member's keys are ordered: affinity (ranked for the conversation given in ?affinity=) or round_robin (the next Request's turn)."`
 	Candidates []PreviewCandidate `json:"candidates" doc:"What Iroha would try for this member, in order."`
 	Skipped    []PreviewSkip      `json:"skipped" doc:"Keys left out right now, each with why and until when."`
 	Empty      *PreviewEmpty      `json:"empty,omitempty" doc:"Set when a planned member has no candidate: why."`
@@ -96,20 +100,22 @@ func (g *Gateway) PreviewRoutes() []api.Route {
 		Description: "Plans exactly as live traffic does: members in Pool order (switched-off and unusable ones reported, not planned), " +
 			"within each the Endpoints and Upstream Keys in try order (the next Request's round-robin start), and every key left out with its reason " +
 			"and until-time (cooling, Model Gap, Endpoint Gap...). With as=<Gateway Key> the key's scope applies, and a model outside it shows the refusal " +
-			"that key would get. Nothing is sent and no Key State changes.",
+			"that key would get. With affinity=<session> the keys are in the order that conversation gets (as if sent in the Iroha-Session header, by the Gateway Key in as). " +
+			"Nothing is sent and no Key State changes.",
 		Query: []api.Param{
 			{Name: "model", Required: true, Description: "A Model Pool name, or <provider handle>/<model ID>, as a Caller would send it to the global routes."},
 			{Name: "shape", Description: "The Caller's Shape. Default openai-chat.", Enum: []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini"}},
 			{Name: "as", Description: "A Gateway Key (name or ID) whose scope to apply. Default: no scope."},
+			{Name: "affinity", Description: "A conversation's session value, as a Caller sends it in the Iroha-Session header: plan the keys in that conversation's order. Combine with as= for that Gateway Key's conversation (conversations are scoped to their Gateway Key)."},
 		},
 		Response: RoutePreview{},
 		Handle: func(c *api.Call) (any, error) {
-			return g.preview(c.R.Context(), c.Query("model"), c.Query("shape"), c.Query("as"))
+			return g.preview(c.R.Context(), c.Query("model"), c.Query("shape"), c.Query("as"), c.Query("affinity"))
 		},
 	}}
 }
 
-func (g *Gateway) preview(ctx context.Context, model, sh, as string) (RoutePreview, error) {
+func (g *Gateway) preview(ctx context.Context, model, sh, as, session string) (RoutePreview, error) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return RoutePreview{}, api.BadRequest("Send ?model=<pool> or ?model=<provider>/<model>.", "model is required.")
@@ -144,6 +150,13 @@ func (g *Gateway) preview(ctx context.Context, model, sh, as string) (RoutePrevi
 		return out, nil
 	}
 	req := planRequest(shape.Shape(sh), rt, now)
+	if strings.TrimSpace(session) != "" {
+		who := requests.Caller{Kind: requests.CallerGatewayKey, GatewayKeyID: caller.KeyID}
+		h := http.Header{}
+		h.Set(affinity.SessionHeader, session)
+		conv := g.conversationOf(ctx, h, nil, who, rt)
+		out.Affinity, req.Affinity = conv.mode, conv.planned()
+	}
 	rot := g.rotation.Peek()
 	plan := planner.Plan(req, rt.providers, rot)
 
@@ -161,6 +174,10 @@ func (g *Gateway) preview(ctx context.Context, model, sh, as string) (RoutePrevi
 		}
 		p := &rt.providers[n.planned]
 		m.Provider, m.Model, m.Planned, m.Keys = p.Handle, p.ModelFor(req), true, len(p.Keys)
+		m.KeyOrder = "round_robin"
+		if p.AffinityKey(req) != "" {
+			m.KeyOrder = "affinity"
+		}
 		ready := map[string]bool{}
 		for _, c := range plan.Candidates {
 			if c.Provider != p {

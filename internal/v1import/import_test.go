@@ -340,7 +340,9 @@ func TestImportRecreatesV1Configuration(t *testing.T) {
 	}
 
 	// A Caller with the new secret reaches the imported keys, each only on
-	// its own Endpoint.
+	// its own Endpoint. Keys in turn (affinity off), so six Requests of one
+	// conversation reach every key.
+	srv.Admin.Patch("/api/providers/acme", map[string]any{"affinity": "off"}).OK()
 	caller := srv.Client(keys["friend-one"].Secret)
 	for i := 0; i < 6; i++ {
 		caller.Post("/providers/acme/v1/chat/completions", map[string]any{"model": "m1", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}).OK()

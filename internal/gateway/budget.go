@@ -161,6 +161,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 		}
 		a, f := x.attempt(seq, c, body, cr, deadline)
 		if f == nil { // answered
+			x.notePreferred(cands[0], &c)
 			x.recordAttempt(a)
 			if a.Status >= 200 && a.Status < 300 {
 				x.worked(c)
@@ -207,6 +208,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 			pairOut[pair] = true // never replay an Attempt that used up its time
 		}
 	}
+	x.notePreferred(cands[0], nil)
 	x.failAll(failed, stop, maxAttempts)
 }
 

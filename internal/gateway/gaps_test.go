@@ -55,6 +55,7 @@ func TestARefusedModelCreatesAModelGapAndTheKeyKeepsServingOtherModels(t *testin
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
+	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
 	caller := srv.Client(issue(t, srv, "pi", all))
 	refuse(t, up, "sk-test-a gpt-x")
 
@@ -257,6 +258,7 @@ func TestModelGapsClearInBulkForSelectedKeys(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b", "sk-test-c")
+	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
 	caller := srv.Client(issue(t, srv, "pi", all))
 	refuse(t, up, "sk-test-a gpt-x", "sk-test-b gpt-x", "sk-test-c gpt-x", "sk-test-a gpt-y")
 	caller.Post(chatPath, chat("gpt-x")).Expect(404)

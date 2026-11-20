@@ -27,7 +27,7 @@ type RequestPage struct {
 const requestColumns = `id, started_at, finished_at, state, status, error_code, error_message, caller_kind, gateway_key_id, caller_name,
 	route, shape_in, shape_out, model, stream, provider_id, provider_handle, endpoint_id, endpoint_name, upstream_key_id, upstream_key_name,
 	wire_model, first_byte_ms, duration_ms, ` + usageColumns + `, attempt_count, summary,
-	pool, rev,
+	pool, rev, affinity_source, affinity, affinity_preferred,
 	EXISTS (SELECT 1 FROM captures c WHERE c.request_id = requests.id)`
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
@@ -35,11 +35,12 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var started int64
 	var finished, firstByte, duration sql.NullInt64
 	var counts usageCounts
-	var code, msg, shapeIn, shapeOut string
+	var code, msg, shapeIn, shapeOut, affSource, affMode string
+	var affPreferred sql.NullBool
 	dest := []any{&r.ID, &started, &finished, &r.State, &r.Status, &code, &msg, &r.Caller.Kind, &r.Caller.GatewayKeyID, &r.Caller.Name,
 		&r.Route, &shapeIn, &shapeOut, &r.Model, &r.Stream, &r.ProviderID, &r.Provider, &r.EndpointID, &r.Endpoint, &r.UpstreamKeyID, &r.UpstreamKey,
 		&r.WireModel, &firstByte, &duration}
-	dest = append(append(dest, counts.dest()...), &r.AttemptCount, &r.Summary, &r.Pool, &r.rev, &r.Captured)
+	dest = append(append(dest, counts.dest()...), &r.AttemptCount, &r.Summary, &r.Pool, &r.rev, &affSource, &affMode, &affPreferred, &r.Captured)
 	err := row.Scan(dest...)
 	if err != nil {
 		return r, err
@@ -55,6 +56,7 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	r.ShapeIn, r.ShapeOut = shape.Shape(shapeIn), shape.Shape(shapeOut)
 	r.FirstByteMs, r.DurationMs = msPtr(firstByte), msPtr(duration)
 	r.Usage = counts.usage()
+	r.Affinity = affinityOf(affSource, affMode, affPreferred)
 	return r, nil
 }
 

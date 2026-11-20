@@ -147,6 +147,7 @@ func TestARestrictedKeyIsNeverSentToOtherEndpoints(t *testing.T) {
 		map[string]any{"name": "plan", "secret": "sk-test-plan", "endpoints": []string{"us"}},
 		map[string]any{"name": "any", "secret": "sk-test-any"},
 	}}).Expect(200)
+	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
 	caller := srv.Client(issue(t, srv, "pi", all))
 
 	// eu fails every time, so each Request walks every candidate it has.

@@ -37,6 +37,8 @@ type providerSnapshot struct {
 	ModelsDevBrand string `json:"models_dev_brand,omitempty"`
 	// Ticket 22; "" is guessed from the Endpoints.
 	LogoDomain string `json:"logo_domain,omitempty"`
+	// Prompt caching 02; "" is on (the default).
+	Affinity string `json:"affinity,omitempty"`
 }
 
 // Resource is the Provider resource of the audit machinery.
@@ -47,10 +49,13 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 	Load: func(ctx context.Context, q audit.Querier, id string) (*providerSnapshot, error) {
 		var s providerSnapshot
 		var created int64
-		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain FROM providers WHERE id = ?`, id).
-			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created, &s.MaxAttempts, &s.FirstByteSeconds, &s.Strict, &s.Discovery, &s.ModelsDevBrand, &s.LogoDomain)
+		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain, affinity FROM providers WHERE id = ?`, id).
+			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created, &s.MaxAttempts, &s.FirstByteSeconds, &s.Strict, &s.Discovery, &s.ModelsDevBrand, &s.LogoDomain, &s.Affinity)
 		if s.Discovery == DiscoveryProvider {
 			s.Discovery = "" // the default, as entries written before ticket 10 have it
+		}
+		if s.Affinity == AffinityOn {
+			s.Affinity = "" // the default, as entries written before it existed have it
 		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -85,11 +90,15 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 		if discovery == "" {
 			discovery = DiscoveryProvider
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		aff := s.Affinity
+		if aff == "" {
+			aff = AffinityOn
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain, affinity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET name = excluded.name, enabled = excluded.enabled, archived = excluded.archived,
 			max_attempts = excluded.max_attempts, first_byte_seconds = excluded.first_byte_seconds, strict = excluded.strict, discovery = excluded.discovery,
-			models_dev_brand = excluded.models_dev_brand, logo_domain = excluded.logo_domain`,
-			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt), s.MaxAttempts, s.FirstByteSeconds, s.Strict, discovery, s.ModelsDevBrand, s.LogoDomain)
+			models_dev_brand = excluded.models_dev_brand, logo_domain = excluded.logo_domain, affinity = excluded.affinity`,
+			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt), s.MaxAttempts, s.FirstByteSeconds, s.Strict, discovery, s.ModelsDevBrand, s.LogoDomain, aff)
 		return err
 	},
 })
@@ -101,6 +110,19 @@ type CreateProvider struct {
 	Enabled *bool   `json:"enabled,omitempty" doc:"Default true for a new Provider."`
 	BudgetOverrides
 	ModelListSettings
+	RoutingSettings
+}
+
+// RoutingSettings change how a Provider's Upstream Keys are chosen.
+type RoutingSettings struct {
+	Affinity *string `json:"affinity,omitempty" enum:"on,off" doc:"on (default): the turns of one conversation go to one Upstream Key (keys ranked per conversation by rendezvous hashing), so the Provider's prompt cache stays warm; off: keys are used in turn (round-robin) whatever the conversation."`
+}
+
+func (s RoutingSettings) check() error {
+	if s.Affinity != nil && *s.Affinity != AffinityOn && *s.Affinity != AffinityOff {
+		return api.BadRequest("Use affinity on or off.", "affinity %q is not on or off.", *s.Affinity)
+	}
+	return nil
 }
 
 // ModelListSettings change how a Provider's model list is kept and used.
@@ -166,6 +188,7 @@ type UpdateProvider struct {
 	Archived *bool   `json:"archived,omitempty" doc:"Archive to retire the Provider: Callers are refused and the handle stays reserved."`
 	BudgetOverrides
 	ModelListSettings
+	RoutingSettings
 }
 
 // ProviderResult is the response of a single Provider change.
@@ -252,7 +275,7 @@ func (h handlers) providerRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodPatch, Path: "/api/providers/{provider}", Tag: tag,
-			Summary: "Rename, enable, disable, archive or unarchive a Provider, or change its Request budget or model list settings",
+			Summary: "Rename, enable, disable, archive or unarchive a Provider, or change its Request budget, model list or affinity settings",
 			Query:   []api.Param{audit.DryRun},
 			Request: UpdateProvider{}, Response: ProviderResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -321,7 +344,7 @@ func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider
 	var id string
 	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM providers WHERE handle = ?`, in.Handle).Scan(&id)
 	if err == nil {
-		return h.updateProvider(m, id, UpdateProvider{Name: in.Name, Enabled: in.Enabled, BudgetOverrides: in.BudgetOverrides, ModelListSettings: in.ModelListSettings})
+		return h.updateProvider(m, id, UpdateProvider{Name: in.Name, Enabled: in.Enabled, BudgetOverrides: in.BudgetOverrides, ModelListSettings: in.ModelListSettings, RoutingSettings: in.RoutingSettings})
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Provider{}, err
@@ -342,6 +365,13 @@ func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider
 	if err := in.ModelListSettings.check(); err != nil {
 		return Provider{}, err
 	}
+	if err := in.RoutingSettings.check(); err != nil {
+		return Provider{}, err
+	}
+	aff := AffinityOn
+	if in.Affinity != nil {
+		aff = *in.Affinity
+	}
 	strict, discovery := false, DiscoveryProvider
 	if in.Strict != nil {
 		strict = *in.Strict
@@ -360,8 +390,8 @@ func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider
 	if err := m.Track(Resource, id); err != nil {
 		return Provider{}, err
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO providers (id, handle, name, enabled, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, in.Handle, name, enabled, store.Millis(m.Now), zeroIfNil(in.MaxAttempts), zeroIfNil(in.FirstByteSeconds), strict, discovery, brand, logo); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO providers (id, handle, name, enabled, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain, affinity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, in.Handle, name, enabled, store.Millis(m.Now), zeroIfNil(in.MaxAttempts), zeroIfNil(in.FirstByteSeconds), strict, discovery, brand, logo, aff); err != nil {
 		return Provider{}, err
 	}
 	return readProvider(m.Ctx, m.Tx, id)
@@ -391,10 +421,14 @@ func (h handlers) updateProvider(m *audit.Mutation, id string, in UpdateProvider
 	if err := in.ModelListSettings.check(); err != nil {
 		return cur, err
 	}
+	if err := in.RoutingSettings.check(); err != nil {
+		return cur, err
+	}
 	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE providers SET name = coalesce(?, name), enabled = coalesce(?, enabled), archived = coalesce(?, archived),
 		max_attempts = coalesce(?, max_attempts), first_byte_seconds = coalesce(?, first_byte_seconds),
-		strict = coalesce(?, strict), discovery = coalesce(?, discovery), models_dev_brand = coalesce(?, models_dev_brand), logo_domain = coalesce(?, logo_domain) WHERE id = ?`,
-		in.Name, in.Enabled, in.Archived, in.MaxAttempts, in.FirstByteSeconds, in.Strict, in.Discovery, in.ModelsDevBrand, in.LogoDomain, id); err != nil {
+		strict = coalesce(?, strict), discovery = coalesce(?, discovery), models_dev_brand = coalesce(?, models_dev_brand), logo_domain = coalesce(?, logo_domain),
+		affinity = coalesce(?, affinity) WHERE id = ?`,
+		in.Name, in.Enabled, in.Archived, in.MaxAttempts, in.FirstByteSeconds, in.Strict, in.Discovery, in.ModelsDevBrand, in.LogoDomain, in.Affinity, id); err != nil {
 		return cur, err
 	}
 	return readProvider(m.Ctx, m.Tx, id)

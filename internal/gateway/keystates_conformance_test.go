@@ -335,6 +335,7 @@ func TestAKeyAddedDuringARequestIsNotUsedByIt(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a")
+	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
 	caller := srv.Client(issue(t, srv, "pi", all))
 
 	srv.SkipShortWaits(time.Second) // the pause before the replay

@@ -121,7 +121,7 @@ func (s *Server) coreRoutes() []api.Route {
 func (s *Server) gateway() *gateway.Gateway {
 	if s.gw == nil {
 		s.gw = gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db),
-			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log), Models: s.models(), Pools: pools.New(s.db), Rules: s.rules.Set})
+			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log), Models: s.models(), Pools: pools.New(s.db), Rules: s.rules.Set, DB: s.db})
 	}
 	return s.gw
 }

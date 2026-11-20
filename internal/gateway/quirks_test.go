@@ -86,6 +86,7 @@ func TestBillingRefusalsCoolTheWholeKeyNotTheModel(t *testing.T) {
 	up := testkit.NewOpenAIChat(t)
 	srv := testkit.Start(t, testkit.Options{HTTPClient: up.Client()})
 	addProviderAt(t, srv, "acme", up.URLAt("inference-api.nousresearch.com"), "sk-test-a", "sk-test-b")
+	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
 	caller := srv.Client(issue(t, srv, "pi", all))
 
 	// Nous answers an empty account with 404: billing, not a missing model.

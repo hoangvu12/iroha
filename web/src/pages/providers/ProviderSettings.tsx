@@ -23,6 +23,7 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
   const logoSave = useSave({ refresh, describe: errorText });
   const enabling = useSave({ refresh, describe: errorText });
   const restoring = useSave({ refresh, describe: errorText });
+  const keeping = useSave({ refresh, describe: errorText });
 
   useEffect(() => {
     setName(p.name);
@@ -111,6 +112,24 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
           />
         </SettingsRow>
         <SaveError save={enabling} className="px-6 pb-3" />
+      </SettingsCard>
+
+      <SettingsCard title="Upstream Keys">
+        <SettingsRow
+          title="Keep each conversation on one key"
+          hint="Its turns go to the same Upstream Key, so the Provider's prompt cache stays warm; while that key can't serve, they go to the conversation's next key. Off: keys are used in turn."
+        >
+          <SaveStatus save={keeping} saving={false} />
+          <Switch
+            checked={p.affinity !== "off"}
+            label="Keep each conversation on one key"
+            pending={keeping.pending}
+            onChange={(on) =>
+              void keeping.run(update({ affinity: on ? "on" : "off" }), { message: on ? "Conversations keep their key" : "Keys used in turn" })
+            }
+          />
+        </SettingsRow>
+        <SaveError save={keeping} className="px-6 pb-3" />
       </SettingsCard>
 
       <SettingsCard title="Provider route">

@@ -181,12 +181,12 @@ export function PoolTag() {
   return <span className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[12px] font-normal text-fg-muted">Pool</span>;
 }
 
-/** A label/value pair in a two-column grid of facts. */
-export function Fact({ label, children, mono }: { label: ReactNode; children: ReactNode; mono?: boolean }) {
+/** A label/value pair in a two-column grid of facts. `wide` spans both columns and wraps (for a sentence, not a name). */
+export function Fact({ label, children, mono, wide }: { label: ReactNode; children: ReactNode; mono?: boolean; wide?: boolean }) {
   return (
-    <div className="min-w-0">
+    <div className={cn("min-w-0", wide && "col-span-2")}>
       <dt className="text-[13px] text-fg-muted">{label}</dt>
-      <dd className={cn("mt-0.5 truncate text-[15px] text-fg", mono && "font-mono text-[14px]")}>{children}</dd>
+      <dd className={cn("mt-0.5 text-[15px] text-fg", wide ? "break-words" : "truncate", mono && "font-mono text-[14px]")}>{children}</dd>
     </div>
   );
 }

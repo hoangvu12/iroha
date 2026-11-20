@@ -5,6 +5,10 @@
 //
 //	var HistoryDays = settings.NewInt(settings.Int{Name: "retention.history_days", Default: 30, Min: 1, Max: 3650, ...})
 //	days, err := HistoryDays.Get(ctx, db)
+//
+// A setting that takes one of a few words is a Choice:
+//
+//	var Experiment = settings.NewChoice(settings.Choice{Name: "affinity.experiment", Choices: []string{"off", "half"}, Default: "off", ...})
 package settings
 
 import (
@@ -15,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -32,9 +37,24 @@ type Int struct {
 	Min, Max    int64
 }
 
+// Choice declares a setting that takes one of a few words.
+type Choice struct {
+	Name        string
+	Description string
+	Choices     []string
+	Default     string
+}
+
+// def is one registered setting, of either kind.
+type def struct {
+	name, description, unit string
+	integer                 *Int
+	choice                  *Choice
+}
+
 var (
 	registryMu sync.Mutex
-	registry   = map[string]*Int{}
+	registry   = map[string]*def{}
 )
 
 // NewInt registers an integer setting. Call it from a package-level var; it
@@ -43,32 +63,88 @@ func NewInt(s Int) *Int {
 	if s.Name == "" || s.Description == "" || s.Default < s.Min || s.Default > s.Max {
 		panic(fmt.Sprintf("settings: %q needs a name, a description and a default within [min, max]", s.Name))
 	}
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if _, ok := registry[s.Name]; ok {
-		panic(fmt.Sprintf("settings: %q registered twice", s.Name))
-	}
 	p := &s
-	registry[s.Name] = p
+	register(&def{name: s.Name, description: s.Description, unit: s.Unit, integer: p})
 	return p
 }
 
-func lookup(name string) (*Int, bool) {
+// NewChoice registers a setting taking one of s.Choices. Call it from a
+// package-level var; it panics on a duplicate name or a default that is not
+// a choice.
+func NewChoice(s Choice) *Choice {
+	if s.Name == "" || s.Description == "" || !slices.Contains(s.Choices, s.Default) {
+		panic(fmt.Sprintf("settings: %q needs a name, a description and a default among its choices", s.Name))
+	}
+	p := &s
+	register(&def{name: s.Name, description: s.Description, choice: p})
+	return p
+}
+
+func register(d *def) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, ok := registry[d.name]; ok {
+		panic(fmt.Sprintf("settings: %q registered twice", d.name))
+	}
+	registry[d.name] = d
+}
+
+func lookup(name string) (*def, bool) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	s, ok := registry[name]
 	return s, ok
 }
 
-func all() []*Int {
+func all() []*def {
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	out := make([]*Int, 0, len(registry))
+	out := make([]*def, 0, len(registry))
 	for _, s := range registry {
 		out = append(out, s)
 	}
-	slices.SortFunc(out, func(a, b *Int) int { return strings.Compare(a.Name, b.Name) })
+	slices.SortFunc(out, func(a, b *def) int { return strings.Compare(a.name, b.name) })
 	return out
+}
+
+// Get returns the setting's current value: the Owner's, else the default.
+func (s *Choice) Get(ctx context.Context, q audit.Querier) (string, error) {
+	raw, err := stored(ctx, q, s.Name)
+	if err != nil || raw == nil {
+		return s.Default, err
+	}
+	var v string
+	if json.Unmarshal(raw, &v) != nil || !slices.Contains(s.Choices, v) {
+		return s.Default, nil // a value this version cannot read: fall back
+	}
+	return v, nil
+}
+
+func (d *def) defaultValue() json.RawMessage {
+	if d.choice != nil {
+		b, _ := json.Marshal(d.choice.Default)
+		return b
+	}
+	return d.integer.encode(d.integer.Default)
+}
+
+// parse validates a value sent by an agent and returns it in stored form.
+func (d *def) parse(raw json.RawMessage) (json.RawMessage, error) {
+	if d.integer != nil {
+		return d.integer.parse(raw)
+	}
+	c := d.choice
+	quoted := make([]string, len(c.Choices))
+	for i, x := range c.Choices {
+		quoted[i] = strconv.Quote(x)
+	}
+	hint := fmt.Sprintf(`Send {"value": %s}.`, strings.Join(quoted, " or "))
+	var v string
+	if len(raw) == 0 || json.Unmarshal(raw, &v) != nil || !slices.Contains(c.Choices, v) {
+		return nil, api.BadRequest(hint, "%s takes one of %s, not %s.", c.Name, strings.Join(c.Choices, ", "), string(raw))
+	}
+	b, _ := json.Marshal(v)
+	return b, nil
 }
 
 // Get returns the setting's current value: the Owner's, else the default.
@@ -144,7 +220,7 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 			return nil, err
 		}
 		if raw == nil {
-			raw = def.encode(def.Default)
+			raw = def.defaultValue()
 		}
 		return &snapshot{Name: name, Value: raw}, nil
 	},
@@ -160,11 +236,8 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 // write stores value for name, or deletes the row when value is nil or the
 // default, so an untouched setting follows its built-in default.
 func write(ctx context.Context, tx *sql.Tx, name string, value json.RawMessage) error {
-	if def, ok := lookup(name); ok && value != nil {
-		var v int64
-		if json.Unmarshal(value, &v) == nil && v == def.Default {
-			value = nil
-		}
+	if def, ok := lookup(name); ok && value != nil && string(value) == string(def.defaultValue()) {
+		value = nil
 	}
 	if value == nil {
 		_, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE name = ?`, name)
@@ -179,22 +252,27 @@ func write(ctx context.Context, tx *sql.Tx, name string, value json.RawMessage) 
 type Setting struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
-	Type        string          `json:"type" enum:"integer"`
+	Type        string          `json:"type" enum:"integer,choice"`
 	Unit        string          `json:"unit,omitempty"`
 	Value       json.RawMessage `json:"value" doc:"The value in effect."`
 	Default     json.RawMessage `json:"default" doc:"The built-in value; DELETE /api/settings/{setting} restores it."`
-	Min         int64           `json:"min"`
-	Max         int64           `json:"max"`
+	Min         int64           `json:"min" doc:"For type integer: the lowest value."`
+	Max         int64           `json:"max" doc:"For type integer: the highest value."`
+	Choices     []string        `json:"choices,omitempty" doc:"For type choice: the values it takes."`
 	IsDefault   bool            `json:"is_default" doc:"true while the value is the built-in default. GET /api/audit-entries?resource=setting says who changed what, when."`
 }
 
-func view(ctx context.Context, q audit.Querier, def *Int) (Setting, error) {
-	raw, err := stored(ctx, q, def.Name)
+func view(ctx context.Context, q audit.Querier, def *def) (Setting, error) {
+	raw, err := stored(ctx, q, def.name)
 	if err != nil {
 		return Setting{}, err
 	}
-	s := Setting{Name: def.Name, Description: def.Description, Type: "integer", Unit: def.Unit,
-		Value: raw, Default: def.encode(def.Default), Min: def.Min, Max: def.Max}
+	s := Setting{Name: def.name, Description: def.description, Type: "integer", Unit: def.unit, Value: raw, Default: def.defaultValue()}
+	if def.integer != nil {
+		s.Min, s.Max = def.integer.Min, def.integer.Max
+	} else {
+		s.Type, s.Choices = "choice", def.choice.Choices
+	}
 	if raw == nil {
 		s.Value, s.IsDefault = s.Default, true
 	}
@@ -240,10 +318,10 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		if err != nil {
 			return Setting{}, err
 		}
-		if err := m.Track(Resource, def.Name); err != nil {
+		if err := m.Track(Resource, def.name); err != nil {
 			return Setting{}, err
 		}
-		if err := write(m.Ctx, m.Tx, def.Name, value); err != nil {
+		if err := write(m.Ctx, m.Tx, def.name, value); err != nil {
 			return Setting{}, err
 		}
 		return view(m.Ctx, m.Tx, def)
@@ -251,9 +329,10 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 	return []api.Route{
 		{
 			Method: http.MethodGet, Path: "/api/settings", Tag: tag,
-			Summary:     "List every setting with its value, default and limits",
-			Description: "Retention periods live here: retention.history_days (Requests and Attempts), retention.logs_days (log events) and retention.captures_days (captured prompts and responses). The hourly retention job applies them.",
-			Response:    SettingList{},
+			Summary: "List every setting with its value, default and limits",
+			Description: "Retention periods live here: retention.history_days (Requests and Attempts), retention.logs_days (log events) and retention.captures_days (captured prompts and responses). The hourly retention job applies them. " +
+				"affinity.experiment (off or half) runs the conversation affinity experiment: with half, half the conversations round-robin, so GET /api/requests/stats?affinity=on and ?affinity=control compare the two.",
+			Response: SettingList{},
 			Handle: func(c *api.Call) (any, error) {
 				out := SettingList{Settings: []Setting{}}
 				for _, def := range all() {
@@ -310,7 +389,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 						return notFound(c.Path("setting"))
 					}
 					var err error
-					out, err = set(m, NamedValue{Name: def.Name, Value: def.encode(def.Default)})
+					out, err = set(m, NamedValue{Name: def.name, Value: def.defaultValue()})
 					return err
 				})
 				return SettingResult{Result: res, Setting: out}, err

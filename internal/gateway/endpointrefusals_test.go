@@ -33,6 +33,7 @@ func TestAnEndpointRefusalIsServedByAnotherKeyOnAnotherEndpoint(t *testing.T) {
 			// The plan of the first Request: (ka, a), then (kb, b).
 			srv.Admin.Post("/api/providers/acme/keys", map[string]any{"name": "ka", "secret": "sk-test-a", "endpoints": []string{"a"}}).Expect(201)
 			srv.Admin.Post("/api/providers/acme/keys", map[string]any{"name": "kb", "secret": "sk-test-b", "endpoints": []string{"b"}}).Expect(201)
+			roundRobin(t, srv, "acme") // the assertions follow round-robin key order
 			caller := srv.Client(issue(t, srv, "pi", all))
 			a.Default(tc.reply)
 			b.Default(b.Text("served by b"))

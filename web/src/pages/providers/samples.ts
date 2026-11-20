@@ -30,6 +30,7 @@ function sampleProvider(handle: string, i: number): Provider {
     budget: { max_attempts: 0, first_byte_seconds: 0, overridden: false },
     strict: false,
     discovery: "provider",
+    affinity: "on",
     models_dev_brand: "",
     logo_domain: "aliyun.com",
     logo_domain_guessed: true,

@@ -1,4 +1,4 @@
-package testkit
+package fakeupstream
 
 import (
 	"encoding/json"
@@ -69,7 +69,7 @@ func (u *Upstream) completeReply(r *Received, text string) Reply {
 		body = map[string]any{
 			"id": "chatcmpl-" + id, "object": "chat.completion", "created": 1767225600, "model": model,
 			"choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": text}, "finish_reason": "stop"}},
-			"usage":   map[string]any{"prompt_tokens": us.Input, "completion_tokens": us.Output, "total_tokens": us.Input + us.Output},
+			"usage":   chatUsage(us),
 		}
 	case shape.OpenAIResponses:
 		body = responsesObject(id, model, "completed", text, us)
@@ -78,7 +78,7 @@ func (u *Upstream) completeReply(r *Received, text string) Reply {
 			"id": "msg_" + id, "type": "message", "role": "assistant", "model": model,
 			"content":     []any{map[string]any{"type": "text", "text": text}},
 			"stop_reason": "end_turn", "stop_sequence": nil,
-			"usage": map[string]any{"input_tokens": us.Input, "output_tokens": us.Output},
+			"usage": anthropicUsage(us, us.Output),
 		}
 	case shape.Gemini:
 		body = geminiChunk(model, text, "STOP", &us)
@@ -96,7 +96,7 @@ func responsesObject(id, model, status, text string, us Usage) map[string]any {
 	}
 	obj := map[string]any{"id": "resp_" + id, "object": "response", "created_at": 1767225600, "status": status, "model": model, "output": output}
 	if status == "completed" {
-		obj["usage"] = map[string]any{"input_tokens": us.Input, "output_tokens": us.Output, "total_tokens": us.Input + us.Output}
+		obj["usage"] = responsesUsage(us)
 	}
 	return obj
 }
@@ -108,9 +108,47 @@ func geminiChunk(model, text, finish string, us *Usage) map[string]any {
 	}
 	out := map[string]any{"candidates": []any{cand}, "modelVersion": model}
 	if us != nil {
-		out["usageMetadata"] = map[string]any{"promptTokenCount": us.Input, "candidatesTokenCount": us.Output, "totalTokenCount": us.Input + us.Output}
+		out["usageMetadata"] = geminiUsage(*us)
 	}
 	return out
+}
+
+// Usage objects per Shape. Input counts every prompt token, cached ones
+// included; cache fields appear only when CacheRead is set, so replies
+// without cache reads look as they always did.
+
+func chatUsage(us Usage) map[string]any {
+	m := map[string]any{"prompt_tokens": us.Input, "completion_tokens": us.Output, "total_tokens": us.Input + us.Output}
+	if us.CacheRead > 0 {
+		m["prompt_tokens_details"] = map[string]any{"cached_tokens": us.CacheRead}
+	}
+	return m
+}
+
+func responsesUsage(us Usage) map[string]any {
+	m := map[string]any{"input_tokens": us.Input, "output_tokens": us.Output, "total_tokens": us.Input + us.Output}
+	if us.CacheRead > 0 {
+		m["input_tokens_details"] = map[string]any{"cached_tokens": us.CacheRead}
+	}
+	return m
+}
+
+// anthropicUsage: Anthropic's input_tokens leave out cache reads.
+func anthropicUsage(us Usage, output int) map[string]any {
+	m := map[string]any{"input_tokens": us.Input, "output_tokens": output}
+	if us.CacheRead > 0 {
+		m["input_tokens"] = max(us.Input-us.CacheRead, 0)
+		m["cache_read_input_tokens"] = us.CacheRead
+	}
+	return m
+}
+
+func geminiUsage(us Usage) map[string]any {
+	m := map[string]any{"promptTokenCount": us.Input, "candidatesTokenCount": us.Output, "totalTokenCount": us.Input + us.Output}
+	if us.CacheRead > 0 {
+		m["cachedContentTokenCount"] = us.CacheRead
+	}
+	return m
 }
 
 func sse(event string, data any) string {
@@ -149,7 +187,7 @@ func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
 		_ = json.Unmarshal(r.Body, &req)
 		if req.StreamOptions.IncludeUsage { // like OpenAI, usage only when asked for
 			events = append(events, sse("", map[string]any{"id": "chatcmpl-" + id, "object": "chat.completion.chunk", "created": 1767225600, "model": model,
-				"choices": []any{}, "usage": map[string]any{"prompt_tokens": us.Input, "completion_tokens": us.Output, "total_tokens": us.Input + us.Output}}))
+				"choices": []any{}, "usage": chatUsage(us)}))
 		}
 		events = append(events, sse("", "[DONE]"))
 	case shape.OpenAIResponses:
@@ -185,7 +223,7 @@ func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
 		events = append(events,
 			sse("message_start", map[string]any{"type": "message_start", "message": map[string]any{
 				"id": "msg_" + id, "type": "message", "role": "assistant", "model": model, "content": []any{},
-				"stop_reason": nil, "stop_sequence": nil, "usage": map[string]any{"input_tokens": us.Input, "output_tokens": 1}}}),
+				"stop_reason": nil, "stop_sequence": nil, "usage": anthropicUsage(us, 1)}}),
 			sse("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}),
 		)
 		for _, p := range pieces {

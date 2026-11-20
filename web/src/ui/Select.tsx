@@ -7,7 +7,8 @@ import { ScrollArea } from "./ScrollArea";
 export type SelectOption<T extends string = string> = { value: T; label: string; disabled?: boolean };
 
 // A short list of choices behind a button. Inside a Field it takes the
-// Field's label; elsewhere pass aria-label.
+// Field's label; elsewhere pass aria-label. `value` null selects nothing and
+// shows `placeholder` (a bulk edit's "Mixed", UI ticket 30).
 export function Select<T extends string>({
   value,
   onValueChange,
@@ -17,7 +18,7 @@ export function Select<T extends string>({
   placeholder,
   "aria-label": label,
 }: {
-  value: T;
+  value: T | null;
   onValueChange: (v: T) => void;
   items: SelectOption<T>[];
   className?: string;

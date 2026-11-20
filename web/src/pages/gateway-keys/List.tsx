@@ -17,7 +17,10 @@ import { Mono } from "@/ui/bits";
 import { ToolbarSearch } from "@/ui/Input";
 import { MenuItem, MenuSeparator } from "@/ui/Menu";
 import { EmptyState } from "@/ui/States";
-import { type GatewayKey, useGatewayKeys } from "./api";
+import { type GatewayKey, editKeys, useCaptureDays, useGatewayKeys, useInvalidateKeys } from "./api";
+import { errorText } from "@/api/client";
+import { BulkEdit, type BulkChanges, type BulkField, bulkDone } from "@/ui/BulkEdit";
+import { type Save, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { RequestsCount } from "./bits";
 import { SAMPLE_GATEWAY_KEYS } from "./samples";
 import { useKeyQuestions } from "./confirm";
@@ -115,6 +118,7 @@ export function KeysList() {
   const confirm = useConfirm();
   const ask = useKeyQuestions();
   const [creating, setCreating] = useState(false);
+  const barSave = useSave({ refresh: useInvalidateKeys(), describe: errorText });
   const { params, setParam, setSort } = useUrlParams();
   const q = params.get("q") ?? "";
   const sort = (params.get("sort") as Sort) || "name";
@@ -168,6 +172,13 @@ export function KeysList() {
         onClearFilters={() => setParam("q")}
         sorting={sorting}
         onSortingChange={(s) => setSort(s[0]?.id ?? "name", s[0]?.desc ?? false, "name")}
+        // Capture prompts for several keys at once, mixed shown (UI ticket 30).
+        bulk={({ rows }) => (
+          <>
+            <GatewayKeysBulkEdit rows={rows} at={barSave} size={phone ? "sm" : "md"} />
+            <SaveStatus save={barSave} saving={false} className="ml-1" />
+          </>
+        )}
         rowActions={(k) => <KeyMenu k={k} {...act} />}
         onRowClick={(k) => navigate(keyHref(k))}
         phoneRow={(k) => <KeyLine k={k} />}
@@ -216,6 +227,29 @@ export function KeysList() {
 }
 
 type Actions = { onRevoke: (k: GatewayKey) => void; onDelete: (k: GatewayKey) => void };
+
+/** Edit… in the bulk bar: Capture prompts (UI ticket 30). Names and secrets are never bulk-edited; access stays on each key's page. */
+function GatewayKeysBulkEdit({ rows, at, size }: { rows: GatewayKey[]; at: Save; size: "sm" | "md" }) {
+  const refresh = useInvalidateKeys();
+  const days = useCaptureDays().data;
+  const fields: BulkField<GatewayKey>[] = [
+    {
+      kind: "boolean",
+      id: "capture",
+      label: "Capture prompts",
+      on: "capturing",
+      get: (k) => k.capture,
+      hint: `Stores the full prompt and response of each later Request made with the key${days ? `, kept for ${days} day${days === 1 ? "" : "s"}` : ""}.`,
+    },
+  ];
+  const apply = async (c: BulkChanges) => {
+    const ordered = [...rows].sort((a, b) => natural(a.name, b.name));
+    const res = await editKeys(ordered.map((k) => ({ key: k.id, capture: c.capture as boolean })));
+    await refresh();
+    return bulkDone(res, ordered.map((k) => k.name), ["key", "keys"]);
+  };
+  return <BulkEdit rows={rows} noun={["key", "keys"]} fields={fields} at={at} onApply={apply} size={size} />;
+}
 
 /** The key's name, a real link to its page (Ctrl/⌘-click opens a new tab), named "Open <name>" for the keyboard and agents. */
 function OpenLink({ k }: { k: GatewayKey }) {

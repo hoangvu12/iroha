@@ -18,6 +18,7 @@ import type { Facts, Model, ModelFilter } from "./api";
 import { calls, errorText, MODEL_FILTERS, useKeys, useModels, useRefresh } from "./api";
 import { Pill, Segmented, Select } from "./controls";
 import { SAMPLE_MODEL_LIST } from "./samples";
+import { ModelsBulkEdit } from "./BulkEdits";
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 const ctx = (n?: number) => (n ? compact.format(n) : "–");
@@ -62,13 +63,18 @@ export function ModelsTab({ handle }: { handle: string }) {
   const [editing, setEditing] = useState<Model>();
   const confirm = useConfirm();
   const chat = useChatActions();
-  const barSave = useSave({ describe: errorText });
+  // `refresh`: its Undo shows the models as they were back at once.
+  const barSave = useSave({ refresh, describe: errorText });
   const [busy, setBusy] = useState<"hide" | "show">();
 
   const setFilter = (f: ModelFilter) => setParam("filter", f === "all" ? undefined : f);
 
   const totalKeys = keys.data?.length ?? 0;
   const data = models.data;
+  // The server pages the list, so a selection can span pages: remember every
+  // model shown, for the bulk edit's mixed values (UI ticket 30).
+  const seen = useRef(new Map<string, Model>());
+  for (const m of data?.models ?? []) seen.current.set(m.model, m);
 
   // These run from the row's menu, which has closed, and the row may leave the filter.
   const change = async (m: Model, body: { hidden?: boolean; added?: boolean }, what: string) => {
@@ -274,6 +280,7 @@ export function ModelsTab({ handle }: { handle: string }) {
             <Button icon={Eye} onClick={() => hideAll(ids, false)} loading={busy === "show"} size={phone ? "sm" : "md"}>
               Show
             </Button>
+            <ModelsBulkEdit handle={handle} rows={ids.flatMap((id) => seen.current.get(id) ?? [])} at={barSave} size={phone ? "sm" : "md"} />
             <SaveStatus save={barSave} saving={false} className="ml-1" />
             <SaveError save={barSave} />
           </>

@@ -42,6 +42,12 @@ function renderList(keys: GatewayKey[], url = "/gateway-keys") {
     const path = String(u);
     const method = init?.method ?? "GET";
     if (path.startsWith("/api/gateway-keys") && method === "GET") return answer({ gateway_keys: keys });
+    if (path === "/api/settings") return answer({ settings: [{ name: "retention.captures_days", value: 7 }] });
+    if (path === "/api/gateway-keys/bulk/update") {
+      const items: { key: string; capture: boolean }[] = JSON.parse(String(init?.body)).items;
+      const outcome = (it: { key: string; capture: boolean }) => (keys.find((k) => k.id === it.key)?.capture === it.capture ? "unchanged" : "updated");
+      return answer({ dry_run: false, audit_entry: "ae_2", succeeded: items.length, failed: 0, items: items.map((it, index) => ({ index, ok: true, outcome: outcome(it), changes: [] })) });
+    }
     return answer({ audit_entry: "ae_1", changes: [], gateway_key: keys[0] });
   });
   vi.stubGlobal("fetch", fetch);
@@ -111,6 +117,26 @@ test("a row click, or Open <name>, opens the key's page", async () => {
   renderList([gk(1), gk(2)]);
   await user.click(await screen.findByRole("link", { name: "Open caller-2" }));
   expect(where()).toBe("/gateway-keys/gk_2");
+});
+
+test("Edit… turns prompt capture on for the selected keys in one change, mixed shown first, the result in the bar", async () => {
+  const user = userEvent.setup();
+  const fetch = renderList([gk(1), gk(2, { capture: true }), gk(3)]);
+  await user.click(await screen.findByRole("checkbox", { name: "Select caller-1" }));
+  await user.click(screen.getByRole("checkbox", { name: "Select caller-2" }));
+  const bar = screen.getByRole("group", { name: "2 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 2 keys" });
+  const capture = within(dialog).getByRole("checkbox", { name: "Capture prompts" });
+  expect(capture.getAttribute("aria-checked")).toBe("mixed");
+  expect(dialog.textContent).toContain("Mixed: capturing for 1 of 2 keys");
+  expect(await within(dialog).findByText(/kept for 7 days/)).toBeTruthy();
+  await user.click(capture);
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 2 keys" }));
+  await waitFor(() => expect(writes(fetch)).toEqual(["POST /api/gateway-keys/bulk/update"]));
+  const body = JSON.parse(String(fetch.mock.calls.find(([u]) => String(u) === "/api/gateway-keys/bulk/update")?.[1]?.body));
+  expect(body).toEqual({ items: [{ key: "gk_1", capture: true }, { key: "gk_2", capture: true }] });
+  expect(await within(bar).findByText("1 key changed, 1 already so", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
 });
 
 test("the row menu: Test as opens the chat sending as the key; Revoke… asks for the name typed, then revokes", async () => {

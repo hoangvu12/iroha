@@ -143,6 +143,31 @@ test("selected models are hidden together through the bulk API, with the result 
   expect(await within(bar).findByText("2 models hidden", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
 });
 
+test("Edit… works on models selected on several pages: mixed values shown, and each model keeps its own other overrides", async () => {
+  const user = userEvent.setup();
+  const all = many(30).map((m, i) => (i === 0 ? { ...m, overrides: { context_length: 8000, chat: "ok" as const } } : i === 26 ? { ...m, hidden: true, overrides: { chat: "ok" as const } } : m));
+  const fetch = renderTab(all);
+  await user.click(await screen.findByRole("checkbox", { name: "Select m-0001" }));
+  await user.click(screen.getByRole("button", { name: "Page 2" }));
+  await user.click(await screen.findByRole("checkbox", { name: "Select m-0027" }));
+  const bar = screen.getByRole("group", { name: "2 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 2 models" });
+  expect(within(dialog).getByRole("checkbox", { name: "Hidden from Callers" }).getAttribute("aria-checked")).toBe("mixed");
+  expect(within(dialog).getByRole("combobox", { name: "Chat" }).textContent).toContain("Chats");
+  expect((within(dialog).getByRole("textbox", { name: "Context window" }) as HTMLInputElement).placeholder).toBe("Mixed");
+  await user.type(within(dialog).getByRole("textbox", { name: "Max output" }), "4096");
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 2 models" }));
+  await waitFor(() => expect(posts(fetch)).toHaveLength(1));
+  expect(JSON.parse(String(posts(fetch)[0][1]?.body))).toEqual({
+    items: [
+      { model: "m-0001", metadata: { context_length: 8000, chat: "ok", max_output_tokens: 4096 } },
+      { model: "m-0027", metadata: { chat: "ok", max_output_tokens: 4096 } },
+    ],
+  });
+  expect(await within(bar).findByText("2 models changed", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+});
+
 test("removing a model the Owner added is red and asks first, naming the model; Cancel keeps it", async () => {
   const user = userEvent.setup();
   const fetch = renderTab();

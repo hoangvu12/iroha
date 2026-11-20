@@ -36,6 +36,8 @@ A mutation answers with the record plus:
 
 One Audit Entry covers every applied item of a bulk call, so one revert undoes all of it.
 
+`POST /api/<resource>/bulk/update` (Upstream Keys, Gateway Keys) edits many existing records in one change: each item is `{"key": "<name or ID>", ...}` with only the fields to change; a field an item leaves out stays as that record has it. Use it to set one value on many records, or to send each its own value; it never creates a record. Names and secrets are changed one record at a time.
+
 ### Audit Entries and revert
 
 Every change to Iroha's configuration writes an Audit Entry naming who made it (`actor`: your Admin Token's name, or `Owner` for the Owner's browser session), with each record's before and after. Read them with `GET /api/audit-entries` (filter by `actor`, `resource`, `record`, `action`, `q`, `since`).

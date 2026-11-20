@@ -1,4 +1,4 @@
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { animateIn } from "@ui-sdk/core";
 import { ArrowDown, ArrowUp, ChevronRight, MoreHorizontal } from "lucide-react";
@@ -256,8 +256,6 @@ const NO_PAGING: PaginationState = { pageIndex: 0, pageSize: Number.MAX_SAFE_INT
 
 // Clicks on a row's own controls, or inside a popup rendered in place in it, don't open the row.
 const OWN_TARGET = "button, a, input, textarea, select, label, [role=menuitem], [role=checkbox], [role=switch], [popover], dialog, [data-slot$='-content']";
-// Space keeps its own meaning on these in select mode: boxes, switches, fields, menu triggers and popups.
-const SPACE_OWN = "input, textarea, select, [contenteditable], [role=checkbox], [role=switch], [aria-haspopup]:not([aria-haspopup=false]), [role=menuitem], [popover], dialog, [data-slot$='-content']";
 
 export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const {
@@ -433,8 +431,9 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const toggleRow = (row: DataRow<T>, on: boolean, event?: Event) =>
     row.getToggleSelectedHandler()({ target: { checked: on }, shiftKey: (event as MouseEvent | undefined)?.shiftKey ?? false });
   // Select mode (UI ticket 25): while any row is selected, a click on a row (not its own
-  // controls) toggles it, Shift+click selects a range, and Space on the row's controls toggles it.
-  // The name's Open button and the row menu still open the row.
+  // controls) toggles it and Shift+click selects a range. The name's Open button and the row
+  // menu still open the row. Keys are left to each control (Space and Enter press a button or
+  // follow a link); the keyboard picks a row with its box.
   const selectMode = !!bulk && selectedCount > 0;
   const rowPress = (row: DataRow<T>, click: (() => void) | undefined) => (e: ReactMouseEvent<HTMLElement>) => {
     const own = (e.target as Element).closest(`${OWN_TARGET}, [data-select-cell]`);
@@ -445,13 +444,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   // Shift+click in select mode picks a range, not the text in between.
   const noTextRange = (e: ReactMouseEvent) => {
     if (selectMode && e.shiftKey) e.preventDefault();
-  };
-  const spaceToggles = (row: DataRow<T>) => (e: ReactKeyboardEvent<HTMLElement>) => {
-    if (!selectMode || e.key !== " " || e.repeat) return;
-    const own = (e.target as Element).closest(SPACE_OWN);
-    if (own && e.currentTarget.contains(own)) return;
-    e.preventDefault();
-    toggleRow(row, !row.getIsSelected(), e.nativeEvent);
   };
   /** The checkbox's whole cell is its hit area: a press beside the box toggles the row (Shift: a range). */
   const selectCell = (toggle: (e: ReactMouseEvent) => void) => (e: ReactMouseEvent<HTMLElement>) => {
@@ -545,7 +537,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
                 data-tone={props.rowTone?.(r)}
                 onClick={click || selectMode ? rowPress(row, click) : undefined}
                 onMouseDown={noTextRange}
-                onKeyDown={spaceToggles(row)}
                 className={cn(
                   "group border-b border-border last:border-b-0",
                   rowClass,

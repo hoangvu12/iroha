@@ -86,10 +86,10 @@ The review of tickets 23-34 (`iroha-v2-notes/v2-ui/review-fixes-2.md`), items 1-
 
 16. **Feed test.** "Numbered pages" is proven with 30 rows, not 100, and asserts the "Page 2" button. Alone it took about 1.5 s before and about 0.95 s now. The full web suite was run twice after merging v2-ui, with no timeout.
 17. `gofmt` on `internal/testchat/send.go`.
+18. **Keys' bulk Endpoints edit sends a change, not a list** (asked after the review, same class as item 1). `POST /api/providers/{p}/keys/bulk/update` items take `endpoints_add` and `endpoints_remove`. The server applies them to each key's list as it is when the call runs: a key with no restriction starts from every Endpoint, and a list left with every Endpoint, or none, is no restriction. `endpoints` still replaces the list. It can't be sent with the other two, and one Endpoint can't be both added and removed; either is a failed item. The Keys tab sends only the change, and `applySet` is gone from `ui/BulkEdit`. Tests: Go `TestBulkEndpointChangesApplyToEachKeysCurrentList`, where a key whose list changed after the rows loaded keeps the change. Web: two tests in `Keys.test.tsx`. Skill: `10_conventions.md`. Chrome: team-1 gained `us` through the API after the tab loaded. Taking `cn` off all 4 keys sent `endpoints_remove: ["cn"]`, and team-1 kept `["intl","us"]` (`keys-endpoints-*.png`).
 
 ### Left as it is
 
-- Keys' bulk Endpoints edit still computes each key's list from the loaded rows. Item 1 named only models and Pool members.
 - The "Not to change" list of the review was not touched.
 
 ### Checks

@@ -1,7 +1,7 @@
 import { plural } from "@/lib/format";
-import { applySet, BulkEdit, type BulkChanges, type BulkField, bulkDone, type SetChange } from "@/ui/BulkEdit";
+import { BulkEdit, type BulkChanges, type BulkField, bulkDone, type SetChange } from "@/ui/BulkEdit";
 import type { Save } from "@/ui/SaveStatus";
-import type { Facts, FactsPatch, Member, Model, Provider, UpstreamKey } from "./api";
+import type { Facts, FactsPatch, KeyEdit, Member, Model, Provider, UpstreamKey } from "./api";
 import { calls, natural, useRefresh } from "./api";
 
 // What each Provider table edits together (UI ticket 30; the reasons are in
@@ -28,13 +28,14 @@ export function KeysBulkEdit({ handle, provider, rows, at, size }: { handle: str
 
   const apply = async (c: BulkChanges) => {
     const ordered = [...rows].sort((a, b) => natural(a.name, b.name));
+    // Endpoints go as the change, not as lists built from the rows: the rows may have been
+    // read pages ago, and the server applies it to each key's list as it is now.
+    const set = c.endpoints as SetChange | undefined;
     const items = ordered.map((k) => {
-      const item: { key: string; enabled?: boolean; endpoints?: string[] } = { key: k.id };
+      const item: KeyEdit = { key: k.id };
       if (typeof c.enabled === "boolean") item.enabled = c.enabled;
-      if (c.endpoints) {
-        const next = applySet(allowed(k), c.endpoints as SetChange, eps);
-        item.endpoints = next.length === eps.length ? [] : next;
-      }
+      if (set?.add.length) item.endpoints_add = set.add;
+      if (set?.remove.length) item.endpoints_remove = set.remove;
       return item;
     });
     const res = await calls.editKeys(handle, items);

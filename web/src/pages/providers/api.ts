@@ -131,6 +131,12 @@ export type Facts = {
   architecture?: { input_modalities?: string[]; output_modalities?: string[] };
 };
 
+/**
+ * One item of an Upstream Keys bulk update: a field left out stays. `endpoints` replaces the
+ * key's list; `endpoints_add` / `endpoints_remove` change it as the server holds it now.
+ */
+export type KeyEdit = { key: string; enabled?: boolean; endpoints?: string[]; endpoints_add?: string[]; endpoints_remove?: string[] };
+
 /** Some overrides of a model: a value sets one, null removes it, a field left out stays. */
 export type FactsPatch = { [K in keyof Facts]?: Facts[K] | null };
 
@@ -439,7 +445,7 @@ export const calls = {
   addKeys: (h: string, items: { secret: string }[], dryRun?: boolean) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }, { query: dry(dryRun) }),
   restrictKeys: (h: string, items: { name: string; endpoints: string[] }[]) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }),
   /** Edits many keys (by name or ID) in one change and one Audit Entry; fields an item leaves out stay as that key has them (UI ticket 30). */
-  editKeys: (h: string, items: { key: string; enabled?: boolean; endpoints?: string[] }[]) =>
+  editKeys: (h: string, items: KeyEdit[]) =>
     api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk/update`, { items }),
   updateKey: (h: string, key: string, body: Partial<Pick<UpstreamKey, "name" | "secret" | "enabled" | "endpoints">>) =>
     api.patch<KeyResult>(`${P(h)}/keys/${seg(key)}`, body),

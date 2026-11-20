@@ -41,15 +41,6 @@ export type SetChange = { add: string[]; remove: string[] };
 /** What the Owner changed, by field ID: a yes-no, a select's or a text field's value, or a set's change. */
 export type BulkChanges = Record<string, boolean | string | SetChange>;
 
-/** One row's set after a change, in `order` (the options' order) where given. */
-export function applySet(current: string[], change: SetChange, order?: string[]): string[] {
-  const next = new Set(current.filter((v) => !change.remove.includes(v)));
-  for (const v of change.add) next.add(v);
-  const out = [...next];
-  return order ? out.sort((a, b) => rank(order, a) - rank(order, b)) : out;
-}
-const rank = (order: string[], v: string) => (order.includes(v) ? order.indexOf(v) : order.length);
-
 type FieldBase = { id: string; label: string; hint?: ReactNode };
 export type SetOption = { value: string; label: string; detail?: ReactNode };
 

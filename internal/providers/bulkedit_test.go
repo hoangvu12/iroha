@@ -78,3 +78,72 @@ func TestManyUpstreamKeysAreEditedInOneRevertibleCall(t *testing.T) {
 	// Names and secrets are not bulk-edited: unknown fields are refused.
 	srv.Admin.Post(keys+"/bulk/update", map[string]any{"items": []any{map[string]any{"key": "a", "secret": "sk-x"}}}).Expect(400)
 }
+
+// Review fix (batch 2): endpoints_add and endpoints_remove change each key's
+// Endpoints as the server holds them now, so a list changed after the UI
+// loaded its rows keeps that change.
+func TestBulkEndpointChangesApplyToEachKeysCurrentList(t *testing.T) {
+	srv := testkit.Start(t)
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
+	for _, n := range []string{"eu", "us", "asia"} {
+		srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": n, "url": "https://" + n + ".example.com/v1", "shape": "openai-chat"}).Expect(201)
+	}
+	keys := "/api/providers/acme/keys"
+	srv.Admin.Post(keys, map[string]any{"name": "a", "secret": "sk-test-a", "endpoints": []string{"eu"}}).Expect(201)
+	srv.Admin.Post(keys, map[string]any{"name": "b", "secret": "sk-test-b"}).Expect(201)
+	srv.Admin.Post(keys, map[string]any{"name": "c", "secret": "sk-test-c", "endpoints": []string{"us", "asia"}}).Expect(201)
+	read := func(name string) []string {
+		var k providers.UpstreamKey
+		srv.Admin.Get(keys + "/" + name).Expect(200).JSON(&k)
+		out := slices.Clone(k.Endpoints)
+		slices.Sort(out)
+		return out
+	}
+
+	// The rows were loaded with a on eu alone; since then someone added us to it.
+	srv.Admin.Patch(keys+"/a", map[string]any{"endpoints": []string{"eu", "us"}}).Expect(200)
+
+	var res audit.BulkResult[providers.UpstreamKey]
+	srv.Admin.Post(keys+"/bulk/update", map[string]any{"items": []any{
+		map[string]any{"key": "a", "endpoints_add": []string{"asia"}},
+		map[string]any{"key": "b", "endpoints_remove": []string{"asia"}},
+		map[string]any{"key": "c", "endpoints_add": []string{"eu"}, "endpoints_remove": []string{"asia"}},
+	}}).Expect(200).JSON(&res)
+	if res.Succeeded != 3 || res.AuditEntry == "" {
+		t.Fatalf("bulk update = %+v", res)
+	}
+	// a keeps us, the change made after the rows loaded; with asia it has every
+	// Endpoint, so it is no longer restricted.
+	if got := read("a"); len(got) != 0 {
+		t.Fatalf("a = %v, want every Endpoint (no restriction)", got)
+	}
+	// b had every Endpoint: taking asia off leaves eu and us.
+	if got := read("b"); !slices.Equal(got, []string{"eu", "us"}) {
+		t.Fatalf("b = %v", got)
+	}
+	if got := read("c"); !slices.Equal(got, []string{"eu", "us"}) {
+		t.Fatalf("c = %v", got)
+	}
+
+	// Taking off every Endpoint a key has leaves it with none, which means every one.
+	srv.Admin.Post(keys+"/bulk/update", map[string]any{"items": []any{map[string]any{"key": "c", "endpoints_remove": []string{"eu", "us"}}}}).Expect(200).JSON(&res)
+	if res.Succeeded != 1 || len(read("c")) != 0 {
+		t.Fatalf("c emptied = %+v, %v", res, read("c"))
+	}
+
+	// endpoints replaces the list and can't be sent with a change to it; one
+	// Endpoint can't be both added and removed; an unknown one fails the item.
+	srv.Admin.Post(keys+"/bulk/update", map[string]any{"items": []any{
+		map[string]any{"key": "a", "endpoints": []string{"eu"}, "endpoints_add": []string{"us"}},
+		map[string]any{"key": "a", "endpoints_add": []string{"us"}, "endpoints_remove": []string{"us"}},
+		map[string]any{"key": "a", "endpoints_add": []string{"mars"}},
+	}}).Expect(200).JSON(&res)
+	if res.Failed != 3 {
+		t.Fatalf("bad items = %+v", res)
+	}
+	for i, code := range []string{"invalid_request", "invalid_request", "not_found"} {
+		if it := res.Items[i]; it.Error == nil || it.Error.Code != code {
+			t.Fatalf("item %d = %+v, want %s", i, it, code)
+		}
+	}
+}

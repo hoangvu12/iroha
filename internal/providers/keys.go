@@ -342,9 +342,11 @@ func (h handlers) bulkEnableRoute(enable bool) api.Route {
 
 // BulkUpdateUpstreamKey is one item of POST .../keys/bulk/update.
 type BulkUpdateUpstreamKey struct {
-	Key       string    `json:"key" doc:"The key to change, by name or ID."`
-	Enabled   *bool     `json:"enabled,omitempty" doc:"false disables the key, true enables it; omit to keep it as it is."`
-	Endpoints *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs); [] lifts the restriction; omit to keep it."`
+	Key             string    `json:"key" doc:"The key to change, by name or ID."`
+	Enabled         *bool     `json:"enabled,omitempty" doc:"false disables the key, true enables it; omit to keep it as it is."`
+	Endpoints       *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs), replacing its list; [] lifts the restriction; omit to keep it."`
+	EndpointsAdd    []string  `json:"endpoints_add,omitempty" doc:"Endpoints (names or IDs) to add to the key's list as it is now. Not with endpoints."`
+	EndpointsRemove []string  `json:"endpoints_remove,omitempty" doc:"Endpoints (names or IDs) to take off the key's list as it is now; a key with no restriction starts from every Endpoint. A list left with every Endpoint, or none, means every Endpoint. Not with endpoints."`
 }
 
 // bulkUpdateRoute is POST .../keys/bulk/update (UI ticket 30: edit many keys at once).
@@ -352,7 +354,8 @@ func (h handlers) bulkUpdateRoute() api.Route {
 	return api.Route{
 		Method: http.MethodPost, Path: "/api/providers/{provider}/keys/bulk/update", Tag: "Upstream Keys",
 		Summary: "Enable, disable or restrict many Upstream Keys of a Provider in one change",
-		Description: `Body {"items": [{"key": "key-1", "enabled": true, "endpoints": ["eu"]}, {"key": "uk_...", "enabled": true}]}. ` +
+		Description: `Body {"items": [{"key": "key-1", "enabled": true, "endpoints_add": ["eu"]}, {"key": "uk_...", "endpoints_remove": ["us"]}]}. ` +
+			"endpoints_add and endpoints_remove change each key's list as it is when the call runs; endpoints replaces it. " +
 			"Names and secrets are changed one key at a time (PATCH).",
 		Query:   []api.Param{audit.DryRun},
 		Request: audit.BulkRequest[BulkUpdateUpstreamKey]{}, Response: audit.BulkResult[UpstreamKey]{},
@@ -374,7 +377,19 @@ func (h handlers) bulkUpdateRoute() api.Route {
 				if err != nil {
 					return UpstreamKey{}, err
 				}
-				return h.updateKey(m, p, id, UpdateUpstreamKey{Enabled: it.Enabled, Endpoints: it.Endpoints}, &sl)
+				eps := it.Endpoints
+				if it.EndpointsAdd != nil || it.EndpointsRemove != nil {
+					if eps != nil {
+						return UpstreamKey{}, api.BadRequest("Send endpoints to replace the key's list, or endpoints_add and endpoints_remove to change it.",
+							"endpoints and endpoints_add or endpoints_remove were both sent.")
+					}
+					next, err := changeKeyEndpoints(m.Ctx, m.Tx, p, id, it.EndpointsAdd, it.EndpointsRemove)
+					if err != nil {
+						return UpstreamKey{}, err
+					}
+					eps = &next
+				}
+				return h.updateKey(m, p, id, UpdateUpstreamKey{Enabled: it.Enabled, Endpoints: eps}, &sl)
 			})
 			if err == nil && !res.DryRun {
 				sl.emit(h.log, p.handle)

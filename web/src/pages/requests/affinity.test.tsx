@@ -12,7 +12,7 @@ test("the reason names where the conversation came from and whether its key serv
     "This conversation's key couldn't serve; its next key was tried (Iroha-Session header)",
   );
   expect(affinityReason({ source: "prefix", mode: "control" })).toBe("Keys in turn: this conversation is in the experiment's round-robin half (prompt's start)");
-  expect(affinityReason({ source: "codex", mode: "off" })).toBe("Keys in turn: conversation affinity is off for this Provider (Codex session)");
+  expect(affinityReason({ source: "codex", mode: "off" })).toBe("Keys in turn: conversation affinity is off for this Provider (session-id header: Codex, pi)");
   expect(affinityReason({ source: "none", mode: "none" })).toBe("Keys in turn: no conversation found");
   expect(affinityReason(undefined)).toBeUndefined();
 });
@@ -27,7 +27,7 @@ const details = (r: RequestRecord) =>
 test("Request Details says why the key was chosen, and nothing for Requests from before", () => {
   const { unmount } = details({ ...SAMPLE_REQUEST, affinity: { source: "opencode", mode: "on", preferred_served: true } });
   expect(screen.getByText("Key choice")).toBeTruthy();
-  expect(screen.getByText("Key chosen for this conversation (OpenCode session)")).toBeTruthy();
+  expect(screen.getByText("Key chosen for this conversation (x-session-affinity header: OpenCode, pi)")).toBeTruthy();
   unmount();
   details({ ...SAMPLE_REQUEST, affinity: undefined });
   expect(screen.queryByText("Key choice")).toBeNull();

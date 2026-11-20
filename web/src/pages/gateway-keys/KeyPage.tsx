@@ -20,7 +20,7 @@ import { EmptyState, ErrorState } from "@/ui/States";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import { type GatewayKey, useCaptureDays, useGatewayKey, useInvalidateKeys, useUpdateKey } from "./api";
-import { baseUrls, requestsHref } from "./bits";
+import { baseUrls, requestsHref, ScopeModels } from "./bits";
 import { DeleteDialog, RevokeDialog } from "./confirm";
 import { SAMPLE_GATEWAY_KEY } from "./samples";
 import { PoolTile, ProviderTile } from "@/ui/LogoTile";
@@ -279,10 +279,14 @@ function Access({ k }: { k: GatewayKey }) {
         </Button>
       </Row>
       {providers.map((p) => (
-        <div key={p.provider} className="flex h-12 items-center gap-3 px-5">
+        <div key={p.provider} className="flex min-h-12 items-center gap-3 px-5 py-2">
           <ProviderTile handle={p.provider} />
-          <span className="flex min-w-0 flex-1 text-[15px]">
-            <RecordLink record={rec.provider(p.provider)}>{p.provider}</RecordLink>
+          <span className="flex min-w-0 flex-1 flex-col text-[15px]">
+            <span className="flex min-w-0">
+              <RecordLink record={rec.provider(p.provider)}>{p.provider}</RecordLink>
+            </span>
+            {/* The models it's narrowed to, each opening its sheet (UI ticket 33). */}
+            {p.models?.length ? <ScopeModels provider={p.provider} models={p.models} max={8} className="mt-0.5" /> : null}
           </span>
           <span className="shrink-0 text-sm text-fg-muted" title={p.models?.join(", ")}>
             {modelsLabel(p.models?.length ? p.models : null)}

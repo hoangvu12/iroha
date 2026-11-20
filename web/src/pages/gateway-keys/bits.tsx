@@ -3,6 +3,7 @@ import { Button as SdkButton } from "@ui-sdk/react/button";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/ui/cn";
 import { CopyButton } from "@/ui/CopyButton";
+import { rec, RecordLink } from "@/sheets/RecordLink";
 import type { GatewayKey } from "./api";
 
 // The copyable value box of C12, the base URLs and a key's Requests link.
@@ -48,5 +49,20 @@ export function RequestsCount({ k, className }: { k: Pick<GatewayKey, "id" | "na
     >
       {formatNumber(k.recent_requests)}
     </SdkButton>
+  );
+}
+
+/** The models a scope narrows a Provider to, each a link to its sheet (UI ticket 33); past `max`, "and N more". */
+export function ScopeModels({ provider, models, max = 6, className }: { provider: string; models: string[]; max?: number; className?: string }) {
+  const shown = models.slice(0, max);
+  return (
+    <span className={cn("flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[13.5px]", className)}>
+      {shown.map((m) => (
+        <RecordLink key={m} record={rec.model(provider, m)} className="font-mono text-[13px]">
+          {m}
+        </RecordLink>
+      ))}
+      {models.length > max && <span className="text-fg-muted">and {models.length - max} more</span>}
+    </span>
   );
 }

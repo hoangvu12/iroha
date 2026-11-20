@@ -585,6 +585,11 @@ const cells: Record<ColumnId, (r: RequestRecord) => ReactNode> = {
         <RecordLink record={rec.pool(r.pool)} className="font-medium" title={r.model}>
           {r.model}
         </RecordLink>
+      ) : r.provider && r.wire_model ? (
+        // Asked of a Provider straight: the model it was sent as has a sheet (UI ticket 33).
+        <RecordLink record={rec.model(r.provider, r.wire_model)} className="font-medium" title={r.model}>
+          {r.model}
+        </RecordLink>
       ) : (
         <span className="truncate font-medium" title={r.model}>
           {r.model || dash}

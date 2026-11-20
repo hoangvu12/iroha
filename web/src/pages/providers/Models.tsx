@@ -19,6 +19,9 @@ import { calls, errorText, MODEL_FILTERS, useKeys, useModels, useRefresh } from 
 import { Pill, Segmented, Select } from "./controls";
 import { SAMPLE_MODEL_LIST } from "./samples";
 import { ModelsBulkEdit } from "./BulkEdits";
+import { rec } from "@/sheets/RecordLink";
+import { startEditing } from "@/sheets/records/editing";
+import { useMaybeSheets } from "@/sheets/stack";
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 const ctx = (n?: number) => (n ? compact.format(n) : "–");
@@ -60,7 +63,13 @@ export function ModelsTab({ handle }: { handle: string }) {
   const refresh = useRefresh();
   const phone = useIsPhone();
   const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<Model>();
+  const sheets = useMaybeSheets();
+  // A model opens in its sheet (UI ticket 33); Details… opens it on its fields.
+  const open = (m: Model, edit = false) => {
+    const r = rec.model(handle, m.model);
+    if (edit) startEditing(r);
+    sheets?.open(r);
+  };
   const confirm = useConfirm();
   const chat = useChatActions();
   // `refresh`: its Undo shows the models as they were back at once.
@@ -123,7 +132,7 @@ export function ModelsTab({ handle }: { handle: string }) {
 
   const menu = (m: Model) => (
     <RowMenu name={m.model}>
-      <MenuItem icon={SlidersHorizontal} onSelect={() => setEditing(m)}>
+      <MenuItem icon={SlidersHorizontal} onSelect={() => open(m, true)}>
         Details…
       </MenuItem>
       <MenuItem icon={MessageCircle} onSelect={() => chat.open({ kind: "model", provider: handle, model: m.model })}>
@@ -286,9 +295,9 @@ export function ModelsTab({ handle }: { handle: string }) {
           </>
         )}
         rowActions={menu}
-        onRowClick={setEditing}
+        onRowClick={(m) => open(m)}
         phoneRow={(m) => <ModelLine m={m} />}
-        // The details dialog has no menu: on phones the row keeps its ⋯.
+        // On phones the row keeps its ⋯ (Clear Model Gaps and the rest, without opening the sheet).
         phoneActions={menu}
         empty={
           <EmptyState
@@ -309,7 +318,6 @@ export function ModelsTab({ handle }: { handle: string }) {
 
       {confirm.dialog}
       <AddModelDialog handle={handle} open={adding} onOpenChange={setAdding} />
-      <ModelDialog handle={handle} model={editing} onClose={() => setEditing(undefined)} />
     </section>
   );
 }
@@ -473,107 +481,68 @@ function AddModelDialog({ handle, open, onOpenChange }: { handle: string; open: 
   );
 }
 
+// A model's details are edited in its sheet (UI ticket 33: it was a dialog);
+// the fields live here, beside the table, as the Endpoint's do.
+
 const tri = (b?: boolean) => (b === undefined ? "" : b ? "yes" : "no");
 const num = (s: string) => (s.trim() ? Number(s.replace(/[_,\s]/g, "")) : undefined);
 
-/** A model's details: where its facts come from, and the Owner's overrides. */
-function ModelDialog({ handle, model: current, onClose }: { handle: string; model?: Model; onClose: () => void }) {
-  // Motion: the dialog stays mounted while it leaves, still about the model it showed, so its exit plays.
-  const last = useRef(current);
-  if (current) last.current = current;
-  const model = current ?? last.current;
-  const refresh = useRefresh();
-  const [f, setF] = useState({ context_length: "", max_output_tokens: "", reasoning: "", chat: "" });
-  const [error, setError] = useState<string>();
-  const [pending, setPending] = useState(false);
+/** "128K", "–": a token count as the table shows it. */
+export const tokens = ctx;
 
-  // A model opened (not one closing): start from its overrides.
-  useEffect(() => {
-    if (!current) return;
-    const o = current.overrides;
-    setF({
-      context_length: o.context_length ? String(o.context_length) : "",
-      max_output_tokens: o.max_output_tokens ? String(o.max_output_tokens) : "",
-      reasoning: tri(o.reasoning),
-      chat: o.chat ?? "",
-    });
-    setError(undefined);
-  }, [current]);
+export type ModelForm = { context_length: string; max_output_tokens: string; reasoning: string; chat: string };
 
-  if (!model) return null;
-  const save = async () => {
-    const metadata: Facts = { ...model.overrides };
-    const cl = num(f.context_length);
-    const mo = num(f.max_output_tokens);
-    if ((cl !== undefined && !(cl > 0)) || (mo !== undefined && !(mo > 0))) return setError("Token counts are whole numbers above 0.");
-    if (cl) metadata.context_length = cl;
-    else delete metadata.context_length;
-    if (mo) metadata.max_output_tokens = mo;
-    else delete metadata.max_output_tokens;
-    if (f.reasoning) metadata.reasoning = f.reasoning === "yes";
-    else delete metadata.reasoning;
-    if (f.chat) metadata.chat = f.chat as "ok" | "unsupported";
-    else delete metadata.chat;
-    setPending(true);
-    try {
-      const res = await calls.saveModel(handle, { model: model.model, metadata });
-      refresh();
-      // Toast: the Details dialog closes on Save.
-      notifyChange(`${model.model} details saved`, res, { onUndone: refresh });
-      onClose();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setPending(false);
-    }
+/** The form, started from the model's overrides (empty fields use the Provider's list, then models.dev). */
+export function modelForm(m: Model): ModelForm {
+  const o = m.overrides;
+  return {
+    context_length: o.context_length ? String(o.context_length) : "",
+    max_output_tokens: o.max_output_tokens ? String(o.max_output_tokens) : "",
+    reasoning: tri(o.reasoning),
+    chat: o.chat ?? "",
   };
+}
 
-  const from = (k: keyof Facts) =>
-    model.overrides[k] !== undefined ? "yours" : model.reported[k] !== undefined ? `${handle}'s list` : model.models_dev[k] !== undefined ? "models.dev" : "";
-  const shown = (k: "context_length" | "max_output_tokens") => model.reported[k] ?? model.models_dev[k];
+/** The overrides the form says (the model's others kept), or what's wrong with it. */
+export function modelMetadata(m: Model, f: ModelForm): { metadata: Facts } | { error: string } {
+  const metadata: Facts = { ...m.overrides };
+  const cl = num(f.context_length);
+  const mo = num(f.max_output_tokens);
+  if ((cl !== undefined && !(cl > 0)) || (mo !== undefined && !(mo > 0))) return { error: "Token counts are whole numbers above 0." };
+  if (cl) metadata.context_length = cl;
+  else delete metadata.context_length;
+  if (mo) metadata.max_output_tokens = mo;
+  else delete metadata.max_output_tokens;
+  if (f.reasoning) metadata.reasoning = f.reasoning === "yes";
+  else delete metadata.reasoning;
+  if (f.chat) metadata.chat = f.chat as "ok" | "unsupported";
+  else delete metadata.chat;
+  return { metadata };
+}
 
+/** Where a fact of the model comes from: "you", "acme's list", "models.dev", or "" when nothing says. */
+export function factSource(m: Model, handle: string, k: keyof Facts): string {
+  return m.overrides[k] !== undefined ? "you" : m.reported[k] !== undefined ? `${handle}'s list` : m.models_dev[k] !== undefined ? "models.dev" : "";
+}
+
+/** The fields of a model's details: what Callers' model lists say of it. */
+export function ModelFields({ m, handle, f, setF }: { m: Model; handle: string; f: ModelForm; setF: (u: (f: ModelForm) => ModelForm) => void }) {
+  const from = (k: keyof Facts) => factSource(m, handle, k);
+  const shown = (k: "context_length" | "max_output_tokens") => m.reported[k] ?? m.models_dev[k];
   return (
-    <Dialog
-      open={!!current}
-      onOpenChange={(o) => !o && onClose()}
-      title={<span className="font-mono">{model.model}</span>}
-      description={[
-        model.visible ? "Listed to Callers" : model.hidden ? "Hidden from Callers" : "Not listed",
-        model.discovered ? `named by ${model.endpoints.length ? model.endpoints.join(", ") : "discovery"}` : "added by you",
-      ].join(", ")}
-      width={560}
-      footer={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" loading={pending} onClick={() => void save()}>
-            Save details
-          </Button>
-        </>
-      }
-    >
-      <p className="mb-4 text-[14px] text-fg-muted">
-        What Callers' model lists say of it. Empty fields use {handle}'s own list, then models.dev. They never change routing.
-      </p>
-      <div className="grid gap-4 md:grid-cols-2">
-        <Field label="Context window" hint={from("context_length") && `Now ${ctx(model.metadata.context_length)}, from ${from("context_length")}`}>
-          {(p) => <Input {...p} inputMode="numeric" placeholder={shown("context_length") ? String(shown("context_length")) : "tokens"} value={f.context_length} onChange={(e) => setF((x) => ({ ...x, context_length: e.target.value }))} />}
-        </Field>
-        <Field label="Max output" hint={from("max_output_tokens") && `Now ${ctx(model.metadata.max_output_tokens)}, from ${from("max_output_tokens")}`}>
-          {(p) => <Input {...p} inputMode="numeric" placeholder={shown("max_output_tokens") ? String(shown("max_output_tokens")) : "tokens"} value={f.max_output_tokens} onChange={(e) => setF((x) => ({ ...x, max_output_tokens: e.target.value }))} />}
-        </Field>
-        <Field label="Reasons before answering" hint={model.metadata.reasoning !== undefined && !f.reasoning ? `Now ${model.metadata.reasoning ? "yes" : "no"}` : undefined}>
-          {() => <Select value={f.reasoning} onValueChange={(v) => setF((x) => ({ ...x, reasoning: v }))} items={[{ value: "", label: "Not set" }, { value: "yes", label: "Yes" }, { value: "no", label: "No" }]} />}
-        </Field>
-        <Field label="Chat" hint="Embedding, speech and image models don't chat.">
-          {() => <Select value={f.chat} onValueChange={(v) => setF((x) => ({ ...x, chat: v }))} items={[{ value: "", label: "Not set" }, { value: "ok", label: "Chats" }, { value: "unsupported", label: "Doesn't chat" }]} />}
-        </Field>
-      </div>
-      {model.model_gaps.length > 0 && (
-        <p className="mt-5 text-[14px] text-fg-muted">
-          Model Gap on {model.model_gaps.join(", ")}: these keys aren't tried for {model.model} until the gap ends or is cleared.
-        </p>
-      )}
-      {error && <p className="mt-3 text-[13px] text-danger-text">{error}</p>}
-    </Dialog>
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Field label="Context window" hint={from("context_length") && `Now ${ctx(m.metadata.context_length)}, from ${from("context_length")}`}>
+        {(p) => <Input {...p} inputMode="numeric" placeholder={shown("context_length") ? String(shown("context_length")) : "tokens"} value={f.context_length} onChange={(e) => setF((x) => ({ ...x, context_length: e.target.value }))} />}
+      </Field>
+      <Field label="Max output" hint={from("max_output_tokens") && `Now ${ctx(m.metadata.max_output_tokens)}, from ${from("max_output_tokens")}`}>
+        {(p) => <Input {...p} inputMode="numeric" placeholder={shown("max_output_tokens") ? String(shown("max_output_tokens")) : "tokens"} value={f.max_output_tokens} onChange={(e) => setF((x) => ({ ...x, max_output_tokens: e.target.value }))} />}
+      </Field>
+      <Field label="Reasons before answering" hint={m.metadata.reasoning !== undefined && !f.reasoning ? `Now ${m.metadata.reasoning ? "yes" : "no"}` : undefined}>
+        {() => <Select value={f.reasoning} onValueChange={(v) => setF((x) => ({ ...x, reasoning: v }))} items={[{ value: "", label: "Not set" }, { value: "yes", label: "Yes" }, { value: "no", label: "No" }]} />}
+      </Field>
+      <Field label="Chat" hint="Embedding, speech and image models don't chat.">
+        {() => <Select value={f.chat} onValueChange={(v) => setF((x) => ({ ...x, chat: v }))} items={[{ value: "", label: "Not set" }, { value: "ok", label: "Chats" }, { value: "unsupported", label: "Doesn't chat" }]} />}
+      </Field>
+    </div>
   );
 }

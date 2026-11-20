@@ -241,6 +241,47 @@ test("an Upstream Key's sheet links its Endpoints, gaps and Request; following o
   expect(sheet.hasAttribute("data-top")).toBe(true);
 });
 
+// UI ticket 33: a model has a sheet now, so where a record names a model on a
+// Provider (the model sent, a Pool member, a key's Model Gap), it's a link.
+
+test("an Attempt's model sent and the Request's links to the model's sheet", async () => {
+  const user = userEvent.setup();
+  routes["GET /api/requests/req_4"] = { ...req1, id: "req_4", model: "acme/gpt-fast", pool: undefined, wire_model: "gpt-fast-2", attempts: [attempt(1, "team-5", 200)] };
+  routes["GET /api/providers/acme/models/gpt-fast"] = { id: "pm_1", model: "gpt-fast", visible: true, discovered: true, added: false, hidden: false, endpoints: [], upstream_keys: [], model_gaps: [], metadata: {}, overrides: {}, reported: {}, models_dev: {} };
+  routes["GET /api/pools"] = { pools: [fastPool] };
+  renderWithSheets(null, "/requests?sheet=request:req_4");
+  const request = await screen.findByRole("dialog", { name: "Request acme/gpt-fast" });
+  expect(hrefOf(await within(request).findByRole("link", { name: "gpt-fast-2" }))).toBe("/requests?sheet=request:req_4&sheet=model:acme/gpt-fast-2");
+  await user.click(within(request).getByRole("tab", { name: /Attempts/ }));
+  // A good Attempt starts folded.
+  await user.click(await within(request).findByRole("button", { name: "Attempt 1" }));
+  const sent = await within(request).findByRole("link", { name: "gpt-fast" });
+  expect(hrefOf(sent)).toBe("/requests?sheet=request:req_4/attempts&sheet=model:acme/gpt-fast");
+  await user.click(sent);
+  await loadedSheet("Model gpt-fast");
+});
+
+test("a Pool's members and its sheet link each member's model", async () => {
+  renderWithSheets(<PoolMembersTab name="fast" pool={fastPool} onAdd={() => {}} />, "/providers/pools/fast/members?sheet=pool:fast");
+  const table = await screen.findByRole("table", { name: "Members of fast" });
+  expect(hrefOf(await within(table).findByRole("link", { name: "gpt-fast" }))).toBe("/providers/pools/fast/members?sheet=model:acme/gpt-fast");
+  const sheet = await loadedSheet("Model Pool fast");
+  expect(hrefOf(await within(sheet).findByRole("link", { name: "gpt-fast" }))).toBe("/providers/pools/fast/members?sheet=pool:fast&sheet=model:acme/gpt-fast");
+});
+
+test("an Upstream Key's Model Gaps link their model", async () => {
+  const keys = (routes["GET /api/providers/acme/keys"] as { upstream_keys: UpstreamKey[] }).upstream_keys;
+  routes["GET /api/providers/acme/keys/team-8"] = {
+    ...keys[1],
+    id: "k-team-8",
+    name: "team-8",
+    model_gaps: [{ model: "gpt-old", reason: "404", created_at: "2026-11-19T10:00:00Z", expires_at: "2026-11-26T10:00:00Z" }],
+  };
+  renderWithSheets(null, "/x?sheet=key:acme/team-8");
+  const sheet = await loadedSheet("Upstream Key team-8");
+  expect(hrefOf(await within(sheet).findByRole("link", { name: "gpt-old" }))).toBe("/x?sheet=key:acme/team-8&sheet=model:acme/gpt-old");
+});
+
 test("an agent finds an Attempt's toggle and its links by name, and follows one", async () => {
   const agent = createAgent();
   renderWithSheets(null, "/requests?sheet=request:req_3/attempts");

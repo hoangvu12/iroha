@@ -601,6 +601,39 @@ func TestModelListSearchFilterAndPaging(t *testing.T) {
 	srv.Admin.Get("/api/providers/acme/models?filter=odd").Expect(400)
 }
 
+// UI ticket 33: the Model sheet reads one entry by its model ID (which may
+// hold slashes), with the same fields as the list.
+func TestOneModelIsReadByItsID(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	up.SetModels("gpt-a", "meta-llama/llama-3.3-70b")
+	addProvider(t, srv, up.URL(), nil, "sk-test-one")
+	refresh(t, srv)
+	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "gpt-a", "hidden": true, "metadata": map[string]any{"context_length": 64000}}).Expect(201)
+
+	var m models.Model
+	srv.Admin.Get("/api/providers/acme/models/gpt-a").Expect(200).JSON(&m)
+	if m.Model != "gpt-a" || !m.Discovered || !m.Hidden || m.Visible || strings.Join(m.Endpoints, ",") != "default" || m.Overrides.ContextLength == nil || *m.Overrides.ContextLength != 64000 || m.Metadata.ContextLength == nil || *m.Metadata.ContextLength != 64000 {
+		t.Fatalf("gpt-a = %+v", m)
+	}
+	// Slashes stay in the ID, escaped or not; the Provider is named by handle or ID.
+	var p struct{ ID string }
+	srv.Admin.Get("/api/providers/acme").Expect(200).JSON(&p)
+	for _, path := range []string{"/api/providers/acme/models/meta-llama/llama-3.3-70b", "/api/providers/" + p.ID + "/models/meta-llama%2Fllama-3.3-70b"} {
+		m = models.Model{}
+		srv.Admin.Get(path).Expect(200).JSON(&m)
+		if m.Model != "meta-llama/llama-3.3-70b" || !m.Visible {
+			t.Fatalf("%s = %+v", path, m)
+		}
+	}
+	// A model the list doesn't hold, and a Provider that doesn't exist, are 404s that say what to do.
+	r := srv.Admin.Get("/api/providers/acme/models/nope").Expect(404)
+	if !strings.Contains(r.Text(), "POST /api/providers/acme/models") {
+		t.Fatalf("404 = %s", r.Text())
+	}
+	srv.Admin.Get("/api/providers/nobody/models/gpt-a").Expect(404)
+}
+
 func TestCallerModelListFollowsTheGatewayKeyScope(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)

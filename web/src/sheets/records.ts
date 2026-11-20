@@ -10,7 +10,10 @@ export type SheetRecord =
   | { kind: "key"; provider: string; key: string }
   | { kind: "endpoint"; provider: string; endpoint: string }
   | { kind: "gateway-key"; key: string }
-  | { kind: "pool"; name: string };
+  | { kind: "pool"; name: string }
+  // UI ticket 33: a model of a Provider's list (its ID may hold slashes), and a Failure Rule as it applies to a Provider.
+  | { kind: "model"; provider: string; model: string }
+  | { kind: "rule"; provider: string; rule: string };
 
 export type SheetKind = SheetRecord["kind"];
 
@@ -22,6 +25,8 @@ export const rec = {
   endpoint: (provider: string, endpoint: string): SheetRecord => ({ kind: "endpoint", provider, endpoint }),
   gatewayKey: (key: string): SheetRecord => ({ kind: "gateway-key", key }),
   pool: (name: string): SheetRecord => ({ kind: "pool", name }),
+  model: (provider: string, model: string): SheetRecord => ({ kind: "model", provider, model }),
+  rule: (provider: string, rule: string): SheetRecord => ({ kind: "rule", provider, rule }),
 };
 
 /** "Upstream Key", for titles and names. */
@@ -32,6 +37,8 @@ export const kindLabel: Record<SheetKind, string> = {
   endpoint: "Endpoint",
   "gateway-key": "Gateway Key",
   pool: "Model Pool",
+  model: "Model",
+  rule: "Failure Rule",
 };
 
 /** The record's own name: "req_01", "acme", "team-5". */
@@ -48,6 +55,10 @@ export function recordName(r: SheetRecord): string {
       return r.endpoint;
     case "pool":
       return r.name;
+    case "model":
+      return r.model;
+    case "rule":
+      return r.rule;
   }
 }
 
@@ -68,6 +79,10 @@ export function recordKey(r: SheetRecord): string {
       return `gateway-key:${r.key}`;
     case "pool":
       return `pool:${r.name}`;
+    case "model":
+      return `model:${r.provider}/${r.model}`;
+    case "rule":
+      return `rule:${r.provider}/${r.rule}`;
   }
 }
 
@@ -83,6 +98,7 @@ function decode(s: string): SheetRecord | undefined {
   if (!rest) return undefined;
   const slash = rest.indexOf("/");
   const head = slash < 0 ? rest : rest.slice(0, slash);
+  // Everything after the Provider: a key's or model's name keeps its own slashes.
   const tail = slash < 0 ? "" : rest.slice(slash + 1);
   switch (kind) {
     case "request": {
@@ -99,6 +115,10 @@ function decode(s: string): SheetRecord | undefined {
       return { kind, key: rest };
     case "pool":
       return { kind, name: rest };
+    case "model":
+      return head && tail ? { kind, provider: head, model: tail } : undefined;
+    case "rule":
+      return head && tail ? { kind, provider: head, rule: tail } : undefined;
   }
   return undefined;
 }

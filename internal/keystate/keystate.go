@@ -458,8 +458,8 @@ func visible(r Record, now time.Time) string {
 
 // FirstCooling is when a cooling decided by d ends for a key (or key and
 // model) that has not been cooling within the last hour: the reset time the
-// response named, else the rule's fixed time, else DefaultCooling. Repeats
-// double the default (Fail); this is the first step.
+// response named, when it is still to come, else the rule's fixed time, else
+// DefaultCooling. Repeats double the default (Fail); this is the first step.
 func FirstCooling(d rules.Decision, now time.Time) time.Time {
 	until, _ := coolingEnd(nil, d, now)
 	return until
@@ -479,14 +479,16 @@ func coolingEnd(prev *row, d rules.Decision, now time.Time) (time.Time, int) {
 	}
 	var until time.Time
 	switch {
-	case !d.ResetAt.IsZero():
+	case !d.ResetAt.IsZero() && d.ResetAt.After(now):
+		// The Provider named a time still to come: cool until then.
 		until = d.ResetAt
-		if !until.After(now) {
-			until = now.Add(time.Second)
-		}
 	case d.Cooling > 0:
 		until = now.Add(d.Cooling)
 	default:
+		// The Provider named a time that has passed (its promise expired, so
+		// the thing it promised is not ready) or named none: cool for the
+		// escalating default, so a key that keeps refusing is tried less and
+		// less often instead of on every Request.
 		dur := DefaultCooling
 		for range level {
 			dur *= 2

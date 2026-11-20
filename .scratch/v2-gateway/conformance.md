@@ -60,7 +60,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 - FAIL-17: Z.ai 1311 (model not in plan) is a Model Gap and the Request tries other keys; v1 stopped the Request (ticket 07).
 - FAIL-18, FAIL-05, FAIL-47, FAIL-70: Z.ai 1315 (wrong product), DashScope key restrictions and account-condition 403s mark the key invalid until a test passes; v1 cooled it for 30 s (ticket 07).
 - FAIL-18, FAIL-05, FAIL-47, PRV-11: any `invalid` outcome on one Endpoint, for a key that has worked on another Endpoint it may still use, is an Endpoint Gap on that Endpoint (no expiry; cleared by the Owner, a secret or restriction edit, a passing test or success there) and the key keeps serving its other Endpoints (ticket 40). v1 had no per-URL key state.
-- FAIL-01, FAIL-15, FAIL-59, FAIL-71, FAIL-73: cooling is 60 s doubling to 1 h; reset times the Provider reports are honoured up to 7 days (v1 clamped to 900 s); billing refusals cool the whole key 15 min; a bare 402 cools the key.
+- FAIL-01, FAIL-15, FAIL-59, FAIL-71, FAIL-73: cooling is 60 s doubling to 1 h; reset times the Provider reports are honoured up to 7 days (v1 clamped to 900 s); a reset time that has already passed (the Provider's promise expired, so what it promised is not ready) falls to the escalating default instead of a 1 s cool; billing refusals cool the whole key 15 min; a bare 402 cools the key.
 - FAIL-16, FAIL-42, FAIL-51, FAIL-75: 5xx and overload retry elsewhere with the Key State unchanged and one replay last (v1 cooled typed 5xx for 30 s).
 - FAIL-103: a key whose cooling ended is tried after healthy keys (ticket 26) but gets no single-trial claim.
 - PRV-32, PRV-33, PRV-38: a passing key test clears invalid and any cooling, billing included; there is no "activate" without a test.
@@ -377,7 +377,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | FAIL-35 | b | covered | `gateway TestBillingRefusalsCoolTheWholeKeyNotTheModel` |  |
 | FAIL-36 | b | covered | `T/"404 model_not_found"`; `T/"credits code on a 429"`; `T/"bare 404"` |  |
 | FAIL-37 | b | n/a |  | DeepAI's `/theos` allowance is balance polling, which is out of scope (spec) |
-| FAIL-38 | b | covered | `T/"pool spent with refill time"` | Recognised on inference rather than on `/theos` |
+| FAIL-38 | b | covered | `T/"pool spent with refill time"`; `rules TestBuiltinQuirkRulesClassifyTheRecordedBodies/"theos cannot cover the request"` | Recognised on inference rather than on `/theos`. The deepai-proxy passes the upstream refusal through unchanged, so the code is the upstream's `theos_insufficient` and the message reads "wait for your Theos to refresh at <time>"; the proxy's own `network_bound` wording is still accepted. The refusal is about the request against the account's daily allowance, not the key being broken, so the key cools for that model until the time the message names |
 | FAIL-39 | b | covered | `T/"check-in refused"` |  |
 | FAIL-40 | b | covered | `T/"402 billing_error"`; `T/"overloaded error event in a 200 stream"`; `T/"rate_limit_error inside a 200 answer"` |  |
 | FAIL-41 | b | covered | `T/"overloaded error event in a 200 stream"`; `T/"rate_limit_error inside a 200 answer"`; `T/"error with no status inside a 200 answer"`; `rules TestEmbeddedErrorsAreToldFromAnswers` |  |
@@ -479,7 +479,7 @@ Deliberate differences from v1 that the tests assert as they are. Each is defens
 | USE-14 | b | n/a |  | polling out of scope |
 | USE-15 | b | n/a |  | polling out of scope |
 | USE-16 | b | n/a |  | DeepAI `/theos` is balance polling, out of scope (ticket 07 FAIL-37) |
-| USE-17 | b | covered | `rules TestBuiltinQuirkRulesClassifyTheRecordedBodies/"pool spent with refill time"` | `deepai-pool-spent` recognises the same 403 body at inference; key cools until the time parsed from the message |
+| USE-17 | b | covered | `rules TestBuiltinQuirkRulesClassifyTheRecordedBodies/"pool spent with refill time"`; `rules TestBuiltinQuirkRulesClassifyTheRecordedBodies/"theos cannot cover the request"` | `deepai-pool-spent` recognises the 403 body at inference, in either wording; the key cools for that model until the time parsed from the message |
 | USE-18 | b | covered | `rules TestBuiltinQuirkRulesClassifyTheRecordedBodies/"check-in refused"` | `deepai-check-in-refused` → retry elsewhere, Key State unchanged |
 | USE-19 | b | n/a |  | polling out of scope; other DeepAI 4xx/5xx fall to the generic rules |
 | USE-20 | b | n/a |  | no polling, so no check-in cadence (ticket 07) |

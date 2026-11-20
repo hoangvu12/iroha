@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hoangvu12/iroha/internal/hosts"
 )
 
 // Outcome is what a matched rule decides.
@@ -263,7 +265,7 @@ func compile(r Rule) (compiled, error) {
 		}
 		c.reset = append(c.reset, rs)
 	}
-	for _, h := range hostList(r.Host) {
+	for _, h := range hosts.List(r.Host) {
 		if strings.ContainsAny(h, "/:@ ") {
 			return fail("host %q is not a host name (give dashscope.aliyuncs.com, not a URL)", h)
 		}
@@ -583,24 +585,7 @@ func (r Rule) MatchesHost(host string) bool {
 	if strings.TrimSpace(r.Host) == "" {
 		return true
 	}
-	host = strings.ToLower(host)
-	for _, domain := range hostList(r.Host) {
-		if host == domain || strings.HasSuffix(host, "."+domain) {
-			return true
-		}
-	}
-	return false
-}
-
-// hostList splits a rule's comma-separated hosts.
-func hostList(s string) []string {
-	var out []string
-	for _, h := range strings.Split(s, ",") {
-		if h = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(h), ".")); h != "" {
-			out = append(out, h)
-		}
-	}
-	return out
+	return hosts.Matches(host, hosts.List(r.Host)...)
 }
 
 // firstDataJSON is the first data payload that is a JSON object of a body

@@ -153,14 +153,7 @@ func (p Policy) Describe(sh shape.Shape) string {
 	return strings.ToUpper(s[:1]) + s[1:] + "."
 }
 
-func matches(host string, domains []string) bool {
-	for _, d := range domains {
-		if host == d || strings.HasSuffix(host, "."+d) {
-			return true
-		}
-	}
-	return false
-}
+func matches(host string, domains []string) bool { return hosts.Matches(host, domains...) }
 
 // namespace is Iroha's UUID namespace for derived prompt_cache_keys.
 var namespace = [16]byte{0x6f, 0x1c, 0x2b, 0x8e, 0x4d, 0x3a, 0x4e, 0x55, 0x9a, 0x0b, 0x6c, 0x2d, 0x1e, 0x7f, 0x30, 0x41}

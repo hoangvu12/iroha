@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/hoangvu12/iroha/internal/affinity"
 	"github.com/hoangvu12/iroha/internal/caching"
 	"github.com/hoangvu12/iroha/internal/shape"
 	"github.com/hoangvu12/iroha/internal/usage"
@@ -124,7 +125,7 @@ func (t *Translation) userFromMetadata(m map[string]any, f callerFields) {
 	if !t.o.Caching.Fields || t.caller.shape != shape.AnthropicMessages || !zero(m["user"]) {
 		return
 	}
-	if v := plainUserID(rawString(f.Metadata.UserID)); v != "" {
+	if v, _ := affinity.MetadataUserID(f.Metadata.UserID); v != "" { // Claude Code's value is a session, not a user
 		m["user"] = bounded(v, 64)
 		t.added("user")
 	}
@@ -144,18 +145,6 @@ func (t *Translation) added(name string) {
 		}
 	}
 	t.Added = append(t.Added, name)
-}
-
-// plainUserID is a metadata.user_id that names a user: not Claude Code's
-// value, which is a session (its JSON form, or the legacy
-// user_<hash>_account_<uuid>_session_<uuid>) and is already the
-// conversation a derived prompt_cache_key is made from.
-func plainUserID(v string) string {
-	v = strings.TrimSpace(v)
-	if strings.HasPrefix(v, "{") || strings.Contains(v, "_session_") {
-		return ""
-	}
-	return v
 }
 
 // bounded is v, or its SHA-256 when longer than n bytes.

@@ -1,7 +1,9 @@
 package affinity_test
 
 import (
+	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -153,7 +155,7 @@ func TestCallersCannotSteerEachOther(t *testing.T) {
 func TestTheExperimentSplitsConversationsInHalves(t *testing.T) {
 	control := 0
 	for i := range 2000 {
-		c := affinity.Identify(hdr("Iroha-Session", "s-"+strings.Repeat("x", i%7)+string(rune('a'+i%26))+itoa(i)), nil).For("gk")
+		c := affinity.Identify(hdr("Iroha-Session", "s-"+strings.Repeat("x", i%7)+string(rune('a'+i%26))+strconv.Itoa(i)), nil).For("gk")
 		if c.Control() {
 			control++
 		}
@@ -163,13 +165,22 @@ func TestTheExperimentSplitsConversationsInHalves(t *testing.T) {
 	}
 }
 
-func itoa(i int) string {
-	var b []byte
-	for {
-		b = append([]byte{byte('0' + i%10)}, b...)
-		i /= 10
-		if i == 0 {
-			return string(b)
+// A metadata.user_id is either Claude Code's (a session, in its JSON or
+// legacy form) or a plain user; translation sends only the plain one on.
+func TestMetadataUserIDTellsAUserFromClaudeCodesSession(t *testing.T) {
+	for _, tc := range []struct{ raw, user, session string }{
+		{`"user-7"`, "user-7", ""},
+		{`" user-7 "`, "user-7", ""},
+		{`"{\"device_id\":\"d\",\"session_id\":\"cc-2\"}"`, "", "cc-2"},
+		{`"{\"device_id\":\"d\"}"`, "", ""},
+		{`"user_abc_account_0f9e_session_6a1b2c3d-0000-4e5f-8a9b-112233445566"`, "", "6a1b2c3d-0000-4e5f-8a9b-112233445566"},
+		{`{"session_id":"cc-3"}`, "", "cc-3"},
+		{`42`, "", ""},
+		{``, "", ""},
+	} {
+		user, session := affinity.MetadataUserID(json.RawMessage(tc.raw))
+		if user != tc.user || session != tc.session {
+			t.Errorf("MetadataUserID(%s) = %q, %q; want %q, %q", tc.raw, user, session, tc.user, tc.session)
 		}
 	}
 }

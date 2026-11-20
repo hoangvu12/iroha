@@ -215,7 +215,7 @@ function LiveToggle({ live, onToggle, phone }: { live: boolean; onToggle: () => 
 
 function StatsRow({ stats, phone }: { stats: Stats; phone: boolean }) {
   const finished = stats.succeeded + stats.failed;
-  const cells: { label: string; value: string }[] = [
+  const cells: { label: string; value: string; title?: string }[] = [
     { label: "Requests", value: formatNumber(stats.requests) },
     { label: "Succeeded", value: finished > 0 ? formatPercent(stats.succeeded / finished) : "–" },
     ...(phone
@@ -225,20 +225,34 @@ function StatsRow({ stats, phone }: { stats: Stats; phone: boolean }) {
           { label: "Median duration", value: secs(stats.median_duration_ms) },
           { label: "Median first token", value: secs(stats.median_first_byte_ms) },
           { label: "Tokens", value: stats.tokens.total > 0 ? compactNumber(stats.tokens.total) : "0" },
+          {
+            label: "Cached",
+            value: stats.tokens.input > 0 ? formatPercent(stats.tokens.cache_read / stats.tokens.input) : "–",
+            title: cachedTitle(stats.tokens),
+          },
         ]),
   ];
   return (
-    <dl className={cn("mb-6 grid divide-x divide-border rounded-xl border border-border", phone ? "-mt-3 grid-cols-3" : "-mt-2 grid-cols-6")}>
+    <dl className={cn("mb-6 grid divide-x divide-border rounded-xl border border-border", phone ? "-mt-3 grid-cols-3" : "-mt-2 grid-cols-7")}>
       {cells.map((c) => (
         <div key={c.label} className={cn("min-w-0", phone ? "px-4 py-3" : "px-5 py-4")}>
           <dt className="truncate text-[14px] text-fg-muted">
             {c.label}
           </dt>
-          <dd className={cn("mt-1 truncate font-semibold tabular tracking-tight", phone ? "text-[22px]" : "text-[26px]")}>{c.value}</dd>
+          <dd title={c.title} className={cn("mt-1 truncate font-semibold tabular tracking-tight", phone ? "text-[22px]" : "text-[26px]")}>
+            {c.value}
+          </dd>
         </div>
       ))}
     </dl>
   );
+}
+
+/** What the cached share is made of: "1,000 of 4,000 input tokens read from the cache; 600 written to it". */
+function cachedTitle(t: Stats["tokens"]): string | undefined {
+  if (t.input <= 0) return undefined;
+  const read = `${formatNumber(t.cache_read)} of ${formatNumber(t.input)} input tokens read from the cache`;
+  return t.cache_write > 0 ? `${read}; ${formatNumber(t.cache_write)} written to it` : read;
 }
 
 function useDebounced<T>(value: T, ms: number): T {

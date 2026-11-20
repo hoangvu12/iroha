@@ -84,6 +84,23 @@ test("an upstream error body is pretty-printed and highlighted as JSON", () => {
   expect([...body.querySelectorAll("[data-token]")].map((e) => `${e.getAttribute("data-token")} ${e.textContent}`)).toEqual(['key "error"', 'string "slow down"']);
 });
 
+test("a served Attempt says what it read from and wrote to the Provider's cache", async () => {
+  const user = userEvent.setup();
+  const usage = { input: 5512, output: 5, cache_read: 4000, cache_write: 1500, cache_write_long: 0, reasoning: 0 };
+  render(view({ ...servedFirst, attempts: [{ ...ok, seq: 1, usage }] }));
+  await user.click(card(1));
+  const panel = card(1).closest("li")!.querySelector("[data-slot=collapsible-panel]") as HTMLElement;
+  const row = (label: string) => within(panel).getByText(label, { selector: "dt" }).nextElementSibling?.textContent;
+  expect(row("Cache read")).toBe("4,000 of 5,512 input");
+  expect(row("Cache write")).toBe("1,500");
+});
+
+test("a failed Attempt, which counted no tokens, shows no cache rows", () => {
+  render(view(failedThenServed));
+  const panel = card(1).closest("li")!.querySelector("[data-slot=collapsible-panel]") as HTMLElement;
+  expect(within(panel).queryByText("Cache read")).toBeNull();
+});
+
 test("an agent opens an Attempt by its name", async () => {
   render(view(servedFirst));
   const entries = agent.snapshot().filter((e) => !e.offPage);

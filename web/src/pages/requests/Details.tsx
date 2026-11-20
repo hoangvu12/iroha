@@ -89,7 +89,10 @@ export function RequestDetails({ r, onShowCaptured }: { r: RequestRecord; onShow
         <Fact label="Input">{r.usage ? formatNumber(r.usage.input) : none}</Fact>
         <Fact label="Output">{r.usage ? formatNumber(r.usage.output) : none}</Fact>
         <Fact label="Cache read">{r.usage ? formatNumber(r.usage.cache_read) : none}</Fact>
+        <Fact label="Cache write">{r.usage ? formatNumber(r.usage.cache_write) : none}</Fact>
         <Fact label="Reasoning">{r.usage ? formatNumber(r.usage.reasoning) : none}</Fact>
+        {/* Only when the Provider split its writes by lifetime (Anthropic's 1 h, OpenAI's 12 h): they cost more. */}
+        {!!r.usage?.cache_write_long && <Fact label="Long-lived cache write">{formatNumber(r.usage.cache_write_long)}</Fact>}
       </Section>
       {r.captured && onShowCaptured && (
         <TextButton onClick={onShowCaptured} className="mt-6 inline-flex items-center gap-1.5 text-[15px] font-medium">

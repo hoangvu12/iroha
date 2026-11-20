@@ -24,7 +24,7 @@ function sampleRequest(i: number): RequestRecord {
     wire_model: "qwen3-max",
     first_byte_ms: 820,
     duration_ms: 4210,
-    usage: { input: 1824, output: 412, cache_read: 0, reasoning: 0 },
+    usage: { input: 1824, output: 412, cache_read: 0, cache_write: 0, cache_write_long: 0, reasoning: 0 },
     attempt_count: 1,
     captured: false,
   };
@@ -40,7 +40,8 @@ export const SAMPLE_STATS: Stats = {
   retried: 341,
   median_duration_ms: 4210,
   median_first_byte_ms: 820,
-  tokens: { input: 0, output: 0, cache_read: 0, reasoning: 0, total: 18_400_000 },
+  cache_hits: 6200,
+  tokens: { input: 16_000_000, output: 2_400_000, cache_read: 7_000_000, cache_write: 900_000, cache_write_long: 0, reasoning: 0, total: 18_400_000 },
 };
 
 export const SAMPLE_CALLERS: FilterOptions["callers"] = [

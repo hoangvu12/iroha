@@ -174,15 +174,15 @@ type upstreamCall struct {
 // the Caller: no other candidate would do better.
 func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (upstreamCall, *api.Error) {
 	ep := c.Endpoint.Shape
-	call := upstreamCall{header: x.r.Header, norm: normalise.For(c.Endpoint.URL, ep)}
-	x.added = nil
+	call := upstreamCall{header: x.sessionHeaders(c, x.r.Header), norm: normalise.For(c.Endpoint.URL, ep)} // caching.go
+	x.added, x.addedPass = nil, false
 	if ep == shape.AnthropicMessages && call.header.Get("Anthropic-Version") == "" {
 		call.header = call.header.Clone()
 		call.header.Set("Anthropic-Version", shape.AnthropicVersion)
 	}
 	if ep == cr.shape {
 		out, injected := preparePassthrough(body, cr, c.WireModel)
-		call.body = call.norm.RequestBody(out)
+		call.body = call.norm.RequestBody(x.passthroughCaching(c, out))
 		call.pass = &passRelay{shape: ep, model: cr.model, dropUsageChunk: injected}
 		return call, nil
 	}

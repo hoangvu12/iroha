@@ -58,6 +58,7 @@ func TestCaptureStoresPromptAndResponseOnlyForKeysWithCaptureOn(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, up.URL())
+	srv.NoConversationIDs("acme") // the 400 below fails its Request
 	debug := issue(t, srv, map[string]any{"name": "debug", "capture": true})
 	friend := issue(t, srv, map[string]any{"name": "friend"})
 

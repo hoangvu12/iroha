@@ -230,6 +230,7 @@ func TestRuleChangesApplyToTheNextAttempt(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b", "sk-test-c")
+	srv.NoConversationIDs("acme") // the 400s are judged by the rules alone
 	c := caller(t, srv)
 
 	// Built-in: a 400 is the request's fault.
@@ -272,6 +273,7 @@ func TestDryRunReplaysRecentFailedAttemptsAndHitsAreCounted(t *testing.T) {
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a")
 	addProvider(t, srv, "other", up.URL(), "sk-test-o")
+	srv.NoConversationIDs("acme") // the 400s are judged by the rules alone
 	c := caller(t, srv)
 	for range 3 {
 		up.Enqueue(arrearage())

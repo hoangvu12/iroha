@@ -25,9 +25,10 @@ func TestGlobalChatNamesTheProviderInTheModelAndEchoesIt(t *testing.T) {
 	body := `{"model":"acme/gpt-x", "messages":[{"role":"user","content":"hi"}], "vendor_extra":{"a":[1,2]}}`
 	resp := caller.Post("/v1/chat/completions", body).Expect(200)
 
-	// The Provider gets its own model ID; every other byte is the Caller's.
+	// The Provider gets its own model ID; every other byte is the Caller's
+	// (plus the conversation's prompt_cache_key, prompt caching 04).
 	got := up.Last()
-	if want := strings.Replace(body, `"acme/gpt-x"`, `"gpt-x"`, 1); string(got.Body) != want || got.Path != "/v1/chat/completions" || got.Bearer() != "sk-test-one" {
+	if want := strings.Replace(body, `"acme/gpt-x"`, `"gpt-x"`, 1); callerBytes(t, got.Body) != want || got.Path != "/v1/chat/completions" || got.Bearer() != "sk-test-one" {
 		t.Fatalf("upstream got %s bearer %q body %s", got.Path, got.Bearer(), got.Body)
 	}
 	if m := resp.Map(); m["model"] != "acme/gpt-x" {

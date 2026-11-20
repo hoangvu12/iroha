@@ -97,6 +97,7 @@ func TestUpstreamRedirectsAreNeverFollowedAndRefusalsKeepTheirStatus(t *testing.
 	up := testkit.NewOpenAIChat(t)
 	elsewhere := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
+	srv.NoConversationIDs("acme") // the 422 below is judged by the rules alone
 	caller := srv.Client(issue(t, srv, "pi", all))
 	moved := func(status int) testkit.Responder {
 		return testkit.Raw(status, "application/json", `{}`).Header("Location", elsewhere.URL()+"/chat/completions")

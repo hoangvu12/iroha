@@ -9,7 +9,7 @@ The Owner chose (2026-11-20) to copy what CLIProxyAPI, LiteLLM, Bifrost, OmniRou
 3. **Caching across Shapes** (ticket 03): add cache markers when translating to Anthropic Messages (on by default for Anthropic-shaped Endpoints, Owner's decision), carry conversation fields across Shapes, refuse Gemini `cachedContent` in translation.
 
 Rules that hold for every ticket:
-- Same-Shape passthrough stays byte-for-byte as today, except where a ticket says otherwise (none does).
+- Same-Shape passthrough stays byte-for-byte as today, except where a ticket says otherwise: ticket 04 adds the conversation's derived ID to passthrough (an appended `prompt_cache_key` on OpenAI Chat and Responses bodies that have none, and session headers on every Shape; `send_prompt_cache_key: off` turns both off).
 - Nothing here may make a Request fail that succeeds today, except the Gemini `cachedContent` refusal in ticket 03 (it silently loses context today).
 - Every new Request field, setting and route is in the served skill and OpenAPI; every behaviour has a Go test with `internal/testkit`; v1 conformance (`.scratch/v2-gateway/conformance.md`) rows touched are updated.
 - Glossary terms (`GLOSSARY.md`): Upstream Key, Endpoint, Shape, Caller, Gateway Key, Cooling, Model Pool. Add a glossary entry for the conversation affinity term you settle on.

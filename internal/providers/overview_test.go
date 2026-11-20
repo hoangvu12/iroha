@@ -14,6 +14,7 @@ func TestTheOverviewCountsKeysModelsAndTrafficPerProviderAndPool(t *testing.T) {
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "idle"}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"url": up.URL(), "shape": "openai-chat"}).Expect(201)
+	srv.NoConversationIDs("acme") // the 400 below fails its Request
 	for _, s := range []string{"sk-test-1", "sk-test-2", "sk-test-3"} {
 		srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": s}).Expect(201)
 	}

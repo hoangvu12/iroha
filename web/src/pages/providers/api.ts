@@ -47,7 +47,7 @@ export type Endpoint = {
   discovery_url: string;
   /** Prompt caching 03: markers on requests Iroha translates for this Endpoint ("" Iroha's default). */
   cache_markers?: CacheSetting;
-  /** Prompt caching 03: a prompt_cache_key made from the conversation ("" Iroha's default). */
+  /** Prompt caching 03/04: the conversation's ID, as prompt_cache_key (OpenAI Shapes, passthrough too) and session headers ("" Iroha's default). */
   send_prompt_cache_key?: CacheSetting;
   /** What translated requests get for the prompt cache, from the settings, Shape and host. Read-only. */
   caching?: { markers: string; prompt_cache_key: boolean; summary: string };

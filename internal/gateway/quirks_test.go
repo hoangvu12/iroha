@@ -27,6 +27,8 @@ func TestDashScopeQuirksApplyByEndpointHostWhateverTheHandle(t *testing.T) {
 	srv := testkit.Start(t, testkit.Options{HTTPClient: up.Client()})
 	addProviderAt(t, srv, "acme", up.URLAt("dashscope-intl.aliyuncs.com"), "sk-test-a", "sk-test-b", "sk-test-c")
 	addProviderAt(t, srv, "other", up.URLAt("api.example.com"), "sk-test-o")
+	srv.NoConversationIDs("acme") // the 400s below are judged by the rules alone
+	srv.NoConversationIDs("other")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
 	// An overdue account is billing: the key cools 15 min, the next key serves.

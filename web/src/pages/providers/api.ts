@@ -1,4 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Stats, StatsGroup } from "@/pages/requests/api";
 import { api, isApiError, seg } from "@/api/client";
 import type { AuditResult, BulkResult } from "@/api/types";
 
@@ -345,6 +346,21 @@ export function useKeys(handle: string) {
     queryKey: qk.keys(handle),
     queryFn: ({ signal }) => api.get<{ upstream_keys: UpstreamKey[] }>(`/api/providers/${seg(handle)}/keys`, { signal }).then((r) => r.upstream_keys),
     refetchInterval: 10_000,
+  });
+}
+
+/**
+ * Each Upstream Key's cache usage over the last 24 h, by key ID: GET /api/requests/stats grouped by
+ * upstream_key, test Requests left out (prompt caching 01). Keys with no Requests are absent.
+ */
+export function useKeyCache(handle: string) {
+  return useQuery({
+    // Under "requests": history, not configuration (api/refresh.ts).
+    queryKey: ["requests", "stats", "key-cache", handle],
+    queryFn: ({ signal }) =>
+      api.get<Stats>("/api/requests/stats", { signal, query: { provider: handle, group_by: "upstream_key", since: "24h", caller_kind: "gateway_key" } }),
+    select: (s): Map<string, StatsGroup> => new Map((s.groups ?? []).filter((g) => g.upstream_key_id).map((g) => [g.upstream_key_id!, g])),
+    refetchInterval: 60_000,
   });
 }
 

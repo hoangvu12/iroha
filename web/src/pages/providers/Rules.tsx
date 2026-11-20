@@ -15,11 +15,12 @@ import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { SaveError, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
-import type { Outcome, Replay, Rule, RuleFields } from "./api";
-import { calls, errorText, OUTCOMES, useRefresh, useRules } from "./api";
+import type { Classification, Outcome, Replay, Rule, RuleFields } from "./api";
+import { calls, errorText, OUTCOMES, useProvider, useRefresh, useRules } from "./api";
 import { Reveal, riseIn } from "@/ui/Reveal";
 import { appearClass, Checkbox, Pill, ringRoom, Segmented, Select, Switch } from "./controls";
 import { RulesFlow } from "./RulesFlow";
+import { TryFailure } from "./RulesTry";
 import { SAMPLE_RULES } from "./samples";
 import { rec } from "@/sheets/RecordLink";
 import { startEditing } from "@/sheets/records/editing";
@@ -45,6 +46,14 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
   const [flowWidth, flowRef] = useWidth();
   // A rule and its match branch side by side need about 940 px; narrower, each step holds its effect.
   const stacked = phone || (flowWidth !== undefined && flowWidth < 940);
+  // A failure tried against the rules (UI ticket 34). The rules changing (an edit, a switch) makes it stale.
+  const provider = useProvider(handle);
+  const [tried, setTried] = useState<Classification>();
+  const [triedOn, setTriedOn] = useState(rules.data);
+  if (triedOn !== rules.data) {
+    setTriedOn(rules.data);
+    setTried(undefined);
+  }
 
   // Asks first, naming the rule; the result (with Undo) toasts, since the confirm has closed.
   const askDelete = (r: Rule) =>
@@ -88,16 +97,19 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
         ) : rules.data?.length === 0 ? (
           <EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />
         ) : (
-          // The route view's dotted ground (C19); on phones a band across the screen, as there.
+          <>
+          {rules.data && <TryFailure handle={handle} rules={rules.data} endpoints={provider.data?.endpoints} result={tried} onResult={setTried} />}
+          {/* The route view's dotted ground (C19); on phones a band across the screen, as there. */}
           <div
             ref={flowRef}
             className={cn(phone ? "-mx-4 bg-subtle px-4 py-6" : "rounded-xl border border-border bg-subtle px-8 py-8")}
             style={{ backgroundImage: "radial-gradient(var(--border-strong) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
           >
             <Skeleton data={rules.data} sample={SAMPLE_RULES} id={stacked ? "rules-flow:stacked" : "rules-flow"} label="Loading the rules">
-              {(list) => <RulesFlow handle={handle} rules={list} onOpen={(r) => open(r)} aside={(r) => <RuleSwitch r={r} />} stacked={stacked} />}
+              {(list) => <RulesFlow handle={handle} rules={list} onOpen={(r) => open(r)} aside={(r) => <RuleSwitch r={r} />} stacked={stacked} tried={tried} />}
             </Skeleton>
           </div>
+          </>
         )
       ) : (
         <DataTable<Rule>

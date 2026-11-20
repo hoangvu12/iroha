@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/hoangvu12/iroha/internal/normalise"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/rules"
 )
@@ -23,6 +24,39 @@ import (
 // maxPeekEvents bounds the comment-only events (": keep-alive") read past
 // while looking for a stream's first data event.
 const maxPeekEvents = 16
+
+// How an Attempt reads an upstream answer for the Failure Rules. Attempts
+// and the classify route (classify.go) both go through these two, so trying
+// a failure by hand reads it exactly as the Gateway does.
+
+// failureBody reads the body of a non-2xx answer, as much as an Attempt
+// keeps.
+func failureBody(resp *http.Response) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(resp.Body, requests.MaxFailureBody))
+}
+
+// answerFailure returns what makes a 2xx answer a failure, or nil when it is
+// an answer to relay (resp.Body then reads from the start): an error inside
+// it (embeddedError; a stream's first data event only when the Caller asked
+// to stream), a whole answer a normaliser finds is a failure sent as a
+// success (normaliseBody), or, when the answer must be translated, a whole
+// body that is not JSON (an HTML page sent with 200), which the Failure
+// Rules read as a 502.
+func answerFailure(resp *http.Response, stream bool, norm normalise.Set, translated bool) []byte {
+	if body := embeddedError(resp, stream); body != nil {
+		return body
+	}
+	if stream && isEventStream(resp.Header) {
+		return nil
+	}
+	if body := normaliseBody(resp, norm); body != nil {
+		return body
+	}
+	if translated {
+		return notJSON(resp)
+	}
+	return nil
+}
 
 // embeddedError returns the error a 2xx answer carries instead of an answer,
 // or nil, leaving resp.Body to read from the start either way.

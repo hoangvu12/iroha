@@ -250,9 +250,10 @@ func TestTheRoutePreviewPlansLikeLiveTrafficAndSendsNothing(t *testing.T) {
 		map[string]any{"provider": "siliconflow", "model": "zai-org/GLM-4.6", "enabled": false}}}).Expect(201)
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// key-1 cools for glm-4.6 (key-2 answers), key-2 is then disabled.
+	// key-1 cools for glm-4.6 (key-2 answers), key-2 is then disabled. The
+	// prompt is empty, so there is no conversation and keys go round-robin.
 	zai.Enqueue(zai.Error(429, "slow down").Header("Retry-After", "40"), zai.Text("hi"))
-	caller.Post("/v1/chat/completions", chatBody("glm-4.6")).Expect(200)
+	caller.Post("/v1/chat/completions", map[string]any{"model": "glm-4.6", "messages": []any{}}).Expect(200)
 	srv.Admin.Post("/api/providers/zai/keys/key-2/disable", nil).OK()
 	calls := zai.Count() + chutes.Count() + sf.Count()
 

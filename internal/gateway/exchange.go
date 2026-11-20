@@ -38,6 +38,9 @@ type exchange struct {
 	idempotencyKey string
 	// test is set on a test send (testrun.go): its recorded Caller and pins.
 	test *testRun
+	// conv is the conversation the Request belongs to (affinity.go), known
+	// once the route is resolved.
+	conv conversation
 
 	// mu guards what follows and every write to w, since a stream's keeper
 	// (stream.go) writes alongside the relay.

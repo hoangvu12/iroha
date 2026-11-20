@@ -56,6 +56,10 @@ _Avoid_: Key health, capacity, eligibility
 The Key State of an Upstream Key, or of one Upstream Key for one model, that the Provider has temporarily refused until a known time.
 _Avoid_: Rate-limited, exhausted, parked
 
+**Conversation Affinity**:
+Keeping the Requests of one conversation (as its Caller identifies it, or by its prompt's start) on one Upstream Key of a Provider, with a fixed next key while that one cannot serve, so the Provider's prompt cache stays warm.
+_Avoid_: Sticky routing, session pinning, key binding
+
 **Model Gap**:
 A remembered fact that one Upstream Key was refused one model, so that model is not sent to that key until the gap expires or is cleared.
 _Avoid_: Allow-list, deny-list, key model availability, entitlement

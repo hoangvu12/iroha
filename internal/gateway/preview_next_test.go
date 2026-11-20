@@ -13,8 +13,16 @@ import (
 // and says "where a Request would go right now". This holds it to that:
 // with the same fixtures, the next real Request makes its Attempts in
 // exactly the order the preview listed, round after round, while keys
-// cool, get Model Gaps and are disabled.
+// cool, get Model Gaps and are disabled. Requests with no conversation get
+// round-robin (the start moves every Request); a conversation's Requests
+// get its own order, which the preview shows with ?affinity= (prompt
+// caching 02).
 func TestTheRoutePreviewMatchesWhatTheNextRequestDoes(t *testing.T) {
+	t.Run("round-robin", func(t *testing.T) { previewMatchesNextRequest(t, "") })
+	t.Run("a conversation", func(t *testing.T) { previewMatchesNextRequest(t, "sess-7") })
+}
+
+func previewMatchesNextRequest(t *testing.T, session string) {
 	srv := testkit.Start(t)
 	zai, chutes := testkit.NewOpenAIChat(t), testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "zai", zai.URL(), "sk-test-z1", "sk-test-z2", "sk-test-z3")
@@ -27,7 +35,11 @@ func TestTheRoutePreviewMatchesWhatTheNextRequestDoes(t *testing.T) {
 	preview := func(model string) []hop {
 		t.Helper()
 		var pv gateway.RoutePreview
-		srv.Admin.Get("/api/route-preview?model=" + model).Expect(200).JSON(&pv)
+		q := ""
+		if session != "" {
+			q = "&as=pi&affinity=" + session
+		}
+		srv.Admin.Get("/api/route-preview?model=" + model + q).Expect(200).JSON(&pv)
 		var out []hop
 		for _, m := range pv.Members {
 			for _, c := range m.Candidates {
@@ -43,7 +55,12 @@ func TestTheRoutePreviewMatchesWhatTheNextRequestDoes(t *testing.T) {
 		for i := 0; i < fail && i < len(want); i++ {
 			ups[want[i].provider].Enqueue(refuse(ups[want[i].provider]))
 		}
-		resp := caller.Post("/v1/chat/completions", chatBody(model))
+		body := map[string]any{"model": model, "messages": []any{}} // no conversation
+		c := caller
+		if session != "" {
+			body, c = chatBody(model), caller.WithHeader("Iroha-Session", session)
+		}
+		resp := c.Post("/v1/chat/completions", body)
 		r := readRequest(t, srv, resp.Header.Get("X-Request-Id"))
 		var out []hop
 		for _, a := range r.Attempts {
@@ -67,6 +84,7 @@ func TestTheRoutePreviewMatchesWhatTheNextRequestDoes(t *testing.T) {
 	for round := 1; round <= 6; round++ {
 		plan := preview("glm-4.6")
 		// Round-robin moves the start every Request; the preview follows it.
+		// A conversation keeps its order; the preview shows it.
 		check(fmt.Sprintf("round %d", round), plan, send("glm-4.6", plan, round%3, retry))
 	}
 

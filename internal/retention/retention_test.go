@@ -1,6 +1,7 @@
 package retention_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -253,6 +254,7 @@ func TestRetentionSettingsAreAuditedAndRevertible(t *testing.T) {
 
 	var list settings.SettingList
 	srv.Admin.Get("/api/settings").Expect(200).JSON(&list)
+	list.Settings = slices.DeleteFunc(list.Settings, func(s settings.Setting) bool { return !strings.HasPrefix(s.Name, "retention.") })
 	want := map[string]string{"retention.captures_days": "3", "retention.history_days": "30", "retention.logs_days": "30"}
 	if len(list.Settings) != len(want) {
 		t.Fatalf("settings = %+v", list.Settings)

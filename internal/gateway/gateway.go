@@ -35,6 +35,7 @@ import (
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/rules"
 	"github.com/hoangvu12/iroha/internal/shape"
+	"github.com/hoangvu12/iroha/internal/store"
 	"github.com/hoangvu12/iroha/internal/translate"
 )
 
@@ -62,6 +63,8 @@ type Options struct {
 	// means the built-in rules. The server passes failurerules.Store.Set:
 	// the built-ins merged with the Owner's rules, reloaded on every change.
 	Rules func() *rules.Set
+	// DB reads runtime settings (affinity.experiment); nil: their defaults.
+	DB *store.DB
 }
 
 // Gateway serves inference.
@@ -77,6 +80,7 @@ type Gateway struct {
 	pools     *pools.Store
 	rules     func() *rules.Set
 	rotation  *planner.Counter
+	db        *store.DB
 	live      inflight // Requests being served (shutdown.go)
 }
 
@@ -90,7 +94,7 @@ func New(o Options) *Gateway {
 		rs = func() *rules.Set { return rules.Default }
 	}
 	return &Gateway{clock: o.Clock, log: o.Log, http: &hc, providers: o.Providers, keys: o.Keys, rec: o.Recorder,
-		states: o.KeyStates, models: o.Models, pools: o.Pools, rules: rs, rotation: planner.NewCounter()}
+		states: o.KeyStates, models: o.Models, pools: o.Pools, rules: rs, rotation: planner.NewCounter(), db: o.DB}
 }
 
 // ChatCompletionRequest documents the body of the Chat Completions routes.
@@ -252,7 +256,11 @@ func (g *Gateway) run(x *exchange, caller gatewaykeys.Caller, resolve resolver) 
 	for i := range rt.providers {
 		g.expireGaps(x, &rt.providers[i], now)
 	}
-	plan := planner.Plan(planRequest(sh, rt, now), rt.providers, g.rotation)
+	x.conv = g.conversationOf(x.ctx, r.Header, body, x.rec.Caller, rt)
+	x.noteAffinity()
+	req := planRequest(sh, rt, now)
+	req.Affinity = x.conv.planned()
+	plan := planner.Plan(req, rt.providers, g.rotation)
 	if len(plan.Candidates) == 0 {
 		e := rt.noCandidate(plan.Empty)
 		if plan.Empty.Code == planner.Cooling {

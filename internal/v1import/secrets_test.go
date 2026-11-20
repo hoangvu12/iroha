@@ -192,6 +192,7 @@ func TestMixedKeyRowsGiveKeylessSlotsOnlyForEmptySecrets(t *testing.T) {
 		}
 	}
 
+	srv.Admin.Patch("/api/providers/deepai-like", map[string]any{"affinity": "off"}).OK() // keys in turn, so every key is reached
 	caller := friendOne(t, srv)
 	for i := 0; i < 8; i++ {
 		chat(caller, "deepai-like").OK()
@@ -273,6 +274,7 @@ func TestReRunningRepairsKeylessSlotsOfAnEarlierImport(t *testing.T) {
 		t.Fatalf("no revertible Audit Entry for the deleted slots: %+v", entries.Entries)
 	}
 
+	srv.Admin.Patch("/api/providers/deepai-like", map[string]any{"affinity": "off"}).OK() // keys in turn, so every key is reached
 	caller := friendOne(t, srv)
 	before := up.Count()
 	for i := 0; i < 8; i++ {

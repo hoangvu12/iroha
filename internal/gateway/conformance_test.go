@@ -423,6 +423,7 @@ func TestAStreamThatBreaksAfterRelayingIsNeverRetriedOnAnotherKey(t *testing.T) 
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
+	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
 	caller := srv.Client(issue(t, srv, "pi", all))
 
 	stream := up.Stream("Hel", "lo")

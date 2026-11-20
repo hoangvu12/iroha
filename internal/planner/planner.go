@@ -10,11 +10,14 @@
 // yields any candidate is the one used, so a later tier is reached only when
 // nothing in an earlier one can serve: first the Endpoints speaking the
 // Caller's Shape, then those speaking a Shape the Gateway translates it to
-// (Request.Translate). Within a tier, Upstream Keys round-robin, each key
-// paired with every Endpoint of the tier it may use, in configured order;
-// then keys back from a cooling that ended (Key.Recovering) move behind the
-// others, and within each of those groups keys whose discovered list names
-// the wire model (Key.Carries) move ahead, each group keeping that order.
+// (Request.Translate). Within a tier, Upstream Keys are in the
+// conversation's order (Request.Affinity: rendezvous hashing, see
+// keyOrder) or, without one or on a Provider with affinity off,
+// round-robin, each key paired with every Endpoint of the tier it may use,
+// in configured order; then keys back from a cooling that ended
+// (Key.Recovering) move behind the others, and within each of those groups
+// keys whose discovered list names the wire model (Key.Carries) move ahead,
+// each group keeping that order.
 //
 // Excluded: disabled and invalid keys, keys cooling at Request.Now, keys
 // with a live Model Gap for the wire model of that Endpoint (ticket 08), keys
@@ -25,11 +28,14 @@
 package planner
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/hoangvu12/iroha/internal/affinity"
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
@@ -41,6 +47,10 @@ type Request struct {
 	// Translate lists the other Shapes the Gateway can translate the
 	// Caller's Shape to; Endpoints speaking them form the second tier.
 	Translate []shape.Shape
+	// Affinity is the conversation the Request belongs to, scoped to its
+	// Caller (affinity.Conversation.ID after For): each Provider's keys are
+	// ranked for it, so its turns land on one key. "" keeps round-robin.
+	Affinity string
 }
 
 // Provider is the routing view of one Provider.
@@ -55,6 +65,19 @@ type Provider struct {
 	// Budget overrides; zero means the Gateway's default.
 	MaxAttempts int
 	FirstByte   time.Duration
+	// AffinityOff keeps round-robin on this Provider even for Requests that
+	// belong to a conversation (the Provider's affinity setting).
+	AffinityOff bool
+}
+
+// AffinityKey is the value p's keys are ranked by for req: the
+// conversation scoped to p and the model asked of it; "" when keys
+// round-robin (no conversation, or affinity off on p).
+func (p *Provider) AffinityKey(req Request) string {
+	if p.AffinityOff {
+		return ""
+	}
+	return affinity.Key(req.Affinity, p.ID, p.ModelFor(req))
 }
 
 // ModelFor is the model asked of this Provider for req, before renames.
@@ -226,10 +249,10 @@ func Plan(req Request, providers []Provider, rot Rotation) Result {
 			}
 			continue
 		}
-		start := int(rot.Next(p.ID) % uint64(n))
+		order := keyOrder(p, req, rot)
 		var pSkips []Skip
 		for _, eps := range tiers {
-			cands, skips := planTier(req, p, eps, start)
+			cands, skips := planTier(req, p, eps, order)
 			if len(cands) > 0 {
 				out = append(out, cands...)
 				pSkips = skips // only the serving tier's skips explain the plan
@@ -289,14 +312,52 @@ func noEndpoint(p *Provider, req Request) string {
 	return fmt.Sprintf("Provider %s has no Endpoint speaking %s or a Shape Iroha translates it to.", p.Handle, req.Shape)
 }
 
-// planTier pairs p's keys, round-robin from start, with the Endpoints of one
-// tier each key may use.
-func planTier(req Request, p *Provider, eps []*Endpoint, start int) ([]Candidate, []Skip) {
+// keyOrder is the order p's keys are taken in, as indexes into p.Keys.
+//
+// For a conversation (p.AffinityKey) it is rendezvous (highest random
+// weight) hashing: each key scores hash(affinity key, key ID) and keys go in
+// descending score. Nothing is stored and every Request of the conversation
+// gets the same order; a key that drops out (cooling, invalid, disabled,
+// removed) moves only the conversations it led, each to its own next key,
+// and they come back when it is usable again. Over many conversations each
+// key leads about 1/n of them, as round-robin spreads Requests.
+//
+// Without one, round-robin from the Rotation's counter for p.
+func keyOrder(p *Provider, req Request, rot Rotation) []int {
+	n := len(p.Keys)
+	order := make([]int, n)
+	if ak := p.AffinityKey(req); ak != "" {
+		scores := make([]uint64, n)
+		for i := range p.Keys {
+			order[i] = i
+			sum := sha256.Sum256([]byte(ak + "/" + p.Keys[i].ID))
+			scores[i] = binary.BigEndian.Uint64(sum[:8])
+		}
+		slices.SortStableFunc(order, func(a, b int) int {
+			switch {
+			case scores[a] > scores[b]:
+				return -1
+			case scores[a] < scores[b]:
+				return 1
+			}
+			return a - b
+		})
+		return order
+	}
+	start := int(rot.Next(p.ID) % uint64(n))
+	for i := range n {
+		order[i] = (start + i) % n
+	}
+	return order
+}
+
+// planTier pairs p's keys, in order, with the Endpoints of one tier each key
+// may use.
+func planTier(req Request, p *Provider, eps []*Endpoint, order []int) ([]Candidate, []Skip) {
 	var out []Candidate
 	var skipped []Skip
-	n := len(p.Keys)
-	for i := range n {
-		k := &p.Keys[(start+i)%n]
+	for _, i := range order {
+		k := &p.Keys[i]
 		allowed := false
 		for _, ep := range eps {
 			if !k.Allows(ep.ID) {
@@ -316,8 +377,8 @@ func planTier(req Request, p *Provider, eps []*Endpoint, start int) ([]Candidate
 		}
 	}
 	// Healthy keys before keys back from a cooling (FAIL-104), then known
-	// carriers first within each, keeping the round-robin order within each
-	// group. A cooling that ended with no success since (Key.Recovering: the
+	// carriers first within each, keeping the key order (the conversation's,
+	// or round-robin) within each group. A cooling that ended with no success since (Key.Recovering: the
 	// key's own past cooling or one for this wire model) is likely still
 	// spent: after a 15 min billing cooling, dozens of such keys must not use
 	// up the budget while a key with no recent refusal waits. Both are

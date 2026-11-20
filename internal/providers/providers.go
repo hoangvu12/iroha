@@ -39,6 +39,7 @@ type Provider struct {
 	ModelsDevBrand   string     `json:"models_dev_brand" doc:"The models.dev provider ID model metadata is looked up under; \"\": none (by model name in models.dev's maker catalog only)."`
 	LogoDomain       string     `json:"logo_domain" doc:"The site whose logo the UI shows for this Provider (GET /api/providers/{provider}/logo): the Owner's, else guessed from the first Endpoint's host; \"\" when there is none (the UI draws the first letter)."`
 	LogoGuessed      bool       `json:"logo_domain_guessed" doc:"true when logo_domain is a guess (the Owner set none)."`
+	Affinity         string     `json:"affinity" enum:"on,off" doc:"on: the turns of one conversation go to one Upstream Key (so its prompt cache stays warm), moving to the conversation's next key only while that key cannot serve; off: keys are used in turn."`
 	Endpoints        []Endpoint `json:"endpoints"`
 	UpstreamKeyCount int        `json:"upstream_key_count"`
 }
@@ -91,6 +92,12 @@ const (
 	DiscoveryNone     = "none"
 	DiscoveryProvider = "provider"
 	DiscoveryKey      = "key"
+)
+
+// Affinity settings of a Provider.
+const (
+	AffinityOn  = "on"
+	AffinityOff = "off"
 )
 
 // NoDiscovery is the discovery_url of an Endpoint that is never asked for models.
@@ -167,9 +174,9 @@ func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	var maxAttempts, firstByte int
 	var logo string
 	err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain,
-		(SELECT count(*) FROM upstream_keys k WHERE k.provider_id = providers.id)
+		(SELECT count(*) FROM upstream_keys k WHERE k.provider_id = providers.id), affinity
 		FROM providers WHERE id = ?`, id).
-		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &maxAttempts, &firstByte, &p.Strict, &p.Discovery, &p.ModelsDevBrand, &logo, &p.UpstreamKeyCount)
+		Scan(&p.ID, &p.Handle, &p.Name, &p.Enabled, &p.Archived, &created, &maxAttempts, &firstByte, &p.Strict, &p.Discovery, &p.ModelsDevBrand, &logo, &p.UpstreamKeyCount, &p.Affinity)
 	if err != nil {
 		return p, err
 	}
@@ -430,8 +437,10 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 		return r, false, nil
 	}
 	var firstByte int
-	err = s.db.QueryRowContext(ctx, `SELECT id, handle, enabled, archived, max_attempts, first_byte_seconds, strict, discovery FROM providers WHERE handle = ?`, handle).
-		Scan(&r.ID, &r.Handle, &r.Enabled, &r.Archived, &r.MaxAttempts, &firstByte, &r.Strict, &r.Discovery)
+	var aff string
+	err = s.db.QueryRowContext(ctx, `SELECT id, handle, enabled, archived, max_attempts, first_byte_seconds, strict, discovery, affinity FROM providers WHERE handle = ?`, handle).
+		Scan(&r.ID, &r.Handle, &r.Enabled, &r.Archived, &r.MaxAttempts, &firstByte, &r.Strict, &r.Discovery, &aff)
+	r.AffinityOff = aff == AffinityOff
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, false, nil
 	}

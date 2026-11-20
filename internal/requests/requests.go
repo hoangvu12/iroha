@@ -64,8 +64,50 @@ type Request struct {
 	AttemptCount int          `json:"attempt_count"`
 	Captured     bool         `json:"captured" doc:"true when the prompt and response are stored: GET /api/requests/{request}/capture."`
 	Attempts     []Attempt    `json:"attempts,omitempty" doc:"Every Attempt in order (on GET /api/requests/{request} only)."`
+	Affinity     *Affinity    `json:"affinity,omitempty" doc:"How the Request's conversation chose its Upstream Key (conversation affinity); absent on Requests refused before planning and on Requests from before it existed."`
 
 	rev int64 // change counter (see GET /api/requests?changed_after=)
+}
+
+// Affinity is how a Request's conversation chose its Upstream Key.
+type Affinity struct {
+	Source string `json:"source" enum:"header,claude_code,codex,session_id,opencode,prompt_cache_key,prefix,none" doc:"Where the conversation was found: the Iroha-Session header, Claude Code's session (x-claude-code-session-id or metadata.user_id), Codex's session_id/session-id/thread-id header, x-session-id or a body session_id, OpenCode's x-session-affinity, the body's prompt_cache_key, a hash of the prompt's start (system prompt, tool names, first user message), or none (an empty prompt)."`
+	Mode   string `json:"mode" enum:"on,off,control,none" doc:"on: the Provider's keys were ranked for the conversation; off: the Provider has affinity off (round-robin); control: the conversation fell in the round-robin half of the affinity.experiment; none: no conversation (round-robin)."`
+	// PreferredServed is set when Mode is on.
+	PreferredServed *bool `json:"preferred_served,omitempty" doc:"With mode on: true when the key the conversation ranks first answered; false when another key did (the first was cooling or failed) or none did."`
+}
+
+// Affinity modes.
+const (
+	AffinityOn      = "on"
+	AffinityOff     = "off"
+	AffinityControl = "control"
+	AffinityNone    = "none"
+)
+
+// AffinityModes lists every mode, for filters.
+var AffinityModes = []string{AffinityOn, AffinityOff, AffinityControl, AffinityNone}
+
+func affinityArgs(a *Affinity) (source, mode string, preferred any) {
+	if a == nil {
+		return "", "", nil
+	}
+	if a.PreferredServed != nil {
+		preferred = *a.PreferredServed
+	}
+	return a.Source, a.Mode, preferred
+}
+
+func affinityOf(source, mode string, preferred sql.NullBool) *Affinity {
+	if mode == "" {
+		return nil
+	}
+	a := &Affinity{Source: source, Mode: mode}
+	if preferred.Valid {
+		v := preferred.Bool
+		a.PreferredServed = &v
+	}
+	return a
 }
 
 // Failure is why a Request failed.
@@ -198,13 +240,16 @@ func (rc *Recorder) Finish(ctx context.Context, r *Request) error {
 		finished = store.Millis(*r.FinishedAt)
 	}
 	in, out, cache, reasoning := usageArgs(r.Usage)
+	affSource, affMode, affPreferred := affinityArgs(r.Affinity)
 	return rc.db.Tx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE requests SET finished_at = ?, state = ?, status = ?, error_code = ?, error_message = ?,
 			model = ?, stream = ?, shape_out = ?, provider_id = ?, provider_handle = ?, endpoint_id = ?, endpoint_name = ?,
 			upstream_key_id = ?, upstream_key_name = ?, wire_model = ?, first_byte_ms = ?, duration_ms = ?,
-			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, reasoning_tokens = ?, summary = ?, pool = ? WHERE id = ?`,
+			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, reasoning_tokens = ?, summary = ?, pool = ?,
+			affinity_source = ?, affinity = ?, affinity_preferred = ? WHERE id = ?`,
 			finished, r.State, r.Status, code, msg, r.Model, r.Stream, string(r.ShapeOut), r.ProviderID, r.Provider, r.EndpointID, r.Endpoint,
-			r.UpstreamKeyID, r.UpstreamKey, r.WireModel, r.FirstByteMs, r.DurationMs, in, out, cache, reasoning, r.Summary, r.Pool, r.ID)
+			r.UpstreamKeyID, r.UpstreamKey, r.WireModel, r.FirstByteMs, r.DurationMs, in, out, cache, reasoning, r.Summary, r.Pool,
+			affSource, affMode, affPreferred, r.ID)
 		return err
 	})
 }

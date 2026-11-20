@@ -56,3 +56,42 @@ Branch `agent/uifix`. Every item of the review list was fixed. The "Not to chang
   - Tests: `ui/Menu.test.tsx`, "on a wide screen a submenu opens beside its item" and "on a phone a submenu opens under its item".
   - Chrome at 390 px: every submenu measured on screen (left 136–154 px, right at most 382 px). Shots `submenu-phone-*-light/dark.png`. The desktop filter submenu still opens to the right (`submenu-desktop-filter-light.png`).
   - On a phone, the submenu now covers the menu items under its trigger while it is open. Escape or a press outside closes it as before.
+
+## Review fixes (batch 2)
+
+The review of tickets 23-34 (`iroha-v2-notes/v2-ui/review-fixes-2.md`), items 1-17. Ticket boxes are not ticked here.
+
+### Bugs
+
+1. **Bulk edit sends only what changed** (ticket 30). `POST /api/providers/{p}/models` and `/bulk` take `metadata_patch`: the named overrides change, `null` removes one, the model's others stay as they are now on the server (read in the same transaction). `metadata` with `metadata_patch` is 400. Models bulk edit sends only the changed fields as `metadata_patch`. Pool members' bulk edit reads the Pool (`GET /api/pools/{name}`) just before its PATCH, so a member changed elsewhere since the tab loaded keeps that change. Tests: `internal/models/patch_test.go`, `Models.test.tsx`, `PoolMembers.test.tsx`. Skill `28_model_metadata.md`.
+2. **Space in select mode** (ticket 25). `DataTable` no longer handles keys on rows: a row's buttons and links keep Space and Enter, and the keyboard picks a row with its box. Test: `ui/DataTable.test.tsx`. Chrome: with 6 keys selected, Space on "Open team-3" opened its sheet and left the selection as it was; Space on a box toggled that row.
+3. **Route view opens the key's sheet** (ticket 22/33). "Open <key>" is a `RecordLink` (`bare`, styled as a button) to `rec.key`, so it stays on the Request. An Attempt's Failure Rule links the rule's sheet (Route view and the drawer), and the Key sheet's cooling rows link the model's sheet. Tests: `RouteView.test.tsx`, `Links.test.tsx`.
+4. **Classify route** (ticket 34). `embedded` is true only for an error inside a 2xx answer, not for any 2xx failure (a normaliser failure is not embedded). The route also takes `translated`: an answer Iroha would translate is read as the translated path reads it. Test: `TestClassifySaysEmbeddedOnlyForAnErrorInsideA2xxAndReadsTranslatedAnswers`. Skill `26_failure_rules.md`.
+5. **Select-mode tests on the pages.** `Keys.test.tsx` and `Models.test.tsx` each test row click toggles, the bulk bar shows and no sheet opens. They passed against the existing code. To check that they test the right thing, I turned select mode off in `DataTable`, and both then failed.
+6. **Gateway Keys `bulk/update` has no `scope`.** No UI used it. Scope is changed one key at a time. The Go test expects 400 for `scope`. `10_conventions.md` and `gateway-keys/api.ts` are updated.
+
+### Standards
+
+7. **Sheet errors use `SaveError`.** `SaveError` takes `error`, a problem the form found before saving, and shows it instead of the save's failure. It is used in the Endpoint, Model, Rule and Gateway Key sheets. Test: `ui/SaveStatus.test.tsx`.
+8. **One wording of outcomes.** Go `internal/rules/words.go` (`KeyEffect`, `RequestEffect`, `Seconds`) words what an outcome does. Both the Rules list (`builtin_key_effect`) and the classify route use it. The web has one map, `lib/outcomes.ts` `OUTCOME_KEY` (tone and pill word), used by the Rules flow, the Rule sheet, Try a failure and the Requests page. Try a failure's result reads "Rule N, name, matches. Upstream Key: <key_effect>. Request: <request_effect>."
+9. **Shared helpers in Go.** `gateway.endpointOf` is shared by keytest and classify. `audit.ItemKey` is the "an item has no key" check of both bulk/update routes.
+10. **`useSheetRefresh`** (`sheets/records/refresh.ts`) is the one `refresh`/`refreshAll` for the Key, Model and Endpoint sheets.
+11. **`appearClass`** lives in `ui/motion.ts`. Field errors, Dialog, BulkEdit and the Provider pages import it.
+12. **`plural(n, one, many)`** in `lib/format.ts` replaces `countOf` and the inline `=== 1 ? "" : "s"` in the batch's code. Test: `lib/format.test.ts`.
+13. **`useStoredChoice`** (`lib/stored-choice.ts`) keeps the Rules view and the feed's paging, with one try/catch. Test: `lib/stored-choice.test.ts`.
+14. **Glossary.** The Try a failure example is "429 cooling". The Provider-facing hint "Rate limits and quotas" in `api.ts` stays, because it names what the Provider sends.
+15. **Route texts.** The bulk/update descriptions keep only the body example and "changed one key at a time (PATCH)". The conventions are in `10_conventions.md`.
+
+### Also
+
+16. **Feed test.** "Numbered pages" is proven with 30 rows, not 100, and asserts the "Page 2" button. Alone it took about 1.5 s before and about 0.95 s now. The full web suite was run twice after merging v2-ui, with no timeout.
+17. `gofmt` on `internal/testchat/send.go`.
+
+### Left as it is
+
+- Keys' bulk Endpoints edit still computes each key's list from the loaded rows. Item 1 named only models and Pool members.
+- The "Not to change" list of the review was not touched.
+
+### Checks
+
+`go build ./... && go vet ./... && go test ./...`, `gofmt -l` on touched files, `npm --prefix web run build` and `npm --prefix web test` pass. Headless Chrome shots in light, dark and 390 px are in `iroha-v2-notes/v2-ui/shots/uifix2/` (outside the repo): bulk edit of models and Pool members (the request bodies are logged in the eval output: `metadata_patch` only, and the Pool's GET before its PATCH), select mode with Space, the Route view's key and rule links and the sheets they open, the Model sheet's form-check and save errors, and Try a failure's result sentence.

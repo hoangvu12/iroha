@@ -376,7 +376,7 @@ export function useKeyCache(handle: string) {
     // Under "requests": history, not configuration (api/refresh.ts).
     queryKey: ["requests", "stats", "key-cache", handle],
     queryFn: ({ signal }) =>
-      api.get<Stats>("/api/requests/stats", { signal, query: { provider: handle, group_by: "upstream_key", since: "24h", caller_kind: "gateway_key" } }),
+      api.get<Stats>("/api/requests/stats", { signal, query: { provider: handle, group_by: "upstream_key", since: "24h", exclude_tests: "true" } }),
     select: (s): Map<string, StatsGroup> => new Map((s.groups ?? []).filter((g) => g.upstream_key_id).map((g) => [g.upstream_key_id!, g])),
     refetchInterval: 60_000,
   });

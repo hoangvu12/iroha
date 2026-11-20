@@ -101,3 +101,35 @@ func TestStatsGroupCacheUsageByKeyProviderModelAndCaller(t *testing.T) {
 		t.Error("an unknown group_by has no hint")
 	}
 }
+
+// exclude_tests=true leaves out the Requests sent from the test chat, on
+// the stats and the list alike; caller_kind keeps working.
+func TestExcludeTestsLeavesOutTestRequests(t *testing.T) {
+	srv := testkit.Start(t)
+	insert(t, srv, "req_key1", requests.CallerGatewayKey, "gk_1", "alice", "m1", "acme", 200, 0)
+	insert(t, srv, "req_key2", requests.CallerGatewayKey, "gk_1", "alice", "m1", "acme", 200, 0)
+	insert(t, srv, "req_test1", requests.CallerTest, "", "Test", "m1", "acme", 200, 0)
+	insert(t, srv, "req_test2", requests.CallerTest, "gk_1", "Test (as alice)", "m1", "acme", 200, 0)
+
+	for q, want := range map[string]int{
+		"":                                   4,
+		"exclude_tests=true":                 2,
+		"exclude_tests=false":                4,
+		"exclude_tests=true&group_by=caller": 2,
+		"caller_kind=gateway_key":            2,
+		"caller_kind=test":                   2,
+	} {
+		if n := statsOf(t, srv, q).Requests; n != want {
+			t.Errorf("stats?%s: %d Requests, want %d", q, n, want)
+		}
+		if n := len(page(t, srv, q).Requests); n != want {
+			t.Errorf("requests?%s: %d Requests, want %d", q, n, want)
+		}
+	}
+	if s := statsOf(t, srv, "exclude_tests=true&group_by=caller"); len(s.Groups) != 1 || s.Groups[0].Caller.Name != "alice" {
+		t.Errorf("groups = %+v", s.Groups)
+	}
+	if e := srv.Admin.Get("/api/requests/stats?exclude_tests=maybe").Expect(400).Err(); e.Hint == "" {
+		t.Error("a bad exclude_tests has no hint")
+	}
+}

@@ -123,7 +123,7 @@ func Routes(db *store.DB) []api.Route {
 			Description: "Takes the same filters as GET /api/requests and counts the Requests they match: how many succeeded, failed and were retried, median duration and time to first token of succeeded Requests, " +
 				"how many read from the Provider's prompt cache, and tokens (input, cache read and cache write; the cached share is cache_read / input).\n\n" +
 				"With `group_by` (provider, upstream_key, model, caller; repeat to combine) it also answers `groups`, one row per group with its Requests, cache hits and tokens: " +
-				"`group_by=upstream_key&provider=acme&since=24h&caller_kind=gateway_key` gives each key's cached share over the last day, test Requests left out.",
+				"`group_by=upstream_key&provider=acme&since=24h&exclude_tests=true` gives each key's cached share over the last day, test Requests left out.",
 			Query:    append(slices.Clone(filterParams), api.Param{Name: "group_by", Enum: []string{"provider", "upstream_key", "model", "caller"}, Description: "Also sum per group: provider, upstream_key, model or caller. Repeat to combine (group_by=provider&group_by=model)."}),
 			Response: Stats{},
 			Handle: func(call *api.Call) (any, error) {

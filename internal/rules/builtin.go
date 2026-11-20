@@ -202,6 +202,17 @@ var Builtin = []Rule{
 		Description: "\"Your credit balance is too low\" (Anthropic answers it as a 400): billing, not a bad request. Cool the key 15 min and try another.",
 	},
 	{
+		// USE-19: the deepai-proxy answers a request the account's Theos cannot pay
+		// for with a code of its own, so the router can tell "this request is too big
+		// for this key" from "this key is spent". The key is healthy and only this
+		// request is too large, so the request moves to another key and this one is
+		// left as it is. Without this rule the generic 4xx rule would call it a bad
+		// request and fail it.
+		Name: "deepai-request-too-large", Code: []string{"theos_request_too_large"},
+		Outcome:     RetryElsewhere,
+		Description: "theos_request_too_large (the deepai-proxy's own answer: the request's prompt costs more than the Theos left on this key): the key is healthy, the request is too big. Try the next key and leave this one as it is.",
+	},
+	{
 		// FAIL-38, USE-17: DeepAI's daily Theos cannot cover the request; the
 		// message names the time the allowance refills. The deepai-proxy passes
 		// the upstream refusal through unchanged, so the code is the upstream's

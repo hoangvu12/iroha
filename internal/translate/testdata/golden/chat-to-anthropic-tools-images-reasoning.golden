@@ -153,6 +153,7 @@
     },
     "prompt_tokens": 35,
     "prompt_tokens_details": {
+      "cache_write_tokens": 7,
       "cached_tokens": 3
     },
     "total_tokens": 77

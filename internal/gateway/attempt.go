@@ -175,6 +175,7 @@ type upstreamCall struct {
 func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (upstreamCall, *api.Error) {
 	ep := c.Endpoint.Shape
 	call := upstreamCall{header: x.r.Header, norm: normalise.For(c.Endpoint.URL, ep)}
+	x.added = nil
 	if ep == shape.AnthropicMessages && call.header.Get("Anthropic-Version") == "" {
 		call.header = call.header.Clone()
 		call.header.Set("Anthropic-Version", shape.AnthropicVersion)
@@ -190,7 +191,8 @@ func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (
 		call.header.Del("Anthropic-Version")
 		call.header.Del("Anthropic-Beta")
 	}
-	tr, err := translate.New(cr.shape, ep, translate.Options{Model: cr.model, ID: x.rec.ID, Now: x.g.clock.Now(), Stream: cr.stream})
+	tr, err := translate.New(cr.shape, ep, translate.Options{Model: cr.model, ID: x.rec.ID, Now: x.g.clock.Now(), Stream: cr.stream,
+		Caching: x.cachingFor(c)})
 	if err != nil {
 		return call, api.Errorf(http.StatusInternalServerError, "translation_failed", "Report this; the Request cannot be translated.", "%v", err)
 	}
@@ -198,12 +200,17 @@ func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (
 	var te *translate.Error
 	switch {
 	case errors.As(err, &te):
+		hint := te.Hint
+		if hint == "" {
+			hint = "Fix the request body"
+		}
 		return call, api.Errorf(http.StatusBadRequest, "untranslatable_request",
-			"Fix the request body; Iroha had to translate it for Provider "+c.Provider.Handle+", whose usable Endpoints speak "+string(ep)+".", "%s", te.Message)
+			hint+"; Iroha had to translate it for Provider "+c.Provider.Handle+", whose usable Endpoints speak "+string(ep)+".", "%s", te.Message)
 	case err != nil:
 		return call, api.Errorf(http.StatusInternalServerError, "translation_failed", "Report this with the Request ID; the request could not be translated.", "%v", err)
 	}
 	call.body, call.tr = call.norm.RequestBody(out), tr
+	x.added = tr.Added
 	return call, nil
 }
 

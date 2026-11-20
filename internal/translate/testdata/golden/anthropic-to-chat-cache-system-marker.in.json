@@ -1,0 +1,27 @@
+{
+  "from": "anthropic-messages",
+  "to": "openai-chat",
+  "model": "anthropic/claude-sonnet-4.5",
+  "wire_model": "anthropic/claude-sonnet-4.5",
+  "caching": {"markers": "keep", "fields": true, "prompt_cache_key": "c1a6f3b0-0000-5000-8000-000000000002"},
+  "request": {
+    "model": "anthropic/claude-sonnet-4.5",
+    "max_tokens": 1024,
+    "system": [
+      {"type": "text", "text": "You are Claude Code."},
+      {"type": "text", "text": "Long project instructions.", "cache_control": {"type": "ephemeral", "ttl": "1h"}}
+    ],
+    "messages": [
+      {"role": "user", "content": [{"type": "text", "text": "Hello", "cache_control": {"type": "ephemeral"}}]}
+    ],
+    "metadata": {"user_id": "user-7"}
+  },
+  "answer": {
+    "id": "chatcmpl-9",
+    "object": "chat.completion",
+    "created": 1767225600,
+    "model": "anthropic/claude-sonnet-4.5",
+    "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "Hi"}}],
+    "usage": {"prompt_tokens": 3000, "completion_tokens": 2, "total_tokens": 3002, "prompt_tokens_details": {"cached_tokens": 1000, "cache_write_tokens": 1990}}
+  }
+}

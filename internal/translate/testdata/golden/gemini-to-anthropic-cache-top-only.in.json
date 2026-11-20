@@ -1,0 +1,12 @@
+{
+  "from": "gemini",
+  "to": "anthropic-messages",
+  "model": "kimi-k2",
+  "wire_model": "kimi-k2",
+  "caching": {"markers": "top_only", "fields": true},
+  "request": {
+    "system_instruction": {"parts": [{"text": "Answer in one word."}]},
+    "contents": [{"role": "user", "parts": [{"text": "Capital of Vietnam?"}]}],
+    "generationConfig": {"maxOutputTokens": 64}
+  }
+}

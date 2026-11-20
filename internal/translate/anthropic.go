@@ -256,6 +256,7 @@ func (w *anthropicWriter) write(m map[string]any) []byte {
 		if _, ok := u["output_tokens"]; !ok {
 			u["output_tokens"] = 0
 		}
+		w.t.writeCacheUsage(u)
 		m["usage"] = u
 		if d := obj(m["delta"]); d != nil {
 			if _, ok := d["stop_sequence"]; !ok {

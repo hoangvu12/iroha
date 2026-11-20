@@ -1,0 +1,12 @@
+{
+  "from": "openai-chat",
+  "to": "openai-responses",
+  "model": "gpt-5",
+  "wire_model": "gpt-5",
+  "caching": {"fields": true, "prompt_cache_key": "c1a6f3b0-0000-5000-8000-000000000005"},
+  "request": {
+    "model": "gpt-5",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "prompt_cache_key": "the-callers-own"
+  }
+}

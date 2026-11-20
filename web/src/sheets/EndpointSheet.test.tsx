@@ -94,6 +94,43 @@ test("picking a header you name opens its name field under the choice, folding a
   for (const c of ["-mx-1", "px-1", "-mb-1", "pb-1"]) expect(panel.className.split(/\s+/)).toContain(c);
 });
 
+// Prompt caching 03: what translated requests get for the prompt cache, and the two settings that turn it off.
+test("the facts say what translated requests get for the prompt cache; Edit sets cache markers and the prompt_cache_key", async () => {
+  const user = userEvent.setup();
+  const summary = "Cache markers of an Anthropic Caller's messages are kept, its system prompt's are not; a prompt_cache_key made from the conversation is sent when the request has none.";
+  routes["GET /api/providers/acme/endpoints/main"] = { ...main, cache_markers: "", send_prompt_cache_key: "off", caching: { markers: "", prompt_cache_key: false, summary } };
+  routes["PATCH /api/providers/acme/endpoints/main"] = { audit_entry: "aud_1", endpoint: main };
+  const { fetch } = renderWithSheets(null, "/x?sheet=endpoint:acme/main");
+  const sheet = await endpointSheet("main");
+  const s = within(sheet);
+  const fact = (label: string) => s.getByText(label, { selector: "dt" }).nextElementSibling?.textContent;
+  expect(fact("Prompt cache")).toBe(summary);
+  expect(fact("Cache markers")).toBe("Iroha's default");
+  expect(fact("Send prompt_cache_key")).toBe("Off");
+
+  await user.click(s.getByRole("button", { name: "Edit main" }));
+  const markers = await s.findByRole("combobox", { name: "Cache markers" });
+  expect(markers.textContent).toContain("Iroha's default");
+  expect(s.getByRole("combobox", { name: "Send prompt_cache_key" }).textContent).toContain("Off");
+  await user.click(markers);
+  await user.click(await screen.findByRole("option", { name: "Off" }));
+  await user.click(s.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(sent(fetch, "PATCH")).toHaveLength(1));
+  expect(sent(fetch, "PATCH")[0][1]).toMatchObject({ cache_markers: "off", send_prompt_cache_key: "off" });
+});
+
+test("an Endpoint without the caching fields (an older server) shows no prompt cache fact and saves Iroha's defaults", async () => {
+  const user = userEvent.setup();
+  routes["PATCH /api/providers/acme/endpoints/main"] = { audit_entry: "aud_1", endpoint: main };
+  const { fetch } = renderWithSheets(null, "/x?sheet=endpoint:acme/main");
+  const sheet = await endpointSheet("main");
+  expect(within(sheet).queryByText("Prompt cache")).toBeNull();
+  await user.click(within(sheet).getByRole("button", { name: "Edit main" }));
+  await user.click(await within(sheet).findByRole("button", { name: "Save" }));
+  await waitFor(() => expect(sent(fetch, "PATCH")).toHaveLength(1));
+  expect(sent(fetch, "PATCH")[0][1]).toMatchObject({ cache_markers: "", send_prompt_cache_key: "" });
+});
+
 test("the Endpoints tab: a row opens the sheet, Edit… opens it on the fields, Delete… in the sheet asks and closes it", async () => {
   const user = userEvent.setup();
   routes["DELETE /api/providers/acme/endpoints/main"] = { audit_entry: "aud_2", endpoint: main };
@@ -131,5 +168,5 @@ test("an agent opens an Endpoint's sheet from the tab and finds Edit, Delete and
     .snapshot()
     .filter((e) => !e.offPage && e.component !== "more" && e.component !== "scroll-area")
     .map((e) => e.label);
-  for (const l of ["URL", "Name", "Shape", "Key sent as", "Model list URL", "Save", "Cancel", "Delete main…", "Test acme in Chat"]) expect(labels, `${l} is missing`).toContain(l);
+  for (const l of ["URL", "Name", "Shape", "Key sent as", "Model list URL", "Cache markers", "Send prompt_cache_key", "Save", "Cancel", "Delete main…", "Test acme in Chat"]) expect(labels, `${l} is missing`).toContain(l);
 });

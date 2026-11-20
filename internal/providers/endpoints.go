@@ -14,6 +14,7 @@ import (
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
+	"github.com/hoangvu12/iroha/internal/caching"
 	"github.com/hoangvu12/iroha/internal/ids"
 	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/shape"
@@ -36,7 +37,10 @@ type endpointSnapshot struct {
 	StaticHeaders map[string]string `json:"static_headers,omitempty"`
 	Renames       map[string]string `json:"renames,omitempty"`
 	DiscoveryURL  string            `json:"discovery_url,omitempty"` // ticket 10; empty is the default
-	CreatedAt     time.Time         `json:"created_at"`
+	// Prompt caching 03; empty is Iroha's default.
+	CacheMarkers       string    `json:"cache_markers,omitempty"`
+	SendPromptCacheKey string    `json:"send_prompt_cache_key,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // EndpointResource is the Endpoint resource of the audit machinery.
@@ -48,9 +52,10 @@ var EndpointResource = audit.Register(&audit.Resource[endpointSnapshot]{
 		var s endpointSnapshot
 		var created int64
 		var headers, renames string
-		err := q.QueryRowContext(ctx, `SELECT e.id, e.provider_id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.discovery_url, e.created_at
+		err := q.QueryRowContext(ctx, `SELECT e.id, e.provider_id, p.handle, e.name, e.url, e.shape, e.auth_style, e.auth_param, e.static_headers, e.renames, e.discovery_url,
+			e.cache_markers, e.send_prompt_cache_key, e.created_at
 			FROM endpoints e JOIN providers p ON p.id = e.provider_id WHERE e.id = ?`, id).
-			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Name, &s.URL, &s.Shape, &s.AuthStyle, &s.AuthParam, &headers, &renames, &s.DiscoveryURL, &created)
+			Scan(&s.ID, &s.ProviderID, &s.Provider, &s.Name, &s.URL, &s.Shape, &s.AuthStyle, &s.AuthParam, &headers, &renames, &s.DiscoveryURL, &s.CacheMarkers, &s.SendPromptCacheKey, &created)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -90,11 +95,14 @@ var EndpointResource = audit.Register(&audit.Resource[endpointSnapshot]{
 		if style == "" {
 			style = string(planner.AuthBearer)
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		_, err := tx.ExecContext(ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url,
+			cache_markers, send_prompt_cache_key, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET name = excluded.name, url = excluded.url, shape = excluded.shape, auth_style = excluded.auth_style,
-			auth_param = excluded.auth_param, static_headers = excluded.static_headers, renames = excluded.renames, discovery_url = excluded.discovery_url`,
-			id, s.ProviderID, s.Name, s.URL, s.Shape, style, s.AuthParam, encodeMap(s.StaticHeaders), encodeMap(s.Renames), s.DiscoveryURL, store.Millis(s.CreatedAt))
+			auth_param = excluded.auth_param, static_headers = excluded.static_headers, renames = excluded.renames, discovery_url = excluded.discovery_url,
+			cache_markers = excluded.cache_markers, send_prompt_cache_key = excluded.send_prompt_cache_key`,
+			id, s.ProviderID, s.Name, s.URL, s.Shape, style, s.AuthParam, encodeMap(s.StaticHeaders), encodeMap(s.Renames), s.DiscoveryURL,
+			s.CacheMarkers, s.SendPromptCacheKey, store.Millis(s.CreatedAt))
 		return err
 	},
 })
@@ -157,26 +165,30 @@ func endpointURLFree(ctx context.Context, q *sql.Tx, providerID, handle, u, sh, 
 
 // CreateEndpoint is the body of POST /api/providers/{provider}/endpoints.
 type CreateEndpoint struct {
-	Name          string             `json:"name,omitempty" doc:"Unique within the Provider. Repeating a create with an existing name updates that Endpoint. Without a name, the Endpoint with the same url and shape is updated, else the name is \"default\"."`
-	URL           *string            `json:"url,omitempty" doc:"Base URL including the version path, e.g. https://api.openai.com/v1 (Iroha appends /chat/completions). Required for a new Endpoint."`
-	Shape         *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks. Required for a new Endpoint."`
-	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent; default bearer. none sends no credential; on a Provider holding no Upstream Keys it also adds the keyless key \"keyless\" (see keyless_key)."`
-	AuthParam     *string            `json:"auth_param,omitempty" doc:"The header name for auth_style header (e.g. api-key) or the query parameter name for auth_style query (e.g. key)."`
-	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Headers sent on every Attempt, e.g. {\"HTTP-Referer\": \"https://example.com\"}. An empty value sends no such header and drops the Caller's. Replaces the whole set; {} clears it."`
-	Renames       *map[string]string `json:"renames,omitempty" doc:"Model renames for this URL, Caller's name -> wire name, e.g. {\"glm-4.6\": \"glm-4.6-fp8\"}. Replaces the whole set; {} clears it."`
-	DiscoveryURL  *string            `json:"discovery_url,omitempty" doc:"Where the model list is read: \"\" (default) for <url>/models, \"none\" to never ask this Endpoint, or a full http(s) URL such as https://api.acme.example/api/coding/v4/models."`
+	Name               string             `json:"name,omitempty" doc:"Unique within the Provider. Repeating a create with an existing name updates that Endpoint. Without a name, the Endpoint with the same url and shape is updated, else the name is \"default\"."`
+	URL                *string            `json:"url,omitempty" doc:"Base URL including the version path, e.g. https://api.openai.com/v1 (Iroha appends /chat/completions). Required for a new Endpoint."`
+	Shape              *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks. Required for a new Endpoint."`
+	AuthStyle          *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent; default bearer. none sends no credential; on a Provider holding no Upstream Keys it also adds the keyless key \"keyless\" (see keyless_key)."`
+	AuthParam          *string            `json:"auth_param,omitempty" doc:"The header name for auth_style header (e.g. api-key) or the query parameter name for auth_style query (e.g. key)."`
+	StaticHeaders      *map[string]string `json:"static_headers,omitempty" doc:"Headers sent on every Attempt, e.g. {\"HTTP-Referer\": \"https://example.com\"}. An empty value sends no such header and drops the Caller's. Replaces the whole set; {} clears it."`
+	Renames            *map[string]string `json:"renames,omitempty" doc:"Model renames for this URL, Caller's name -> wire name, e.g. {\"glm-4.6\": \"glm-4.6-fp8\"}. Replaces the whole set; {} clears it."`
+	DiscoveryURL       *string            `json:"discovery_url,omitempty" doc:"Where the model list is read: \"\" (default) for <url>/models, \"none\" to never ask this Endpoint, or a full http(s) URL such as https://api.acme.example/api/coding/v4/models."`
+	CacheMarkers       *string            `json:"cache_markers,omitempty" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint: \"\" (default) Iroha's choice for its Shape and host, on, or off. Endpoint.caching shows the effect."`
+	SendPromptCacheKey *string            `json:"send_prompt_cache_key,omitempty" enum:",on,off" doc:"Send an OpenAI-shaped Endpoint a prompt_cache_key derived from the conversation on translated requests that have none: \"\" (default) Iroha's choice, on, or off."`
 }
 
 // UpdateEndpoint is the body of PATCH /api/providers/{provider}/endpoints/{endpoint}.
 type UpdateEndpoint struct {
-	Name          *string            `json:"name,omitempty"`
-	URL           *string            `json:"url,omitempty"`
-	Shape         *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini"`
-	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"Changing to a style without a parameter clears auth_param. Changing to none on a Provider holding no Upstream Keys adds the keyless key \"keyless\" (see keyless_key)."`
-	AuthParam     *string            `json:"auth_param,omitempty"`
-	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Replaces the whole set; {} clears it."`
-	Renames       *map[string]string `json:"renames,omitempty" doc:"Replaces the whole set; {} clears it."`
-	DiscoveryURL  *string            `json:"discovery_url,omitempty" doc:"\"\" for <url>/models, \"none\" for no discovery, or a URL."`
+	Name               *string            `json:"name,omitempty"`
+	URL                *string            `json:"url,omitempty"`
+	Shape              *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini"`
+	AuthStyle          *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"Changing to a style without a parameter clears auth_param. Changing to none on a Provider holding no Upstream Keys adds the keyless key \"keyless\" (see keyless_key)."`
+	AuthParam          *string            `json:"auth_param,omitempty"`
+	StaticHeaders      *map[string]string `json:"static_headers,omitempty" doc:"Replaces the whole set; {} clears it."`
+	Renames            *map[string]string `json:"renames,omitempty" doc:"Replaces the whole set; {} clears it."`
+	DiscoveryURL       *string            `json:"discovery_url,omitempty" doc:"\"\" for <url>/models, \"none\" for no discovery, or a URL."`
+	CacheMarkers       *string            `json:"cache_markers,omitempty" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint: \"\" (default) Iroha's choice for its Shape and host, on, or off. Endpoint.caching shows the effect."`
+	SendPromptCacheKey *string            `json:"send_prompt_cache_key,omitempty" enum:",on,off" doc:"Send an OpenAI-shaped Endpoint a prompt_cache_key derived from the conversation on translated requests that have none: \"\" (default) Iroha's choice, on, or off."`
 }
 
 // EndpointResult is the response of a single Endpoint change.
@@ -501,7 +513,8 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 			return Endpoint{}, err
 		}
 		if id != "" {
-			return h.updateEndpoint(m, p, id, UpdateEndpoint{AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames, DiscoveryURL: in.DiscoveryURL})
+			return h.updateEndpoint(m, p, id, UpdateEndpoint{AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames, DiscoveryURL: in.DiscoveryURL,
+				CacheMarkers: in.CacheMarkers, SendPromptCacheKey: in.SendPromptCacheKey})
 		}
 	}
 	if in.Name == "" {
@@ -510,7 +523,8 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 	if err := api.CheckName("name", in.Name); err != nil {
 		return Endpoint{}, err
 	}
-	upd := UpdateEndpoint{URL: in.URL, Shape: in.Shape, AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames, DiscoveryURL: in.DiscoveryURL}
+	upd := UpdateEndpoint{URL: in.URL, Shape: in.Shape, AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames, DiscoveryURL: in.DiscoveryURL,
+		CacheMarkers: in.CacheMarkers, SendPromptCacheKey: in.SendPromptCacheKey}
 	var id string
 	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM endpoints WHERE provider_id = ? AND name = ?`, p.id, in.Name).Scan(&id)
 	if err == nil {
@@ -536,9 +550,11 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 	if err := m.Track(EndpointResource, id); err != nil {
 		return Endpoint{}, err
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, p.id, e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), e.DiscoveryURL, store.Millis(m.Now)); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `INSERT INTO endpoints (id, provider_id, name, url, shape, auth_style, auth_param, static_headers, renames, discovery_url,
+		cache_markers, send_prompt_cache_key, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, p.id, e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), e.DiscoveryURL,
+		e.CacheMarkers, e.SendPromptCacheKey, store.Millis(m.Now)); err != nil {
 		return Endpoint{}, err
 	}
 	return readEndpoint(m.Ctx, m.Tx, id)
@@ -588,6 +604,19 @@ func applyEndpoint(e *Endpoint, in UpdateEndpoint) error {
 		}
 		e.DiscoveryURL = d
 	}
+	for _, f := range []struct {
+		name    string
+		in, out *string
+	}{{"cache_markers", in.CacheMarkers, &e.CacheMarkers}, {"send_prompt_cache_key", in.SendPromptCacheKey, &e.SendPromptCacheKey}} {
+		if f.in == nil {
+			continue
+		}
+		v := strings.ToLower(strings.TrimSpace(*f.in))
+		if !caching.ValidSetting(v) {
+			return api.BadRequest("Send \"\" for Iroha's default, \"on\" or \"off\".", "%s %q is not a value it takes.", f.name, *f.in)
+		}
+		*f.out = v
+	}
 	return checkEndpoint(e)
 }
 
@@ -636,8 +665,9 @@ func (h handlers) updateEndpoint(m *audit.Mutation, p ref, id string, in UpdateE
 			return Endpoint{}, err
 		}
 	}
-	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE endpoints SET name = ?, url = ?, shape = ?, auth_style = ?, auth_param = ?, static_headers = ?, renames = ?, discovery_url = ? WHERE id = ?`,
-		e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), e.DiscoveryURL, id); err != nil {
+	if _, err := m.Tx.ExecContext(m.Ctx, `UPDATE endpoints SET name = ?, url = ?, shape = ?, auth_style = ?, auth_param = ?, static_headers = ?, renames = ?, discovery_url = ?,
+		cache_markers = ?, send_prompt_cache_key = ? WHERE id = ?`,
+		e.Name, e.URL, e.Shape, e.AuthStyle, e.AuthParam, encodeMap(e.StaticHeaders), encodeMap(e.Renames), e.DiscoveryURL, e.CacheMarkers, e.SendPromptCacheKey, id); err != nil {
 		return Endpoint{}, err
 	}
 	return readEndpoint(m.Ctx, m.Tx, id)

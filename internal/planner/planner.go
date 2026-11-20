@@ -102,6 +102,10 @@ type Endpoint struct {
 	StaticHeaders map[string]string
 	// Renames maps a Caller-facing model name to the name this URL uses.
 	Renames map[string]string
+	// CacheMarkers and SendPromptCacheKey are the Owner's prompt caching
+	// settings for requests translated to this URL ("" default, on, off;
+	// caching.For reads them).
+	CacheMarkers, SendPromptCacheKey string
 }
 
 // WireModel is the model name this Endpoint uses for the Caller's model:

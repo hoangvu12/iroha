@@ -172,6 +172,7 @@ func tidyResponse(r map[string]any, t *Translation, u *dto.Usage) {
 	case u != nil:
 		r["usage"] = responsesUsage(usageMap(u))
 	}
+	t.writeCacheUsage(obj(r["usage"]))
 	if r["output"] == nil {
 		r["output"] = []any{}
 	}

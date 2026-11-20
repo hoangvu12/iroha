@@ -1,0 +1,21 @@
+== request sent upstream ==
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": "You are Claude Code.",
+      "role": "system"
+    },
+    {
+      "content": [
+        {
+          "text": "Hello",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "gpt-5",
+  "prompt_cache_key": "c1a6f3b0-0000-5000-8000-000000000003"
+}

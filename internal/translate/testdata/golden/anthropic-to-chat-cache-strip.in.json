@@ -1,0 +1,16 @@
+{
+  "from": "anthropic-messages",
+  "to": "openai-chat",
+  "model": "gpt-5",
+  "wire_model": "gpt-5",
+  "caching": {"markers": "strip", "fields": true, "prompt_cache_key": "c1a6f3b0-0000-5000-8000-000000000003"},
+  "request": {
+    "model": "gpt-5",
+    "max_tokens": 1024,
+    "system": [{"type": "text", "text": "You are Claude Code.", "cache_control": {"type": "ephemeral"}}],
+    "messages": [
+      {"role": "user", "content": [{"type": "text", "text": "Hello", "cache_control": {"type": "ephemeral"}}]}
+    ],
+    "metadata": {"user_id": "{\"device_id\":\"d1\",\"account_uuid\":\"\",\"session_id\":\"6a1b2c3d-0000-4e5f-8a9b-112233445566\"}"}
+  }
+}

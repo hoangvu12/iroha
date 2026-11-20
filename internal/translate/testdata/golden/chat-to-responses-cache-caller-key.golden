@@ -1,0 +1,12 @@
+== request sent upstream ==
+{
+  "input": [
+    {
+      "content": "Hello",
+      "role": "user"
+    }
+  ],
+  "model": "gpt-5",
+  "prompt_cache_key": "the-callers-own",
+  "store": false
+}

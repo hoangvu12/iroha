@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
@@ -241,6 +242,71 @@ func TestAnEndpointRefusingTheCacheFieldsIsAskedAgainWithoutThem(t *testing.T) {
 	srv2.Client(issue(t, srv2, "pi", all)).Post(chatPath, agentChat()).Expect(200)
 	if ant.Count() != 2 || strings.Contains(string(ant.Last().Body), "cache_control") {
 		t.Fatalf("second body %s", ant.Last().Body)
+	}
+}
+
+// The retry without Iroha's additions is free: it is its own Attempt but
+// does not use the Request's budget, so a Provider allowing one Attempt
+// still serves, and one with two keys keeps its fallback to the second.
+func TestTheRetryWithoutCacheFieldsUsesNoAttemptOfTheBudget(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addCachingProvider(t, srv, "openai-chat", up.URL(), nil)
+	srv.Admin.Patch("/api/providers/acme", map[string]any{"max_attempts": 1}).Expect(200)
+	refusal := testkit.Raw(400, "application/json", `{"error":{"message":"Unrecognized request argument supplied: prompt_cache_key","type":"invalid_request_error"}}`)
+	caller := claudeCaller(t, srv)
+	up.Enqueue(refusal, up.Text("hello"))
+	resp := caller.WithHeader("Iroha-Session", "s-1").Post(messagesPath, messages("gpt-x")).Expect(200)
+	if r := readRequest(t, srv, resp.Header.Get("X-Request-Id")); len(r.Attempts) != 2 || r.Attempts[0].Outcome != "retry_elsewhere" || r.Attempts[1].Status != 200 {
+		t.Fatalf("attempts %+v", r.Attempts)
+	}
+
+	// With two Attempts and two keys, a 5xx on the plain retry still moves on
+	// to the second key.
+	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": "sk-test-2"}).Expect(201)
+	srv.Admin.Patch("/api/providers/acme", map[string]any{"max_attempts": 2}).Expect(200)
+	srv.SkipShortWaits(time.Second)
+	up.Enqueue(refusal, up.Error(503, "busy"), up.Text("hello"))
+	resp = caller.WithHeader("Iroha-Session", "s-2").Post(messagesPath, messages("gpt-x")).Expect(200)
+	r := readRequest(t, srv, resp.Header.Get("X-Request-Id"))
+	if len(r.Attempts) != 3 || r.Attempts[0].UpstreamKey != r.Attempts[1].UpstreamKey || r.Attempts[2].UpstreamKey == r.Attempts[1].UpstreamKey {
+		t.Fatalf("attempts %+v", r.Attempts)
+	}
+
+	// At most once per Endpoint: a second refusal on the plain request is
+	// judged by the Failure Rules like any other 400.
+	srv.Admin.Patch("/api/providers/acme", map[string]any{"max_attempts": 1}).Expect(200)
+	up.Enqueue(refusal, refusal)
+	resp = caller.WithHeader("Iroha-Session", "s-3").Post(messagesPath, messages("gpt-x"))
+	if resp.Status == 200 || up.Count() != 7 {
+		t.Fatalf("status %d after %d upstream calls", resp.Status, up.Count())
+	}
+}
+
+// Only a refusal of the field as unknown is retried: a 400 that merely
+// quotes 'user' (a role error) or echoes the request (which holds the
+// added prompt_cache_key) is judged by the Failure Rules as before, with
+// no second call.
+func TestAnOrdinary400NamingAnAddedFieldIsNotRetried(t *testing.T) {
+	for name, body := range map[string]string{
+		"role error": `{"error":{"message":"Invalid value: 'tool'. Supported values are: 'system', 'assistant', 'user'.","type":"invalid_request_error","param":"messages[1].role"}}`,
+		"body echo":  `{"error":{"message":"Invalid request","type":"invalid_request_error","request":{"model":"gpt-x","user":"u-7","prompt_cache_key":"0b1c"}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := testkit.Start(t)
+			up := testkit.NewOpenAIChat(t)
+			addCachingProvider(t, srv, "openai-chat", up.URL(), nil)
+			up.Enqueue(testkit.Raw(400, "application/json", body), up.Text("hello"))
+			req := messages("gpt-x")
+			req["metadata"] = map[string]any{"user_id": "u-7"}
+			resp := claudeCaller(t, srv).WithHeader("Iroha-Session", "s-1").Post(messagesPath, req)
+			if !strings.Contains(string(up.Last().Body), "prompt_cache_key") || !strings.Contains(string(up.Last().Body), `"user"`) {
+				t.Fatalf("the request lacks Iroha's additions: %s", up.Last().Body)
+			}
+			if resp.Status != 400 || up.Count() != 1 {
+				t.Fatalf("status %d after %d upstream calls: %s", resp.Status, up.Count(), resp.Body)
+			}
+		})
 	}
 }
 

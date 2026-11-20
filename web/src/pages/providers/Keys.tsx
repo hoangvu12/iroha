@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useChatActions } from "@/app/chat-panel";
 import { useLocation, useNavigate } from "react-router";
-import { rec } from "@/sheets/RecordLink";
+import { RecordLink, rec } from "@/sheets/RecordLink";
 import { readStack, writeStack } from "@/sheets/records";
 import { useMaybeSheets } from "@/sheets/stack";
 import type { BulkResult } from "@/api/types";
@@ -930,13 +930,15 @@ export function EndpointsDialog({
 
 // ---- One key: its sheet (sheets/records/KeySheet.tsx) ----
 
-export function CoolingRow({ model, reason, until }: { model: string; reason: string; until: string }) {
+export function CoolingRow({ provider, model, reason, until }: { provider: string; model: string; reason: string; until: string }) {
   const left = Math.max(0, Math.round((new Date(until).getTime() - Date.now()) / 1000));
   return (
     <li className="flex items-start gap-3 px-4 py-2.5">
       <StatusDot tone={stateTone.cooling} className="mt-1.5" />
       <span className="min-w-0 flex-1">
-        <span className="block font-mono">{model}</span>
+        <span className="flex min-w-0 font-mono">
+          <RecordLink record={rec.model(provider, model)}>{model}</RecordLink>
+        </span>
         <span className="block text-fg-muted">
           Cooling for this model, {shortWait(left)} left: {reason}
         </span>

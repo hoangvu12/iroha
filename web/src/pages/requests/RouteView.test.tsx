@@ -58,6 +58,25 @@ test("the route's cards and the selected step link the records they name; a card
   await screen.findByRole("dialog", { name: "Upstream Key team-6" });
 });
 
+routes["GET /api/requests/req_rule"] = {
+  ...req1,
+  id: "req_rule",
+  attempt_count: 2,
+  attempts: [{ ...attempt(1, "team-5", 429), rule: "rate-limited", outcome: "cooling_key", reason: "429 slow down" }, attempt(2, "team-6", 200)],
+};
+
+test("the Attempt panel opens its key and its Failure Rule in place, as sheets over the Route view (review fixes 2)", async () => {
+  const user = userEvent.setup();
+  renderWithSheets(page, "/requests/req_rule/route");
+  const panel = await screen.findByRole("region", { name: "Selected step" });
+  expect(hrefOf(within(panel).getByRole("link", { name: "rate-limited" }))).toBe("/requests/req_rule/route?sheet=rule:acme/rate-limited");
+  const open = within(panel).getByRole("link", { name: "Open team-5" });
+  // Not the Keys page: the key's sheet over the Route view.
+  expect(hrefOf(open)).toBe("/requests/req_rule/route?sheet=key:acme/team-5");
+  await user.click(open);
+  await screen.findByRole("dialog", { name: "Upstream Key team-5" });
+});
+
 // UI ticket 18: motion in the Route view. jsdom has no Tailwind, so this reads the classes on the real markup.
 const classesOf = (el: Element) => el.getAttribute("class")!.split(/\s+/);
 

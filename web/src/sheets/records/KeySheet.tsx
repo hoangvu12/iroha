@@ -279,7 +279,7 @@ function KeyDetails({ k, provider, index, refetch }: { k: UpstreamKey; provider:
               </li>
             ))}
             {k.cooling_models.map((c) => (
-              <CoolingRow key={`c${c.model}`} model={c.model} reason={c.reason} until={c.until} />
+              <CoolingRow key={`c${c.model}`} provider={provider} model={c.model} reason={c.reason} until={c.until} />
             ))}
           </ul>
         </SheetSection>

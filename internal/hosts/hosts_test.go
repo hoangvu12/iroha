@@ -18,3 +18,36 @@ func TestOf(t *testing.T) {
 		}
 	}
 }
+
+// A domain matches itself and its subdomains, whatever the case; nothing
+// else ends in it by accident.
+func TestMatches(t *testing.T) {
+	for _, tc := range []struct {
+		host    string
+		domains []string
+		want    bool
+	}{
+		{"api.deepseek.com", []string{"deepseek.com"}, true},
+		{"deepseek.com", []string{"deepseek.com"}, true},
+		{"API.DeepSeek.com", []string{"deepseek.com"}, true},
+		{"api.deepseek.com", []string{"DeepSeek.com"}, true},
+		{"notdeepseek.com", []string{"deepseek.com"}, false},
+		{"deepseek.com.evil.example", []string{"deepseek.com"}, false},
+		{"api.mistral.ai", []string{"googleapis.com", "mistral.ai"}, true},
+		{"", []string{"deepseek.com"}, false},
+		{"api.deepseek.com", nil, false},
+	} {
+		if got := hosts.Matches(tc.host, tc.domains...); got != tc.want {
+			t.Errorf("Matches(%q, %v) = %v", tc.host, tc.domains, got)
+		}
+	}
+}
+
+// List reads a comma-separated list of domains as Failure Rules and
+// normalisers write it.
+func TestList(t *testing.T) {
+	got := hosts.List(" Relay.Example.com., ,api.x.ai ")
+	if len(got) != 2 || got[0] != "relay.example.com" || got[1] != "api.x.ai" {
+		t.Errorf("List = %q", got)
+	}
+}

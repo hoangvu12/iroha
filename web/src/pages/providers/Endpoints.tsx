@@ -180,12 +180,9 @@ export const endpointFields = (endpoint?: Endpoint) => ({
   renames: Object.entries(endpoint?.renames ?? {})
     .map(([k, v]) => `${k} -> ${v}`)
     .join("\n"),
-  cache_markers: (endpoint?.cache_markers || "default") as CacheChoice,
-  send_prompt_cache_key: (endpoint?.send_prompt_cache_key || "default") as CacheChoice,
+  cache_markers: endpoint?.cache_markers ?? ("" as CacheSetting),
+  send_prompt_cache_key: endpoint?.send_prompt_cache_key ?? ("" as CacheSetting),
 });
-
-type CacheChoice = (typeof CACHE_SETTINGS)[number]["value"];
-const cacheSetting = (c: CacheChoice): CacheSetting => (c === "default" ? "" : c);
 
 export type EndpointForm = ReturnType<typeof endpointFields>;
 
@@ -206,8 +203,8 @@ export function endpointBody(f: EndpointForm, handle: string, existing: Endpoint
     discovery_url: f.discovery_url.trim(),
     static_headers: linesToMap(f.headers, HEADER_LINE),
     renames: linesToMap(f.renames, RENAME_LINE),
-    cache_markers: cacheSetting(f.cache_markers),
-    send_prompt_cache_key: cacheSetting(f.send_prompt_cache_key),
+    cache_markers: f.cache_markers,
+    send_prompt_cache_key: f.send_prompt_cache_key,
   };
   if (f.name.trim()) body.name = f.name.trim();
   return { body };

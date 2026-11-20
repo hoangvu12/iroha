@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/hoangvu12/iroha/internal/affinity"
 	"github.com/hoangvu12/iroha/internal/caching"
 	"github.com/hoangvu12/iroha/internal/shape"
 	"github.com/hoangvu12/iroha/internal/usage"
@@ -22,7 +23,8 @@ import (
 //     never a 1 h marker after a 5 min one; and metadata.user_id from the
 //     Caller's user, safety_identifier or prompt_cache_key;
 //   - toward OpenAI Chat from Anthropic: the system prompt's markers where
-//     the Endpoint honours them, or no markers at all; the Caller's plain
+//     the Endpoint honours them, or no markers at all;
+//   - toward OpenAI Chat and Responses from Anthropic: the Caller's plain
 //     metadata.user_id as user (Claude Code's session JSON is a session, not
 //     a user);
 //   - toward OpenAI Chat and Responses: a prompt_cache_key derived from the
@@ -109,15 +111,23 @@ func (t *Translation) applyCaching(m map[string]any, f callerFields) {
 		if t.caller.shape == shape.AnthropicMessages {
 			t.chatMarkers(m, f, c.Markers)
 		}
-		if c.Fields && t.caller.shape == shape.AnthropicMessages && zero(m["user"]) {
-			if v := plainUserID(rawString(f.Metadata.UserID)); v != "" {
-				m["user"] = bounded(v, 64)
-				t.added("user")
-			}
-		}
+		t.userFromMetadata(m, f)
 		t.promptCacheKey(m, c.PromptCacheKey)
 	case shape.OpenAIResponses:
+		t.userFromMetadata(m, f)
 		t.promptCacheKey(m, c.PromptCacheKey)
+	}
+}
+
+// userFromMetadata sends an Anthropic Caller's plain metadata.user_id as
+// OpenAI's user (Chat and Responses), unless the request already has one.
+func (t *Translation) userFromMetadata(m map[string]any, f callerFields) {
+	if !t.o.Caching.Fields || t.caller.shape != shape.AnthropicMessages || !zero(m["user"]) {
+		return
+	}
+	if v, _ := affinity.MetadataUserID(f.Metadata.UserID); v != "" { // Claude Code's value is a session, not a user
+		m["user"] = bounded(v, 64)
+		t.added("user")
 	}
 }
 
@@ -135,18 +145,6 @@ func (t *Translation) added(name string) {
 		}
 	}
 	t.Added = append(t.Added, name)
-}
-
-// plainUserID is a metadata.user_id that names a user: not Claude Code's
-// value, which is a session (its JSON form, or the legacy
-// user_<hash>_account_<uuid>_session_<uuid>) and is already the
-// conversation a derived prompt_cache_key is made from.
-func plainUserID(v string) string {
-	v = strings.TrimSpace(v)
-	if strings.HasPrefix(v, "{") || strings.Contains(v, "_session_") {
-		return ""
-	}
-	return v
 }
 
 // bounded is v, or its SHA-256 when longer than n bytes.

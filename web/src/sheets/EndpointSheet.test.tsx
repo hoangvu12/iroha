@@ -114,9 +114,14 @@ test("the facts say what translated requests get for the prompt cache; Edit sets
   expect(s.getByRole("combobox", { name: "Send prompt_cache_key" }).textContent).toContain("Off");
   await user.click(markers);
   await user.click(await screen.findByRole("option", { name: "Off" }));
+  // Iroha's default is the setting "".
+  const key = s.getByRole("combobox", { name: "Send prompt_cache_key" });
+  await user.click(key);
+  await user.click(await screen.findByRole("option", { name: "Iroha's default" }));
+  expect(key.textContent).toContain("Iroha's default");
   await user.click(s.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(sent(fetch, "PATCH")).toHaveLength(1));
-  expect(sent(fetch, "PATCH")[0][1]).toMatchObject({ cache_markers: "off", send_prompt_cache_key: "off" });
+  expect(sent(fetch, "PATCH")[0][1]).toMatchObject({ cache_markers: "off", send_prompt_cache_key: "" });
 });
 
 test("an Endpoint without the caching fields (an older server) shows no prompt cache fact and saves Iroha's defaults", async () => {

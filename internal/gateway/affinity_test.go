@@ -180,6 +180,52 @@ func TestAffinityOffKeepsRoundRobin(t *testing.T) {
 	}
 }
 
+// In a Pool mixing Providers with affinity on and off, the Request records
+// the mode of the Provider whose key served it, so round-robin traffic is
+// never filed as affinity on; when nothing serves, the last Attempt's.
+func TestAPoolRecordsTheAffinityOfTheProviderThatServed(t *testing.T) {
+	srv := testkit.Start(t)
+	zai, chutes := testkit.NewOpenAIChat(t), testkit.NewOpenAIChat(t)
+	addProvider(t, srv, "zai", zai.URL(), "sk-test-z")
+	addProvider(t, srv, "chutes", chutes.URL(), "sk-test-c")
+	roundRobin(t, srv, "zai")
+	pool(t, srv, "glm", nil, "zai", "glm-4.6", "chutes", "glm-4.6")
+	caller := srv.Client(issue(t, srv, "pi", all)).WithHeader("Iroha-Session", "s-1")
+
+	if a := affinityOf(t, srv, caller.Post("/v1/chat/completions", chatBody("glm")).Expect(200)); a.Mode != "off" || a.PreferredServed != nil {
+		t.Fatalf("zai (affinity off) served, yet affinity = %+v", a)
+	}
+	zai.Enqueue(zai.Error(429, "slow down"))
+	if a := affinityOf(t, srv, caller.Post("/v1/chat/completions", chatBody("glm")).Expect(200)); a.Mode != "on" {
+		t.Fatalf("chutes (affinity on) served, yet affinity = %+v", a)
+	}
+
+	// Nothing serves: the last Attempt's Provider decides.
+	srv.Clock.Advance(2 * time.Minute)
+	pool(t, srv, "glm", nil, "chutes", "glm-4.6", "zai", "glm-4.6")
+	chutes.Enqueue(chutes.Error(429, "slow down"))
+	zai.Enqueue(zai.Error(429, "slow down"))
+	if a := affinityOf(t, srv, caller.Post("/v1/chat/completions", chatBody("glm")).Expect(503)); a.Mode != "off" || a.PreferredServed != nil {
+		t.Fatalf("the last Attempt was zai's, yet affinity = %+v", a)
+	}
+}
+
+// preferred_served says the key affinity put first gave the Caller a
+// successful answer: a redirect it answered with is not one.
+func TestPreferredServedNeedsASuccess(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	sixKeys(t, srv, up)
+	caller := srv.Client(issue(t, srv, "pi", all)).WithHeader("Iroha-Session", "s-1")
+	up.Enqueue(testkit.Raw(302, "text/plain", "moved").Header("Location", "https://elsewhere.example/v1"))
+	if a := affinityOf(t, srv, caller.Post(chatPath, chatBody("gpt-x")).Expect(502)); a.Mode != "on" || a.PreferredServed == nil || *a.PreferredServed {
+		t.Fatalf("the preferred key answered a redirect, yet affinity = %+v", a)
+	}
+	if a := affinityOf(t, srv, caller.Post(chatPath, chatBody("gpt-x")).Expect(200)); a.PreferredServed == nil || !*a.PreferredServed {
+		t.Fatalf("affinity = %+v", a)
+	}
+}
+
 // With the experiment at half, about half the conversations round-robin
 // (mode control) and half keep their key (mode on); the Requests stats
 // filter tells the halves apart.

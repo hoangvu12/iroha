@@ -53,6 +53,9 @@ type tried struct {
 type queued struct {
 	c      planner.Candidate
 	replay bool
+	// plain is the retry of a refused Attempt without Iroha's cache
+	// additions (caching.go): made at once, and outside the Attempt budget.
+	plain bool
 	// notBefore is when a replay may go: its failure plus replayPause.
 	notBefore time.Time
 }
@@ -123,6 +126,8 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 	var failed []tried
 	stop := stopCandidates
 	seq := 0
+	free := 0 // Attempts that use none of the budget (the plain retry, caching.go)
+	var last *planner.Candidate
 	for i := 0; i < len(queue); i++ {
 		q := queue[i]
 		c := q.c
@@ -131,7 +136,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 		if keyOut[c.Key.ID] || modelOut[keyModel] || (pairOut[pair] && !q.replay) {
 			continue
 		}
-		if seq >= maxAttempts {
+		if seq-free >= maxAttempts && !q.plain {
 			stop = stopAttempts
 			break
 		}
@@ -150,18 +155,23 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 				continue
 			}
 			if !x.pauseUntil(q.notBefore) {
+				x.noteServed(cands[0], last, false)
 				x.stopped()
 				x.summarize(failed, nil, "")
 				return
 			}
 		}
 		seq++
+		if q.plain {
+			free++
+		}
 		if seq == 1 {
 			x.noteProvider(c.Provider)
 		}
+		last = &c
 		a, f := x.attempt(seq, c, body, cr, deadline)
 		if f == nil { // answered
-			x.notePreferred(cands[0], &c)
+			x.noteServed(cands[0], &c, a.Status >= 200 && a.Status < 300 && a.Error == "")
 			x.recordAttempt(a)
 			if a.Status >= 200 && a.Status < 300 {
 				x.worked(c)
@@ -169,17 +179,18 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 			x.summarize(failed, &a, "")
 			return
 		}
-		if field := refusedAddition(f, x.added); field != "" { // caching.go
+		if field := x.refusedAddition(c, f); field != "" { // caching.go
 			t := x.retryPlain(c, a, f, field)
 			x.recordAttempt(t.attempt)
 			failed = append(failed, t)
-			queue = append(queue[:i+1], append([]queued{{c: c}}, queue[i+1:]...)...)
+			queue = append(queue[:i+1], append([]queued{{c: c, plain: true}}, queue[i+1:]...)...)
 			continue
 		}
 		t := x.classify(set, c, a, f)
 		x.recordAttempt(t.attempt)
 		failed = append(failed, t)
 		if x.ctx.Err() != nil {
+			x.noteServed(cands[0], last, false)
 			x.stopped()
 			x.summarize(failed, nil, "")
 			return
@@ -215,7 +226,7 @@ func (x *exchange) serve(cands []planner.Candidate, body []byte, cr callerReques
 			pairOut[pair] = true // never replay an Attempt that used up its time
 		}
 	}
-	x.notePreferred(cands[0], nil)
+	x.noteServed(cands[0], last, false)
 	x.failAll(failed, stop, maxAttempts)
 }
 

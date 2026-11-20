@@ -111,12 +111,23 @@ func (x *exchange) noteAffinity() {
 	x.rec.Affinity = &requests.Affinity{Source: string(x.conv.Source), Mode: x.conv.mode}
 }
 
-// notePreferred records whether the key affinity put first (the plan's
-// first candidate) answered the Request.
-func (x *exchange) notePreferred(first planner.Candidate, served *planner.Candidate) {
-	if x.rec.Affinity == nil || x.rec.Affinity.Mode != requests.AffinityOn {
+// noteServed records how affinity applied to the Request once its Attempts
+// are over. last is the candidate of the last Attempt (nil when none was
+// made), success whether it gave the Caller a successful answer. The mode
+// is that of last's Provider, so in a Pool mixing Providers with affinity
+// on and off, round-robin traffic is filed as off. preferred_served (mode
+// on only) says the key affinity put first (the plan's first candidate)
+// gave that successful answer.
+func (x *exchange) noteServed(first planner.Candidate, last *planner.Candidate, success bool) {
+	if x.rec.Affinity == nil || x.conv.mode == requests.AffinityNone {
 		return
 	}
-	ok := served != nil && served.Key.ID == first.Key.ID && served.Provider.ID == first.Provider.ID
+	if last != nil && last.Provider.AffinityOff {
+		x.rec.Affinity.Mode = requests.AffinityOff
+	}
+	if x.rec.Affinity.Mode != requests.AffinityOn {
+		return
+	}
+	ok := success && last != nil && last.Key.ID == first.Key.ID && last.Provider.ID == first.Provider.ID
 	x.rec.Affinity.PreferredServed = &ok
 }

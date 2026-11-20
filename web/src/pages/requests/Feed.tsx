@@ -31,6 +31,7 @@ import { Skeleton } from "@/ui/Skeleton";
 import { type DataColumn, type DataTablePaging, DataTable, columnsFor, useTablePaging } from "@/ui/DataTable";
 import type { FilterOptions, RequestRecord, Stats } from "./api";
 import { useFilterOptions, useRequestFeed, useRequestStats } from "./api";
+import { cachedShare, cacheReadText } from "./cache-share";
 import { SAMPLE_CALLERS, SAMPLE_REQUESTS, SAMPLE_STATS } from "./samples";
 import { clock, compactNumber, failed, PoolTag, ProviderLogo, secs, shapeInOut, StatusCell, statusTone } from "./bits";
 import { useLendRequestRows } from "@/sheets/stack";
@@ -227,7 +228,7 @@ function StatsRow({ stats, phone }: { stats: Stats; phone: boolean }) {
           { label: "Tokens", value: stats.tokens.total > 0 ? compactNumber(stats.tokens.total) : "0" },
           {
             label: "Cached",
-            value: stats.tokens.input > 0 ? formatPercent(stats.tokens.cache_read / stats.tokens.input) : "–",
+            value: pctOr(cachedShare(stats.tokens)),
             title: cachedTitle(stats.tokens),
           },
         ]),
@@ -248,10 +249,12 @@ function StatsRow({ stats, phone }: { stats: Stats; phone: boolean }) {
   );
 }
 
+const pctOr = (share: number | undefined) => (share === undefined ? "–" : formatPercent(share));
+
 /** What the cached share is made of: "1,000 of 4,000 input tokens read from the cache; 600 written to it". */
 function cachedTitle(t: Stats["tokens"]): string | undefined {
-  if (t.input <= 0) return undefined;
-  const read = `${formatNumber(t.cache_read)} of ${formatNumber(t.input)} input tokens read from the cache`;
+  if (cachedShare(t) === undefined) return undefined;
+  const read = cacheReadText(t);
   return t.cache_write > 0 ? `${read}; ${formatNumber(t.cache_write)} written to it` : read;
 }
 

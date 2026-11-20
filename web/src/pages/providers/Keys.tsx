@@ -19,7 +19,7 @@ import { RecordLink, rec } from "@/sheets/RecordLink";
 import { readStack, writeStack } from "@/sheets/records";
 import { useMaybeSheets } from "@/sheets/stack";
 import type { BulkResult } from "@/api/types";
-import { formatDuration, formatNumber, formatPercent, plural, timeAgo } from "@/lib/format";
+import { formatDuration, formatPercent, plural, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { useUrlParams } from "@/lib/url-state";
 import { Button, TextButton } from "@/ui/Button";
@@ -37,6 +37,7 @@ import { EmptyState } from "@/ui/States";
 import { notify, notifyChange } from "@/ui/toast";
 import type { KeyTestBulk, KeyTestResult, Provider, UpstreamKey } from "./api";
 import type { StatsGroup } from "@/pages/requests/api";
+import { cachedShare, cacheReadText } from "@/pages/requests/cache-share";
 import { calls, errorText, maskSecret, natural, useKeyCache, useKeys, useRefresh } from "./api";
 import { Reveal } from "@/ui/Reveal";
 import { appearClass } from "@/ui/motion";
@@ -65,7 +66,7 @@ const stateOrder = { invalid: 0, cooling: 1, disabled: 2, active: 3 };
 type KeyCache = Map<string, StatsGroup>;
 
 /** A key's cached share, undefined when it counted no input in the window. */
-const shareOf = (g?: StatsGroup) => (g && g.tokens.input > 0 ? g.tokens.cache_read / g.tokens.input : undefined);
+const shareOf = (g?: StatsGroup) => cachedShare(g?.tokens);
 
 const col = columnsFor<UpstreamKey>();
 const keyColumns = (cache: KeyCache) => col.columns([
@@ -117,7 +118,7 @@ function CachedCell({ g }: { g?: StatsGroup }) {
   const share = shareOf(g);
   if (!g || share === undefined) return <span className="text-fg-muted">–</span>;
   return (
-    <span title={`${formatNumber(g.tokens.cache_read)} of ${formatNumber(g.tokens.input)} input tokens read from the cache, ${plural(g.requests, "Request")}`}>
+    <span title={`${cacheReadText(g.tokens)}, ${plural(g.requests, "Request")}`}>
       {formatPercent(share)}
     </span>
   );

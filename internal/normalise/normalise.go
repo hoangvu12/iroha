@@ -182,17 +182,11 @@ func (s Set) Stream() *Stream {
 
 // matchesHost reports whether host is one of hosts (comma-separated) or a
 // subdomain of one; an empty list matches every host.
-func matchesHost(hosts, host string) bool {
-	if strings.TrimSpace(hosts) == "" {
+func matchesHost(list, host string) bool {
+	if strings.TrimSpace(list) == "" {
 		return true
 	}
-	for _, d := range strings.Split(hosts, ",") {
-		d = strings.ToLower(strings.TrimSpace(d))
-		if d != "" && (host == d || strings.HasSuffix(host, "."+d)) {
-			return true
-		}
-	}
-	return false
+	return hosts.Matches(host, hosts.List(list)...)
 }
 
 // JSON helpers. Numbers are kept as written (json.Number), and encoding

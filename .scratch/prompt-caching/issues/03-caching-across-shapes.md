@@ -36,6 +36,29 @@ Same-Shape passthrough doesn't change. Go tests: golden files per direction (mar
 **Deferred / worth knowing**:
 
 - A Caller's marker on a non-text Chat part (an image, a tool result) can't be matched to a block by text and is left out; Iroha's own markers are then added only if none of the Caller's were placed.
-- Toward OpenAI Responses from Anthropic only `prompt_cache_key` is added (RelayKit already copies `metadata`); no `user` mapping there.
 - Host lists are code (like normalisers), not settings; a Provider that changes its handling needs a code change or the Endpoint's `on`/`off`.
 - Markers within the 4 that RelayKit splits differently from the Caller's parts (a list-content system prompt stays two blocks) count as separate markers, so the clamp may drop one more than the Caller expected.
+
+## Review fixes
+
+From the code review of tickets 01-03 (`iroha-v2-notes/prompt-caching/review-fixes.md`), one pass on branch `agent/pcfix`:
+
+1. **The plain retry is free.** The retry without Iroha's additions is queued as `queued.plain` and does not count toward `max_attempts` (`seq - free`); still its own Attempt, at most once per Endpoint per Request (`x.plain`). `gateway TestTheRetryWithoutCacheFieldsUsesNoAttemptOfTheBudget`: `max_attempts: 1` and a refusal now succeeds; with two keys and `max_attempts: 2` the fallback to the second key is kept.
+2. **Only real unknown-field refusals.** `caching.Refused` replaces the substring match: the field must be refused as unknown (OpenAI-compatible "Unrecognized request argument supplied", "Unknown parameter", "Unsupported parameter", `unknown field`, Google's `Unknown name`, pydantic "Extra inputs are not permitted" with the field in `loc`, Anthropic `path: Extra inputs are not permitted`, JSON Schema "was unexpected") and named as the parameter (top-level fields first in the path, `cache_control` anywhere). Table `caching TestRefusedFindsTheAddedFieldAnEndpointRefuses`; `gateway TestAnOrdinary400NamingAnAddedFieldIsNotRetried` (a role error quoting `'user'` and a body echo go to the Failure Rules, one upstream call).
+3. **`affinity.mode` is the serving Provider's.** `noteServed` sets `off` when the Provider whose key served (or, with no answer, the last Attempt's) has affinity off. `gateway TestAPoolRecordsTheAffinityOfTheProviderThatServed`.
+4. **`preferred_served` needs a success**: true only for a 2xx answer with no error from the preferred key. `gateway TestPreferredServedNeedsASuccess` (a redirect answered by it is false).
+5. **`exclude_tests=true`** on `GET /api/requests` and `/stats` (`caller_kind != 'test'`, so tests sent as a Gateway Key too); `caller_kind` still works; skill 41 and the Keys tab's "Cached, 24 h" column use it. `requests TestExcludeTestsLeavesOutTestRequests`.
+6. **Anthropic → OpenAI Responses** maps a plain `metadata.user_id` to `user` as toward Chat (`userFromMetadata`), never over a `user` already there; a refusal of it is covered by fix 2. The deferral line is removed. `translate TestAnthropicToResponsesMapsAPlainUserID`.
+7. **`cache_markers: on` wins** over the host default toward Anthropic (block markers on Kimi, DeepSeek and Anthropic's own API alike); `Policy.Note` makes the Endpoint's `caching.summary` say when the host refuses (Kimi/Moonshot) or ignores (DeepSeek) them. Rows in `caching TestPolicyFollowsShapeHostAndSettings`, `TestTheSummaryWarnsWhenOnGoesAgainstTheHost`.
+8. **Key choice labels**: `codex` reads "session-id or thread-id header: Codex, pi"; the API doc of `Affinity.source`, skill 20 and the `affinity.Source` comments say `codex`/`opencode` name headers sent by Codex/OpenCode and others (pi). Stored values unchanged.
+9. **Caller, not client** in skill 20, `affinity.go` and `affinity.ts`.
+10. **Log kind** `cache_field.refused` (`gateway.KindCacheFieldRefused`, declared beside its emitter) instead of `generic`.
+11. `Usage`'s doc comment is back above `Usage` in `pages/requests/api.ts`.
+12. **One host match**: `hosts.Matches` and `hosts.List`, used by Failure Rules (`Rule.MatchesHost`, rule checks), normalisers and the caching defaults. `hosts TestMatches`, `TestList`.
+13. **Body reading**: `affinity.MetadataUserID` (plain user or Claude Code session) is used by affinity and by translation; translate's `plainUserID` copy is gone. `affinity TestMetadataUserIDTellsAUserFromClaudeCodesSession`. Left as they are: `rawString`/`str` and `firstNonEmpty`/`firstText` (five-line JSON helpers; `firstNonEmpty` trims and `firstText` must not, and exporting generic JSON helpers from `affinity` would make translation depend on it for nothing affinity-specific), and `callerFields`/`fields` (they read different parts of the body for different jobs: marker placement and Gemini's cache versus identifying a conversation; one struct would couple them).
+14. **One settings type**: `caching.Settings` (embedded in `providers.Endpoint` and the audit snapshot, so the JSON stays flat; `planner.Endpoint.Caching`; `caching.For(sh, url, s)`) and `caching.SettingsPatch` in the create/update bodies, applied by `Settings.Apply`. On the web one `CacheSetting` type: the form's Selects hold `""` for Iroha's default (`EndpointSheet.test.tsx` picks it).
+15. `requests` takes `affinity_source` values from `affinity.Sources`; `requests TestAffinitySourcesAreAffinitysList` checks the OpenAPI enum (a struct tag) against it.
+16. **One cached-share helper**: `pages/requests/cache-share.ts` (`cachedShare`, `cacheReadText`) for the stats row, the Keys column and an Attempt's Cache read row; `cache-share.test.ts`.
+17. `strconv.Itoa` in `affinity_test.go`; `testkit.CacheMarkers` replaces `markerPlaces` (gateway) and `markers` (translate).
+
+Not changed, as the review asked: cache writes reaching Callers of translated answers, `cache_hits`, the read-only `caching` summary, `settings.Choice`, and the other items listed under "Not to change".

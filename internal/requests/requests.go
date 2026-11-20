@@ -71,10 +71,10 @@ type Request struct {
 
 // Affinity is how a Request's conversation chose its Upstream Key.
 type Affinity struct {
-	Source string `json:"source" enum:"header,claude_code,codex,session_id,opencode,prompt_cache_key,prefix,none" doc:"Where the conversation was found: the Iroha-Session header, Claude Code's session (x-claude-code-session-id or metadata.user_id), Codex's session_id/session-id/thread-id header, x-session-id or a body session_id, OpenCode's x-session-affinity, the body's prompt_cache_key, a hash of the prompt's start (system prompt, tool names, first user message), or none (an empty prompt)."`
-	Mode   string `json:"mode" enum:"on,off,control,none" doc:"on: the Provider's keys were ranked for the conversation; off: the Provider has affinity off (round-robin); control: the conversation fell in the round-robin half of the affinity.experiment; none: no conversation (round-robin)."`
+	Source string `json:"source" enum:"header,claude_code,codex,session_id,opencode,prompt_cache_key,prefix,none" doc:"Where the conversation was found: the Iroha-Session header, Claude Code's session (x-claude-code-session-id or metadata.user_id), codex: the session_id, session-id or thread-id header (sent by Codex and others, such as pi), x-session-id or a body session_id, opencode: the x-session-affinity header (sent by OpenCode and others, such as pi), the body's prompt_cache_key, a hash of the prompt's start (system prompt, tool names, first user message), or none (an empty prompt)."`
+	Mode   string `json:"mode" enum:"on,off,control,none" doc:"on: the Provider's keys were ranked for the conversation; off: the Provider that served (or, when none did, the last Attempt's) has affinity off (round-robin); control: the conversation fell in the round-robin half of the affinity.experiment; none: no conversation (round-robin)."`
 	// PreferredServed is set when Mode is on.
-	PreferredServed *bool `json:"preferred_served,omitempty" doc:"With mode on: true when the key the conversation ranks first answered; false when another key did (the first was cooling or failed) or none did."`
+	PreferredServed *bool `json:"preferred_served,omitempty" doc:"With mode on: true when the key the conversation ranks first gave the Caller a successful (2xx) answer; false when another key did (the first was cooling or failed), the answer was not a success, or none came."`
 }
 
 // Affinity modes.

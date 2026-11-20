@@ -149,7 +149,7 @@ test("Cached, 24 h: each key's cached share from the Requests of the last day, t
   expect(cell(1)?.textContent).toBe("–"); // no Requests in the last day
   expect(cell(2)?.textContent).toBe("0.0%");
   const asked = fetch.mock.calls.map(([u]) => new URL(String(u), "http://iroha.test")).find((u) => u.pathname === "/api/requests/stats")!;
-  expect(Object.fromEntries(asked.searchParams)).toEqual({ provider: "acme", group_by: "upstream_key", since: "24h", caller_kind: "gateway_key" });
+  expect(Object.fromEntries(asked.searchParams)).toEqual({ provider: "acme", group_by: "upstream_key", since: "24h", exclude_tests: "true" });
 });
 
 test("sorting by Cached, 24 h puts the best-cached key first and lives in the URL", async () => {

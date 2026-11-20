@@ -54,16 +54,16 @@ export type Endpoint = {
   created_at: string;
 };
 
+/** An Endpoint's caching setting (cache_markers, send_prompt_cache_key): "" is Iroha's default. The form's Selects hold it as is. */
 export type CacheSetting = "" | "on" | "off";
 
-/** An Endpoint's caching setting as the form's Select holds it ("default" for ""). */
-export const CACHE_SETTINGS: { value: "default" | "on" | "off"; label: string }[] = [
-  { value: "default", label: "Iroha's default" },
+export const CACHE_SETTINGS: { value: CacheSetting; label: string }[] = [
+  { value: "", label: "Iroha's default" },
   { value: "on", label: "On" },
   { value: "off", label: "Off" },
 ];
 
-export const cacheSettingLabel = (s?: CacheSetting) => CACHE_SETTINGS.find((c) => c.value === (s || "default"))!.label;
+export const cacheSettingLabel = (s?: CacheSetting) => CACHE_SETTINGS.find((c) => c.value === (s ?? ""))!.label;
 
 export type Provider = {
   id: string;
@@ -376,7 +376,7 @@ export function useKeyCache(handle: string) {
     // Under "requests": history, not configuration (api/refresh.ts).
     queryKey: ["requests", "stats", "key-cache", handle],
     queryFn: ({ signal }) =>
-      api.get<Stats>("/api/requests/stats", { signal, query: { provider: handle, group_by: "upstream_key", since: "24h", caller_kind: "gateway_key" } }),
+      api.get<Stats>("/api/requests/stats", { signal, query: { provider: handle, group_by: "upstream_key", since: "24h", exclude_tests: "true" } }),
     select: (s): Map<string, StatsGroup> => new Map((s.groups ?? []).filter((g) => g.upstream_key_id).map((g) => [g.upstream_key_id!, g])),
     refetchInterval: 60_000,
   });

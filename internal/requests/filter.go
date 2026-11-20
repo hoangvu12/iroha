@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hoangvu12/iroha/internal/affinity"
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/store"
@@ -45,6 +46,7 @@ var timeParams = []api.Param{
 var filterParams = append([]api.Param{
 	{Name: "caller", Description: "Caller name at the time of the Request (a Gateway Key name, or a Test caller such as `Test` or `Test (as zeron-fleet)`), or a Gateway Key ID. Repeat for any of several."},
 	{Name: "caller_kind", Enum: []string{CallerGatewayKey, CallerTest}, Description: "Only Requests from Gateway Keys, or only test Requests sent from the chat."},
+	{Name: "exclude_tests", Type: "boolean", Description: "true: leave out test Requests (sent from the test chat, also those sent as a Gateway Key), so only Callers' own traffic counts."},
 	{Name: "provider", Description: "Provider handle that served (or was named by) the Request. Repeat for any of several."},
 	{Name: "pool", Description: "Model Pool the Caller asked for. Repeat for any of several."},
 	{Name: "model", Description: "Model exactly as the Caller named it. Repeat for any of several."},
@@ -57,7 +59,14 @@ var filterParams = append([]api.Param{
 	{Name: "q", Description: "Text search: part of the Request ID, model, Caller name or Provider handle."},
 }, timeParams...)
 
-var affinitySources = []string{"header", "claude_code", "codex", "session_id", "opencode", "prompt_cache_key", "prefix", "none"}
+// affinitySources are the values of affinity_source: affinity.Sources.
+var affinitySources = func() []string {
+	out := make([]string, len(affinity.Sources))
+	for i, s := range affinity.Sources {
+		out[i] = string(s)
+	}
+	return out
+}()
 
 const timeHint = "Use an RFC 3339 time (2026-01-02T15:04:05Z) or a duration such as 1h."
 
@@ -90,6 +99,15 @@ func parseFilter(q url.Values, c clock.Clock, timeOnly bool) (filter, error) {
 				return f, api.BadRequest("Use caller_kind=gateway_key or caller_kind=test.", "caller_kind %q is not a Caller kind.", s)
 			}
 			f.add("caller_kind = ?", s)
+		}
+		if s := q.Get("exclude_tests"); s != "" {
+			b, err := strconv.ParseBool(s)
+			if err != nil {
+				return f, api.BadRequest("Use exclude_tests=true or exclude_tests=false.", "exclude_tests %q is not true or false.", s)
+			}
+			if b {
+				f.add("caller_kind != ?", CallerTest)
+			}
 		}
 		for _, p := range []struct{ param, col string }{{"provider", "provider_handle"}, {"pool", "pool"}, {"model", "model"}} {
 			if v := values(q, p.param); len(v) > 0 {

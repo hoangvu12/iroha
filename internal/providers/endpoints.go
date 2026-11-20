@@ -38,9 +38,8 @@ type endpointSnapshot struct {
 	Renames       map[string]string `json:"renames,omitempty"`
 	DiscoveryURL  string            `json:"discovery_url,omitempty"` // ticket 10; empty is the default
 	// Prompt caching 03; empty is Iroha's default.
-	CacheMarkers       string    `json:"cache_markers,omitempty"`
-	SendPromptCacheKey string    `json:"send_prompt_cache_key,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
+	caching.Settings
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // EndpointResource is the Endpoint resource of the audit machinery.
@@ -165,30 +164,28 @@ func endpointURLFree(ctx context.Context, q *sql.Tx, providerID, handle, u, sh, 
 
 // CreateEndpoint is the body of POST /api/providers/{provider}/endpoints.
 type CreateEndpoint struct {
-	Name               string             `json:"name,omitempty" doc:"Unique within the Provider. Repeating a create with an existing name updates that Endpoint. Without a name, the Endpoint with the same url and shape is updated, else the name is \"default\"."`
-	URL                *string            `json:"url,omitempty" doc:"Base URL including the version path, e.g. https://api.openai.com/v1 (Iroha appends /chat/completions). Required for a new Endpoint."`
-	Shape              *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks. Required for a new Endpoint."`
-	AuthStyle          *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent; default bearer. none sends no credential; on a Provider holding no Upstream Keys it also adds the keyless key \"keyless\" (see keyless_key)."`
-	AuthParam          *string            `json:"auth_param,omitempty" doc:"The header name for auth_style header (e.g. api-key) or the query parameter name for auth_style query (e.g. key)."`
-	StaticHeaders      *map[string]string `json:"static_headers,omitempty" doc:"Headers sent on every Attempt, e.g. {\"HTTP-Referer\": \"https://example.com\"}. An empty value sends no such header and drops the Caller's. Replaces the whole set; {} clears it."`
-	Renames            *map[string]string `json:"renames,omitempty" doc:"Model renames for this URL, Caller's name -> wire name, e.g. {\"glm-4.6\": \"glm-4.6-fp8\"}. Replaces the whole set; {} clears it."`
-	DiscoveryURL       *string            `json:"discovery_url,omitempty" doc:"Where the model list is read: \"\" (default) for <url>/models, \"none\" to never ask this Endpoint, or a full http(s) URL such as https://api.acme.example/api/coding/v4/models."`
-	CacheMarkers       *string            `json:"cache_markers,omitempty" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint: \"\" (default) Iroha's choice for its Shape and host, on, or off. Endpoint.caching shows the effect."`
-	SendPromptCacheKey *string            `json:"send_prompt_cache_key,omitempty" enum:",on,off" doc:"Send an OpenAI-shaped Endpoint a prompt_cache_key derived from the conversation on translated requests that have none: \"\" (default) Iroha's choice, on, or off."`
+	Name          string             `json:"name,omitempty" doc:"Unique within the Provider. Repeating a create with an existing name updates that Endpoint. Without a name, the Endpoint with the same url and shape is updated, else the name is \"default\"."`
+	URL           *string            `json:"url,omitempty" doc:"Base URL including the version path, e.g. https://api.openai.com/v1 (Iroha appends /chat/completions). Required for a new Endpoint."`
+	Shape         *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The API format the URL speaks. Required for a new Endpoint."`
+	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"How the Upstream Key is sent; default bearer. none sends no credential; on a Provider holding no Upstream Keys it also adds the keyless key \"keyless\" (see keyless_key)."`
+	AuthParam     *string            `json:"auth_param,omitempty" doc:"The header name for auth_style header (e.g. api-key) or the query parameter name for auth_style query (e.g. key)."`
+	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Headers sent on every Attempt, e.g. {\"HTTP-Referer\": \"https://example.com\"}. An empty value sends no such header and drops the Caller's. Replaces the whole set; {} clears it."`
+	Renames       *map[string]string `json:"renames,omitempty" doc:"Model renames for this URL, Caller's name -> wire name, e.g. {\"glm-4.6\": \"glm-4.6-fp8\"}. Replaces the whole set; {} clears it."`
+	DiscoveryURL  *string            `json:"discovery_url,omitempty" doc:"Where the model list is read: \"\" (default) for <url>/models, \"none\" to never ask this Endpoint, or a full http(s) URL such as https://api.acme.example/api/coding/v4/models."`
+	caching.SettingsPatch
 }
 
 // UpdateEndpoint is the body of PATCH /api/providers/{provider}/endpoints/{endpoint}.
 type UpdateEndpoint struct {
-	Name               *string            `json:"name,omitempty"`
-	URL                *string            `json:"url,omitempty"`
-	Shape              *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini"`
-	AuthStyle          *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"Changing to a style without a parameter clears auth_param. Changing to none on a Provider holding no Upstream Keys adds the keyless key \"keyless\" (see keyless_key)."`
-	AuthParam          *string            `json:"auth_param,omitempty"`
-	StaticHeaders      *map[string]string `json:"static_headers,omitempty" doc:"Replaces the whole set; {} clears it."`
-	Renames            *map[string]string `json:"renames,omitempty" doc:"Replaces the whole set; {} clears it."`
-	DiscoveryURL       *string            `json:"discovery_url,omitempty" doc:"\"\" for <url>/models, \"none\" for no discovery, or a URL."`
-	CacheMarkers       *string            `json:"cache_markers,omitempty" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint: \"\" (default) Iroha's choice for its Shape and host, on, or off. Endpoint.caching shows the effect."`
-	SendPromptCacheKey *string            `json:"send_prompt_cache_key,omitempty" enum:",on,off" doc:"Send an OpenAI-shaped Endpoint a prompt_cache_key derived from the conversation on translated requests that have none: \"\" (default) Iroha's choice, on, or off."`
+	Name          *string            `json:"name,omitempty"`
+	URL           *string            `json:"url,omitempty"`
+	Shape         *string            `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini"`
+	AuthStyle     *string            `json:"auth_style,omitempty" enum:"bearer,x-api-key,header,query,none" doc:"Changing to a style without a parameter clears auth_param. Changing to none on a Provider holding no Upstream Keys adds the keyless key \"keyless\" (see keyless_key)."`
+	AuthParam     *string            `json:"auth_param,omitempty"`
+	StaticHeaders *map[string]string `json:"static_headers,omitempty" doc:"Replaces the whole set; {} clears it."`
+	Renames       *map[string]string `json:"renames,omitempty" doc:"Replaces the whole set; {} clears it."`
+	DiscoveryURL  *string            `json:"discovery_url,omitempty" doc:"\"\" for <url>/models, \"none\" for no discovery, or a URL."`
+	caching.SettingsPatch
 }
 
 // EndpointResult is the response of a single Endpoint change.
@@ -514,7 +511,7 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 		}
 		if id != "" {
 			return h.updateEndpoint(m, p, id, UpdateEndpoint{AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames, DiscoveryURL: in.DiscoveryURL,
-				CacheMarkers: in.CacheMarkers, SendPromptCacheKey: in.SendPromptCacheKey})
+				SettingsPatch: in.SettingsPatch})
 		}
 	}
 	if in.Name == "" {
@@ -524,7 +521,7 @@ func (h handlers) upsertEndpoint(m *audit.Mutation, p ref, in CreateEndpoint) (E
 		return Endpoint{}, err
 	}
 	upd := UpdateEndpoint{URL: in.URL, Shape: in.Shape, AuthStyle: in.AuthStyle, AuthParam: in.AuthParam, StaticHeaders: in.StaticHeaders, Renames: in.Renames, DiscoveryURL: in.DiscoveryURL,
-		CacheMarkers: in.CacheMarkers, SendPromptCacheKey: in.SendPromptCacheKey}
+		SettingsPatch: in.SettingsPatch}
 	var id string
 	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM endpoints WHERE provider_id = ? AND name = ?`, p.id, in.Name).Scan(&id)
 	if err == nil {
@@ -604,18 +601,8 @@ func applyEndpoint(e *Endpoint, in UpdateEndpoint) error {
 		}
 		e.DiscoveryURL = d
 	}
-	for _, f := range []struct {
-		name    string
-		in, out *string
-	}{{"cache_markers", in.CacheMarkers, &e.CacheMarkers}, {"send_prompt_cache_key", in.SendPromptCacheKey, &e.SendPromptCacheKey}} {
-		if f.in == nil {
-			continue
-		}
-		v := strings.ToLower(strings.TrimSpace(*f.in))
-		if !caching.ValidSetting(v) {
-			return api.BadRequest("Send \"\" for Iroha's default, \"on\" or \"off\".", "%s %q is not a value it takes.", f.name, *f.in)
-		}
-		*f.out = v
+	if err := e.Settings.Apply(in.SettingsPatch); err != nil {
+		return api.BadRequest("Send \"\" for Iroha's default, \"on\" or \"off\".", "%s.", err.Error())
 	}
 	return checkEndpoint(e)
 }

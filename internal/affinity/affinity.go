@@ -25,9 +25,9 @@ type Source string
 const (
 	Header         Source = "header"           // Iroha-Session
 	ClaudeCode     Source = "claude_code"      // x-claude-code-session-id, or the session in metadata.user_id
-	Codex          Source = "codex"            // session_id, session-id or thread-id header
+	Codex          Source = "codex"            // session_id, session-id or thread-id header (Codex, pi and others send them)
 	SessionID      Source = "session_id"       // x-session-id header, or session_id in the body
-	OpenCode       Source = "opencode"         // x-session-affinity
+	OpenCode       Source = "opencode"         // x-session-affinity header (OpenCode, pi and others)
 	PromptCacheKey Source = "prompt_cache_key" // the body's prompt_cache_key
 	Prefix         Source = "prefix"           // hash of the system prompt, tool names and first user message
 	None           Source = "none"             // nothing to go by (an empty prompt)
@@ -156,8 +156,7 @@ func session(v string) string {
 // user_<hash>_account_<uuid>_session_<uuid>.
 var legacyUserID = regexp.MustCompile(`_session_([A-Fa-f0-9-]+)$`)
 
-// claudeCodeSession is the session inside Claude Code's metadata.user_id,
-// in its JSON form ({"session_id": ...} as a string) or its legacy form.
+// claudeCodeSession is the session inside Claude Code's metadata.user_id.
 func claudeCodeSession(metadata json.RawMessage) string {
 	var m struct {
 		UserID json.RawMessage `json:"user_id"`
@@ -165,25 +164,40 @@ func claudeCodeSession(metadata json.RawMessage) string {
 	if json.Unmarshal(metadata, &m) != nil {
 		return ""
 	}
+	_, s := MetadataUserID(m.UserID)
+	return s
+}
+
+// MetadataUserID reads an Anthropic metadata.user_id (raw JSON): either
+// Claude Code's value, which names a session (its JSON form, a string
+// holding {"session_id": ...}, or the legacy
+// user_<hash>_account_<uuid>_session_<uuid>; an object with session_id from
+// some Callers), or a plain user. At most one of user and sessionID is set;
+// neither when the value is empty, of another type, or Claude Code's form
+// without a usable session. Translation sends only a plain user on.
+func MetadataUserID(raw json.RawMessage) (user, sessionID string) {
 	var inner struct {
 		SessionID json.RawMessage `json:"session_id"`
 	}
-	if u := strings.TrimSpace(str(m.UserID)); u != "" {
-		if strings.HasPrefix(u, "{") {
-			if json.Unmarshal([]byte(u), &inner) == nil {
-				return session(str(inner.SessionID))
-			}
-			return ""
+	u := strings.TrimSpace(str(raw))
+	switch {
+	case u == "":
+		if json.Unmarshal(raw, &inner) == nil { // an object, from some Callers
+			return "", session(str(inner.SessionID))
 		}
+		return "", ""
+	case strings.HasPrefix(u, "{"):
+		if json.Unmarshal([]byte(u), &inner) == nil {
+			return "", session(str(inner.SessionID))
+		}
+		return "", ""
+	case strings.Contains(u, "_session_"):
 		if s := legacyUserID.FindStringSubmatch(u); s != nil {
-			return session(s[1])
+			return "", session(s[1])
 		}
-		return ""
+		return "", ""
 	}
-	if json.Unmarshal(m.UserID, &inner) == nil { // an object, from some clients
-		return session(str(inner.SessionID))
-	}
-	return ""
+	return u, ""
 }
 
 // str is a JSON string's value; "" for anything else.
@@ -278,7 +292,7 @@ func cut(s string) string {
 }
 
 // text is the text of a content value: a string, or the text of its
-// parts (cache markers and other part fields are left out, since clients
+// parts (cache markers and other part fields are left out, since Callers
 // move them between turns).
 func text(raw json.RawMessage) string {
 	if s := str(raw); s != "" {

@@ -7,6 +7,7 @@ import { Disclosure } from "@/ui/Disclosure";
 import { Skeleton } from "@/ui/Skeleton";
 import { EmptyState } from "@/ui/States";
 import type { Attempt, RequestRecord } from "./api";
+import { cacheReadText } from "./cache-share";
 import { SAMPLE_ATTEMPTS } from "./samples";
 import { attemptFailed, explain, servedModel, thenText } from "./attempt-info";
 import { Badge, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, statusText, Summary } from "./bits";
@@ -129,9 +130,7 @@ export function AttemptFacts({ a, next, withSentTo = true }: { a: Attempt; next?
       )}
       {!e.failed && a.usage && (
         <>
-          <Row label="Cache read">
-            {formatNumber(a.usage.cache_read)} of {formatNumber(a.usage.input)} input
-          </Row>
+          <Row label="Cache read">{cacheReadText(a.usage, "short")}</Row>
           <Row label="Cache write">{formatNumber(a.usage.cache_write)}</Row>
         </>
       )}

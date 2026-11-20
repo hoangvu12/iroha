@@ -12,7 +12,7 @@ test("the reason names where the conversation came from and whether its key serv
     "This conversation's key couldn't serve; its next key was tried (Iroha-Session header)",
   );
   expect(affinityReason({ source: "prefix", mode: "control" })).toBe("Keys in turn: this conversation is in the experiment's round-robin half (prompt's start)");
-  expect(affinityReason({ source: "codex", mode: "off" })).toBe("Keys in turn: conversation affinity is off for this Provider (session-id header: Codex, pi)");
+  expect(affinityReason({ source: "codex", mode: "off" })).toBe("Keys in turn: conversation affinity is off for this Provider (session-id or thread-id header: Codex, pi)");
   expect(affinityReason({ source: "none", mode: "none" })).toBe("Keys in turn: no conversation found");
   expect(affinityReason(undefined)).toBeUndefined();
 });

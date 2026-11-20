@@ -83,7 +83,7 @@ test("an example fills the failure in one click; Try asks the server what the ru
   const user = userEvent.setup();
   const fetch = renderTab();
   const p = await panel();
-  await user.click(within(p).getByRole("button", { name: "429 rate limit" }));
+  await user.click(within(p).getByRole("button", { name: "429 cooling" }));
   expect((within(p).getByRole("textbox", { name: "Status" }) as HTMLInputElement).value).toBe("429");
   expect((within(p).getByRole("textbox", { name: "Body" }) as HTMLTextAreaElement).value).toContain("rate_limit_exceeded");
   expect((within(p).getByRole("textbox", { name: "Headers" }) as HTMLTextAreaElement).value).toBe("Retry-After: 30");
@@ -100,7 +100,7 @@ test("the result is said in words and the path lights up to the rule that matche
   const user = userEvent.setup();
   renderTab();
   const p = await panel();
-  await user.click(within(p).getByRole("button", { name: "429 rate limit" }));
+  await user.click(within(p).getByRole("button", { name: "429 cooling" }));
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   const said = await within(p).findByRole("status");
   // The server's own words for the effects (key_effect, request_effect), never re-worded here.
@@ -148,7 +148,7 @@ test("editing the failure clears the highlight", async () => {
   const user = userEvent.setup();
   renderTab();
   const p = await panel();
-  await user.click(within(p).getByRole("button", { name: "429 rate limit" }));
+  await user.click(within(p).getByRole("button", { name: "429 cooling" }));
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   await within(p).findByRole("status");
   await user.type(within(p).getByRole("textbox", { name: "Body" }), " ");
@@ -161,7 +161,7 @@ test("on a phone the path lights up the same way, stacked", async () => {
   vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(max-width: 767px)", media: q, addEventListener() {}, removeEventListener() {} }));
   renderTab();
   const p = await panel();
-  await user.click(within(p).getByRole("button", { name: "429 rate limit" }));
+  await user.click(within(p).getByRole("button", { name: "429 cooling" }));
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   await within(p).findByRole("status");
   const rate = steps()[2];
@@ -176,7 +176,7 @@ test("an agent fills in a failure and tries it", async () => {
   const entries = agent.snapshot().filter((e) => !e.offPage && e.component !== "more");
   for (const e of entries) expect(e.label, `${e.component} ${e.ref} has no name`).toBeTruthy();
   const labels = entries.map((e) => e.label);
-  for (const l of ["Status", "Body", "Headers", "Try this failure", "429 rate limit", "401 invalid key", "404 model not found", "200 with an error"]) expect(labels, `${l} is missing`).toContain(l);
+  for (const l of ["Status", "Body", "Headers", "Try this failure", "429 cooling", "401 invalid key", "404 model not found", "200 with an error"]) expect(labels, `${l} is missing`).toContain(l);
   const run = await agent.act({
     steps: [
       { ref: "Status", action: "setValue", args: ["401"] },

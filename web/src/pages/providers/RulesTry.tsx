@@ -21,7 +21,7 @@ const json = (v: unknown) => JSON.stringify(v, null, 2);
 /** One click fills the failure: the common answers a Provider gives. */
 export const EXAMPLES: Example[] = [
   {
-    label: "429 rate limit",
+    label: "429 cooling",
     status: "429",
     headers: "Retry-After: 30",
     body: json({ error: { message: "Rate limit reached for requests", type: "requests", code: "rate_limit_exceeded" } }),

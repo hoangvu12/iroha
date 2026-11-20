@@ -235,7 +235,7 @@ function StatsRow({ stats, phone }: { stats: Stats; phone: boolean }) {
   return (
     <dl className={cn("mb-6 grid divide-x divide-border rounded-xl border border-border", phone ? "-mt-3 grid-cols-3" : "-mt-2 grid-cols-7")}>
       {cells.map((c) => (
-        <div key={c.label} className={cn("min-w-0", phone ? "px-4 py-3" : "px-5 py-4")}>
+        <div key={c.label} className={cn("min-w-0", phone ? "px-4 py-3" : "px-4 py-4")}>
           <dt className="truncate text-[14px] text-fg-muted">
             {c.label}
           </dt>

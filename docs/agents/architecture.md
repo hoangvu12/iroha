@@ -21,6 +21,7 @@ One Go binary (`cmd/iroha`), one SQLite file (`<data-dir>/iroha.db`), pure-Go dr
 | `internal/shape` | The four Shape names; `AnthropicVersion`. |
 | `internal/hosts` | `hosts.Of(url)`: the lowercased host without port, the one way Iroha reads an Endpoint's host (Failure Rules, normalisers, logs). |
 | `internal/testkit` | In-process server, clients, fake upstreams. |
+| `internal/archtest` | Tests only: the checked rules of "Rules everyone follows" (parses the module's non-test Go files and migrations), with allow-lists. |
 | `internal/providers` | Providers, Endpoints (URL, Shape, auth style, static headers, renames; validated in `checkEndpoint`), Upstream Keys and their restriction to Endpoints (`upstream_key_endpoints`, `restrictions.go`): tables, audited admin routes (`/api/providers`, `.../{provider}/endpoints`, `.../{provider}/keys`, key `enable`/`disable` singly and in bulk, `.../{provider}/summary`, `.../{provider}/model-gaps` and key `clear-model-gaps` singly and in bulk in `gaps.go`), the per-Provider Request budget (`EffectiveBudget`), and `Store.Routing(handle)`, the routing view the Gateway plans over (Key States and restrictions included). `Routes(tr, db, log)`. |
 | `internal/rules` | Failure Rules, pure and table-tested: a `Rule` is data (status, code, body regex, headers, scope, `Outcome`, reset sources); `Set.Classify(Failure, now)` gives a `Decision` (rule, outcome, reason, reset time, the status it read). `Builtin` (`builtin.go`; one entry per rule) holds the provider quirks of 07 and the generic fallbacks; `Merge(owner, builtin)` lets same-named rules override. A built-in for one Provider's quirk targets it by `Host` (comma-separated domains of the service, e.g. `aliyuncs.com`), never by handle; codes nothing else uses differently are global. Errors inside a 2xx answer (`EmbeddedError`) are read as the status they stand for, and an event-stream failure body by its first JSON payload, so streamed and buffered errors match the same rules. `builtin_test.go` has a recorded body for every built-in and fails when a rule has none. |
 | `internal/failurerules` | Failure Rules managed through the admin API (`/api/rules`): the `failure_rules` table (Owner rules, overrides of built-ins by name, built-ins switched off; a row exists only while a rule differs from its built-in), the audited `failure_rule` resource whose record ID is the rule name (built-ins always exist, cannot be deleted), hit counts from `attempts.rule`, the dry-run `replay` of recent failed Attempts, and `Store.Set`, the live `rules.Set` passed as `gateway.Options.Rules` (reloaded when triggers bump `failure_rules_version`, so API changes and reverts apply to the next Request). |
@@ -227,13 +228,18 @@ Nested admin resources (Endpoints and Upstream Keys under a Provider) resolve th
 
 ## Rules everyone follows
 
-- **Time**: never call `time.Now`, `time.After`, `time.NewTimer` or `context.WithTimeout` for anything behaviour depends on. Take a `clock.Clock` and use `c.Now()`, `c.NewTimer`, `clock.WithTimeout(ctx, c, d)`, `clock.Sleep`. Tests use `*clock.Fake`.
-- **Stored times** are `INTEGER` unix milliseconds UTC named `*_at`; convert with `store.Millis` / `store.FromMillis` / `store.NullMillis`.
+`internal/archtest` checks the rules marked *(checked)*: `go test ./internal/archtest` fails naming the file:line and the fix. An exception goes in that test's allow-list with the reason next to it, never a weaker check.
+
+- **Time** *(checked: `TestTimeComesFromTheInjectedClock`)*: no wall clock outside `internal/clock` and `internal/testkit`. Take a `clock.Clock`: `c.Now()`, `c.NewTimer`, `clock.Since`, `clock.Sleep`, `clock.WithTimeout(ctx, c, d)`. Tests use `*clock.Fake`.
+- **Stored times** are unix milliseconds UTC named `*_at` *(checked for migrations: `TestStoredTimesAreIntegerMillis` refuses a `*_at` column of any type but `INTEGER`)*; convert with `store.Millis` / `store.FromMillis` / `store.NullMillis`. Naming a time column `*_at` is yours to remember.
 - **Writes** go through `db.Tx(ctx, func(tx *sql.Tx) error {...})` (takes the write lock up front).
-- **JSON** fields are `snake_case`; times RFC 3339.
+- **JSON** fields and parameters are `snake_case` *(checked: `TestAPIJSONIsSnakeCase`, over the OpenAPI of every route but the Caller routes, which speak their Shape's wire format)*; times RFC 3339.
 - **Errors** returned from handlers are `*api.Error` with a code, message and a hint naming the next action (`api.Errorf`, `api.BadRequest`, `api.NotFound`). Anything else becomes a 500 and is logged as `http.error`.
 - **Secrets** (Admin Tokens, Gateway Keys, Upstream Keys) are stored readable (ADR-0006) but never written to logs.
-- Modules take their dependencies explicitly (`*store.DB`, `*slog.Logger`, `clock.Clock`, `*http.Client`); no globals, no service locator.
+- **Dependencies** are passed explicitly (`*store.DB`, `*slog.Logger`, `clock.Clock`, `*http.Client`); no service locator *(checked: `TestDependenciesArePassedExplicitly` refuses package-level vars of those types, `slog`'s default logger and `http.DefaultClient`/`http.Get`)*.
+- **Imports** *(checked: `TestImportsStayInTheirPackages`)*: stdlib `net/http`, no router or framework; a module outside the standard library needs an entry in the test's `thirdParty` list (RelayKit for `internal/translate` only, `modernc.org/sqlite` for `internal/store` and `internal/v1import`).
+- **Pure packages** *(checked: `TestPurePackagesStayPure`)*: `rules`, `planner`, `affinity`, `caching` and `normalise`, with everything they import, use no database, routes, server, outbound HTTP, logger, clock or `os`; `modelmeta` uses no database, routes or server (its `Source` fetches models.dev). `http.Header` and other plain types are fine.
+- **Hosts** *(checked: `TestEndpointHostsComeFromHostsOf`)*: read an Endpoint's host with `hosts.Of`, compare with `hosts.Matches`, never `url.Hostname()`.
 
 ## Add a route
 

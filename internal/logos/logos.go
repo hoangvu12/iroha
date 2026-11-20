@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/clock"
+	"github.com/hoangvu12/iroha/internal/hosts"
 	"github.com/hoangvu12/iroha/internal/logs"
 )
 
@@ -461,11 +462,7 @@ var secondLevel = map[string]bool{"co": true, "com": true, "net": true, "org": t
 // (api.openai.com -> openai.com, dashscope-intl.aliyuncs.com -> aliyuncs.com).
 // "" for IP addresses, localhost and anything unreadable.
 func SiteOf(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return ""
-	}
-	d, err := NormalizeDomain(u.Hostname())
+	d, err := NormalizeDomain(hosts.Of(rawURL))
 	if err != nil {
 		return ""
 	}

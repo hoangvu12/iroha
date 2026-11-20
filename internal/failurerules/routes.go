@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/audit"
+	"github.com/hoangvu12/iroha/internal/hosts"
 	"github.com/hoangvu12/iroha/internal/providers"
 	"github.com/hoangvu12/iroha/internal/rules"
 	"github.com/hoangvu12/iroha/internal/store"
@@ -361,17 +361,17 @@ func providerScope(ctx context.Context, q queryer, ref string) (string, []string
 		return "", nil, err
 	}
 	defer rows.Close()
-	var hosts []string
+	var list []string
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
 			return "", nil, err
 		}
-		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
-			hosts = append(hosts, strings.ToLower(u.Hostname()))
+		if h := hosts.Of(raw); h != "" {
+			list = append(list, h)
 		}
 	}
-	return handle, hosts, rows.Err()
+	return handle, list, rows.Err()
 }
 
 // appliesTo reports whether a rule can match failures of the Provider.

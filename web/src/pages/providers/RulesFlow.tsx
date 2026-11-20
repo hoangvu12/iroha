@@ -1,11 +1,11 @@
-import type { ReactNode } from "react";
+import type { AriaAttributes, ReactNode } from "react";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { CircleX } from "lucide-react";
 import { formatNumber } from "@/lib/format";
 import type { Tone } from "@/ui/bits";
 import { StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
-import type { Outcome, Rule } from "./api";
+import type { Classification, Outcome, Rule } from "./api";
 import { OUTCOMES } from "./api";
 import { Pill, ProviderTile } from "./controls";
 import { Connector, IconTile, Tag } from "./PoolRoute";
@@ -41,15 +41,42 @@ export function builtInWords(b: NonNullable<Rule["overrides"]>): string {
   return `${what}, ${time}`;
 }
 
-function coolFor(n: number): string {
+export function coolFor(n: number): string {
   if (n < 120 || n % 60 !== 0) return `${n} s`;
   if (n < 7200 || n % 3600 !== 0) return `${n / 60} min`;
   return `${n / 3600} h`;
 }
 
 /**
+ * Where a tried failure went at one step (UI ticket 34): `missed` (tried, didn't match), `match`
+ * (decided here) or `unreached` (after the match). Undefined when nothing was tried, and for a
+ * switched-off rule, which is skipped either way.
+ */
+export type Trace = "missed" | "match" | "unreached";
+
+/** Each rule's trace for a tried failure, and the End card's; nothing for an answer that isn't a failure. */
+export function traceOf(rules: Rule[], tried: Classification | undefined): { steps: (Trace | undefined)[]; end?: Trace; at: number } {
+  const none = { steps: rules.map(() => undefined), at: -1 };
+  if (!tried?.failure) return none;
+  // Where it stopped: the rule that matched, or past the last rule (the End card).
+  const at = tried.rule ? rules.findIndex((r) => r.name === tried.rule) : rules.length;
+  if (at < 0) return none;
+  return {
+    steps: rules.map((r, i) => (i === at ? "match" : i > at ? "unreached" : r.enabled ? "missed" : undefined)),
+    end: at === rules.length ? "match" : "unreached",
+    at,
+  };
+}
+
+// A lit path: the route view's lines in the focus colour (the Connector reads --border-strong).
+const lit = "[--border-strong:var(--info)] [--color-border-strong:var(--info)]";
+// The highlight changes colour only, on the hover duration (a colour fade is kept under reduced motion).
+const traceMotion = "transition-[opacity,border-color,box-shadow,background-color,color] duration-hover ease-[ease]";
+
+/**
  * `stacked`: too narrow for a rule and its match branch side by side (phones, a tablet, a narrow window
  * beside the chat): each step then carries what a match does inside it, under its conditions.
+ * `tried`: a failure tried against these rules (UI ticket 34); the path it took lights up.
  */
 export function RulesFlow({
   handle,
@@ -57,18 +84,25 @@ export function RulesFlow({
   onOpen,
   aside,
   stacked,
+  tried,
 }: {
   handle: string;
   rules: Rule[];
   onOpen: (r: Rule) => void;
   aside: (r: Rule) => ReactNode;
   stacked: boolean;
+  tried?: Classification;
 }) {
   const column = stacked ? "w-full max-w-[560px]" : "w-[520px] self-start";
   const most = Math.max(0, ...rules.map((r) => r.hits));
+  const trace = traceOf(rules, tried);
+  // The rail under a step is lit while the failure is still falling: down to the step that matched.
+  const fell = (i: number) => i < trace.at;
+  // The fallback that decided a failure no rule matched: no response or 5xx tries the next key.
+  const fallback = trace.end === "match" && tried ? (tried.outcome === "fail_request" ? "caller" : "next") : undefined;
   return (
     <div className="flex flex-col items-center">
-      <Box className={column}>
+      <Box className={column} trace={trace.end && "missed"}>
         <ProviderTile handle={handle} size={36} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] text-fg-muted">A failed Attempt on</span>
@@ -76,34 +110,53 @@ export function RulesFlow({
         </span>
         <Tag>Start</Tag>
       </Box>
-      <Rail className={column} label="Tried in order; the first rule that matches decides" />
+      <Rail className={cn(column, trace.end && lit)} label="Tried in order; the first rule that matches decides" />
       <ol aria-label="Failure Rules, in the order they're tried" className="flex w-full flex-col">
         {rules.map((r, i) => (
-          <li key={r.name} className="flex flex-col items-center">
-            <Step r={r} n={i + 1} most={most} stacked={stacked} onOpen={() => onOpen(r)} aside={aside(r)} />
-            <Rail className={column} />
+          <li key={r.name} className="flex flex-col items-center" data-trace={trace.steps[i]} aria-current={trace.steps[i] === "match" ? "step" : undefined}>
+            <Step r={r} n={i + 1} most={most} stacked={stacked} onOpen={() => onOpen(r)} aside={aside(r)} trace={trace.steps[i]} tried={tried} />
+            <Rail className={cn(column, fell(i) && lit, trace.steps[i] === "unreached" && "opacity-50")} />
           </li>
         ))}
       </ol>
-      <Box className={column}>
+      <Box
+        className={column}
+        trace={trace.end}
+        role="group"
+        aria-label="No rule matched"
+        aria-current={trace.end === "match" ? "step" : undefined}
+      >
         <IconTile>
           <CircleX size={17} />
         </IconTile>
         <span className="min-w-0 flex-1">
           <span className="block text-[13px] text-fg-muted">No rule matched</span>
-          <span className="block text-[15px] font-semibold">No response or 5xx: try the next key</span>
-          <span className="block text-[15px] font-semibold">Anything else: return the error to the Caller</span>
+          {/* A failure that got here: the line of the fallback that decided it stays, the other one dims. */}
+          <span className={cn("block text-[15px] font-semibold", traceMotion, fallback === "caller" && "text-fg-subtle")}>No response or 5xx: try the next key</span>
+          <span className={cn("block text-[15px] font-semibold", traceMotion, fallback === "next" && "text-fg-subtle")}>Anything else: return the error to the Caller</span>
         </span>
-        <Tag>End</Tag>
+        {trace.end === "match" ? <Pill tone="blue">Decided here</Pill> : <Tag>End</Tag>}
       </Box>
     </div>
   );
 }
 
-/** A card of the flow, as on the route view (C19): white, rounded, bordered. */
-function Box({ children, className, dashed }: { children: ReactNode; className?: string; dashed?: boolean }) {
+/** A card of the flow, as on the route view (C19): white, rounded, bordered; `trace` lights it on a tried failure's path. */
+function Box({ children, className, dashed, trace, ...aria }: { children: ReactNode; className?: string; dashed?: boolean; trace?: Trace } & AriaAttributes & { role?: string }) {
   return (
-    <div className={cn("flex items-center gap-3 rounded-xl border bg-bg px-4 py-3 shadow-sm", dashed ? "border-dashed border-border shadow-none" : "border-border", className)}>
+    <div
+      {...aria}
+      data-trace={trace}
+      className={cn(
+        "flex items-center gap-3 rounded-xl border bg-bg px-4 py-3 shadow-sm",
+        traceMotion,
+        dashed ? "border-dashed border-border shadow-none" : "border-border",
+        trace === "missed" && "border-info",
+        trace === "match" && "border-info ring-2 ring-info/25",
+        trace === "unreached" && "opacity-50",
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -121,17 +174,41 @@ function Rail({ label, className }: { label?: string; className?: string }) {
   );
 }
 
-function Step({ r, n, most, stacked, onOpen, aside }: { r: Rule; n: number; most: number; stacked: boolean; onOpen: () => void; aside: ReactNode }) {
+function Step({
+  r,
+  n,
+  most,
+  stacked,
+  onOpen,
+  aside,
+  trace,
+  tried,
+}: {
+  r: Rule;
+  n: number;
+  most: number;
+  stacked: boolean;
+  onOpen: () => void;
+  aside: ReactNode;
+  trace?: Trace;
+  tried?: Classification;
+}) {
   const off = !r.enabled;
   const scope = scopeWords(r);
+  const match = trace === "match";
+  // What this step does to the tried failure: the engine's words (a Retry-After changes the time), else the rule's.
+  const effect = match && tried ? tried : undefined;
   const card = (
     <div
       data-off={off || undefined}
       className={cn(
         // As on the route view: hover changes border only (duration-hover); no press scale on a card.
-        "relative w-full rounded-xl border bg-bg shadow-sm transition-[border-color] duration-hover ease-[ease] hover:border-border-strong",
+        "relative w-full rounded-xl border bg-bg shadow-sm hover:border-border-strong",
+        traceMotion,
         stacked ? "w-full max-w-[560px]" : "w-[520px] shrink-0",
         off ? "border-dashed border-border bg-bg/70 shadow-none" : "border-border",
+        match && "border-info ring-2 ring-info/25 hover:border-info",
+        trace === "unreached" && "opacity-50",
       )}
     >
       <SdkButton onClick={onOpen} aria-label={`Open ${r.name}`} className="absolute inset-0 rounded-xl outline-none focus-visible:outline-2 focus-visible:outline-info" />
@@ -139,7 +216,8 @@ function Step({ r, n, most, stacked, onOpen, aside }: { r: Rule; n: number; most
         <span
           className={cn(
             "inline-flex size-7 shrink-0 items-center justify-center rounded-full border text-[13px] tabular",
-            off ? "border-dashed border-border text-fg-subtle" : "border-border-strong text-fg-muted",
+            traceMotion,
+            off ? "border-dashed border-border text-fg-subtle" : match ? "border-info bg-info-tint font-semibold text-info" : "border-border-strong text-fg-muted",
           )}
         >
           {n}
@@ -155,6 +233,8 @@ function Step({ r, n, most, stacked, onOpen, aside }: { r: Rule; n: number; most
               <Pill>{r.source === "builtin" ? "Built-in" : "Custom"}</Pill>
             )}
             {off && <Pill>Off, skipped</Pill>}
+            {trace === "missed" && <Pill>Didn't match</Pill>}
+            {match && <Pill tone="blue">Matched</Pill>}
           </span>
           {/* Phones wrap what it matches rather than cut it: it's the half of the rule that can't be read elsewhere on the step. */}
           <span className={cn("mt-0.5 block font-mono text-[13px] text-fg-muted", stacked ? "[overflow-wrap:anywhere]" : "truncate")} title={matchWords(r)}>
@@ -172,22 +252,24 @@ function Step({ r, n, most, stacked, onOpen, aside }: { r: Rule; n: number; most
       {stacked && (
         <div className={cn("border-t px-4 py-2.5", off ? "border-dashed border-border" : "border-border")}>
           <span className="mb-1 flex items-start justify-between gap-3">
-            <span className="text-[12.5px] text-fg-muted">{off ? "Would, if it were on" : "If it matches"}</span>
+            <span className={cn("text-[12.5px]", match ? "font-medium text-info" : "text-fg-muted")}>{off ? "Would, if it were on" : match ? "It matches, so" : "If it matches"}</span>
             <Hits hits={r.hits} most={most} />
           </span>
-          <Effect r={r} />
+          <Effect r={effect ?? r} />
         </div>
       )}
     </div>
   );
   if (stacked) return card;
+  // A tried failure that passed this rule leaves its branch dim, so the lit path reads at a glance.
+  const dim = trace === "missed" || trace === "unreached";
   return (
     <div className="flex w-full items-center">
       {card}
       {/* The match branch: the failure leaves the flow here when this rule matches. */}
-      <div className="flex w-28 shrink-0 items-center" aria-hidden>
+      <div className={cn("flex w-28 shrink-0 items-center", traceMotion, match && lit, dim && "opacity-40")} aria-hidden>
         <span className={cn("h-px flex-1", off ? "border-t border-dashed border-border-strong" : "bg-border-strong")} />
-        <span className={cn("mx-1 text-[12.5px]", off ? "text-fg-subtle" : "text-fg-muted")}>{off ? "skipped" : "matches"}</span>
+        <span className={cn("mx-1 text-[12.5px]", off ? "text-fg-subtle" : match ? "font-medium text-info" : "text-fg-muted")}>{off ? "skipped" : "matches"}</span>
         <span className={cn("h-px w-3", off ? "border-t border-dashed border-border-strong" : "bg-border-strong")} />
         {!off && (
           <svg width="6" height="9" viewBox="0 0 6 9" className="text-border-strong">
@@ -195,20 +277,20 @@ function Step({ r, n, most, stacked, onOpen, aside }: { r: Rule; n: number; most
           </svg>
         )}
       </div>
-      <Box dashed={off} className={cn("min-w-0 max-w-[380px] flex-1 py-2.5", off && "opacity-60")}>
-        <Effect r={r} />
+      <Box dashed={off} trace={match ? "match" : undefined} className={cn("min-w-0 max-w-[380px] flex-1 py-2.5", off && "opacity-60", dim && "opacity-40")}>
+        <Effect r={effect ?? r} />
       </Box>
     </div>
   );
 }
 
 /** What a match does: to the Upstream Key (with its Key State colour) and to the Request. */
-function Effect({ r }: { r: Rule }) {
+function Effect({ r }: { r: Pick<Rule, "key_effect" | "request_effect"> & { outcome?: Outcome } }) {
   return (
     <dl className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[14px]">
       <dt className="text-fg-muted">Upstream Key</dt>
       <dd className="flex min-w-0 items-center gap-2">
-        <StatusDot tone={keyTone(r.outcome)} />
+        <StatusDot tone={r.outcome ? keyTone(r.outcome) : "gray"} />
         <span className="truncate">{r.key_effect}</span>
       </dd>
       <dt className="text-fg-muted">Request</dt>

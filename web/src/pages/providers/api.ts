@@ -203,6 +203,29 @@ export type Rule = RuleFields & {
 
 export type Replay = { attempts: number; changed: number; since: string; rules: { rule: string; now: number; after: number }[] };
 
+/** A failure the Owner types, for POST /api/providers/{p}/rules/classify (UI ticket 34). Status 0: no response. */
+export type FailureInput = { status: number; body?: string; headers?: Record<string, string>; model?: string; endpoint?: string };
+
+/** What the live Failure Rules decide for a FailureInput (Go `gateway.Classification`). */
+export type Classification = {
+  dry_run: boolean;
+  provider: string;
+  endpoint?: string;
+  host?: string;
+  /** false: a 2xx answer with no error in it, relayed to the Caller; no rule tried. */
+  failure: boolean;
+  /** Absent when no rule matched (the engine's fallback decided). */
+  rule?: string;
+  outcome?: Outcome;
+  status: number;
+  embedded: boolean;
+  reason?: string;
+  key_effect: string;
+  request_effect: string;
+  cooling_seconds?: number;
+  cooling_from?: "response" | "rule" | "default";
+};
+
 export type Member = { position: number; provider: string; model: string; enabled: boolean };
 export type MemberInput = { provider: string; model: string; enabled: boolean };
 
@@ -438,6 +461,8 @@ export const calls = {
   updateRule: (name: string, body: Partial<RuleFields>, dryRun?: boolean) => api.patch<RuleResult>(`/api/rules/${seg(name)}`, body, { query: dry(dryRun) }),
   switchRule: (name: string, on: boolean) => api.post<RuleResult>(`/api/rules/${seg(name)}/${on ? "enable" : "disable"}`),
   deleteRule: (name: string) => api.delete<RuleResult>(`/api/rules/${seg(name)}`),
+  /** Read-only: which rule a typed failure matches and what it does (nothing is sent or stored). */
+  classify: (h: string, body: FailureInput) => api.post<Classification>(`${P(h)}/rules/classify`, body),
 
   createPool: (body: { name: string; members?: MemberInput[]; maker?: string }) => api.post<PoolResult>("/api/pools", body),
   updatePool: (name: string, body: { name?: string; members?: MemberInput[]; maker?: string; budget?: Partial<Pool["budget"]> }) =>

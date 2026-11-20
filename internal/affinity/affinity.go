@@ -25,9 +25,9 @@ type Source string
 const (
 	Header         Source = "header"           // Iroha-Session
 	ClaudeCode     Source = "claude_code"      // x-claude-code-session-id, or the session in metadata.user_id
-	Codex          Source = "codex"            // session_id, session-id or thread-id header
+	Codex          Source = "codex"            // session_id, session-id or thread-id header (Codex, pi and others send them)
 	SessionID      Source = "session_id"       // x-session-id header, or session_id in the body
-	OpenCode       Source = "opencode"         // x-session-affinity
+	OpenCode       Source = "opencode"         // x-session-affinity header (OpenCode, pi and others)
 	PromptCacheKey Source = "prompt_cache_key" // the body's prompt_cache_key
 	Prefix         Source = "prefix"           // hash of the system prompt, tool names and first user message
 	None           Source = "none"             // nothing to go by (an empty prompt)
@@ -180,7 +180,7 @@ func claudeCodeSession(metadata json.RawMessage) string {
 		}
 		return ""
 	}
-	if json.Unmarshal(m.UserID, &inner) == nil { // an object, from some clients
+	if json.Unmarshal(m.UserID, &inner) == nil { // an object, from some Callers
 		return session(str(inner.SessionID))
 	}
 	return ""
@@ -278,7 +278,7 @@ func cut(s string) string {
 }
 
 // text is the text of a content value: a string, or the text of its
-// parts (cache markers and other part fields are left out, since clients
+// parts (cache markers and other part fields are left out, since Callers
 // move them between turns).
 func text(raw json.RawMessage) string {
 	if s := str(raw); s != "" {

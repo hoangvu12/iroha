@@ -3,8 +3,8 @@ import type { Affinity } from "./api";
 const SOURCES: Record<Affinity["source"], string> = {
   header: "Iroha-Session header",
   claude_code: "Claude Code session",
-  // Several clients send these two headers, so the label names the header and who is known to send it
-  codex: "session-id header: Codex, pi",
+  // Several Callers send these two headers, so the label names the header and who is known to send it
+  codex: "session-id or thread-id header: Codex, pi",
   session_id: "session ID",
   opencode: "x-session-affinity header: OpenCode, pi",
   prompt_cache_key: "prompt_cache_key",

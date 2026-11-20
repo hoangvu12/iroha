@@ -54,16 +54,16 @@ export type Endpoint = {
   created_at: string;
 };
 
+/** An Endpoint's caching setting (cache_markers, send_prompt_cache_key): "" is Iroha's default. The form's Selects hold it as is. */
 export type CacheSetting = "" | "on" | "off";
 
-/** An Endpoint's caching setting as the form's Select holds it ("default" for ""). */
-export const CACHE_SETTINGS: { value: "default" | "on" | "off"; label: string }[] = [
-  { value: "default", label: "Iroha's default" },
+export const CACHE_SETTINGS: { value: CacheSetting; label: string }[] = [
+  { value: "", label: "Iroha's default" },
   { value: "on", label: "On" },
   { value: "off", label: "Off" },
 ];
 
-export const cacheSettingLabel = (s?: CacheSetting) => CACHE_SETTINGS.find((c) => c.value === (s || "default"))!.label;
+export const cacheSettingLabel = (s?: CacheSetting) => CACHE_SETTINGS.find((c) => c.value === (s ?? ""))!.label;
 
 export type Provider = {
   id: string;

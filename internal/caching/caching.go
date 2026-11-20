@@ -35,6 +35,42 @@ const (
 // ValidSetting reports whether v is a value of either setting.
 func ValidSetting(v string) bool { return v == Default || v == On || v == Off }
 
+// Settings are an Endpoint's two prompt caching settings, as stored and
+// shown (embedded in the Endpoint, its audit snapshot and the planner's
+// Endpoint, so they travel together).
+type Settings struct {
+	CacheMarkers       string `json:"cache_markers" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint (prompt caching): \"\" Iroha's default for its Shape and host (see caching), on (markers whatever the host; caching.summary warns where the host refuses or ignores them), or off (none are sent). Same-Shape requests pass through untouched."`
+	SendPromptCacheKey string `json:"send_prompt_cache_key" enum:",on,off" doc:"Whether a request translated to this OpenAI-shaped Endpoint is sent a prompt_cache_key derived from its conversation (and user from an Anthropic Caller's metadata.user_id) when it has none: \"\" Iroha's default (on, except hosts known to refuse unknown fields), on, or off."`
+}
+
+// SettingsPatch is the settings of a create or update body: only those
+// sent change.
+type SettingsPatch struct {
+	CacheMarkers       *string `json:"cache_markers,omitempty" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint: \"\" (default) Iroha's choice for its Shape and host, on, or off. Endpoint.caching shows the effect."`
+	SendPromptCacheKey *string `json:"send_prompt_cache_key,omitempty" enum:",on,off" doc:"Send an OpenAI-shaped Endpoint a prompt_cache_key derived from the conversation on translated requests that have none: \"\" (default) Iroha's choice, on, or off."`
+}
+
+// Apply sets the settings p carries, trimmed and lowercased; a value that
+// is not "", on or off is an error naming the setting, and changes nothing.
+func (s *Settings) Apply(p SettingsPatch) error {
+	next := *s
+	for _, f := range []struct {
+		name    string
+		in, out *string
+	}{{"cache_markers", p.CacheMarkers, &next.CacheMarkers}, {"send_prompt_cache_key", p.SendPromptCacheKey, &next.SendPromptCacheKey}} {
+		if f.in == nil {
+			continue
+		}
+		v := strings.ToLower(strings.TrimSpace(*f.in))
+		if !ValidSetting(v) {
+			return fmt.Errorf("%s %q is not a value it takes", f.name, *f.in)
+		}
+		*f.out = v
+	}
+	*s = next
+	return nil
+}
+
 // Markers is what a translated request's cache markers become.
 type Markers string
 
@@ -86,11 +122,12 @@ var (
 )
 
 // For is the policy of an Endpoint speaking sh at url with the Owner's
-// cache_markers and send_prompt_cache_key settings. Only the default
+// settings s. Only the default
 // follows the host; an explicit on or off is the Owner's and wins (on
 // toward Anthropic is block markers, with a Note where the host refuses or
 // ignores them).
-func For(sh shape.Shape, url, markers, promptCacheKey string) Policy {
+func For(sh shape.Shape, url string, s Settings) Policy {
+	markers, promptCacheKey := s.CacheMarkers, s.SendPromptCacheKey
 	host := hosts.Of(url)
 	var p Policy
 	switch sh {

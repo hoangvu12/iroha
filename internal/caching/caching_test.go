@@ -43,7 +43,7 @@ func TestPolicyFollowsShapeHostAndSettings(t *testing.T) {
 		{"Gemini Endpoints get neither", shape.Gemini, "https://generativelanguage.googleapis.com/v1beta", "on", "on", caching.AsBefore, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := caching.For(tc.sh, tc.url, tc.markers, tc.key)
+			p := caching.For(tc.sh, tc.url, caching.Settings{CacheMarkers: tc.markers, SendPromptCacheKey: tc.key})
 			if p.Markers != tc.want || p.PromptCacheKey != tc.wantKey {
 				t.Errorf("For(%s, %s, %q, %q) = %+v, want markers %q, key %v", tc.sh, tc.url, tc.markers, tc.key, p, tc.want, tc.wantKey)
 			}
@@ -54,16 +54,16 @@ func TestPolicyFollowsShapeHostAndSettings(t *testing.T) {
 // When the Owner's on overrides what a host is known to do with markers,
 // the summary says so instead of the setting being silently ignored.
 func TestTheSummaryWarnsWhenOnGoesAgainstTheHost(t *testing.T) {
-	kimi := caching.For(shape.AnthropicMessages, "https://api.moonshot.ai/anthropic", "on", "")
+	kimi := caching.For(shape.AnthropicMessages, "https://api.moonshot.ai/anthropic", caching.Settings{CacheMarkers: "on"})
 	if s := kimi.Describe(shape.AnthropicMessages); !strings.Contains(s, "refuses") || !strings.Contains(s, "top-level") {
 		t.Errorf("Kimi with on: %s", s)
 	}
-	deepseek := caching.For(shape.AnthropicMessages, "https://api.deepseek.com/anthropic", "on", "")
+	deepseek := caching.For(shape.AnthropicMessages, "https://api.deepseek.com/anthropic", caching.Settings{CacheMarkers: "on"})
 	if s := deepseek.Describe(shape.AnthropicMessages); !strings.Contains(s, "ignores") {
 		t.Errorf("DeepSeek with on: %s", s)
 	}
 	for _, url := range []string{"https://api.moonshot.ai/anthropic", "https://relay.example/v1"} {
-		if s := caching.For(shape.AnthropicMessages, url, "", "").Describe(shape.AnthropicMessages); strings.Contains(s, "refuses") {
+		if s := caching.For(shape.AnthropicMessages, url, caching.Settings{}).Describe(shape.AnthropicMessages); strings.Contains(s, "refuses") {
 			t.Errorf("%s by default: %s", url, s)
 		}
 	}
@@ -72,14 +72,28 @@ func TestTheSummaryWarnsWhenOnGoesAgainstTheHost(t *testing.T) {
 // Conversation fields go wherever they can be read: always to Anthropic,
 // to OpenAI Endpoints with the prompt_cache_key (a strict one refuses both).
 func TestFieldsFollowThePromptCacheKeyOnOpenAIEndpoints(t *testing.T) {
-	if !caching.For(shape.AnthropicMessages, "https://x.example", "off", "off").Fields {
+	if !caching.For(shape.AnthropicMessages, "https://x.example", caching.Settings{CacheMarkers: "off", SendPromptCacheKey: "off"}).Fields {
 		t.Error("Anthropic Endpoints always take metadata.user_id")
 	}
-	if caching.For(shape.OpenAIChat, "https://api.mistral.ai/v1", "", "").Fields || !caching.For(shape.OpenAIChat, "https://api.openai.com/v1", "", "").Fields {
+	if caching.For(shape.OpenAIChat, "https://api.mistral.ai/v1", caching.Settings{}).Fields || !caching.For(shape.OpenAIChat, "https://api.openai.com/v1", caching.Settings{}).Fields {
 		t.Error("OpenAI Endpoints follow send_prompt_cache_key")
 	}
-	if caching.For(shape.Gemini, "https://x.example", "on", "on").Fields {
+	if caching.For(shape.Gemini, "https://x.example", caching.Settings{CacheMarkers: "on", SendPromptCacheKey: "on"}).Fields {
 		t.Error("Gemini has no such fields")
+	}
+}
+
+// A patch sets only the settings it carries, trimmed and lowercased, and
+// names the setting it refuses.
+func TestSettingsApplyAPatch(t *testing.T) {
+	on, off, bad := " ON ", "off", "sometimes"
+	s := caching.Settings{CacheMarkers: "off"}
+	if err := s.Apply(caching.SettingsPatch{SendPromptCacheKey: &on}); err != nil || s != (caching.Settings{CacheMarkers: "off", SendPromptCacheKey: "on"}) {
+		t.Fatalf("%+v, %v", s, err)
+	}
+	err := s.Apply(caching.SettingsPatch{CacheMarkers: &bad, SendPromptCacheKey: &off})
+	if err == nil || !strings.Contains(err.Error(), "cache_markers") || !strings.Contains(err.Error(), "sometimes") {
+		t.Fatalf("error %v", err)
 	}
 }
 

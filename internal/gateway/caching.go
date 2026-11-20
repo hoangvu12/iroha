@@ -34,7 +34,7 @@ func (x *exchange) cachingFor(c planner.Candidate) translate.Caching {
 	if x.plain[c.Endpoint.ID] {
 		return translate.Caching{}
 	}
-	p := caching.For(c.Endpoint.Shape, c.Endpoint.URL, c.Endpoint.CacheMarkers, c.Endpoint.SendPromptCacheKey)
+	p := caching.For(c.Endpoint.Shape, c.Endpoint.URL, c.Endpoint.Caching)
 	tc := translate.Caching{Markers: p.Markers, Fields: p.Fields}
 	if p.PromptCacheKey {
 		model := c.Provider.Model

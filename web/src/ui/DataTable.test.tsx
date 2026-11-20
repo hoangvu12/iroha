@@ -235,24 +235,40 @@ test("the checkbox's whole cell selects the row, in and out of select mode, and 
   expect(opened).not.toHaveBeenCalled();
 });
 
-test("select mode: Space on a row's control toggles the row; Enter on its Open button still opens it", async () => {
+test("select mode: buttons and links keep their own Space and Enter; Space on the row's box toggles it", async () => {
   const user = userEvent.setup();
   const opened = vi.fn();
-  render(<SelectableFruits opened={opened} />);
+  const linked = vi.fn((e: { preventDefault(): void }) => e.preventDefault());
+  const withLink = col.columns([
+    ...columns,
+    col.display({ id: "where", header: "Where", cell: ({ row }) => <a href={`#${row.original.name}`} onClick={linked}>Shop of {row.original.name}</a> }),
+  ]);
+  render(<SelectableFruits opened={opened} columns={withLink} />);
   // Outside select mode Space presses the Open button as usual.
   screen.getByRole("button", { name: "Open cherry" }).focus();
   await user.keyboard(" ");
   expect(opened).toHaveBeenLastCalledWith("cherry");
 
   await user.click(screen.getByRole("checkbox", { name: "Select apple" }));
+  // In select mode too: Space and Enter on Open open the row, and select nothing.
   screen.getByRole("button", { name: "Open banana" }).focus();
   await user.keyboard(" ");
-  expect(checked("banana")).toBe("true");
-  expect(opened).toHaveBeenCalledTimes(1);
+  expect(opened).toHaveBeenLastCalledWith("banana");
+  expect(checked("banana")).toBe("false");
+  await user.keyboard("{Enter}");
+  expect(opened).toHaveBeenCalledTimes(3);
+  expect(checked("banana")).toBe("false");
+  // Space on a link does what it does on a page (scrolls), not select the row; Enter follows it.
+  screen.getByRole("link", { name: "Shop of banana" }).focus();
   await user.keyboard(" ");
   expect(checked("banana")).toBe("false");
   await user.keyboard("{Enter}");
-  expect(opened).toHaveBeenLastCalledWith("banana");
+  expect(linked).toHaveBeenCalledTimes(1);
+  // The keyboard way to pick a row is its box.
+  screen.getByRole("checkbox", { name: "Select banana" }).focus();
+  await user.keyboard(" ");
+  expect(checked("banana")).toBe("true");
+  expect(screen.getByRole("group", { name: "2 selected" })).toBeTruthy();
 });
 
 test("an agent in select mode selects rows by their boxes and still opens one by its name", async () => {

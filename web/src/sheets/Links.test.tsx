@@ -282,6 +282,31 @@ test("an Upstream Key's Model Gaps link their model", async () => {
   expect(hrefOf(await within(sheet).findByRole("link", { name: "gpt-old" }))).toBe("/x?sheet=key:acme/team-8&sheet=model:acme/gpt-old");
 });
 
+test("an Upstream Key's cooling models link their model (review fixes 2)", async () => {
+  const keys = (routes["GET /api/providers/acme/keys"] as { upstream_keys: UpstreamKey[] }).upstream_keys;
+  routes["GET /api/providers/acme/keys/team-9"] = {
+    ...keys[1],
+    id: "k-team-9",
+    name: "team-9",
+    model_gaps: [],
+    cooling_models: [{ model: "gpt-busy", reason: "429", until: "2099-01-01T00:00:00Z" }],
+  };
+  renderWithSheets(null, "/x?sheet=key:acme/team-9");
+  const sheet = await loadedSheet("Upstream Key team-9");
+  expect(hrefOf(await within(sheet).findByRole("link", { name: "gpt-busy" }))).toBe("/x?sheet=key:acme/team-9&sheet=model:acme/gpt-busy");
+});
+
+test("an Attempt's Failure Rule links the rule's sheet (review fixes 2)", async () => {
+  routes["GET /api/requests/req_5"] = {
+    ...req1,
+    id: "req_5",
+    attempts: [{ ...attempt(1, "team-5", 429), rule: "rate-limited", outcome: "cooling_key", reason: "429 slow down" }],
+  };
+  renderWithSheets(null, "/requests?sheet=request:req_5/attempts");
+  const request = await screen.findByRole("dialog", { name: "Request fast" });
+  expect(hrefOf(await within(request).findByRole("link", { name: "rate-limited" }))).toBe("/requests?sheet=request:req_5/attempts&sheet=rule:acme/rate-limited");
+});
+
 test("an agent finds an Attempt's toggle and its links by name, and follows one", async () => {
   const agent = createAgent();
   renderWithSheets(null, "/requests?sheet=request:req_3/attempts");

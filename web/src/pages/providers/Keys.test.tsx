@@ -139,7 +139,7 @@ const endpoint = (name: string): Endpoint => ({
 });
 const acme = { handle: "acme", endpoints: [endpoint("eu"), endpoint("us"), endpoint("asia")] } as Provider;
 
-test("Edit… shows mixed values for the selected keys and sends one bulk update with only what changed, each key's own Endpoints kept", async () => {
+test("Edit… shows mixed values for the selected keys and sends one bulk update with only what changed: Endpoints as a change the server applies to each key's own list", async () => {
   const user = userEvent.setup();
   const fetch = renderTab([key(1, { endpoints: ["eu"] }), key(2, { enabled: false }), key(3)], undefined, { provider: acme });
   await user.click(await screen.findByRole("checkbox", { name: "Select all rows on this page" }));
@@ -158,12 +158,27 @@ test("Edit… shows mixed values for the selected keys and sends one bulk update
     expect(posts(fetch)).toEqual([
       [
         "/api/providers/acme/keys/bulk/update",
-        { items: [{ key: "key_1", endpoints: ["eu"] }, { key: "key_2", endpoints: ["eu", "us"] }, { key: "key_3", endpoints: ["eu", "us"] }] },
+        { items: [{ key: "key_1", endpoints_remove: ["asia"] }, { key: "key_2", endpoints_remove: ["asia"] }, { key: "key_3", endpoints_remove: ["asia"] }] },
       ],
     ]),
   );
   expect(await within(bar).findByText("3 keys changed", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
   expect(within(bar).getByRole("button", { name: "Undo: 3 keys changed" })).toBeTruthy();
+});
+
+test("ticking an Endpoint sends it to add, never a list built from the loaded rows, so a key's list changed since keeps that change", async () => {
+  const user = userEvent.setup();
+  // As loaded: team-1 on eu alone, team-2 on eu and asia. Either may have changed since.
+  const fetch = renderTab([key(1, { endpoints: ["eu"] }), key(2, { endpoints: ["eu", "asia"] })], undefined, { provider: acme });
+  await user.click(await screen.findByRole("checkbox", { name: "Select all rows on this page" }));
+  const bar = screen.getByRole("group", { name: "2 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 2 keys" });
+  await user.click(within(dialog).getByRole("checkbox", { name: "us" })); // off on both -> on
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 2 keys" }));
+  await waitFor(() =>
+    expect(posts(fetch)).toEqual([["/api/providers/acme/keys/bulk/update", { items: [{ key: "key_1", endpoints_add: ["us"] }, { key: "key_2", endpoints_add: ["us"] }] }]]),
+  );
 });
 
 test("a bulk edit that fails on some keys names them in the bar, with Undo for the rest", async () => {
@@ -221,6 +236,21 @@ test("clicking a row, or its name with the keyboard, opens the key's sheet", asy
   await user.click(screen.getByRole("button", { name: "Open team-1" }));
   await waitFor(() => expect(decodeURIComponent(where())).toBe("?sheet=key:acme/team-1"));
   // No key dialog any more (UI ticket 27).
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("in select mode a click on a key's row toggles it, the bulk bar follows, and no sheet opens (UI ticket 25)", async () => {
+  const user = userEvent.setup();
+  renderTab([key(1), key(2), key(3)]);
+  await user.click(await screen.findByRole("checkbox", { name: "Select team-1" }));
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+  const team2 = rows().find((r) => within(r).queryByText("team-2"))!;
+  await user.click(within(team2).getByText("Active"));
+  expect(screen.getByRole("group", { name: "2 selected" })).toBeTruthy();
+  expect(screen.getByRole("checkbox", { name: "Select team-2" }).getAttribute("aria-checked")).toBe("true");
+  await user.click(within(team2).getByText("Active"));
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+  expect(decodeURIComponent(where())).not.toContain("sheet=");
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 

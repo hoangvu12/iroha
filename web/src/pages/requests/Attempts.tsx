@@ -102,7 +102,7 @@ export function AttemptFacts({ a, next, withSentTo = true }: { a: Attempt; next?
         <>
           <Row label="Result">{a.status ? `${a.status} ${statusText(a.status)}`.trim() : "No response"}</Row>
           {e.reason && <Row label="Provider said">{e.reason}</Row>}
-          <Row label="Failure Rule">{e.rule ?? <span className="text-fg-muted">None matched</span>}</Row>
+          <Row label="Failure Rule">{e.rule ? <RecordLink record={rec.rule(a.provider, e.rule)}>{e.rule}</RecordLink> : <span className="text-fg-muted">None matched</span>}</Row>
           {e.keyState && (
             <Row label="Key State" className={keyStateClass[e.keyState.tone]}>
               <span title={e.action}>{e.keyState.text}</span>

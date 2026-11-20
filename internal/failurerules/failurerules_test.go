@@ -106,7 +106,7 @@ func TestBuiltinRulesAreListedOverriddenByNameAndNeverDeleted(t *testing.T) {
 	r := over.Rule
 	if over.Outcome != "updated" || over.AuditEntry == "" || r.Source != failurerules.SourceOwner || r.Outcome != rules.CoolingKey ||
 		!slices.Equal(r.Status, []string{"429"}) || r.KeyEffect != "Cool 2 min" || r.Overrides == nil || r.Overrides.Outcome != rules.CoolingKeyModel ||
-		over.Replay != nil {
+		r.BuiltinKeyEffect != "Cool 60 s for the model" || over.Replay != nil {
 		t.Fatalf("override = %+v", over)
 	}
 	if !slices.Equal(over.Changes[0].Fields, []string{"cooling_seconds", "outcome"}) {

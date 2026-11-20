@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { createAgent } from "@ui-sdk/react/agent";
 import { useState } from "react";
 import { expect, test, vi } from "vitest";
-import { applySet, BulkEdit, type BulkChanges, type BulkField, bulkDone, commonValue } from "./BulkEdit";
+import { BulkEdit, type BulkChanges, type BulkField, bulkDone, commonValue } from "./BulkEdit";
 import { SaveError, SaveStatus, useSave } from "./SaveStatus";
 import type { BulkResult } from "@/api/types";
 
@@ -34,12 +34,10 @@ function Bar({ apply, list = rows }: { apply: (c: BulkChanges) => Promise<unknow
   );
 }
 
-test("the pure helpers: a shared value or mixed, and a set change as a delta", () => {
+test("commonValue: a shared value or mixed", () => {
   expect(commonValue(rows, (r) => r.note)).toEqual({ mixed: false, value: "x" });
   expect(commonValue(rows, (r) => r.on)).toEqual({ mixed: true });
   expect(commonValue([], (r: Row) => r.on)).toEqual({ mixed: true });
-  expect(applySet(["eu", "us"], { add: ["asia"], remove: ["us"] }, ["eu", "us", "asia"])).toEqual(["eu", "asia"]);
-  expect(applySet(["us"], { add: ["eu"], remove: [] }, ["eu", "us"])).toEqual(["eu", "us"]);
 });
 
 test("mixed values show as mixed: a dash, a 'Mixed' placeholder in a select and a field, and a dash with a count in a set", async () => {

@@ -131,6 +131,15 @@ export type Facts = {
   architecture?: { input_modalities?: string[]; output_modalities?: string[] };
 };
 
+/**
+ * One item of an Upstream Keys bulk update: a field left out stays. `endpoints` replaces the
+ * key's list; `endpoints_add` / `endpoints_remove` change it as the server holds it now.
+ */
+export type KeyEdit = { key: string; enabled?: boolean; endpoints?: string[]; endpoints_add?: string[]; endpoints_remove?: string[] };
+
+/** Some overrides of a model: a value sets one, null removes it, a field left out stays. */
+export type FactsPatch = { [K in keyof Facts]?: Facts[K] | null };
+
 export type Model = {
   id: string;
   model: string;
@@ -166,7 +175,8 @@ export type ModelList = {
 
 export type RefreshResult = { summary: string; outcome: string; added: string[]; removed: string[]; discovered: number };
 
-export type Outcome = "invalid" | "cooling_key" | "cooling_key_model" | "model_gap" | "retry_elsewhere" | "fail_request";
+export type { Outcome } from "@/lib/outcomes";
+import type { Outcome } from "@/lib/outcomes";
 export const OUTCOMES: { value: Outcome; label: string; hint: string }[] = [
   { value: "cooling_key", label: "Cool the key", hint: "Rate limits and quotas: the key rests, then comes back." },
   { value: "cooling_key_model", label: "Cool the key for this model", hint: "A per-model limit: the key keeps serving other models." },
@@ -199,12 +209,14 @@ export type Rule = RuleFields & {
   last_hit_at?: string;
   order: number;
   overrides?: RuleFields & { name: string };
+  /** With overrides: what the replaced built-in did to the key, in the words of key_effect. */
+  builtin_key_effect?: string;
 };
 
 export type Replay = { attempts: number; changed: number; since: string; rules: { rule: string; now: number; after: number }[] };
 
 /** A failure the Owner types, for POST /api/providers/{p}/rules/classify (UI ticket 34). Status 0: no response. */
-export type FailureInput = { status: number; body?: string; headers?: Record<string, string>; model?: string; endpoint?: string };
+export type FailureInput = { status: number; body?: string; headers?: Record<string, string>; model?: string; endpoint?: string; translated?: boolean };
 
 /** What the live Failure Rules decide for a FailureInput (Go `gateway.Classification`). */
 export type Classification = {
@@ -433,7 +445,7 @@ export const calls = {
   addKeys: (h: string, items: { secret: string }[], dryRun?: boolean) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }, { query: dry(dryRun) }),
   restrictKeys: (h: string, items: { name: string; endpoints: string[] }[]) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }),
   /** Edits many keys (by name or ID) in one change and one Audit Entry; fields an item leaves out stay as that key has them (UI ticket 30). */
-  editKeys: (h: string, items: { key: string; enabled?: boolean; endpoints?: string[] }[]) =>
+  editKeys: (h: string, items: KeyEdit[]) =>
     api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk/update`, { items }),
   updateKey: (h: string, key: string, body: Partial<Pick<UpstreamKey, "name" | "secret" | "enabled" | "endpoints">>) =>
     api.patch<KeyResult>(`${P(h)}/keys/${seg(key)}`, body),
@@ -453,7 +465,9 @@ export const calls = {
 
   saveModel: (h: string, body: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts }) => api.post<ModelResult>(`${P(h)}/models`, body),
   /** Many models' changes in one call and one Audit Entry; each item applies or fails on its own. */
-  saveModels: (h: string, items: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts }[]) => api.post<BulkResult<Model>>(`${P(h)}/models/bulk`, { items }),
+  /** `metadata_patch` changes only the overrides it names (null removes one); the rest stay as each model has them. */
+  saveModels: (h: string, items: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts; metadata_patch?: FactsPatch }[]) =>
+    api.post<BulkResult<Model>>(`${P(h)}/models/bulk`, { items }),
   refreshModels: (h: string) => api.post<RefreshResult>(`${P(h)}/models/refresh`, {}, { timeoutMs: 120_000 }),
   resetModels: (h: string) => api.post<{ removed: string[]; kept: number }>(`${P(h)}/models/reset`),
 
@@ -464,6 +478,8 @@ export const calls = {
   /** Read-only: which rule a typed failure matches and what it does (nothing is sent or stored). */
   classify: (h: string, body: FailureInput) => api.post<Classification>(`${P(h)}/rules/classify`, body),
 
+  /** Reads the Pool as the server has it now (for a change built on its whole member list). */
+  pool: (name: string) => api.get<Pool>(`/api/pools/${seg(name)}`),
   createPool: (body: { name: string; members?: MemberInput[]; maker?: string }) => api.post<PoolResult>("/api/pools", body),
   updatePool: (name: string, body: { name?: string; members?: MemberInput[]; maker?: string; budget?: Partial<Pool["budget"]> }) =>
     api.patch<PoolResult>(`/api/pools/${seg(name)}`, body),

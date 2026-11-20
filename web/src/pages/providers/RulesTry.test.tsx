@@ -83,7 +83,7 @@ test("an example fills the failure in one click; Try asks the server what the ru
   const user = userEvent.setup();
   const fetch = renderTab();
   const p = await panel();
-  await user.click(within(p).getByRole("button", { name: "429 rate limit" }));
+  await user.click(within(p).getByRole("button", { name: "429 cooling" }));
   expect((within(p).getByRole("textbox", { name: "Status" }) as HTMLInputElement).value).toBe("429");
   expect((within(p).getByRole("textbox", { name: "Body" }) as HTMLTextAreaElement).value).toContain("rate_limit_exceeded");
   expect((within(p).getByRole("textbox", { name: "Headers" }) as HTMLTextAreaElement).value).toBe("Retry-After: 30");
@@ -100,10 +100,11 @@ test("the result is said in words and the path lights up to the rule that matche
   const user = userEvent.setup();
   renderTab();
   const p = await panel();
-  await user.click(within(p).getByRole("button", { name: "429 rate limit" }));
+  await user.click(within(p).getByRole("button", { name: "429 cooling" }));
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   const said = await within(p).findByRole("status");
-  expect(said.textContent).toContain("Rule 3, rate-limited, matches: the key cools for this model for 30 s (the time the response names); the Request tries the next key.");
+  // The server's own words for the effects (key_effect, request_effect), never re-worded here.
+  expect(said.textContent).toContain("Rule 3, rate-limited, matches. Upstream Key: Cool 30 s for the model (the time the response names). Request: Try next key.");
   expect(said.textContent).toContain("429 rate_limit_exceeded: Rate limit reached");
   const [owner, off, rate, server] = steps();
   // Passed on the way: didn't match; a switched-off rule stays skipped.
@@ -127,7 +128,7 @@ test("no match lights the End card with the engine's fallback", async () => {
   await user.type(within(p).getByRole("textbox", { name: "Status" }), "418");
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   const said = await within(p).findByRole("status");
-  expect(said.textContent).toContain("No rule matches, so the fallback decides: the key is unchanged; the error goes back to the Caller.");
+  expect(said.textContent).toContain("No rule matches, so the fallback decides. Upstream Key: No change. Request: Return to Caller.");
   const end = screen.getByRole("group", { name: "No rule matched" });
   expect(end.getAttribute("aria-current")).toBe("step");
   for (const s of steps().filter((s) => !s.textContent?.includes("Off, skipped"))) expect(within(s).getByText("Didn't match")).toBeTruthy();
@@ -147,7 +148,7 @@ test("editing the failure clears the highlight", async () => {
   const user = userEvent.setup();
   renderTab();
   const p = await panel();
-  await user.click(within(p).getByRole("button", { name: "429 rate limit" }));
+  await user.click(within(p).getByRole("button", { name: "429 cooling" }));
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   await within(p).findByRole("status");
   await user.type(within(p).getByRole("textbox", { name: "Body" }), " ");
@@ -160,7 +161,7 @@ test("on a phone the path lights up the same way, stacked", async () => {
   vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(max-width: 767px)", media: q, addEventListener() {}, removeEventListener() {} }));
   renderTab();
   const p = await panel();
-  await user.click(within(p).getByRole("button", { name: "429 rate limit" }));
+  await user.click(within(p).getByRole("button", { name: "429 cooling" }));
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   await within(p).findByRole("status");
   const rate = steps()[2];
@@ -175,7 +176,7 @@ test("an agent fills in a failure and tries it", async () => {
   const entries = agent.snapshot().filter((e) => !e.offPage && e.component !== "more");
   for (const e of entries) expect(e.label, `${e.component} ${e.ref} has no name`).toBeTruthy();
   const labels = entries.map((e) => e.label);
-  for (const l of ["Status", "Body", "Headers", "Try this failure", "429 rate limit", "401 invalid key", "404 model not found", "200 with an error"]) expect(labels, `${l} is missing`).toContain(l);
+  for (const l of ["Status", "Body", "Headers", "Try this failure", "429 cooling", "401 invalid key", "404 model not found", "200 with an error"]) expect(labels, `${l} is missing`).toContain(l);
   const run = await agent.act({
     steps: [
       { ref: "Status", action: "setValue", args: ["401"] },

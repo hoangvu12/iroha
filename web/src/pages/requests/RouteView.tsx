@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, ArrowUpRight, CornerDownLeft, MessageCircle, User, X } from "lucide-react";
+import { ArrowLeft, CornerDownLeft, MessageCircle, User, X } from "lucide-react";
 import { useChatPanel } from "@/app/chat-panel";
 import { PageBody } from "@/app/PageBody";
 import { CHAT_WIDTH, SIDEBAR_WIDTH } from "@/app/Shell";
@@ -439,7 +439,7 @@ function AttemptPanel({ a, next, onClose }: { a: Attempt; next?: Attempt; onClos
       {e.failed && (
         <PanelSection title="What Iroha did">
           {e.reason && <Row label="Provider said">{e.reason}</Row>}
-          <Row label="Failure Rule">{e.rule ?? <span className="text-fg-muted">None matched</span>}</Row>
+          <Row label="Failure Rule">{e.rule ? <RecordLink record={rec.rule(a.provider, e.rule)}>{e.rule}</RecordLink> : <span className="text-fg-muted">None matched</span>}</Row>
           {e.keyState && (
             <Row label="Key State" className={keyStateClass[e.keyState.tone]}>
               <span title={e.action}>{e.keyState.text}</span>
@@ -469,12 +469,9 @@ function AttemptPanel({ a, next, onClose }: { a: Attempt; next?: Attempt; onClos
       )}
       {e.headers && <Headers headers={e.headers} />}
       <div className="flex-1" />
-      <Link
-        to={`/providers/${seg(a.provider)}/keys?key=${encodeURIComponent(a.upstream_key)}`}
-        className={buttonClass("secondary", "lg", "mt-8 w-full")}
-      >
-        Open {a.upstream_key} <ArrowUpRight size={16} />
-      </Link>
+      <RecordLink bare record={rec.key(a.provider, a.upstream_key)} className={buttonClass("secondary", "lg", "mt-8 w-full")}>
+        Open {a.upstream_key}
+      </RecordLink>
     </div>
   );
 }

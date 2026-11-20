@@ -1,7 +1,8 @@
 import { useCallback, useState } from "react";
 import { Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { api, isApiError, seg } from "@/api/client";
-import { formatNumber } from "@/lib/format";
+import { formatNumber, plural } from "@/lib/format";
+import { useStoredChoice } from "@/lib/stored-choice";
 import { useUrlParams } from "@/lib/url-state";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
@@ -18,7 +19,8 @@ import { notifyChange } from "@/ui/toast";
 import type { Classification, Outcome, Replay, Rule, RuleFields } from "./api";
 import { calls, errorText, OUTCOMES, useProvider, useRefresh, useRules } from "./api";
 import { Reveal, riseIn } from "@/ui/Reveal";
-import { appearClass, Checkbox, Pill, ringRoom, Segmented, Select, Switch } from "./controls";
+import { appearClass } from "@/ui/motion";
+import { Checkbox, Pill, ringRoom, Segmented, Select, Switch } from "./controls";
 import { RulesFlow } from "./RulesFlow";
 import { TryFailure } from "./RulesTry";
 import { SAMPLE_RULES } from "./samples";
@@ -141,7 +143,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
           phoneRow={(r) => <RuleLine r={r} />}
           phoneActions={(r) => <RuleSwitch r={r} />}
           empty={<EmptyState icon={ShieldAlert} title="No rules" description="Add one to decide what a failure from this Provider means." />}
-          footer={({ shown, total }) => (shown === total ? `${total} rule${total === 1 ? "" : "s"}, in the order they're tried` : `${shown} of ${total} rules`)}
+          footer={({ shown, total }) => (shown === total ? `${plural(total, "rule")}, in the order they're tried` : `${shown} of ${total} rules`)}
         />
       )}
 
@@ -157,26 +159,7 @@ const VIEWS: { value: RulesView; label: string }[] = [
   { value: "table", label: "Table" },
   { value: "flow", label: "Flow" },
 ];
-const VIEW_KEY = "iroha:rules:view";
-
-function useRulesView() {
-  const [view, setState] = useState<RulesView>(() => {
-    try {
-      return localStorage.getItem(VIEW_KEY) === "flow" ? "flow" : "table";
-    } catch {
-      return "table";
-    }
-  });
-  const setView = (v: RulesView) => {
-    setState(v);
-    try {
-      localStorage.setItem(VIEW_KEY, v);
-    } catch {
-      // Storage refused (private window, blocked site data): the choice lasts this visit only.
-    }
-  };
-  return [view, setView] as const;
-}
+const useRulesView = () => useStoredChoice<RulesView>("iroha:rules:view", ["table", "flow"], "table");
 
 /** The width of an element, kept up to date (undefined until measured, and where ResizeObserver is missing). */
 function useWidth() {

@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format";
 import { type ReactNode, useId, useState } from "react";
 import { Pencil } from "lucide-react";
 import { errorText } from "@/api/client";
@@ -5,6 +6,7 @@ import type { BulkResult } from "@/api/types";
 import { Button, TextButton } from "./Button";
 import { Checkbox } from "./Checkbox";
 import { cn } from "./cn";
+import { appearClass } from "./motion";
 import { Dialog } from "./Dialog";
 import { Input } from "./Input";
 import { type Done, type Save } from "./SaveStatus";
@@ -22,7 +24,7 @@ import { Select, type SelectOption } from "./Select";
 /** The row's noun, one and many: ["key", "keys"]. */
 export type Noun = [one: string, many: string];
 
-export const countOf = (n: number, noun: Noun) => `${n} ${n === 1 ? noun[0] : noun[1]}`;
+const countOf = (n: number, noun: Noun) => plural(n, ...noun);
 
 /** The value every row shares, or mixed (no rows count as mixed). */
 export type Common<V> = { mixed: true } | { mixed: false; value: V };
@@ -38,15 +40,6 @@ export type SetChange = { add: string[]; remove: string[] };
 
 /** What the Owner changed, by field ID: a yes-no, a select's or a text field's value, or a set's change. */
 export type BulkChanges = Record<string, boolean | string | SetChange>;
-
-/** One row's set after a change, in `order` (the options' order) where given. */
-export function applySet(current: string[], change: SetChange, order?: string[]): string[] {
-  const next = new Set(current.filter((v) => !change.remove.includes(v)));
-  for (const v of change.add) next.add(v);
-  const out = [...next];
-  return order ? out.sort((a, b) => rank(order, a) - rank(order, b)) : out;
-}
-const rank = (order: string[], v: string) => (order.includes(v) ? order.indexOf(v) : order.length);
 
 type FieldBase = { id: string; label: string; hint?: ReactNode };
 export type SetOption = { value: string; label: string; detail?: ReactNode };
@@ -142,7 +135,7 @@ export function BulkEdit<T>({
           ))}
         </div>
         {error && (
-          <p role="alert" className="mt-3 text-[13px] text-danger-text transition-opacity duration-list-in ease-out starting:opacity-0">
+          <p role="alert" className={cn("mt-3 text-[13px] text-danger-text", appearClass)}>
             {error}
           </p>
         )}

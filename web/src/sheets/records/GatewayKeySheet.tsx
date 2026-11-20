@@ -2,12 +2,12 @@ import { useState } from "react";
 import { KeyRound, MessageCircle, Pencil } from "lucide-react";
 import { errorText, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
-import { formatDate, timeAgo } from "@/lib/format";
+import { formatDate, plural, timeAgo } from "@/lib/format";
 import { type GatewayKey, useGatewayKey, useInvalidateKeys, useUpdateKey } from "@/pages/gateway-keys/api";
 import { RequestsCount, ScopeModels } from "@/pages/gateway-keys/bits";
 import { type Draft, sameScope, toDraft, toScope } from "@/pages/gateway-keys/scope";
 import { ScopeEditor } from "@/pages/gateway-keys/ScopeEditor";
-import { SaveStatus, useSave } from "@/ui/SaveStatus";
+import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { maskSecret } from "@/pages/providers/api";
 import { Status } from "@/ui/bits";
 import { Button } from "@/ui/Button";
@@ -131,11 +131,7 @@ function Access({ k }: { k: GatewayKey }) {
             setError(undefined);
           }}
         />
-        {(error || saving.error) && (
-          <p role="alert" className="mt-3 text-[13px] text-danger-text">
-            {error ?? saving.error}
-          </p>
-        )}
+        <SaveError save={saving} error={error} className="mt-3" />
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button onClick={() => setEditing(false)}>Cancel</Button>
           <Button variant="primary" loading={saving.pending} onClick={save}>
@@ -166,7 +162,7 @@ function Access({ k }: { k: GatewayKey }) {
           {(scope.providers ?? []).length > 0 && (
             <LinkList>
               {(scope.providers ?? []).map((p) => (
-                <LinkRow key={p.provider} aside={p.models?.length ? `${p.models.length} model${p.models.length === 1 ? "" : "s"}` : "All models"}>
+                <LinkRow key={p.provider} aside={p.models?.length ? plural(p.models.length, "model") : "All models"}>
                   <RecordLink record={rec.provider(p.provider)}>{p.provider}</RecordLink>
                   {p.models?.length ? <ScopeModels provider={p.provider} models={p.models} className="mt-1" /> : null}
                 </LinkRow>

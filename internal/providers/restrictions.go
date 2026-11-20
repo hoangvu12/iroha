@@ -96,6 +96,63 @@ func writeKeyEndpoints(ctx context.Context, q *sql.Tx, providerID, id string, en
 	return nil
 }
 
+// changeKeyEndpoints is key id's Endpoint list (IDs) as it is now, with add
+// added and remove taken off: a key with no restriction starts from every
+// Endpoint of p, and a list left with every Endpoint or none is no
+// restriction ([]).
+func changeKeyEndpoints(ctx context.Context, q *sql.Tx, p ref, id string, add, remove []string) ([]string, error) {
+	addIDs, err := resolveEndpoints(ctx, q, p, add)
+	if err != nil {
+		return nil, err
+	}
+	removeIDs, err := resolveEndpoints(ctx, q, p, remove)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range addIDs {
+		if slices.Contains(removeIDs, e) {
+			return nil, api.BadRequest("Name each Endpoint in endpoints_add or endpoints_remove, not both.", "Endpoint %s is both added and removed.", e)
+		}
+	}
+	all, err := providerEndpointIDs(ctx, q, p.id)
+	if err != nil {
+		return nil, err
+	}
+	cur, err := keyEndpointIDsOf(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(cur) == 0 {
+		cur = all
+	}
+	next := slices.DeleteFunc(slices.Clone(cur), func(e string) bool { return slices.Contains(removeIDs, e) })
+	next = append(next, addIDs...)
+	slices.Sort(next)
+	next = slices.Compact(next)
+	if len(next) == 0 || slices.Equal(next, all) {
+		return []string{}, nil
+	}
+	return next, nil
+}
+
+// providerEndpointIDs is every Endpoint of a Provider, sorted.
+func providerEndpointIDs(ctx context.Context, q queryer, providerID string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id FROM endpoints WHERE provider_id = ? ORDER BY id`, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // resolveEndpoints resolves Endpoint names or IDs of Provider p, sorted
 // and without duplicates.
 func resolveEndpoints(ctx context.Context, q queryer, p ref, refs []string) ([]string, error) {

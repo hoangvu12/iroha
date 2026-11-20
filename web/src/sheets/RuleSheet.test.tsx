@@ -30,7 +30,7 @@ const rule = (name: string, i: number, o: Partial<Rule> = {}): Rule => ({
 });
 const RULES = [
   rule("rate-quota", 0, { source: "owner", provider: "acme", status: ["429", "5xx"], code: ["Throttling.RateQuota"], body: "quota", hits: 312, description: "DashScope's quota" }),
-  rule("mine", 1, { source: "owner", outcome: "fail_request", key_effect: "No change", request_effect: "Return to Caller", hits: 4, overrides: { name: "mine", status: ["429"], outcome: "cooling_key" } }),
+  rule("mine", 1, { source: "owner", outcome: "fail_request", key_effect: "No change", request_effect: "Return to Caller", hits: 4, overrides: { name: "mine", status: ["429"], outcome: "cooling_key" }, builtin_key_effect: "Cool 60 s" }),
   rule("server-error", 2, { status: ["5xx"], outcome: "retry_elsewhere", key_effect: "No change", hits: 20 }),
 ];
 const result = (r: Rule) => ({ dry_run: false, audit_entry: "aud_1", changes: [], rule: r });

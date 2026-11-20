@@ -20,14 +20,16 @@ import (
 // it is on, where it comes from, what it does, and how often it decided.
 type RuleView struct {
 	rules.Rule
-	Enabled       bool        `json:"enabled" doc:"false: the rule is switched off and never matches."`
-	Source        string      `json:"source" enum:"builtin,owner" doc:"builtin: shipped with Iroha and unchanged (it may be switched off). owner: added by the Owner or an agent, or a built-in rule overridden by name."`
-	Overrides     *rules.Rule `json:"overrides,omitempty" doc:"For an owner rule with a built-in rule's name: the built-in rule it replaces. DELETE /api/rules/{rule} brings the built-in back."`
-	Order         int         `json:"order" doc:"Position, from 1, in the order rules are tried (among the rules listed): rules limited to a Provider or host first, then the others; the Owner's new rules before the built-ins. The first enabled rule that matches decides."`
-	KeyEffect     string      `json:"key_effect" doc:"What a match does to the Upstream Key, in words: Mark invalid, Cool 60 s, Cool until reset, Record Model Gap, No change."`
-	RequestEffect string      `json:"request_effect" enum:"Try next key,Return to Caller" doc:"What a match does to the Request."`
-	Hits          int         `json:"hits" doc:"Failed Attempts this rule decided since hits_since (only on the Provider asked for, when there is one)."`
-	LastHitAt     *time.Time  `json:"last_hit_at,omitempty" doc:"When it last decided an Attempt within that window."`
+	Enabled   bool        `json:"enabled" doc:"false: the rule is switched off and never matches."`
+	Source    string      `json:"source" enum:"builtin,owner" doc:"builtin: shipped with Iroha and unchanged (it may be switched off). owner: added by the Owner or an agent, or a built-in rule overridden by name."`
+	Overrides *rules.Rule `json:"overrides,omitempty" doc:"For an owner rule with a built-in rule's name: the built-in rule it replaces. DELETE /api/rules/{rule} brings the built-in back."`
+	Order     int         `json:"order" doc:"Position, from 1, in the order rules are tried (among the rules listed): rules limited to a Provider or host first, then the others; the Owner's new rules before the built-ins. The first enabled rule that matches decides."`
+	KeyEffect string      `json:"key_effect" doc:"What a match does to the Upstream Key, in words: Mark invalid, Cool 60 s, Cool until reset (for the model), Record Model Gap for the model, No change."`
+	// BuiltinKeyEffect words Overrides' outcome, so a UI never words it itself.
+	BuiltinKeyEffect string     `json:"builtin_key_effect,omitempty" doc:"With overrides: what the replaced built-in rule did to the Upstream Key, in the words of key_effect."`
+	RequestEffect    string     `json:"request_effect" enum:"Try next key,Return to Caller" doc:"What a match does to the Request."`
+	Hits             int        `json:"hits" doc:"Failed Attempts this rule decided since hits_since (only on the Provider asked for, when there is one)."`
+	LastHitAt        *time.Time `json:"last_hit_at,omitempty" doc:"When it last decided an Attempt within that window."`
 }
 
 // RuleList is the response of GET /api/rules.
@@ -317,10 +319,11 @@ func countHits(ctx context.Context, q queryer, since time.Time, handle string) (
 
 func viewOf(e entry, order int, h hit) RuleView {
 	v := RuleView{Rule: e.rule, Enabled: e.enabled, Source: e.source, Order: order, Hits: h.n,
-		KeyEffect: keyEffect(e.rule), RequestEffect: requestEffect(e.rule.Outcome)}
+		KeyEffect: keyEffect(e.rule), RequestEffect: e.rule.Outcome.RequestEffect()}
 	if e.source == SourceOwner && e.builtin != nil {
 		b := *e.builtin
 		v.Overrides = &b
+		v.BuiltinKeyEffect = keyEffect(b)
 	}
 	if h.n > 0 {
 		t := h.last
@@ -329,43 +332,17 @@ func viewOf(e entry, order int, h hit) RuleView {
 	return v
 }
 
+// keyEffect words what rule r does to the Upstream Key when it matches: a
+// reset time the response names, else the rule's time, else 60 s.
 func keyEffect(r rules.Rule) string {
-	switch r.Outcome {
-	case rules.Invalid:
-		return "Mark invalid"
-	case rules.ModelGap:
-		return "Record Model Gap"
-	case rules.CoolingKey, rules.CoolingKeyModel:
-		s := "Cool 60 s"
-		switch {
-		case len(r.Reset) > 0:
-			s = "Cool until reset"
-		case r.CoolingSeconds > 0:
-			s = "Cool " + seconds(r.CoolingSeconds)
-		}
-		if r.Outcome == rules.CoolingKeyModel {
-			s += " for the model"
-		}
-		return s
-	}
-	return "No change"
-}
-
-func seconds(n int) string {
+	cool := "60 s"
 	switch {
-	case n < 120 || n%60 != 0:
-		return fmt.Sprintf("%d s", n)
-	case n < 7200 || n%3600 != 0:
-		return fmt.Sprintf("%d min", n/60)
+	case len(r.Reset) > 0:
+		cool = "until reset"
+	case r.CoolingSeconds > 0:
+		cool = rules.Seconds(r.CoolingSeconds)
 	}
-	return fmt.Sprintf("%d h", n/3600)
-}
-
-func requestEffect(o rules.Outcome) string {
-	if o.Retries() {
-		return "Try next key"
-	}
-	return "Return to Caller"
+	return rules.KeyEffect(r.Outcome, cool, "")
 }
 
 // providerScope resolves a Provider by handle or ID to its handle and the

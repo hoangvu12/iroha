@@ -4,7 +4,7 @@ import { Copy, KeyRound, MessageCircle, Plus, Settings2, Trash2, Ban } from "luc
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
-import { timeAgo } from "@/lib/format";
+import { plural, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { useUrlParams } from "@/lib/url-state";
 import { shortDate, shortSecret } from "@/pages/settings/format";
@@ -239,7 +239,7 @@ function GatewayKeysBulkEdit({ rows, at, size }: { rows: GatewayKey[]; at: Save;
       label: "Capture prompts",
       on: "capturing",
       get: (k) => k.capture,
-      hint: `Stores the full prompt and response of each later Request made with the key${days ? `, kept for ${days} day${days === 1 ? "" : "s"}` : ""}.`,
+      hint: `Stores the full prompt and response of each later Request made with the key${days ? `, kept for ${plural(days, "day")}` : ""}.`,
     },
   ];
   const apply = async (c: BulkChanges) => {

@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format";
 import type { Scope } from "./api";
 
 // The scope being edited in the create dialog and on the key page, and the
@@ -25,7 +26,6 @@ export function toScope(d: Draft): Scope {
   };
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** "Everything", "3 Providers, 1 Pool", "Nothing" (C12's Access column). */
 export function scopeSummary(s: Scope): string {

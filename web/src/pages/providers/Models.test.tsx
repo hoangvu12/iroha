@@ -146,7 +146,7 @@ test("selected models are hidden together through the bulk API, with the result 
   expect(await within(bar).findByText("2 models hidden", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
 });
 
-test("Edit… works on models selected on several pages: mixed values shown, and each model keeps its own other overrides", async () => {
+test("Edit… works on models selected on several pages: mixed values shown, and only the changed field is sent, so each model keeps its own other overrides", async () => {
   const user = userEvent.setup();
   const all = many(30).map((m, i) => (i === 0 ? { ...m, overrides: { context_length: 8000, chat: "ok" as const } } : i === 26 ? { ...m, hidden: true, overrides: { chat: "ok" as const } } : m));
   const fetch = renderTab(all);
@@ -162,13 +162,48 @@ test("Edit… works on models selected on several pages: mixed values shown, and
   await user.type(within(dialog).getByRole("textbox", { name: "Max output" }), "4096");
   await user.click(within(dialog).getByRole("button", { name: "Apply to 2 models" }));
   await waitFor(() => expect(posts(fetch)).toHaveLength(1));
+  // The rows were read pages ago; sending their overrides back would undo a change made since.
   expect(JSON.parse(String(posts(fetch)[0][1]?.body))).toEqual({
     items: [
-      { model: "m-0001", metadata: { context_length: 8000, chat: "ok", max_output_tokens: 4096 } },
-      { model: "m-0027", metadata: { chat: "ok", max_output_tokens: 4096 } },
+      { model: "m-0001", metadata_patch: { max_output_tokens: 4096 } },
+      { model: "m-0027", metadata_patch: { max_output_tokens: 4096 } },
     ],
   });
   expect(await within(bar).findByText("2 models changed", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
+});
+
+test("clearing a field in Edit… removes just that override (null), and Chat and Reasons are sent only when changed", async () => {
+  const user = userEvent.setup();
+  const all = [model("a", { overrides: { context_length: 8000, chat: "ok" } }), model("b", { overrides: { context_length: 9000, reasoning: true } })];
+  const fetch = renderTab(all);
+  await user.click(await screen.findByRole("checkbox", { name: "Select all rows on this page" }));
+  await user.click(within(screen.getByRole("group", { name: "2 selected" })).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 2 models" });
+  await user.click(within(dialog).getByRole("combobox", { name: "Reasons before answering" }));
+  await user.click(await screen.findByRole("option", { name: "Not set" }));
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 2 models" }));
+  await waitFor(() => expect(posts(fetch)).toHaveLength(1));
+  expect(JSON.parse(String(posts(fetch)[0][1]?.body))).toEqual({
+    items: [
+      { model: "a", metadata_patch: { reasoning: null } },
+      { model: "b", metadata_patch: { reasoning: null } },
+    ],
+  });
+});
+
+test("in select mode a click on a model's row toggles it, the bulk bar follows, and no sheet opens (UI ticket 25)", async () => {
+  const user = userEvent.setup();
+  renderTab();
+  await user.click(await screen.findByRole("checkbox", { name: "Select my-model" }));
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+  const pinned = rows().find((r) => within(r).queryByText("pinned-model"))!;
+  await user.click(within(pinned).getAllByRole("cell")[2]);
+  expect(screen.getByRole("group", { name: "2 selected" })).toBeTruthy();
+  expect((screen.getByRole("checkbox", { name: "Select pinned-model" }) as HTMLElement).getAttribute("aria-checked")).toBe("true");
+  await user.click(within(pinned).getAllByRole("cell")[2]);
+  expect(screen.getByRole("group", { name: "1 selected" })).toBeTruthy();
+  expect(new URLSearchParams(where()).getAll("sheet")).toEqual([]);
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 test("removing a model the Owner added is red and asks first, naming the model; Cancel keeps it", async () => {

@@ -3,8 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Eye, EyeOff, ListPlus, ListX, MessageCircle, SlidersHorizontal } from "lucide-react";
 import { api, isApiError, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
-import { timeAgo } from "@/lib/format";
-import { calls, errorText, type Model, natural, usePools, useRefresh } from "@/pages/providers/api";
+import { plural, timeAgo } from "@/lib/format";
+import { calls, errorText, type Model, natural, usePools } from "@/pages/providers/api";
+import { useSheetRefresh } from "./refresh";
 import { factSource, ModelFields, modelForm, modelMetadata, tokens } from "@/pages/providers/Models";
 import { Status } from "@/ui/bits";
 import { Button, TextButton } from "@/ui/Button";
@@ -62,8 +63,8 @@ export default function ModelSheet({ record }: SheetBodyProps<"model">) {
 
 /** A model named somewhere (a Request, a Pool member, a Gateway Key's scope) that the Provider's list doesn't hold. */
 function NotListed({ provider, model, refetch }: { provider: string; model: string; refetch: () => Promise<unknown> }) {
-  const refresh = useRefresh();
-  const saving = useSave({ refresh: () => Promise.all([refresh(), refetch()]), describe: errorText });
+  const { refresh } = useSheetRefresh(refetch);
+  const saving = useSave({ refresh, describe: errorText });
   return (
     <div className="p-6">
       <DialogTitle className="mb-2 break-words text-[17px] font-semibold">
@@ -88,8 +89,7 @@ function ModelDetails({ m, provider, refetch }: { m: Model; provider: string; re
   const chat = useChatActions();
   const confirm = useConfirm();
   const pools = usePools();
-  const refreshAll = useRefresh();
-  const refresh = () => Promise.all([refreshAll(), refetch()]);
+  const { refresh, refreshAll } = useSheetRefresh(refetch);
   const actionSave = useSave({ refresh, describe: errorText });
   const detailsSave = useSave({ refresh, describe: errorText });
   const [editing, setEditing] = useEditing(rec.model(provider, m.model));
@@ -113,7 +113,7 @@ function ModelDetails({ m, provider, refetch }: { m: Model; provider: string; re
   const change = (body: { hidden?: boolean; added?: boolean }, message: string) => void actionSave.run(() => calls.saveModel(provider, { model: m.model, ...body }), { message });
   const clearGaps = () =>
     void actionSave.run(() => calls.bulkKeys(provider, "clear-model-gaps", m.model_gaps, m.model), {
-      message: (r) => `Model Gaps of ${m.model} cleared on ${r.succeeded} key${r.succeeded === 1 ? "" : "s"}`,
+      message: (r) => `Model Gaps of ${m.model} cleared on ${plural(r.succeeded, "key")}`,
     });
 
   // Asks first; a model only the Owner added leaves the list, so its sheet closes and the result (with Undo) toasts.
@@ -196,11 +196,7 @@ function ModelDetails({ m, provider, refetch }: { m: Model; provider: string; re
           >
             <p className="text-[14px] text-fg-muted">What Callers' model lists say of it. Empty fields use {provider}'s own list, then models.dev. They never change routing.</p>
             <ModelFields m={m} handle={provider} f={f} setF={setF} />
-            {(error || detailsSave.error) && (
-              <p role="alert" className="text-[13px] text-danger-text">
-                {error ?? detailsSave.error}
-              </p>
-            )}
+            <SaveError save={detailsSave} error={error} />
             <div className="flex flex-wrap justify-end gap-2">
               <Button onClick={() => setEditing(false)}>Cancel</Button>
               <Button type="submit" variant="primary" loading={detailsSave.pending}>

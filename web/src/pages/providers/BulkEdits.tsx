@@ -1,6 +1,7 @@
-import { applySet, BulkEdit, type BulkChanges, type BulkField, bulkDone, type SetChange } from "@/ui/BulkEdit";
+import { plural } from "@/lib/format";
+import { BulkEdit, type BulkChanges, type BulkField, bulkDone, type SetChange } from "@/ui/BulkEdit";
 import type { Save } from "@/ui/SaveStatus";
-import type { Facts, Member, Model, Provider, UpstreamKey } from "./api";
+import type { Facts, FactsPatch, KeyEdit, Member, Model, Provider, UpstreamKey } from "./api";
 import { calls, natural, useRefresh } from "./api";
 
 // What each Provider table edits together (UI ticket 30; the reasons are in
@@ -27,13 +28,14 @@ export function KeysBulkEdit({ handle, provider, rows, at, size }: { handle: str
 
   const apply = async (c: BulkChanges) => {
     const ordered = [...rows].sort((a, b) => natural(a.name, b.name));
+    // Endpoints go as the change, not as lists built from the rows: the rows may have been
+    // read pages ago, and the server applies it to each key's list as it is now.
+    const set = c.endpoints as SetChange | undefined;
     const items = ordered.map((k) => {
-      const item: { key: string; enabled?: boolean; endpoints?: string[] } = { key: k.id };
+      const item: KeyEdit = { key: k.id };
       if (typeof c.enabled === "boolean") item.enabled = c.enabled;
-      if (c.endpoints) {
-        const next = applySet(allowed(k), c.endpoints as SetChange, eps);
-        item.endpoints = next.length === eps.length ? [] : next;
-      }
+      if (set?.add.length) item.endpoints_add = set.add;
+      if (set?.remove.length) item.endpoints_remove = set.remove;
       return item;
     });
     const res = await calls.editKeys(handle, items);
@@ -94,28 +96,17 @@ export function ModelsBulkEdit({ handle, rows, at, size }: { handle: string; row
       if (v !== undefined && !(Number.isInteger(v) && v > 0)) throw new Error("Token counts are whole numbers above 0.");
       counts[k] = v;
     }
-    const meta = "chat" in c || "reasoning" in c || Object.keys(counts).length > 0;
+    // Only the changed overrides go out (null removes one): the rows may have been read
+    // pages ago, and the server keeps each model's others as they are now.
+    const patch: FactsPatch = {};
+    if (typeof c.chat === "string") patch.chat = c.chat ? (c.chat as Facts["chat"]) : null;
+    if (typeof c.reasoning === "string") patch.reasoning = c.reasoning ? c.reasoning === "yes" : null;
+    for (const [k, v] of Object.entries(counts) as ["context_length" | "max_output_tokens", number | undefined][]) patch[k] = v ?? null;
     const items = rows.map((m) => {
-      const item: { model: string; hidden?: boolean; added?: boolean; metadata?: Facts } = { model: m.model };
+      const item: { model: string; hidden?: boolean; added?: boolean; metadata_patch?: FactsPatch } = { model: m.model };
       if (typeof c.hidden === "boolean") item.hidden = c.hidden;
       if (typeof c.added === "boolean") item.added = c.added;
-      if (meta) {
-        // Overrides are replaced as a whole: start from this model's own.
-        const f: Facts = { ...m.overrides };
-        if (typeof c.chat === "string") {
-          if (c.chat) f.chat = c.chat as Facts["chat"];
-          else delete f.chat;
-        }
-        if (typeof c.reasoning === "string") {
-          if (c.reasoning) f.reasoning = c.reasoning === "yes";
-          else delete f.reasoning;
-        }
-        for (const [k, v] of Object.entries(counts) as ["context_length" | "max_output_tokens", number | undefined][]) {
-          if (v) f[k] = v;
-          else delete f[k];
-        }
-        item.metadata = f;
-      }
+      if (Object.keys(patch).length) item.metadata_patch = patch;
       return item;
     });
     const res = await calls.saveModels(handle, items);
@@ -125,32 +116,25 @@ export function ModelsBulkEdit({ handle, rows, at, size }: { handle: string; row
   return <BulkEdit rows={rows} noun={["model", "models"]} fields={fields} at={at} onApply={apply} size={size} />;
 }
 
-/** A Pool's members: On. The whole list is saved in one change, so it all applies or none does. */
-export function MembersBulkEdit({
-  pool,
-  members,
-  rows,
-  at,
-  size,
-}: {
-  pool: string;
-  members: Member[];
-  rows: Member[];
-  at: Save;
-  size?: "sm" | "md";
-}) {
+/**
+ * A Pool's members: On. The whole list is saved in one change, so it all applies or none does.
+ * The list is read again just before saving, so a member changed or added elsewhere since the
+ * tab loaded keeps that change.
+ */
+export function MembersBulkEdit({ pool, rows, at, size }: { pool: string; rows: Member[]; at: Save; size?: "sm" | "md" }) {
   const refresh = useRefresh();
   const key = (m: Pick<Member, "provider" | "model">) => `${m.provider}/${m.model}`;
   const fields: BulkField<Member>[] = [{ kind: "boolean", id: "enabled", label: "On", get: (m) => m.enabled, hint: "Iroha skips a member that is off and tries the next one." }];
   const apply = async (c: BulkChanges) => {
     const picked = new Set(rows.map(key));
     const on = c.enabled as boolean;
-    const next = members.map(({ provider, model, enabled }) => ({ provider, model, enabled: picked.has(`${provider}/${model}`) ? on : enabled }));
+    const now = (await calls.pool(pool)).members;
+    const next = now.map(({ provider, model, enabled }) => ({ provider, model, enabled: picked.has(`${provider}/${model}`) ? on : enabled }));
     const res = await calls.updatePool(pool, { members: next });
     await refresh();
-    const n = rows.filter((m) => m.enabled !== on).length;
+    const n = now.filter((m) => picked.has(key(m)) && m.enabled !== on).length;
     if (n === 0) return { message: `Nothing changed: ${rows.length === 1 ? "it was" : "they were"} already ${on ? "on" : "off"}` };
-    return { message: `${n} member${n === 1 ? "" : "s"} switched ${on ? "on" : "off"}`, entry: res.audit_entry };
+    return { message: `${plural(n, "member")} switched ${on ? "on" : "off"}`, entry: res.audit_entry };
   };
   return <BulkEdit rows={rows} noun={["member", "members"]} fields={fields} at={at} onApply={apply} size={size} />;
 }

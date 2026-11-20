@@ -29,13 +29,17 @@ const pool: Pool = {
 };
 
 let fetch: ReturnType<typeof vi.fn<typeof globalThis.fetch>>;
+/** The Pool as the server has it now (a test may change it after the tab loaded). */
+let current: Pool;
 beforeEach(() => {
   localStorage.clear();
+  current = pool;
   fetch = vi.fn<typeof globalThis.fetch>(async (url, init) => {
     const u = new URL(String(url), "http://iroha.test");
     if (u.pathname === "/api/overview") return json({ since: "2026-11-19T00:00:00Z", providers: [], pools: [] });
     if (u.pathname === "/api/gateway-keys") return json({ gateway_keys: [] });
     if (u.pathname === "/api/pools/fast" && init?.method === "PATCH") return json({ dry_run: false, audit_entry: "aud_1", changes: [], pool });
+    if (u.pathname === "/api/pools/fast") return json(current);
     return new Response("{}", { status: 404 });
   });
   vi.stubGlobal("fetch", fetch);
@@ -133,6 +137,29 @@ test("Edit… switches the selected members off in one save, the others kept; th
   await waitFor(() => expect(saved()).toEqual([["acme off", "zeta", "kappa off"]]));
   expect(await within(bar).findByText("2 members switched off", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
   expect(within(bar).getByRole("button", { name: "Undo: 2 members switched off" })).toBeTruthy();
+});
+
+test("Edit… reads the Pool again before saving, so a member changed or added elsewhere meanwhile keeps that change", async () => {
+  const user = userEvent.setup();
+  await renderTab();
+  await user.click(screen.getByRole("checkbox", { name: "Select acme (m-1)" }));
+  await user.click(screen.getByRole("checkbox", { name: "Select kappa (m-3)" }));
+  // Someone switches zeta off and adds omega after the tab loaded.
+  current = {
+    ...pool,
+    members: [
+      { position: 1, provider: "acme", model: "m-1", enabled: true },
+      { position: 2, provider: "zeta", model: "qwen/m-2", enabled: false },
+      { position: 3, provider: "kappa", model: "m-3", enabled: true },
+      { position: 4, provider: "omega", model: "m-4", enabled: true },
+    ],
+  };
+  const bar = screen.getByRole("group", { name: "2 selected" });
+  await user.click(within(bar).getByRole("button", { name: "Edit…" }));
+  const dialog = await screen.findByRole("dialog", { name: "Edit 2 members" });
+  await user.click(within(dialog).getByRole("checkbox", { name: "On" }));
+  await user.click(within(dialog).getByRole("button", { name: "Apply to 2 members" }));
+  await waitFor(() => expect(saved()).toEqual([["acme off", "zeta off", "kappa off", "omega"]]));
 });
 
 test("Test in Chat on a member opens the chat on its Provider and model", async () => {

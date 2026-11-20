@@ -28,8 +28,10 @@ export const RecordLink = forwardRef<
     title?: string;
     /** Search params the link removes: the modal dialog it sits in, when the URL holds it (`["key"]`), so the sheet replaces the dialog and Back brings it back. */
     drop?: string[];
+    /** Styled by `className` alone (a link that looks like a button), with no underline. */
+    bare?: boolean;
   }
->(function RecordLink({ record, children, className, drop, ...rest }, ref) {
+>(function RecordLink({ record, children, className, drop, bare, ...rest }, ref) {
   const sheets = useMaybeSheets();
   const level = useSheetLevel();
   const location = useLocation();
@@ -43,11 +45,11 @@ export const RecordLink = forwardRef<
     <SdkButton
       ref={ref as never}
       render={<Link to={href} />}
-      className={cn(recordLinkClass, className)}
+      className={bare ? className : cn(recordLinkClass, className)}
       onClick={onClick}
       {...rest}
     >
-      <span className={textClass}>{children}</span>
+      {bare ? children : <span className={textClass}>{children}</span>}
     </SdkButton>
   );
 });

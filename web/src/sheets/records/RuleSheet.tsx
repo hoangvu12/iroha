@@ -4,7 +4,7 @@ import { DialogTitle } from "@ui-sdk/react/dialog";
 import { formatNumber, timeAgo } from "@/lib/format";
 import { calls, errorText, type Replay, type Rule, useRefresh, useRules } from "@/pages/providers/api";
 import { deleteQuestion, ReplayNote, RuleFormFields, type RuleForm, ruleForm, ruleProblem, RuleSwitch, sendRule } from "@/pages/providers/Rules";
-import { builtInWords, RuleStep, scopeWords } from "@/pages/providers/RulesFlow";
+import { RuleStep, scopeWords } from "@/pages/providers/RulesFlow";
 import { Pill } from "@/pages/providers/controls";
 import { Button } from "@/ui/Button";
 import { useConfirm } from "@/ui/Confirm";
@@ -166,11 +166,7 @@ function RuleDetails({ r, n, count, most, provider }: { r: Rule; n: number; coun
             {builtin && <p className="text-[14px] text-fg-muted">Saving adds your own rule of this name, which replaces the built-in one until you restore it.</p>}
             <RuleFormFields f={f} set={set} handle={provider} isNew={false} />
             {replay && <ReplayNote replay={replay} />}
-            {(error || saving.error) && (
-              <p role="alert" className="text-[13px] text-danger-text">
-                {error ?? saving.error}
-              </p>
-            )}
+            <SaveError save={saving} error={error} />
             <div className="flex flex-wrap justify-end gap-2">
               <Button onClick={() => setEditing(false)}>Cancel</Button>
               <Button loading={checking} onClick={() => void check()}>
@@ -199,7 +195,7 @@ function RuleDetails({ r, n, count, most, provider }: { r: Rule; n: number; coun
               </Fact>
               {r.overrides && (
                 <Fact label="Built-in did" wide>
-                  {builtInWords(r.overrides)}
+                  {r.builtin_key_effect ?? r.overrides.outcome}
                 </Fact>
               )}
               <Fact label="Description" wide>

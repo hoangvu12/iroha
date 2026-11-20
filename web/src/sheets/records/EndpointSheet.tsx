@@ -4,7 +4,8 @@ import { MessageCircle, Pencil, Trash2 } from "lucide-react";
 import { api, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
 import { formatDate } from "@/lib/format";
-import { authStyleLabel, calls, type Endpoint, errorText, natural, shapeLabel, useKeys, useProvider, useRefresh } from "@/pages/providers/api";
+import { authStyleLabel, calls, type Endpoint, errorText, natural, shapeLabel, useKeys, useProvider } from "@/pages/providers/api";
+import { useSheetRefresh } from "./refresh";
 import { KeyStateLabel } from "@/pages/providers/controls";
 import { endpointBody, EndpointFields, endpointFields } from "@/pages/providers/Endpoints";
 import { Button } from "@/ui/Button";
@@ -78,8 +79,8 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
   const providerQ = useProvider(provider);
   const chat = useChatActions();
   const confirm = useConfirm();
-  const refreshAll = useRefresh();
-  const saving = useSave({ refresh: () => Promise.all([refreshAll(), refetch()]), describe: errorText });
+  const { refresh, refreshAll } = useSheetRefresh(refetch);
+  const saving = useSave({ refresh, describe: errorText });
   const [editing, setEditing] = useEditing(rec.endpoint(provider, e.name));
   const [f, setF] = useState(() => endpointFields(e));
   const [error, setError] = useState<string>();
@@ -168,11 +169,7 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
           >
             {/* One column: a sheet is narrower than the dialog was. */}
             <EndpointFields f={f} setF={setF} isNew={false} wide={false} />
-            {(error || saving.error) && (
-              <p role="alert" className="text-[13px] text-danger-text">
-                {error ?? saving.error}
-              </p>
-            )}
+            <SaveError save={saving} error={error} />
             <div className="flex flex-wrap justify-end gap-2">
               <Button onClick={() => setEditing(false)}>Cancel</Button>
               <Button type="submit" variant="primary" loading={saving.pending}>

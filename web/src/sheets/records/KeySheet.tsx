@@ -4,7 +4,8 @@ import { CircleSlash, Eye, EyeOff, MessageCircle, Pause, Play, Trash2, Waypoints
 import { api, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
 import { formatDate, formatDuration, timeAgo } from "@/lib/format";
-import { calls, errorText, maskSecret, useProvider, useRefresh, type KeyTestBulk, type UpstreamKey } from "@/pages/providers/api";
+import { calls, errorText, maskSecret, useProvider, type KeyTestBulk, type UpstreamKey } from "@/pages/providers/api";
+import { useSheetRefresh } from "./refresh";
 import { KeyStateLabel, ringRoom } from "@/pages/providers/controls";
 import { CoolingRow, EndpointsDialog, reportBulk, ResultsDialog, testFailure, testResults, type Results } from "@/pages/providers/Keys";
 import { Mono, StatusDot } from "@/ui/bits";
@@ -65,8 +66,7 @@ function KeyDetails({ k, provider, index, refetch }: { k: UpstreamKey; provider:
   const chat = useChatActions();
   const confirm = useConfirm();
   const providerQ = useProvider(provider);
-  const refreshAll = useRefresh();
-  const refresh = () => Promise.all([refreshAll(), refetch()]);
+  const { refresh, refreshAll } = useSheetRefresh(refetch);
 
   const [shown, setShown] = useState(false);
   const [name, setName] = useState(k.name);
@@ -279,7 +279,7 @@ function KeyDetails({ k, provider, index, refetch }: { k: UpstreamKey; provider:
               </li>
             ))}
             {k.cooling_models.map((c) => (
-              <CoolingRow key={`c${c.model}`} model={c.model} reason={c.reason} until={c.until} />
+              <CoolingRow key={`c${c.model}`} provider={provider} model={c.model} reason={c.reason} until={c.until} />
             ))}
           </ul>
         </SheetSection>

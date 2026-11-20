@@ -1,12 +1,11 @@
 import type { AriaAttributes, ReactNode } from "react";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { CircleX } from "lucide-react";
-import { formatNumber } from "@/lib/format";
-import type { Tone } from "@/ui/bits";
+import { formatNumber, plural } from "@/lib/format";
+import { OUTCOME_KEY } from "@/lib/outcomes";
 import { StatusDot } from "@/ui/bits";
 import { cn } from "@/ui/cn";
 import type { Classification, Outcome, Rule } from "./api";
-import { OUTCOMES } from "./api";
 import { Pill, ProviderTile } from "./controls";
 import { Connector, IconTile, Tag } from "./PoolRoute";
 
@@ -16,9 +15,6 @@ import { Connector, IconTile, Tag } from "./PoolRoute";
 // rules are passed over; the first rule whose every condition holds decides
 // what happens to the Upstream Key and the Request. When none matches, no
 // response or a 5xx tries the next key and anything else returns the error.
-
-const keyTone = (o: Outcome): Tone =>
-  o === "invalid" ? "red" : o === "cooling_key" || o === "cooling_key_model" ? "amber" : o === "model_gap" ? "blue" : "gray";
 
 /** What a rule matches, as its conditions read: any of a list, all of the conditions. */
 export function matchWords(r: Pick<Rule, "status" | "code" | "body" | "header">): string {
@@ -30,22 +26,6 @@ export function matchWords(r: Pick<Rule, "status" | "code" | "body" | "header">)
 }
 
 export const scopeWords = (r: Rule) => (r.provider ? `only ${r.provider}` : r.host ? `on ${r.host}` : undefined);
-const outcomeLabel = (o: Outcome) => OUTCOMES.find((x) => x.value === o)?.label ?? o;
-
-/** What the replaced built-in rule did, with its cooling time, so an override that only changes the time still shows the change. */
-export function builtInWords(b: NonNullable<Rule["overrides"]>): string {
-  const what = outcomeLabel(b.outcome).toLowerCase();
-  if (b.outcome !== "cooling_key" && b.outcome !== "cooling_key_model") return what;
-  // As the server words it (internal/failurerules keyEffect): a reset time named by the reply, else the fixed time, else 60 s.
-  const time = b.reset?.length ? "until reset" : b.cooling_seconds ? coolFor(b.cooling_seconds) : "60 s";
-  return `${what}, ${time}`;
-}
-
-export function coolFor(n: number): string {
-  if (n < 120 || n % 60 !== 0) return `${n} s`;
-  if (n < 7200 || n % 3600 !== 0) return `${n / 60} min`;
-  return `${n / 3600} h`;
-}
 
 /**
  * Where a tried failure went at one step (UI ticket 34): `missed` (tried, didn't match), `match`
@@ -250,7 +230,7 @@ export function RuleStep({
           </span>
           {(scope || r.overrides) && (
             <span className={cn("mt-0.5 block text-[13px] text-fg-muted", !stacked && "truncate")}>
-              {[scope && `Tried early: ${scope}`, r.overrides && `Built-in did: ${builtInWords(r.overrides)}`].filter(Boolean).join(" · ")}
+              {[scope && `Tried early: ${scope}`, r.overrides && `Built-in did: ${r.builtin_key_effect ?? r.overrides.outcome}`].filter(Boolean).join(" · ")}
             </span>
           )}
         </span>
@@ -298,7 +278,7 @@ function Effect({ r }: { r: Pick<Rule, "key_effect" | "request_effect"> & { outc
     <dl className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[14px]">
       <dt className="text-fg-muted">Upstream Key</dt>
       <dd className="flex min-w-0 items-center gap-2">
-        <StatusDot tone={r.outcome ? keyTone(r.outcome) : "gray"} />
+        <StatusDot tone={r.outcome ? OUTCOME_KEY[r.outcome].tone : "gray"} />
         <span className="truncate">{r.key_effect}</span>
       </dd>
       <dt className="text-fg-muted">Request</dt>
@@ -310,7 +290,7 @@ function Effect({ r }: { r: Pick<Rule, "key_effect" | "request_effect"> & { outc
 /** Today's hits: the count and a bar against the busiest rule, so the rules that fire stand out. */
 function Hits({ hits, most }: { hits: number; most: number }) {
   return (
-    <span className="flex w-20 shrink-0 flex-col items-end gap-1" title={`${formatNumber(hits)} hit${hits === 1 ? "" : "s"} today`}>
+    <span className="flex w-20 shrink-0 flex-col items-end gap-1" title={`${plural(hits, "hit")} today`}>
       <span className="text-[13px] text-fg-muted tabular">
         <span className={cn("text-[14px]", hits ? "font-semibold text-fg" : "text-fg-subtle")}>{formatNumber(hits)}</span> today
       </span>

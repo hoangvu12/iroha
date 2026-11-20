@@ -12,6 +12,7 @@ import {
 import { Dialog as SdkDialog, DialogBackdrop, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@ui-sdk/react/dialog";
 import { buttonClass, iconButtonClass } from "./Button";
 import { cn } from "./cn";
+import { appearClass } from "./motion";
 import { Field, Input } from "./Input";
 import { isApiError } from "@/api/client";
 
@@ -183,7 +184,7 @@ function Confirmation({
             </AlertDialogDescription>
             {shown.children && <div className="mt-4">{shown.children}</div>}
             {error && (
-              <p role="alert" className="mt-4 text-[13px] text-danger-text transition-opacity duration-list-in ease-out starting:opacity-0">
+              <p role="alert" className={cn("mt-4 text-[13px] text-danger-text", appearClass)}>
                 {error}
               </p>
             )}

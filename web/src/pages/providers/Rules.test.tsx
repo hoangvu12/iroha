@@ -42,6 +42,7 @@ const FLOW_RULES = [
     key_effect: "No change",
     request_effect: "Return to Caller",
     overrides: { name: "mine", status: ["429"], outcome: "cooling_key" },
+    builtin_key_effect: "Cool 60 s",
   }),
   rule("server-error", 2, { enabled: false, status: ["5xx"], outcome: "retry_elsewhere", key_effect: "No change", request_effect: "Try next key", hits: 0 }),
 ];
@@ -140,7 +141,8 @@ test("each step says what it matches and, on a match, what happens to the key an
   expect(quota.textContent).toContain("matches");
   // The Owner's version of a built-in rule says it replaces it, and what the built-in did.
   expect(within(mine).getByText("Replaces built-in")).toBeTruthy();
-  expect(mine.textContent).toContain("Built-in did: cool the key, 60 s");
+  // In the server's words (builtin_key_effect), as the key effect of any rule is.
+  expect(mine.textContent).toContain("Built-in did: Cool 60 s");
   expect(mine.textContent).toContain("Return to Caller");
   // A switched-off rule is passed over.
   expect(within(off).getByText("Off, skipped")).toBeTruthy();

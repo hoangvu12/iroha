@@ -46,7 +46,7 @@ type Send struct {
 	Stream   *bool       `json:"stream,omitempty" doc:"Default true: the answer streams as the Shape's server-sent events."`
 	// Reasoning is written in the Shape's own field, so translation to the
 	// Endpoint's Shape is exercised like any Caller's.
-	Reasoning string `json:"reasoning,omitempty" enum:"off,low,medium,high" doc:"Reasoning effort, written in the Shape's own field: reasoning_effort (OpenAI Chat), reasoning.effort (Responses), thinking.budget_tokens 1024/4096/12000 (Anthropic), thinkingConfig.thinkingBudget (Gemini). off or absent: not set."`
+	Reasoning string   `json:"reasoning,omitempty" enum:"off,low,medium,high" doc:"Reasoning effort, written in the Shape's own field: reasoning_effort (OpenAI Chat), reasoning.effort (Responses), thinking.budget_tokens 1024/4096/12000 (Anthropic), thinkingConfig.thinkingBudget (Gemini). off or absent: not set."`
 	Tools     []string `json:"tools,omitempty" doc:"Test tools to offer, by name (GET /api/test/tools lists them: get_weather, get_time, calculate, web_search, fetch_url, lookup_order). The answer carries a check of the model's tool calls."`
 	ToolCheck bool     `json:"tool_check,omitempty" doc:"The older form of tools: [\"get_weather\"]. Ignored when tools names any."`
 	MaxTokens int      `json:"max_tokens,omitempty" doc:"Most output tokens. Default 4096 (plus the reasoning budget on Anthropic)."`

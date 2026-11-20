@@ -4,6 +4,12 @@
 
 const root = () => getComputedStyle(document.documentElement);
 
+/**
+ * An error line (a Field error, a dialog's or a sheet form's): drops 4 px and fades in where it
+ * appears, on the list recipe; no shake. The one copy: import it, don't write it out.
+ */
+export const appearClass = "transition-[opacity,translate] duration-list-in ease-out starting:-translate-y-(--motion-shift-sm) starting:opacity-0";
+
 /** A `--duration-*` token in ms ("250ms", "0.25s"); 0 when it is missing or zeroed by reduced motion. */
 export function durationOf(token: `--duration-${string}`): number {
   const v = root().getPropertyValue(token).trim();

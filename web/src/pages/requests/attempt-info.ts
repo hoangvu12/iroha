@@ -1,3 +1,4 @@
+import { type Outcome, OUTCOME_KEY } from "@/lib/outcomes";
 import type { Tone } from "@/ui/bits";
 import type { Attempt } from "./api";
 import { clock } from "./bits";
@@ -8,7 +9,7 @@ import { clock } from "./bits";
 // (action: the Key State effect), and the upstream error body and headers.
 // The drawer, the Attempts tab and the Route view all read them through here.
 
-export type Outcome = "invalid" | "cooling_key" | "cooling_key_model" | "model_gap" | "retry_elsewhere" | "fail_request";
+export type { Outcome } from "@/lib/outcomes";
 
 export type Explanation = {
   failed: boolean;
@@ -52,28 +53,29 @@ export function explain(a: Attempt): Explanation {
   // An invalid verdict on one Endpoint of a key that works on another is an
   // Endpoint Gap there (ticket 40): the action names it, the key stays as it was.
   const endpointGap = outcome === "invalid" && /Endpoint Gap on/i.test(a.action ?? "");
+  const tone = outcome && OUTCOME_KEY[outcome].tone;
   switch (outcome) {
     case "cooling_key":
-      e.keyState = { text: until ? `Cooling until ${until}` : "Cooling", tone: "amber" };
+      e.keyState = { text: until ? `Cooling until ${until}` : "Cooling", tone: tone! };
       break;
     case "cooling_key_model":
       // Three models refused within minutes escalate to the whole key (the action says so).
       e.keyState = /whole key/i.test(a.action ?? "")
-        ? { text: `Cooling until ${untilIn(a.action?.slice(a.action.search(/whole key/i))) ?? until ?? "later"}`, tone: "amber" }
-        : { text: until ? `Cooling for ${a.wire_model} until ${until}` : `Cooling for ${a.wire_model}`, tone: "amber" };
+        ? { text: `Cooling until ${untilIn(a.action?.slice(a.action.search(/whole key/i))) ?? until ?? "later"}`, tone: tone! }
+        : { text: until ? `Cooling for ${a.wire_model} until ${until}` : `Cooling for ${a.wire_model}`, tone: tone! };
       break;
     case "invalid":
-      e.keyState = endpointGap ? { text: `Endpoint Gap on ${a.endpoint}`, tone: "blue" } : { text: stays ? "Still invalid" : "Invalid", tone: "red" };
+      e.keyState = endpointGap ? { text: `Endpoint Gap on ${a.endpoint}`, tone: OUTCOME_KEY.model_gap.tone } : { text: stays ? "Still invalid" : "Invalid", tone: tone! };
       break;
     case "model_gap":
-      e.keyState = { text: `Model Gap for ${a.wire_model}`, tone: "blue" };
+      e.keyState = { text: `Model Gap for ${a.wire_model}`, tone: tone! };
       break;
     case "retry_elsewhere":
     case "fail_request":
-      e.keyState = { text: "Unchanged", tone: "gray" };
+      e.keyState = { text: OUTCOME_KEY[outcome].short, tone: tone! };
       break;
   }
-  if (stays && e.keyState) e.keyState = { text: "Still invalid", tone: "red" };
+  if (stays && e.keyState) e.keyState = { text: "Still invalid", tone: OUTCOME_KEY.invalid.tone };
   return e;
 }
 
@@ -102,16 +104,10 @@ export function jumpLabel(a: Attempt, next: Attempt | undefined): { text: string
   if (!next || !attemptFailed(a)) return undefined;
   const tried = thenText(a, next);
   const lower = tried.charAt(0).toLowerCase() + tried.slice(1);
-  switch (explain(a).outcome) {
-    case "cooling_key":
-    case "cooling_key_model":
-      return { text: `Cooling, ${lower}`, tone: "amber" };
-    case "model_gap":
-      return { text: `Model Gap, ${lower}`, tone: "blue" };
-    case "invalid":
-      if (/Endpoint Gap on/i.test(a.action ?? "")) return { text: `Endpoint Gap, ${lower}`, tone: "blue" };
-      return { text: `Invalid key, ${lower}`, tone: "red" };
-  }
+  const o = explain(a).outcome;
+  if (o === "invalid" && /Endpoint Gap on/i.test(a.action ?? "")) return { text: `Endpoint Gap, ${lower}`, tone: OUTCOME_KEY.model_gap.tone };
+  // The outcomes that changed the key name themselves (one map: lib/outcomes.ts).
+  if (o && o !== "retry_elsewhere" && o !== "fail_request") return { text: `${OUTCOME_KEY[o].short}, ${lower}`, tone: OUTCOME_KEY[o].tone };
   if (a.status === 0) return { text: `No response, ${lower}`, tone: "red" };
   return { text: `${a.status}, ${lower}`, tone: a.status === 429 ? "amber" : "red" };
 }

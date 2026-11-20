@@ -261,21 +261,30 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 	return res, nil
 }
 
+// endpointOf is the Provider's Endpoint ref names, by ID or name (an ID
+// wins over another Endpoint's name), or a 404 saying how to list them.
+func endpointOf(rt *providers.Routing, ref string) (*planner.Endpoint, error) {
+	var ep *planner.Endpoint
+	for i := range rt.Endpoints {
+		if e := &rt.Endpoints[i]; e.ID == ref || (ep == nil && e.Name == ref) {
+			ep = e
+		}
+	}
+	if ep == nil {
+		return nil, api.NotFound("List them with GET /api/providers/"+rt.Handle+"/endpoints; address one by its name or ID.",
+			"Provider %s has no Endpoint named %q or with that ID.", rt.Handle, ref)
+	}
+	return ep, nil
+}
+
 // testEndpoint is the Endpoint a key test uses: the one named by ref, or
 // the first one the key may use.
 func testEndpoint(rt *providers.Routing, k *planner.Key, ref string) (*planner.Endpoint, error) {
-	list := "GET /api/providers/" + rt.Handle + "/endpoints"
 	if ref != "" {
-		var ep *planner.Endpoint
-		for i := range rt.Endpoints {
-			if e := &rt.Endpoints[i]; e.ID == ref || (ep == nil && e.Name == ref) {
-				ep = e
-			}
-		}
+		ep, err := endpointOf(rt, ref)
 		switch {
-		case ep == nil:
-			return nil, api.NotFound("List them with "+list+"; address one by its name or ID.",
-				"Provider %s has no Endpoint named %q or with that ID.", rt.Handle, ref)
+		case err != nil:
+			return nil, err
 		case !k.Allows(ep.ID):
 			return nil, api.Conflict("endpoint_not_allowed", "Test on an Endpoint the key may use (GET /api/providers/"+rt.Handle+"/keys/"+k.Name+" lists them), or lift its restriction.",
 				"Upstream Key %s is restricted to other Endpoints than %s.", k.Name, ep.Name)

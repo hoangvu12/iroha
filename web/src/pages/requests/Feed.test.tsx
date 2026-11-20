@@ -212,18 +212,19 @@ test("numbered pages, if the Owner prefers them: a later page loads the older Re
 });
 
 test("the Owner switches the feed to numbered pages in the View menu, and this browser remembers it", async () => {
+  // 30 rows: one more page than the smallest page size (25) proves paging, and stays within the
+  // rows a reveal renders at once (UI ticket 26), so nothing waits on a deferred render.
   const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => request(`req_${String(from + i).padStart(3, "0")}`));
   iroha(
     (p) => {
       if (p.has("changed_after")) return { requests: [], cursor: 1 };
-      return { requests: page(1, 100), next_before: "req_100", cursor: 1 };
+      return { requests: page(1, 30), cursor: 1 };
     },
-    { ...STATS, requests: 120 },
+    { ...STATS, requests: 30 },
   );
   const user = userEvent.setup();
   const first = renderFeed();
-  // Rows past the first 30 render in a transition after the reveal (UI ticket 26), slow in jsdom.
-  await waitFor(() => expect(shownIds()).toHaveLength(100), { timeout: 5000 });
+  await waitFor(() => expect(shownIds()).toHaveLength(30));
   expect(screen.queryByRole("navigation", { name: "Pages of Requests" })).toBeNull();
 
   await user.click(screen.getByRole("button", { name: "View" }));
@@ -231,7 +232,7 @@ test("the Owner switches the feed to numbered pages in the View menu, and this b
   expect(screen.getByRole("menuitemradio", { name: "Live, load older as you scroll" }).getAttribute("aria-checked")).toBe("true");
   await user.click(choice);
   await waitFor(() => expect(shownIds()).toHaveLength(25));
-  expect(screen.getByRole("navigation", { name: "Pages of Requests" })).toBeTruthy();
+  expect(within(screen.getByRole("navigation", { name: "Pages of Requests" })).getByRole("button", { name: "Page 2" })).toBeTruthy();
   expect(localStorage.getItem("iroha:requests:paging")).toBe("pages");
 
   first.unmount();

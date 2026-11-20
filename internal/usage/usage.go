@@ -12,12 +12,33 @@ import (
 )
 
 // Usage is the token count of one answer (OpenAI Chat, OpenAI Responses,
-// Anthropic Messages, Gemini).
+// Anthropic Messages, Gemini), in one convention whatever the Provider's:
+// Input is every prompt token, and CacheRead and CacheWrite are parts of it.
+// subset and separate are the only places a Provider's counts become it.
 type Usage struct {
-	Input     int64 `json:"input" doc:"Prompt tokens, cached ones included."`
-	Output    int64 `json:"output" doc:"Completion tokens, reasoning included."`
-	CacheRead int64 `json:"cache_read" doc:"Prompt tokens served from the Provider's cache."`
-	Reasoning int64 `json:"reasoning" doc:"Completion tokens spent on reasoning."`
+	Input          int64 `json:"input" doc:"Prompt tokens, all of them: uncached, read from the Provider's cache and written to it."`
+	Output         int64 `json:"output" doc:"Completion tokens, reasoning included."`
+	CacheRead      int64 `json:"cache_read" doc:"Part of input served from the Provider's prompt cache."`
+	CacheWrite     int64 `json:"cache_write" doc:"Part of input written to the Provider's prompt cache (Anthropic, OpenAI GPT-5.6+, Kimi and Qwen report it; most bill it above normal input)."`
+	CacheWriteLong int64 `json:"cache_write_long" doc:"Part of cache_write kept for the Provider's longer lifetime and billed higher (Anthropic's 1 h, OpenAI's 12 h); 0 when the Provider reports no split."`
+	Reasoning      int64 `json:"reasoning" doc:"Completion tokens spent on reasoning."`
+}
+
+// cache is what an answer said about the Provider's prompt cache.
+type cache struct{ read, write, writeLong int64 }
+
+// subset is the usage of a Provider whose prompt count already includes the
+// tokens read from and written to its cache (OpenAI Chat and Responses,
+// Gemini, and the OpenAI-compatible APIs of DeepSeek, Qwen, Kimi...).
+func subset(prompt int64, c cache) Usage {
+	return Usage{Input: prompt, CacheRead: c.read, CacheWrite: c.write, CacheWriteLong: c.writeLong}
+}
+
+// separate is the usage of a Provider that counts uncached prompt tokens,
+// cache reads and cache writes apart (Anthropic Messages: input_tokens is
+// only what follows the last cache breakpoint).
+func separate(uncached int64, c cache) Usage {
+	return Usage{Input: uncached + c.read + c.write, CacheRead: c.read, CacheWrite: c.write, CacheWriteLong: c.writeLong}
 }
 
 // Reader collects the usage of one answer written in one Shape.
@@ -90,7 +111,7 @@ func (r *Reader) Event(data []byte) {
 
 // gemini reads a Gemini usageMetadata. Gemini counts thoughts and tool-use
 // prompts apart: thoughts are output (and reasoning), tool-use prompt tokens
-// input; cached content is part of the prompt count.
+// input; cached content is part of the prompt count. It reports no writes.
 func (r *Reader) gemini(b []byte) {
 	var v struct {
 		Usage *struct {
@@ -105,7 +126,9 @@ func (r *Reader) gemini(b []byte) {
 		return
 	}
 	u := v.Usage
-	r.u = &Usage{Input: u.Prompt + u.ToolPrompt, Output: u.Candidates + u.Thoughts, CacheRead: u.Cached, Reasoning: u.Thoughts}
+	out := subset(u.Prompt+u.ToolPrompt, cache{read: u.Cached})
+	out.Output, out.Reasoning = u.Candidates+u.Thoughts, u.Thoughts
+	r.u = &out
 }
 
 // Usage is what was read, or nil when the answer carried none.
@@ -119,15 +142,55 @@ func (r *Reader) chat(b []byte) {
 
 type openAIChat struct {
 	Usage *struct {
-		PromptTokens        *int64 `json:"prompt_tokens"`
-		CompletionTokens    *int64 `json:"completion_tokens"`
-		PromptTokensDetails *struct {
-			CachedTokens int64 `json:"cached_tokens"`
-		} `json:"prompt_tokens_details"`
+		PromptTokens        *int64        `json:"prompt_tokens"`
+		CompletionTokens    *int64        `json:"completion_tokens"`
+		PromptTokensDetails *inputDetails `json:"prompt_tokens_details"`
+		// DeepSeek reports its cache hits here, Moonshot's older answers
+		// cached_tokens, OpenRouter-style relays cache_write_tokens.
+		PromptCacheHitTokens    int64 `json:"prompt_cache_hit_tokens"`
+		CachedTokens            int64 `json:"cached_tokens"`
+		CacheWriteTokens        int64 `json:"cache_write_tokens"`
 		CompletionTokensDetails *struct {
 			ReasoningTokens int64 `json:"reasoning_tokens"`
 		} `json:"completion_tokens_details"`
 	} `json:"usage"`
+}
+
+// inputDetails is OpenAI's prompt_tokens_details (Chat) or
+// input_tokens_details (Responses), with the names other Providers put in
+// it: Qwen's cache_creation_input_tokens and cache_creation.
+type inputDetails struct {
+	CachedTokens             int64 `json:"cached_tokens"`
+	CacheWriteTokens         int64 `json:"cache_write_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheWriteTokensDetails  *struct {
+		TTL12h int64 `json:"ttl_12h_tokens"`
+	} `json:"cache_write_tokens_details"`
+	CacheCreation *ttlSplit `json:"cache_creation"`
+}
+
+// ttlSplit is Anthropic's (and Qwen's) split of cache writes by lifetime.
+type ttlSplit struct {
+	Ephemeral1h int64 `json:"ephemeral_1h_input_tokens"`
+}
+
+// cache reads the details, with read and write counts found beside them
+// (top-level fields some Providers use). Several names for one count are
+// the same tokens told twice, never added: the largest wins.
+func (d *inputDetails) cache(read, write int64) cache {
+	c := cache{read: read, write: write}
+	if d == nil {
+		return c
+	}
+	c.read = max(c.read, d.CachedTokens)
+	c.write = max(c.write, d.CacheWriteTokens, d.CacheCreationInputTokens)
+	if d.CacheWriteTokensDetails != nil {
+		c.writeLong = d.CacheWriteTokensDetails.TTL12h
+	}
+	if d.CacheCreation != nil {
+		c.writeLong = max(c.writeLong, d.CacheCreation.Ephemeral1h)
+	}
+	return c
 }
 
 // FromOpenAIChat reads the "usage" object of an OpenAI Chat Completions
@@ -137,16 +200,16 @@ func FromOpenAIChat(b []byte) (u Usage, ok bool) {
 	if json.Unmarshal(b, &v) != nil || v.Usage == nil || v.Usage.PromptTokens == nil && v.Usage.CompletionTokens == nil {
 		return u, false
 	}
-	if p := v.Usage.PromptTokens; p != nil {
-		u.Input = *p
+	c := v.Usage
+	var prompt int64
+	if c.PromptTokens != nil {
+		prompt = *c.PromptTokens
 	}
-	if c := v.Usage.CompletionTokens; c != nil {
-		u.Output = *c
+	u = subset(prompt, c.PromptTokensDetails.cache(max(c.PromptCacheHitTokens, c.CachedTokens), c.CacheWriteTokens))
+	if c.CompletionTokens != nil {
+		u.Output = *c.CompletionTokens
 	}
-	if d := v.Usage.PromptTokensDetails; d != nil {
-		u.CacheRead = d.CachedTokens
-	}
-	if d := v.Usage.CompletionTokensDetails; d != nil {
+	if d := c.CompletionTokensDetails; d != nil {
 		u.Reasoning = d.ReasoningTokens
 	}
 	return u, true
@@ -157,10 +220,11 @@ func FromOpenAIChat(b []byte) (u Usage, ok bool) {
 // In a stream message_start gives input and cache counts and message_delta
 // the output; either may repeat a field, and a null keeps the earlier value.
 type anthropicCounts struct {
-	Input       *int64 `json:"input_tokens"`
-	Output      *int64 `json:"output_tokens"`
-	CacheRead   *int64 `json:"cache_read_input_tokens"`
-	CacheCreate *int64 `json:"cache_creation_input_tokens"`
+	Input       *int64    `json:"input_tokens"`
+	Output      *int64    `json:"output_tokens"`
+	CacheRead   *int64    `json:"cache_read_input_tokens"`
+	CacheCreate *int64    `json:"cache_creation_input_tokens"`
+	Split       *ttlSplit `json:"cache_creation"`
 }
 
 func (a *anthropicCounts) merge(b anthropicCounts) {
@@ -168,6 +232,9 @@ func (a *anthropicCounts) merge(b anthropicCounts) {
 		if *f.src != nil {
 			*f.dst = *f.src
 		}
+	}
+	if b.Split != nil {
+		a.Split = b.Split
 	}
 }
 
@@ -178,5 +245,11 @@ func (a *anthropicCounts) usage() *Usage {
 		}
 		return *p
 	}
-	return &Usage{Input: v(a.Input) + v(a.CacheRead) + v(a.CacheCreate), Output: v(a.Output), CacheRead: v(a.CacheRead)}
+	c := cache{read: v(a.CacheRead), write: v(a.CacheCreate)}
+	if a.Split != nil {
+		c.writeLong = a.Split.Ephemeral1h
+	}
+	u := separate(v(a.Input), c)
+	u.Output = v(a.Output)
+	return &u
 }

@@ -38,10 +38,29 @@ function Where() {
   return <output aria-label="Where">{l.search}</output>;
 }
 
-function renderTab(keys: UpstreamKey[], url = "/providers/acme/keys", { provider, refuse = [] }: { provider?: Provider; refuse?: number[] } = {}) {
+type Group = { upstream_key_id: string; requests: number; input: number; cache_read: number };
+
+function renderTab(
+  keys: UpstreamKey[],
+  url = "/providers/acme/keys",
+  { provider, refuse = [], cache = [] }: { provider?: Provider; refuse?: number[]; cache?: Group[] } = {},
+) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (u, init) => {
     const path = String(u);
     if (path.startsWith("/api/providers/acme/keys") && (init?.method ?? "GET") === "GET") return answer({ upstream_keys: keys });
+    if (path.startsWith("/api/requests/stats"))
+      return answer({
+        requests: 0,
+        cache_hits: 0,
+        tokens: {},
+        groups: cache.map((g) => ({
+          provider: "acme",
+          upstream_key_id: g.upstream_key_id,
+          requests: g.requests,
+          cache_hits: g.cache_read > 0 ? g.requests : 0,
+          tokens: { input: g.input, output: 0, cache_read: g.cache_read, cache_write: 0, cache_write_long: 0, reasoning: 0, total: g.input },
+        })),
+      });
     const items: unknown[] = JSON.parse(String(init?.body ?? "{}")).items ?? [];
     const ok = (i: number) => !refuse.includes(i);
     return answer({
@@ -110,6 +129,42 @@ test("the state filter and search narrow the keys and live in the URL; sorting b
   await user.click(screen.getByRole("button", { name: "Sort by State" }));
   expect(where()).toContain("sort=state");
   expect(within(rows()[0]).getByText("team-3")).toBeTruthy(); // invalid first
+});
+
+test("Cached, 24 h: each key's cached share from the Requests of the last day, test Requests left out", async () => {
+  const fetch = renderTab([key(1), key(2), key(3)], undefined, {
+    cache: [
+      { upstream_key_id: "key_1", requests: 12, input: 4000, cache_read: 1000 },
+      { upstream_key_id: "key_3", requests: 3, input: 900, cache_read: 0 },
+    ],
+  });
+  await screen.findByRole("table", { name: "Upstream Keys" });
+  const at = within(screen.getByRole("table", { name: "Upstream Keys" }))
+    .getAllByRole("columnheader")
+    .findIndex((h) => h.textContent?.includes("Cached, 24 h"));
+  expect(at).toBeGreaterThan(0);
+  const cell = (i: number) => within(rows()[i]).getAllByRole("cell")[at];
+  await waitFor(() => expect(cell(0)?.textContent).toBe("25.0%"));
+  expect(cell(0)?.querySelector("[title]")?.getAttribute("title")).toBe("1,000 of 4,000 input tokens read from the cache, 12 Requests");
+  expect(cell(1)?.textContent).toBe("–"); // no Requests in the last day
+  expect(cell(2)?.textContent).toBe("0.0%");
+  const asked = fetch.mock.calls.map(([u]) => new URL(String(u), "http://iroha.test")).find((u) => u.pathname === "/api/requests/stats")!;
+  expect(Object.fromEntries(asked.searchParams)).toEqual({ provider: "acme", group_by: "upstream_key", since: "24h", caller_kind: "gateway_key" });
+});
+
+test("sorting by Cached, 24 h puts the best-cached key first and lives in the URL", async () => {
+  const user = userEvent.setup();
+  renderTab([key(1), key(2), key(3)], undefined, {
+    cache: [
+      { upstream_key_id: "key_1", requests: 2, input: 1000, cache_read: 100 },
+      { upstream_key_id: "key_2", requests: 2, input: 1000, cache_read: 800 },
+    ],
+  });
+  await screen.findByRole("table", { name: "Upstream Keys" });
+  await waitFor(() => expect(within(rows()[1]).getByText("80.0%")).toBeTruthy());
+  await user.click(screen.getByRole("button", { name: "Sort by Cached, 24 h" }));
+  expect(rows().map((r) => within(r).getByText(/^team-/).textContent)).toEqual(["team-2", "team-1", "team-3"]);
+  expect(where()).toContain("sort=cached");
 });
 
 test("selecting keys shows the bulk bar; Disable calls the bulk API and shows its result in the bar", async () => {
@@ -259,13 +314,23 @@ test("an old link to a key's dialog (?key=) opens its sheet instead", async () =
   await waitFor(() => expect(decodeURIComponent(where())).toBe("?sort=state&sheet=key:acme/team-1"));
 });
 
+test("an agent sorts the keys by their cached share to find the ones getting cache hits", async () => {
+  renderTab([key(1), key(2)], undefined, { cache: [{ upstream_key_id: "key_2", requests: 4, input: 2000, cache_read: 1500 }] });
+  await screen.findByRole("table", { name: "Upstream Keys" });
+  await waitFor(() => expect(screen.getByText("75.0%")).toBeTruthy());
+  const run = await agent.act({ steps: [{ ref: "Sort by Cached, 24 h", action: "press" }] });
+  expect(run.ok, run.error?.message).toBe(true);
+  expect(rows().map((r) => within(r).getByText(/^team-/).textContent)).toEqual(["team-2", "team-1"]);
+  expect(where()).toContain("sort=cached");
+});
+
 test("an agent filters, selects and tests keys, and needs a person to delete one", async () => {
   const fetch = renderTab([key(1), key(2), key(3, { state: { state: "invalid" } })]);
   await screen.findByRole("table", { name: "Upstream Keys" });
   const entries = agent.snapshot().filter((e) => !e.offPage && e.component !== "more");
   for (const e of entries) expect(e.label, `${e.component} ${e.ref} has no name`).toBeTruthy();
   const labels = entries.map((e) => e.label);
-  for (const l of ["Search keys by name or secret", "Show keys", "Sort by Name", "Sort by State", "Sort by Last used", "Select team-1", "More for team-1", "Open team-1"])
+  for (const l of ["Search keys by name or secret", "Show keys", "Sort by Name", "Sort by State", "Sort by Cached, 24 h", "Sort by Last used", "Select team-1", "More for team-1", "Open team-1"])
     expect(labels, `${l} is missing`).toContain(l);
 
   const run = await agent.act({

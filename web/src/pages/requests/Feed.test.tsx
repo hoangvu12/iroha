@@ -131,6 +131,34 @@ test("a Gateway Key's ID as the caller (its Requests count links so) filters by 
   expect(screen.queryByRole("menuitemradio", { name: /gk_2/ })).toBeNull();
 });
 
+/** The stats row's Cached figure, once the real stats replaced the skeleton's sample. */
+async function cachedFigure() {
+  // The sample a skeleton is drawn from sits in an inert box.
+  const term = await waitFor(() => {
+    const t = screen.getByText("Cached");
+    expect(t.closest("[inert]")).toBeNull();
+    return t;
+  });
+  expect(term.tagName).toBe("DT");
+  return term.nextElementSibling as HTMLElement;
+}
+
+test("the stats row shows the cached share: cache read over input", async () => {
+  const tokens = { input: 4000, output: 100, cache_read: 1000, cache_write: 600, cache_write_long: 0, reasoning: 0, total: 4100 };
+  iroha(() => ({ requests: [request("req_1")], cursor: 1 }), { ...STATS, cache_hits: 1, tokens });
+  renderFeed();
+  const figure = await cachedFigure();
+  expect(figure.textContent).toBe("25.0%");
+  // The numbers behind it, for whoever hovers.
+  expect(figure.getAttribute("title")).toBe("1,000 of 4,000 input tokens read from the cache; 600 written to it");
+});
+
+test("the cached share is a dash while no input was counted", async () => {
+  iroha(() => ({ requests: [request("req_1")], cursor: 1 }));
+  renderFeed();
+  expect((await cachedFigure()).textContent).toBe("–");
+});
+
 test("the first load shows a skeleton of the feed, labelled for screen readers", async () => {
   vi.stubGlobal("fetch", vi.fn<typeof globalThis.fetch>(() => new Promise<Response>(() => {})));
   renderFeed();

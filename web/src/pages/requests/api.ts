@@ -8,7 +8,8 @@ import { api, seg } from "@/api/client";
 
 export type Shape = "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini";
 
-export type Usage = { input: number; output: number; cache_read: number; reasoning: number };
+/** Token usage: input is every prompt token; cache_read and cache_write are parts of it (cache_write_long, of the writes). */
+export type Usage = { input: number; output: number; cache_read: number; cache_write: number; cache_write_long: number; reasoning: number };
 
 export type Attempt = {
   seq: number;
@@ -79,7 +80,23 @@ export type Stats = {
   retried: number;
   median_duration_ms?: number;
   median_first_byte_ms?: number;
-  tokens: { input: number; output: number; cache_read: number; reasoning: number; total: number };
+  /** Requests that read anything from the Provider's prompt cache. */
+  cache_hits: number;
+  tokens: Usage & { total: number };
+  /** With group_by: one row per group. */
+  groups?: StatsGroup[];
+};
+
+/** One group of GET /api/requests/stats?group_by=: only the grouped-by fields are set. */
+export type StatsGroup = {
+  provider?: string;
+  upstream_key_id?: string;
+  upstream_key?: string;
+  model?: string;
+  caller?: { kind: "gateway_key" | "test"; gateway_key_id?: string; name: string };
+  requests: number;
+  cache_hits: number;
+  tokens: Usage & { total: number };
 };
 
 export type CallerOption = { name: string; kind: "gateway_key" | "test"; gateway_key_id?: string; requests: number };

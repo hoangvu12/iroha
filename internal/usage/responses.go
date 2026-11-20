@@ -3,13 +3,12 @@ package usage
 import "encoding/json"
 
 // responsesCounts is an OpenAI Responses usage object. input_tokens
-// includes the cached ones, output_tokens the reasoning ones.
+// includes the cached and written ones, output_tokens the reasoning ones.
 type responsesCounts struct {
-	Input        *int64 `json:"input_tokens"`
-	Output       *int64 `json:"output_tokens"`
-	InputDetails *struct {
-		CachedTokens int64 `json:"cached_tokens"`
-	} `json:"input_tokens_details"`
+	Input         *int64        `json:"input_tokens"`
+	Output        *int64        `json:"output_tokens"`
+	InputDetails  *inputDetails `json:"input_tokens_details"`
+	CacheWrite    int64         `json:"cache_write_tokens"`
 	OutputDetails *struct {
 		ReasoningTokens int64 `json:"reasoning_tokens"`
 	} `json:"output_tokens_details"`
@@ -41,14 +40,13 @@ func fromResponses(b []byte) (u Usage, ok bool) {
 	if c == nil || c.Input == nil && c.Output == nil {
 		return u, false
 	}
+	var prompt int64
 	if c.Input != nil {
-		u.Input = *c.Input
+		prompt = *c.Input
 	}
+	u = subset(prompt, c.InputDetails.cache(0, c.CacheWrite))
 	if c.Output != nil {
 		u.Output = *c.Output
-	}
-	if c.InputDetails != nil {
-		u.CacheRead = c.InputDetails.CachedTokens
 	}
 	if c.OutputDetails != nil {
 		u.Reasoning = c.OutputDetails.ReasoningTokens

@@ -202,6 +202,17 @@ var Builtin = []Rule{
 		Description: "\"Your credit balance is too low\" (Anthropic answers it as a 400): billing, not a bad request. Cool the key 15 min and try another.",
 	},
 	{
+		// USE-21: DeepAI's daily Theos are used up. That is a different thing from
+		// the request being too big: the account has nothing left to spend today, and
+		// the message names the time the allowance comes back. Without a rule it falls
+		// through to the generic 403 and the key is tried again every minute until
+		// tomorrow.
+		Name: "deepai-theos-exhausted", Code: []string{"theos_exhausted"},
+		Outcome:     CoolingKeyModel,
+		Reset:       []string{`body:They refresh at\s+(\d{4}-\d\d-\d\d[t ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:z|[+-]\d\d:?\d\d)?)`},
+		Description: "DeepAI theos_exhausted (\"You've used today's Theos. They refresh at <time>\"): the account's daily allowance is spent. Cool the key for this model until the time the message names, so the router stops trying it before the allowance comes back.",
+	},
+	{
 		// USE-19: the deepai-proxy answers a request the account's Theos cannot pay
 		// for with a code of its own, so the router can tell "this request is too big
 		// for this key" from "this key is spent". The key is healthy and only this

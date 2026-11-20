@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { formatNumber } from "@/lib/format";
 import { rec, RecordLink } from "@/sheets/RecordLink";
 import { TextButton } from "@/ui/Button";
+import { affinityReason } from "./affinity";
 import type { RequestRecord } from "./api";
 import { Fact, failed, longShape, msOrSecs, ProviderLogo, secs, Summary } from "./bits";
 
@@ -60,6 +61,11 @@ export function RequestDetails({ r, onShowCaptured }: { r: RequestRecord; onShow
         <Fact label="Upstream Key" mono>
           {r.upstream_key && r.provider ? <RecordLink record={rec.key(r.provider, r.upstream_key)}>{r.upstream_key}</RecordLink> : r.upstream_key || none}
         </Fact>
+        {affinityReason(r.affinity) && (
+          <Fact label="Key choice" wide>
+            {affinityReason(r.affinity)}
+          </Fact>
+        )}
         <Fact label="Stream">{r.stream ? "Yes" : "No"}</Fact>
         <Fact label="Caller Shape">{longShape(r.shape_in)}</Fact>
         <Fact label="Upstream Shape">{r.shape_out ? longShape(r.shape_out) : none}</Fact>

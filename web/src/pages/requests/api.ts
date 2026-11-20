@@ -9,6 +9,13 @@ import { api, seg } from "@/api/client";
 export type Shape = "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini";
 
 /** Token usage: input is every prompt token; cache_read and cache_write are parts of it (cache_write_long, of the writes). */
+/** How the Request's conversation chose its Upstream Key (conversation affinity). */
+export type Affinity = {
+  source: "header" | "claude_code" | "codex" | "session_id" | "opencode" | "prompt_cache_key" | "prefix" | "none";
+  mode: "on" | "off" | "control" | "none";
+  preferred_served?: boolean;
+};
+
 export type Usage = { input: number; output: number; cache_read: number; cache_write: number; cache_write_long: number; reasoning: number };
 
 export type Attempt = {
@@ -68,6 +75,7 @@ export type RequestRecord = {
   attempt_count: number;
   captured: boolean;
   attempts?: Attempt[];
+  affinity?: Affinity;
 };
 
 export type RequestPage = { requests: RequestRecord[]; next_before?: string; cursor: number };

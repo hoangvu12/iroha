@@ -70,7 +70,12 @@ export const SAMPLE_ATTEMPTS: Attempt[] = [
 ];
 
 /** One Request with its Attempts, for the drawer and the Route view before its own answer arrives. */
-export const SAMPLE_REQUEST: RequestRecord = { ...sampleRequest(0), id: "req_sample_0000000000", attempts: SAMPLE_ATTEMPTS };
+export const SAMPLE_REQUEST: RequestRecord = {
+  ...sampleRequest(0),
+  id: "req_sample_0000000000",
+  attempts: SAMPLE_ATTEMPTS,
+  affinity: { source: "claude_code", mode: "on", preferred_served: true },
+};
 
 export const SAMPLE_CAPTURE: Capture = {
   request_id: "req_sample",

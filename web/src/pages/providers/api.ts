@@ -59,6 +59,7 @@ export type Provider = {
   budget: { max_attempts: number; first_byte_seconds: number; overridden: boolean };
   strict: boolean;
   discovery: "none" | "provider" | "key";
+  affinity: "on" | "off";
   models_dev_brand: string;
   logo_domain: string;
   logo_domain_guessed: boolean;
@@ -450,7 +451,7 @@ const dry = (d?: boolean) => ({ dry_run: d || undefined });
 
 export const calls = {
   createProvider: (body: { handle: string; name?: string }) => api.post<ProviderResult>("/api/providers", body),
-  updateProvider: (h: string, body: Partial<Pick<Provider, "name" | "enabled" | "archived" | "logo_domain">>) => api.patch<ProviderResult>(P(h), body),
+  updateProvider: (h: string, body: Partial<Pick<Provider, "name" | "enabled" | "archived" | "logo_domain" | "affinity">>) => api.patch<ProviderResult>(P(h), body),
 
   createEndpoint: (h: string, body: Partial<Endpoint>) => api.post<EndpointResult>(`${P(h)}/endpoints`, body),
   updateEndpoint: (h: string, name: string, body: Partial<Endpoint>) => api.patch<EndpointResult>(`${P(h)}/endpoints/${seg(name)}`, body),

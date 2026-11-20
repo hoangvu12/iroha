@@ -20,4 +20,4 @@ Before using ui-sdk (`@ui-sdk/react`, `@ui-sdk/core`, pinned to one exact versio
 
 ## Background
 
-This branch is Iroha v2, a from-scratch rewrite of v1 (branch `main`, a Bun/TypeScript app). The v2 spec is `.scratch/v2-gateway/spec.md`. Research that shaped it lives in `docs/research/`; `docs/research/v1-case-catalog.md` lists every behaviour v1 handled and is the conformance checklist for v2.
+This is Iroha v2, a from-scratch rewrite of v1 (a Bun/TypeScript app, retired; its last state is the tag `v1-final`). `main` is v2. The v2 spec is `.scratch/v2-gateway/spec.md`. Research that shaped it lives in `docs/research/`; `docs/research/v1-case-catalog.md` lists every behaviour v1 handled and is the conformance checklist for v2.

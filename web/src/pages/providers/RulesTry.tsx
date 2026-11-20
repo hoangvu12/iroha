@@ -6,7 +6,8 @@ import { Code, langOf } from "@/ui/highlight";
 import { Field, Input } from "@/ui/Input";
 import type { Classification, Endpoint, FailureInput, Rule } from "./api";
 import { calls, errorText } from "./api";
-import { appearClass, Select } from "./controls";
+import { appearClass } from "@/ui/motion";
+import { Select } from "./controls";
 
 // Try a failure (UI ticket 34): the Owner types an answer from the Provider and
 // the server says what the live Failure Rules decide for it

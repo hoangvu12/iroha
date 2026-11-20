@@ -38,7 +38,8 @@ import { notify, notifyChange } from "@/ui/toast";
 import type { KeyTestBulk, KeyTestResult, Provider, UpstreamKey } from "./api";
 import { calls, errorText, maskSecret, natural, useKeys, useRefresh } from "./api";
 import { Reveal } from "@/ui/Reveal";
-import { appearClass, Checkbox, KeyStateLabel, Pill, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
+import { appearClass } from "@/ui/motion";
+import { Checkbox, KeyStateLabel, Pill, Segmented, Select, shortWait, stateTone, Switch } from "./controls";
 import { SAMPLE_KEYS } from "./samples";
 import { KeysBulkEdit } from "./BulkEdits";
 

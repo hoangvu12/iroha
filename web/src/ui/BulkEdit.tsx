@@ -5,6 +5,7 @@ import type { BulkResult } from "@/api/types";
 import { Button, TextButton } from "./Button";
 import { Checkbox } from "./Checkbox";
 import { cn } from "./cn";
+import { appearClass } from "./motion";
 import { Dialog } from "./Dialog";
 import { Input } from "./Input";
 import { type Done, type Save } from "./SaveStatus";
@@ -142,7 +143,7 @@ export function BulkEdit<T>({
           ))}
         </div>
         {error && (
-          <p role="alert" className="mt-3 text-[13px] text-danger-text transition-opacity duration-list-in ease-out starting:opacity-0">
+          <p role="alert" className={cn("mt-3 text-[13px] text-danger-text", appearClass)}>
             {error}
           </p>
         )}

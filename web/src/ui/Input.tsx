@@ -5,6 +5,7 @@ import { Field as SdkField, FieldDescription, FieldError, FieldLabel, useFieldCo
 import { Input as SdkInput } from "@ui-sdk/react/input";
 import { PasswordInput as SdkPasswordInput, PasswordInputControl, PasswordInputToggle } from "@ui-sdk/react/password-input";
 import { cn } from "./cn";
+import { appearClass } from "./motion";
 
 const inputBase =
   // 16px on phones so focusing does not zoom the page; 14px from md up.
@@ -101,7 +102,7 @@ export function Field({
         <FieldError
           match
           role="alert"
-          className="text-[13px] text-danger-text transition-[opacity,translate] duration-list-in ease-out starting:-translate-y-(--motion-shift-sm) starting:opacity-0"
+          className={cn("text-[13px] text-danger-text", appearClass)}
         >
           {error}
         </FieldError>

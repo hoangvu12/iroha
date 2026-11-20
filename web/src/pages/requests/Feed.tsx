@@ -5,6 +5,7 @@ import { Activity, ChevronDown, Columns3, ListFilter } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
+import { useStoredChoice } from "@/lib/stored-choice";
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import { Button, buttonClass, TextButton } from "@/ui/Button";
 import { StatusDot } from "@/ui/bits";
@@ -44,29 +45,10 @@ import { COLUMNS, type ColumnId, type FilterKey, RANGES, type RequestsUrl, STATU
  * Owner picks it in the View menu; this browser remembers it, like page sizes.
  */
 export type FeedPaging = "live" | "pages";
-const PAGING_KEY = "iroha:requests:paging";
-
-function readPaging(): FeedPaging {
-  try {
-    return localStorage.getItem(PAGING_KEY) === "pages" ? "pages" : "live";
-  } catch {
-    return "live";
-  }
-}
+const PAGINGS: readonly FeedPaging[] = ["live", "pages"];
 
 /** The Owner's choice of paging, remembered in this browser (where storage is refused, for this visit). */
-function useFeedPaging() {
-  const [paging, setState] = useState<FeedPaging>(readPaging);
-  const setPaging = (p: FeedPaging) => {
-    setState(p);
-    try {
-      localStorage.setItem(PAGING_KEY, p);
-    } catch {
-      // Storage refused (private window, blocked site data): the choice lasts this visit only.
-    }
-  };
-  return [paging, setPaging] as const;
-}
+const useFeedPaging = () => useStoredChoice("iroha:requests:paging", PAGINGS, "live");
 
 const PAGING_CHOICES: { value: FeedPaging; label: string }[] = [
   { value: "live", label: "Live, load older as you scroll" },

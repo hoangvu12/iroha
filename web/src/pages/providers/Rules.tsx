@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { api, isApiError, seg } from "@/api/client";
 import { formatNumber, plural } from "@/lib/format";
+import { useStoredChoice } from "@/lib/stored-choice";
 import { useUrlParams } from "@/lib/url-state";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
@@ -158,26 +159,7 @@ const VIEWS: { value: RulesView; label: string }[] = [
   { value: "table", label: "Table" },
   { value: "flow", label: "Flow" },
 ];
-const VIEW_KEY = "iroha:rules:view";
-
-function useRulesView() {
-  const [view, setState] = useState<RulesView>(() => {
-    try {
-      return localStorage.getItem(VIEW_KEY) === "flow" ? "flow" : "table";
-    } catch {
-      return "table";
-    }
-  });
-  const setView = (v: RulesView) => {
-    setState(v);
-    try {
-      localStorage.setItem(VIEW_KEY, v);
-    } catch {
-      // Storage refused (private window, blocked site data): the choice lasts this visit only.
-    }
-  };
-  return [view, setView] as const;
-}
+const useRulesView = () => useStoredChoice<RulesView>("iroha:rules:view", ["table", "flow"], "table");
 
 /** The width of an element, kept up to date (undefined until measured, and where ResizeObserver is missing). */
 function useWidth() {

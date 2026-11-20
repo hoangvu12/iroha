@@ -161,7 +161,8 @@ func TestWhenEveryAttemptFailsTheCallerGetsEachAttempt(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
-	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
+	roundRobin(t, srv, "acme")    // the assertions follow round-robin key order
+	srv.NoConversationIDs("acme") // the 400 below is judged by the rules alone
 	caller := srv.Client(issue(t, srv, "pi", all))
 
 	// Two keys failing with 5xx: each is tried, then one replay, then the

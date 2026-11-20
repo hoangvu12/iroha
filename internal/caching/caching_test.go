@@ -1,6 +1,7 @@
 package caching_test
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -80,6 +81,54 @@ func TestFieldsFollowThePromptCacheKeyOnOpenAIEndpoints(t *testing.T) {
 	}
 	if caching.For(shape.Gemini, "https://x.example", caching.Settings{CacheMarkers: "on", SendPromptCacheKey: "on"}).Fields {
 		t.Error("Gemini has no such fields")
+	}
+}
+
+// Prompt caching 04: the session headers go to every Shape, strict hosts
+// included (they refuse unknown body fields, not headers); only
+// send_prompt_cache_key off turns them off.
+func TestSessionHeadersGoEverywhereUnlessOff(t *testing.T) {
+	for _, sh := range []shape.Shape{shape.OpenAIChat, shape.OpenAIResponses, shape.AnthropicMessages, shape.Gemini} {
+		for _, url := range []string{"https://relay.example/v1", "https://generativelanguage.googleapis.com/v1beta/openai"} {
+			if !caching.For(sh, url, caching.Settings{}).SessionHeaders || !caching.For(sh, url, caching.Settings{SendPromptCacheKey: "on"}).SessionHeaders {
+				t.Errorf("%s at %s: no session headers by default or with on", sh, url)
+			}
+			if caching.For(sh, url, caching.Settings{SendPromptCacheKey: "off"}).SessionHeaders {
+				t.Errorf("%s at %s: session headers with off", sh, url)
+			}
+		}
+	}
+	if s := caching.For(shape.OpenAIChat, "https://relay.example/v1", caching.Settings{}).Describe(shape.OpenAIChat); !strings.Contains(s, "passthrough") || !strings.Contains(s, "session_id") {
+		t.Errorf("summary: %s", s)
+	}
+	if s := caching.For(shape.AnthropicMessages, "https://relay.example/v1", caching.Settings{}).Describe(shape.AnthropicMessages); !strings.Contains(s, "x-session-affinity") {
+		t.Errorf("summary: %s", s)
+	}
+	if s := caching.For(shape.Gemini, "https://relay.example/v1", caching.Settings{SendPromptCacheKey: "off"}).Describe(shape.Gemini); s != "Nothing is added for the prompt cache." {
+		t.Errorf("summary with off: %s", s)
+	}
+}
+
+// SetSessionHeaders adds the derived value only where the Caller sent no
+// header of its own (session-id and session_id are one slot).
+func TestSetSessionHeadersKeepsTheCallersOwn(t *testing.T) {
+	h := http.Header{}
+	h.Set("X-Session-Id", "theirs")
+	h.Set("session-id", "codex")
+	caching.SetSessionHeaders(h, "derived")
+	if v := h.Values("X-Session-Id"); len(v) != 1 || v[0] != "theirs" {
+		t.Errorf("x-session-id = %q", v)
+	}
+	if h.Get("X-Session-Affinity") != "derived" {
+		t.Errorf("x-session-affinity = %q", h.Get("X-Session-Affinity"))
+	}
+	if h.Get("session_id") != "" {
+		t.Errorf("session_id added beside the Caller's session-id")
+	}
+	h2 := http.Header{}
+	caching.SetSessionHeaders(h2, "")
+	if len(h2) != 0 {
+		t.Errorf("headers with no value: %v", h2)
 	}
 }
 

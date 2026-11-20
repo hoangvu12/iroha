@@ -1,6 +1,7 @@
 package gateway_test
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -25,28 +26,267 @@ func addCachingProvider(t *testing.T, srv *testkit.Server, sh, url string, extra
 	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": "sk-test-1"}).Expect(201)
 }
 
-// Same-Shape passthrough is byte for byte, whatever the caching settings:
-// markers, conversation fields and Gemini's cachedContent reach the
-// Provider as the Caller wrote them, nothing added.
-func TestSameShapePassthroughStaysByteForByteWithCachingOn(t *testing.T) {
-	for _, tc := range []struct {
-		shape, path, body string
-		up                func(testing.TB) *testkit.Upstream
-	}{
-		{"openai-chat", chatPath, `{"model":"m",  "messages":[{"role":"system","content":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral","ttl":"1h"}}]},{"role":"user","content":"hi"}],"user":"u-1","safety_identifier":"s-1"}`, testkit.NewOpenAIChat},
-		{"openai-responses", responsesPath, `{"model":"m","input":"hi",  "user":"u-1","metadata":{"a":"b"}}`, testkit.NewOpenAIResponses},
-		{"anthropic-messages", messagesPath, `{"model":"m","max_tokens":10,"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":"u-1"}}`, testkit.NewAnthropic},
-		{"gemini", geminiModels + "m:generateContent", `{"cachedContent":"cachedContents/abc",  "contents":[{"role":"user","parts":[{"text":"hi"}]}]}`, testkit.NewGemini},
-	} {
+// passthroughCases are one Caller body per Shape, sent to an Endpoint of
+// the same Shape, with markers, conversation fields and Gemini's
+// cachedContent, and odd spacing to show the bytes are the Caller's.
+var passthroughCases = []struct {
+	shape, path, body string
+	up                func(testing.TB) *testkit.Upstream
+	key               bool // an OpenAI Shape: gets the derived prompt_cache_key
+}{
+	{"openai-chat", chatPath, `{"model":"m",  "messages":[{"role":"system","content":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral","ttl":"1h"}}]},{"role":"user","content":"hi"}],"user":"u-1","safety_identifier":"s-1"}`, testkit.NewOpenAIChat, true},
+	{"openai-responses", responsesPath, `{"model":"m","input":"hi",  "user":"u-1","metadata":{"a":"b"}}`, testkit.NewOpenAIResponses, true},
+	{"anthropic-messages", messagesPath, `{"model":"m","max_tokens":10,"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":"u-1"}}`, testkit.NewAnthropic, false},
+	{"gemini", geminiModels + "m:generateContent", `{"cachedContent":"cachedContents/abc",  "contents":[{"role":"user","parts":[{"text":"hi"}]}]}`, testkit.NewGemini, false},
+}
+
+// sessionHeaders are the headers relays and Providers route a session by.
+var sessionHeaders = []string{"x-session-affinity", "x-session-id", "session_id"}
+
+// sentKey is the prompt_cache_key of a request body, "" when none.
+func sentKey(t *testing.T, body []byte) string {
+	t.Helper()
+	var b struct {
+		Key *string `json:"prompt_cache_key"`
+	}
+	if err := json.Unmarshal(body, &b); err != nil {
+		t.Fatalf("body %s: %v", body, err)
+	}
+	if b.Key == nil {
+		return ""
+	}
+	return *b.Key
+}
+
+var appendedKey = regexp.MustCompile(`,"prompt_cache_key":"[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"}$`)
+
+// callerBytes is a passthrough body without the prompt_cache_key Iroha
+// appends (prompt caching 04), failing the test when none was appended:
+// what remains must be the Caller's bytes.
+func callerBytes(t *testing.T, body []byte) string {
+	t.Helper()
+	loc := appendedKey.FindIndex(body)
+	if loc == nil {
+		t.Fatalf("no prompt_cache_key appended to %s", body)
+	}
+	return string(body[:loc[0]]) + "}"
+}
+
+// Prompt caching 04: same-Shape passthrough gets the conversation's ID.
+// OpenAI Chat and Responses bodies are the Caller's plus exactly the
+// appended prompt_cache_key; Anthropic and Gemini bodies stay byte for
+// byte; every Shape gets the session headers with the same value, and
+// Iroha-Session itself is not forwarded.
+func TestPassthroughAddsTheConversationIDAndNothingElse(t *testing.T) {
+	for _, tc := range passthroughCases {
 		t.Run(tc.shape, func(t *testing.T) {
 			srv := testkit.Start(t)
 			up := tc.up(t)
-			addCachingProvider(t, srv, tc.shape, up.URL(), map[string]any{"cache_markers": "on", "send_prompt_cache_key": "on"})
+			addCachingProvider(t, srv, tc.shape, up.URL(), nil)
 			srv.Client(issue(t, srv, "pi", all)).WithHeader("Iroha-Session", "s-1").Post(tc.path, tc.body).Expect(200)
-			if got := string(up.Last().Body); got != tc.body {
-				t.Fatalf("upstream got\n%s\nwant\n%s", got, tc.body)
+			got := up.Last()
+			want := tc.body
+			key := sentKey(t, got.Body)
+			if tc.key {
+				if !uuidPattern.MatchString(key) {
+					t.Fatalf("prompt_cache_key %q in\n%s", key, got.Body)
+				}
+				want = tc.body[:len(tc.body)-1] + `,"prompt_cache_key":"` + key + `"}`
+			}
+			if string(got.Body) != want {
+				t.Fatalf("upstream got\n%s\nwant\n%s", got.Body, want)
+			}
+			if tc.key {
+				// Same value in the headers as in the body.
+				for _, h := range sessionHeaders {
+					if v := got.Header.Values(h); len(v) != 1 || v[0] != key {
+						t.Errorf("%s = %q, want %q", h, v, key)
+					}
+				}
+			} else {
+				for _, h := range sessionHeaders {
+					if v := got.Header.Get(h); !uuidPattern.MatchString(v) {
+						t.Errorf("%s = %q", h, v)
+					}
+				}
+			}
+			if got.Header.Get("Iroha-Session") != "" {
+				t.Errorf("Iroha-Session forwarded")
 			}
 		})
+	}
+}
+
+// send_prompt_cache_key off turns every addition off, headers included:
+// each Shape's body is byte for byte and no session header is sent.
+func TestPromptCacheKeyOffKeepsPassthroughByteForByte(t *testing.T) {
+	for _, tc := range passthroughCases {
+		t.Run(tc.shape, func(t *testing.T) {
+			srv := testkit.Start(t)
+			up := tc.up(t)
+			addCachingProvider(t, srv, tc.shape, up.URL(), map[string]any{"cache_markers": "on", "send_prompt_cache_key": "off"})
+			srv.Client(issue(t, srv, "pi", all)).WithHeader("Iroha-Session", "s-1").Post(tc.path, tc.body).Expect(200)
+			got := up.Last()
+			if string(got.Body) != tc.body {
+				t.Fatalf("upstream got\n%s\nwant\n%s", got.Body, tc.body)
+			}
+			for _, h := range sessionHeaders {
+				if v := got.Header.Get(h); v != "" {
+					t.Errorf("%s = %q with send_prompt_cache_key off", h, v)
+				}
+			}
+		})
+	}
+}
+
+// The Caller's own prompt_cache_key and session headers are forwarded as
+// they are, never overwritten nor sent twice; only the missing ones are
+// added.
+func TestTheCallersOwnConversationIDsAreKept(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addCachingProvider(t, srv, "openai-chat", up.URL(), nil)
+	caller := srv.Client(issue(t, srv, "pi", all))
+
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}],"prompt_cache_key":"mine"}`
+	caller.Post(chatPath, body).Expect(200)
+	if got := up.Last(); string(got.Body) != body {
+		t.Fatalf("upstream got %s", got.Body)
+	}
+
+	for _, own := range sessionHeaders {
+		t.Run(own, func(t *testing.T) {
+			caller.WithHeader(own, "their-session").Post(chatPath, chatBody("m")).Expect(200)
+			got := up.Last()
+			if v := got.Header.Values(own); len(v) != 1 || v[0] != "their-session" {
+				t.Errorf("%s = %q", own, v)
+			}
+			key := sentKey(t, got.Body)
+			if !uuidPattern.MatchString(key) {
+				t.Fatalf("prompt_cache_key %q: the Caller's raw session must not be sent", key)
+			}
+			for _, h := range sessionHeaders {
+				if h != own && got.Header.Get(h) != key {
+					t.Errorf("%s = %q, want the derived %q", h, got.Header.Get(h), key)
+				}
+			}
+		})
+	}
+}
+
+// A Request with no conversation (an empty prompt: affinity source none)
+// gets nothing added.
+func TestNoConversationGetsNoConversationID(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addCachingProvider(t, srv, "openai-chat", up.URL(), nil)
+	body := `{"model":"m","messages":[]}`
+	srv.Client(issue(t, srv, "pi", all)).Post(chatPath, body).Expect(200)
+	got := up.Last()
+	if string(got.Body) != body {
+		t.Fatalf("upstream got %s", got.Body)
+	}
+	for _, h := range sessionHeaders {
+		if v := got.Header.Get(h); v != "" {
+			t.Errorf("%s = %q", h, v)
+		}
+	}
+}
+
+// One conversation keeps one value across Requests; another Gateway Key,
+// Provider or model gets another.
+func TestPassthroughConversationIDsAreScopedToKeyProviderAndModel(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addCachingProvider(t, srv, "openai-chat", up.URL(), nil)
+	srv.Admin.Post("/api/providers", map[string]any{"handle": "zeta"}).Expect(201)
+	srv.Admin.Post("/api/providers/zeta/endpoints", map[string]any{"name": "main", "url": up.URL(), "shape": "openai-chat"}).Expect(201)
+	srv.Admin.Post("/api/providers/zeta/keys", map[string]any{"secret": "sk-test-2"}).Expect(201)
+	pi := srv.Client(issue(t, srv, "pi", all)).WithHeader("Iroha-Session", "s-1")
+	zed := srv.Client(issue(t, srv, "zed", all)).WithHeader("Iroha-Session", "s-1")
+
+	key := func(c *testkit.Client, path, model string) string {
+		t.Helper()
+		c.Post(path, chatBody(model)).Expect(200)
+		k := sentKey(t, up.Last().Body)
+		if k == "" || up.Last().Header.Get("x-session-affinity") != k {
+			t.Fatalf("body key %q, header %q", k, up.Last().Header.Get("x-session-affinity"))
+		}
+		return k
+	}
+	a := key(pi, chatPath, "m")
+	if key(pi, chatPath, "m") != a {
+		t.Errorf("the same conversation got two values")
+	}
+	if key(zed, chatPath, "m") == a {
+		t.Errorf("another Gateway Key got the same value")
+	}
+	if key(pi, chatPath, "m2") == a {
+		t.Errorf("another model got the same value")
+	}
+	if key(pi, strings.Replace(chatPath, "/acme/", "/zeta/", 1), "m") == a {
+		t.Errorf("another Provider got the same value")
+	}
+}
+
+// A host that refuses unknown fields gets the session headers (headers it
+// doesn't know are ignored) but no prompt_cache_key in the body.
+func TestAStrictHostGetsHeadersButNoBodyField(t *testing.T) {
+	up := testkit.NewOpenAIChat(t)
+	srv := testkit.Start(t, testkit.Options{HTTPClient: up.Client()})
+	addCachingProvider(t, srv, "openai-chat", up.URLAt("generativelanguage.googleapis.com"), nil)
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	srv.Client(issue(t, srv, "pi", all)).WithHeader("Iroha-Session", "s-1").Post(chatPath, body).Expect(200)
+	got := up.Last()
+	if string(got.Body) != body {
+		t.Fatalf("upstream got %s", got.Body)
+	}
+	for _, h := range sessionHeaders {
+		if v := got.Header.Get(h); !uuidPattern.MatchString(v) {
+			t.Errorf("%s = %q", h, v)
+		}
+	}
+}
+
+// On passthrough Iroha's prompt_cache_key is the only difference from the
+// Caller's body, so a 400 the Failure Rules would end the Request with is
+// asked again once without it, whatever its wording, outside the Attempt
+// budget. A 400 the rules read as the key's problem is handled as before.
+func TestAPassthrough400IsAskedAgainWithoutThePromptCacheKey(t *testing.T) {
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	addCachingProvider(t, srv, "openai-chat", up.URL(), nil)
+	srv.Admin.Patch("/api/providers/acme", map[string]any{"max_attempts": 1}).Expect(200)
+	caller := srv.Client(issue(t, srv, "pi", all))
+	odd := testkit.Raw(400, "application/json", `{"error":{"message":"Bad request: something went wrong","type":"invalid_request_error"}}`)
+
+	up.Enqueue(odd, up.Text("hello"))
+	resp := caller.WithHeader("Iroha-Session", "s-1").Post(chatPath, chatBody("m")).Expect(200)
+	reqs := up.Requests()
+	if len(reqs) != 2 || sentKey(t, reqs[0].Body) == "" || sentKey(t, reqs[1].Body) != "" {
+		t.Fatalf("%d upstream calls; bodies %s / %s", len(reqs), reqs[0].Body, up.Last().Body)
+	}
+	if reqs[1].Header.Get("x-session-affinity") == "" {
+		t.Errorf("the plain retry dropped the session headers")
+	}
+	r := readRequest(t, srv, resp.Header.Get("X-Request-Id"))
+	if len(r.Attempts) != 2 || r.Attempts[0].Outcome != "retry_elsewhere" || r.Attempts[0].UpstreamKey != r.Attempts[1].UpstreamKey ||
+		!strings.Contains(r.Attempts[0].Action, "without") {
+		t.Fatalf("attempts %+v", r.Attempts)
+	}
+
+	// The plain retry fails too: the Caller gets that 400, as before.
+	up.Enqueue(odd, odd)
+	resp = caller.WithHeader("Iroha-Session", "s-2").Post(chatPath, chatBody("m")).Expect(400)
+	if up.Count() != 4 || !strings.Contains(string(resp.Body), "something went wrong") {
+		t.Fatalf("%d upstream calls; answer %s", up.Count(), resp.Body)
+	}
+
+	// A 400 that is the key's problem (billing) cools the key, no plain retry.
+	up.Enqueue(testkit.Raw(400, "application/json", `{"error":{"message":"Your credit balance is too low to access the API.","type":"invalid_request_error"}}`))
+	caller.WithHeader("Iroha-Session", "s-3").Post(chatPath, chatBody("m"))
+	if up.Count() != 5 {
+		t.Fatalf("%d upstream calls after a billing 400", up.Count())
 	}
 }
 

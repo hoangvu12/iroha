@@ -57,13 +57,14 @@ func TestResponsesPassThroughToAResponsesEndpoint(t *testing.T) {
 	up.SetUsage(40, 12)
 
 	// Stored state, tools, structured output and extensions reach the
-	// Provider byte for byte.
+	// Provider byte for byte (plus the conversation's prompt_cache_key,
+	// prompt caching 04).
 	body := `{"model":"gpt-5", "input":"Say hello", "store":true, "previous_response_id":"resp_prev",
 		"tools":[{"type":"function","name":"weather","parameters":{"type":"object"}}],
 		"text":{"format":{"type":"json_schema","name":"answer","schema":{"type":"object"}}}, "provider_extension":{"cache":"ephemeral"}}`
 	resp := caller.Post(responsesPath, body).Expect(200)
 	got := up.Last()
-	if string(got.Body) != body || got.Path != "/v1/responses" || got.Bearer() != "sk-test-oai" || got.Header.Get("Idempotency-Key") != "attempt-123" {
+	if callerBytes(t, got.Body) != body || got.Path != "/v1/responses" || got.Bearer() != "sk-test-oai" || got.Header.Get("Idempotency-Key") != "attempt-123" {
 		t.Fatalf("upstream got %s %v\n%s", got.Path, got.Header, got.Body)
 	}
 	if m := resp.Map(); m["model"] != "gpt-5" || m["object"] != "response" {

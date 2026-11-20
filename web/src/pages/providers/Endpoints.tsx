@@ -252,12 +252,12 @@ export function EndpointFields({ f, setF, isNew, wide = true }: { f: EndpointFor
       <Field label="Model renames" hint="One per line, as caller-model -> sent-model.">
         {(p) => <textarea {...p} rows={2} spellCheck={false} value={f.renames} onChange={set("renames")} className={textareaClass} />}
       </Field>
-      {/* Prompt caching 03: only requests Iroha translates get these; passthrough goes as the Caller wrote it. */}
+      {/* Prompt caching 03: markers only on requests Iroha translates. 04: the conversation's ID on every request, passthrough included. */}
       <div className={cn("grid gap-4", pair)}>
         <Field label="Cache markers" hint="On requests Iroha translates for this Endpoint. Off sends none.">
           {() => <Select value={f.cache_markers} onValueChange={(v) => set("cache_markers")({ target: { value: v } })} items={CACHE_SETTINGS} />}
         </Field>
-        <Field label="Send prompt_cache_key" hint="One per conversation, on translated OpenAI requests that have none.">
+        <Field label="Send prompt_cache_key" hint="One per conversation, on OpenAI requests that have none, plus session headers on every request. Off sends neither.">
           {() => <Select value={f.send_prompt_cache_key} onValueChange={(v) => set("send_prompt_cache_key")({ target: { value: v } })} items={CACHE_SETTINGS} />}
         </Field>
       </div>

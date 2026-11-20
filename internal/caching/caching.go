@@ -1,7 +1,9 @@
-// Package caching decides what a translated request gets for the
-// Provider's prompt cache (prompt caching 03): which cache markers, and
-// whether a prompt_cache_key derived from the conversation is sent. It is
-// pure. An Endpoint's two settings (cache_markers, send_prompt_cache_key:
+// Package caching decides what a request gets for the Provider's prompt
+// cache: which cache markers a translated request gets (prompt caching 03),
+// and whether the conversation's ID is sent, as a prompt_cache_key derived
+// from it on OpenAI Chat and Responses Endpoints and in the session headers
+// relays route by on every Endpoint, passthrough included (prompt caching
+// 04). It is pure. An Endpoint's two settings (cache_markers, send_prompt_cache_key:
 // "" for Iroha's default, "on", "off") meet what each Provider documents,
 // known by host like built-in Failure Rules and normalisers (research
 // docs/research/prompt-caching.md, section 2):
@@ -12,12 +14,15 @@
 //   - OpenRouter and Alibaba (Qwen) honour markers on OpenAI Chat;
 //   - Gemini's and Mistral's OpenAI APIs refuse fields they don't know.
 //
-// Same-Shape passthrough never comes here: its body is the Caller's.
+// Same-Shape passthrough gets only the conversation's ID (appended
+// prompt_cache_key on OpenAI Shapes, the session headers); its markers and
+// every other byte are the Caller's.
 package caching
 
 import (
 	"crypto/sha1"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/hoangvu12/iroha/internal/hosts"
@@ -40,14 +45,14 @@ func ValidSetting(v string) bool { return v == Default || v == On || v == Off }
 // Endpoint, so they travel together).
 type Settings struct {
 	CacheMarkers       string `json:"cache_markers" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint (prompt caching): \"\" Iroha's default for its Shape and host (see caching), on (markers whatever the host; caching.summary warns where the host refuses or ignores them), or off (none are sent). Same-Shape requests pass through untouched."`
-	SendPromptCacheKey string `json:"send_prompt_cache_key" enum:",on,off" doc:"Whether a request translated to this OpenAI-shaped Endpoint is sent a prompt_cache_key derived from its conversation (and user from an Anthropic Caller's metadata.user_id) when it has none: \"\" Iroha's default (on, except hosts known to refuse unknown fields), on, or off."`
+	SendPromptCacheKey string `json:"send_prompt_cache_key" enum:",on,off" doc:"Whether requests to this Endpoint carry their conversation's ID (a UUID derived from it, scoped to the Gateway Key, Provider and model; never the Caller's raw session): on an OpenAI-shaped Endpoint a prompt_cache_key when the request has none, passthrough or translated (and user from an Anthropic Caller's metadata.user_id when translated); on every Endpoint the x-session-affinity, x-session-id and session_id headers the Caller did not send. \"\" Iroha's default (on, except no body field to hosts known to refuse unknown fields; they still get the headers), on, or off (nothing, headers included)."`
 }
 
 // SettingsPatch is the settings of a create or update body: only those
 // sent change.
 type SettingsPatch struct {
 	CacheMarkers       *string `json:"cache_markers,omitempty" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint: \"\" (default) Iroha's choice for its Shape and host, on, or off. Endpoint.caching shows the effect."`
-	SendPromptCacheKey *string `json:"send_prompt_cache_key,omitempty" enum:",on,off" doc:"Send an OpenAI-shaped Endpoint a prompt_cache_key derived from the conversation on translated requests that have none: \"\" (default) Iroha's choice, on, or off."`
+	SendPromptCacheKey *string `json:"send_prompt_cache_key,omitempty" enum:",on,off" doc:"Send the conversation's derived ID: a prompt_cache_key to an OpenAI-shaped Endpoint on requests that have none (passthrough too), and session headers (x-session-affinity, x-session-id, session_id) to any Endpoint: \"\" (default) Iroha's choice, on, or off (neither)."`
 }
 
 // Apply sets the settings p carries, trimmed and lowercased; a value that
@@ -96,12 +101,19 @@ const (
 	TopOnly Markers = "top_only"
 )
 
-// Policy is what one Endpoint's translated requests get.
+// Policy is what one Endpoint's requests get. Markers and Fields apply to
+// translated requests only; PromptCacheKey and SessionHeaders to every
+// request that belongs to a conversation, passthrough included.
 type Policy struct {
 	Markers Markers
 	// PromptCacheKey: an OpenAI Endpoint is sent a prompt_cache_key derived
 	// from the conversation when the request carries none.
 	PromptCacheKey bool
+	// SessionHeaders: the same derived value goes in SessionHeaderNames the
+	// Caller did not send, on every Shape and host (strict hosts refuse
+	// unknown body fields, not headers); only send_prompt_cache_key off
+	// turns them off.
+	SessionHeaders bool
 	// Fields: conversation fields are carried across Shapes (user,
 	// safety_identifier, prompt_cache_key <-> Anthropic metadata.user_id).
 	// Anthropic Endpoints always take metadata; OpenAI Endpoints follow
@@ -163,8 +175,39 @@ func For(sh shape.Shape, url string, s Settings) Policy {
 	if sh == shape.OpenAIChat || sh == shape.OpenAIResponses {
 		p.PromptCacheKey = promptCacheKey == On || (promptCacheKey == Default && !matches(host, strictHosts))
 	}
+	p.SessionHeaders = promptCacheKey != Off
 	p.Fields = sh == shape.AnthropicMessages || p.PromptCacheKey
 	return p
+}
+
+// SessionHeaderNames are the headers relays and Providers route a session
+// by: x-session-affinity (Fireworks and others; Pi's default form),
+// x-session-id (OpenRouter), session_id (Codex-style backends and relays
+// built for them).
+var SessionHeaderNames = []string{"x-session-affinity", "x-session-id", "session_id"}
+
+// sameSlot are header spellings that fill the same slot: a Caller sending
+// Codex's session-id is not also sent session_id.
+var sameSlot = map[string][]string{"session_id": {"session-id"}}
+
+// SetSessionHeaders puts v in each of SessionHeaderNames that h lacks; a
+// header the Caller sent is left as it is. Nothing when v is "".
+func SetSessionHeaders(h http.Header, v string) {
+	if v == "" {
+		return
+	}
+	for _, n := range SessionHeaderNames {
+		if h.Get(n) != "" {
+			continue
+		}
+		taken := false
+		for _, alt := range sameSlot[n] {
+			taken = taken || h.Get(alt) != ""
+		}
+		if !taken {
+			h.Set(n, v)
+		}
+	}
 }
 
 // Describe says in a sentence what p does, for the API and the UI.
@@ -192,10 +235,13 @@ func (p Policy) Describe(sh shape.Shape) string {
 	}
 	if sh == shape.OpenAIChat || sh == shape.OpenAIResponses {
 		if p.PromptCacheKey {
-			parts = append(parts, "a prompt_cache_key made from the conversation is sent when the request has none")
+			parts = append(parts, "a prompt_cache_key made from the conversation is sent when the request has none, passthrough included")
 		} else {
 			parts = append(parts, "no prompt_cache_key is added")
 		}
+	}
+	if p.SessionHeaders {
+		parts = append(parts, "the conversation's ID goes in the x-session-affinity, x-session-id and session_id headers the Caller did not send")
 	}
 	s := "Nothing is added for the prompt cache."
 	if len(parts) > 0 {

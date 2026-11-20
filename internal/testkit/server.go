@@ -297,6 +297,21 @@ func (s *Server) Client(token string) *Client {
 	return &Client{t: s.t, srv: s, Token: token}
 }
 
+// NoConversationIDs sets send_prompt_cache_key off on every Endpoint of
+// Provider handle, so its passthrough Requests get no prompt_cache_key
+// (prompt caching 04). For tests of the Failure Rules: a 400 is then judged
+// alone, without the free retry that drops Iroha's addition.
+func (s *Server) NoConversationIDs(handle string) {
+	s.t.Helper()
+	var list struct {
+		Endpoints []struct{ Name string }
+	}
+	s.Admin.Get("/api/providers/" + handle + "/endpoints").OK().JSON(&list)
+	for _, e := range list.Endpoints {
+		s.Admin.Patch("/api/providers/"+handle+"/endpoints/"+e.Name, map[string]any{"send_prompt_cache_key": "off"}).Expect(200)
+	}
+}
+
 type syncBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer

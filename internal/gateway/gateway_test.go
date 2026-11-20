@@ -63,9 +63,10 @@ func TestNonStreamedChatPassesThroughWithTheRequestedModelAndIsRecorded(t *testi
 	body := `{"model":"gpt-x",  "messages":[{"role":"user","content":"hi"}], "vendor_extra":{"a":[1,2]}}`
 	resp := caller.Post(chatPath, body).Expect(200)
 
-	// The upstream got the Caller's bytes untouched, with the Upstream Key.
+	// The upstream got the Caller's bytes untouched (plus the conversation's
+	// prompt_cache_key appended, prompt caching 04), with the Upstream Key.
 	got := up.Last()
-	if string(got.Body) != body || got.Path != "/v1/chat/completions" || got.Bearer() != "sk-test-one" {
+	if callerBytes(t, got.Body) != body || got.Path != "/v1/chat/completions" || got.Bearer() != "sk-test-one" {
 		t.Fatalf("upstream got path %s bearer %q body %s", got.Path, got.Bearer(), got.Body)
 	}
 	// The answer passes through, naming the model asked for.

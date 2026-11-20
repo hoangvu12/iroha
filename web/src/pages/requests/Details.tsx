@@ -70,7 +70,7 @@ export function RequestDetails({ r, onShowCaptured }: { r: RequestRecord; onShow
         )}
         {r.wire_model && r.wire_model !== r.model && (
           <Fact label="Model sent" mono>
-            {r.wire_model}
+            {r.provider ? <RecordLink record={rec.model(r.provider, r.wire_model)}>{r.wire_model}</RecordLink> : r.wire_model}
           </Fact>
         )}
         <div className="col-span-2">

@@ -78,7 +78,9 @@ export default function PoolSheet({ record }: SheetBodyProps<"pool">) {
                     <span className="w-4 shrink-0 text-right tabular text-[13px] text-fg-muted">{m.position}</span>
                     <ProviderTile handle={m.provider} size={20} />
                     <RecordLink record={rec.provider(m.provider)}>{m.provider}</RecordLink>
-                    <span className="min-w-0 truncate font-mono text-[13.5px] text-fg-muted">{m.model}</span>
+                    <RecordLink record={rec.model(m.provider, m.model)} className="font-mono text-[13.5px] text-fg-muted">
+                      {m.model}
+                    </RecordLink>
                   </span>
                 </LinkRow>
               ))}

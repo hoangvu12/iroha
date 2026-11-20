@@ -1,9 +1,13 @@
-import { KeyRound, MessageCircle } from "lucide-react";
-import { seg } from "@/api/client";
+import { useState } from "react";
+import { KeyRound, MessageCircle, Pencil } from "lucide-react";
+import { errorText, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
 import { formatDate, timeAgo } from "@/lib/format";
-import { useGatewayKey } from "@/pages/gateway-keys/api";
-import { RequestsCount } from "@/pages/gateway-keys/bits";
+import { type GatewayKey, useGatewayKey, useInvalidateKeys, useUpdateKey } from "@/pages/gateway-keys/api";
+import { RequestsCount, ScopeModels } from "@/pages/gateway-keys/bits";
+import { type Draft, sameScope, toDraft, toScope } from "@/pages/gateway-keys/scope";
+import { ScopeEditor } from "@/pages/gateway-keys/ScopeEditor";
+import { SaveStatus, useSave } from "@/ui/SaveStatus";
 import { maskSecret } from "@/pages/providers/api";
 import { Status } from "@/ui/bits";
 import { Button } from "@/ui/Button";
@@ -41,7 +45,6 @@ export default function GatewayKeySheet({ record }: SheetBodyProps<"gateway-key"
     );
 
   const k = q.data;
-  const scope = k.scope;
   return (
     <>
       <SheetBar kind="Gateway Key" page={`/gateway-keys/${seg(k.id)}`} />
@@ -80,34 +83,108 @@ export default function GatewayKeySheet({ record }: SheetBodyProps<"gateway-key"
             {k.revoked_at && <Fact label="Revoked">{formatDate(k.revoked_at)}</Fact>}
           </Facts>
         </SheetSection>
-        <SheetSection title="Access">
-          {scope.all ? (
-            <p className="text-[14.5px] text-fg-muted">Every Provider and Model Pool.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {(scope.providers ?? []).length > 0 && (
-                <LinkList>
-                  {(scope.providers ?? []).map((p) => (
-                    <LinkRow key={p.provider} aside={p.models?.length ? `${p.models.length} model${p.models.length === 1 ? "" : "s"}` : "All models"}>
-                      <RecordLink record={rec.provider(p.provider)}>{p.provider}</RecordLink>
-                    </LinkRow>
-                  ))}
-                </LinkList>
-              )}
-              {(scope.pools ?? []).length > 0 && (
-                <LinkList>
-                  {(scope.pools ?? []).map((name) => (
-                    <LinkRow key={name} aside="Model Pool">
-                      <RecordLink record={rec.pool(name)}>{name}</RecordLink>
-                    </LinkRow>
-                  ))}
-                </LinkList>
-              )}
-              {!(scope.providers ?? []).length && !(scope.pools ?? []).length && <p className="text-[14.5px] text-fg-muted">Nothing: every call is refused.</p>}
-            </div>
-          )}
-        </SheetSection>
+        <Access k={k} />
       </SheetBody>
     </>
+  );
+}
+
+/**
+ * The key's access, edited in place (UI ticket 33): Edit access swaps the
+ * list for the scope editor the key's page uses in its dialog, and the result
+ * shows here with Undo. The key's own page keeps its dialog: a sheet of the
+ * key opened over its own page would be odd.
+ */
+function Access({ k }: { k: GatewayKey }) {
+  const scope = k.scope;
+  const update = useUpdateKey();
+  const invalidate = useInvalidateKeys();
+  const saving = useSave({ refresh: invalidate, describe: errorText });
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Draft>(() => toDraft(scope));
+  const [error, setError] = useState<string>();
+
+  const edit = () => {
+    setDraft(toDraft(k.scope));
+    setError(undefined);
+    setEditing(true);
+  };
+  const save = () => {
+    const next = toScope(draft);
+    if (sameScope(next, k.scope)) return setEditing(false);
+    if (!draft.all && draft.providers.size === 0 && draft.pools.size === 0)
+      return setError("Tick at least one Provider or Model Pool, or choose Everything. To stop the key working, revoke it.");
+    setError(undefined);
+    void saving
+      .run(() => update.mutateAsync({ id: k.id, scope: next }), { message: `Access of ${k.name} changed` })
+      .then((ok) => ok && setEditing(false));
+  };
+
+  if (editing)
+    return (
+      <SheetSection title="Access">
+        <ScopeEditor
+          heading={false}
+          draft={draft}
+          onChange={(d) => {
+            setDraft(d);
+            setError(undefined);
+          }}
+        />
+        {(error || saving.error) && (
+          <p role="alert" className="mt-3 text-[13px] text-danger-text">
+            {error ?? saving.error}
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button onClick={() => setEditing(false)}>Cancel</Button>
+          <Button variant="primary" loading={saving.pending} onClick={save}>
+            Save access
+          </Button>
+        </div>
+      </SheetSection>
+    );
+
+  return (
+    <SheetSection
+      title="Access"
+      action={
+        !k.revoked && (
+          <span className="flex items-center gap-2">
+            <SaveStatus save={saving} saving={false} />
+            <Button size="sm" icon={Pencil} onClick={edit}>
+              Edit access
+            </Button>
+          </span>
+        )
+      }
+    >
+      {scope.all ? (
+        <p className="text-[14.5px] text-fg-muted">Every Provider and Model Pool.</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {(scope.providers ?? []).length > 0 && (
+            <LinkList>
+              {(scope.providers ?? []).map((p) => (
+                <LinkRow key={p.provider} aside={p.models?.length ? `${p.models.length} model${p.models.length === 1 ? "" : "s"}` : "All models"}>
+                  <RecordLink record={rec.provider(p.provider)}>{p.provider}</RecordLink>
+                  {p.models?.length ? <ScopeModels provider={p.provider} models={p.models} className="mt-1" /> : null}
+                </LinkRow>
+              ))}
+            </LinkList>
+          )}
+          {(scope.pools ?? []).length > 0 && (
+            <LinkList>
+              {(scope.pools ?? []).map((name) => (
+                <LinkRow key={name} aside="Model Pool">
+                  <RecordLink record={rec.pool(name)}>{name}</RecordLink>
+                </LinkRow>
+              ))}
+            </LinkList>
+          )}
+          {!(scope.providers ?? []).length && !(scope.pools ?? []).length && <p className="text-[14.5px] text-fg-muted">Nothing: every call is refused.</p>}
+        </div>
+      )}
+    </SheetSection>
   );
 }

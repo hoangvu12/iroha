@@ -2,11 +2,19 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAgent } from "@ui-sdk/react/agent";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "@/ui/toast";
 import type { Rule } from "./api";
 import { RulesTab } from "./Rules";
+import { SheetStackProvider } from "@/sheets/stack";
+
+function Where() {
+  const l = useLocation();
+  return <output aria-label="Where">{l.search}</output>;
+}
+/** The sheets the URL holds (an existing rule opens in its sheet, UI ticket 33). */
+const sheetsOpen = () => new URLSearchParams(screen.getByLabelText("Where").textContent ?? "").getAll("sheet");
 
 const agent = createAgent();
 const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -47,7 +55,10 @@ function renderTab(list: Rule[] = RULES) {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={["/providers/acme/rules"]}>
-        <RulesTab handle="acme" adding={false} setAdding={() => {}} />
+        <SheetStackProvider>
+          <RulesTab handle="acme" adding={false} setAdding={() => {}} />
+          <Where />
+        </SheetStackProvider>
       </MemoryRouter>
       <Toaster />
     </QueryClientProvider>,
@@ -142,13 +153,14 @@ test("each step says what it matches and, on a match, what happens to the key an
   expect(screen.getByText("Anything else: return the error to the Caller")).toBeTruthy();
 });
 
-test("clicking a step opens the rule to edit, as a table row does", async () => {
+test("clicking a step opens the rule's sheet, as a table row does", async () => {
   const user = userEvent.setup();
   localStorage.setItem("iroha:rules:view", "flow");
   renderTab(FLOW_RULES);
   await flow();
   await user.click(screen.getByRole("button", { name: "Open mine" }));
-  expect(await screen.findByRole("dialog", { name: "Edit mine" })).toBeTruthy();
+  await waitFor(() => expect(sheetsOpen()).toEqual(["rule:acme/mine"]));
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 test("on a phone each step carries what a match does inside it, so the list still reads as a flow", async () => {
@@ -174,10 +186,10 @@ test("an agent switches to Flow and opens a rule from it", async () => {
   for (const l of ["View", "Open mine", "Open rate-limited", "Open server-error", "server-error on"]) expect(labels, `${l} is missing`).toContain(l);
   const run = await agent.act({ steps: [{ ref: "Open server-error", action: "press" }] });
   expect(run.ok, run.error?.message).toBe(true);
-  expect(await screen.findByRole("dialog", { name: "Change server-error" })).toBeTruthy();
+  await waitFor(() => expect(sheetsOpen()).toEqual(["rule:acme/server-error"]));
 });
 
-test("an agent opens a built-in rule to change it", async () => {
+test("an agent opens a built-in rule's sheet from its row", async () => {
   renderTab();
   await screen.findByRole("table", { name: "Failure Rules" });
   const entries = agent.snapshot().filter((e) => !e.offPage && e.component !== "more");
@@ -186,5 +198,5 @@ test("an agent opens a built-in rule to change it", async () => {
   for (const l of ["Open mine", "More for mine", "mine on", "Open rate-limited"]) expect(labels, `${l} is missing`).toContain(l);
   const run = await agent.act({ steps: [{ ref: "Open rate-limited", action: "press" }] });
   expect(run.ok, run.error?.message).toBe(true);
-  expect(await screen.findByRole("dialog")).toBeTruthy();
+  await waitFor(() => expect(sheetsOpen()).toEqual(["rule:acme/rate-limited"]));
 });

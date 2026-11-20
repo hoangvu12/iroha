@@ -137,7 +137,7 @@ func (rc *Recorder) Begin(ctx context.Context, r *Request) error {
 // Attempt records one finished Attempt of Request id.
 func (rc *Recorder) Attempt(ctx context.Context, id string, a Attempt) error {
 	ctx = context.WithoutCancel(ctx)
-	in, out, cache, reasoning := usageArgs(a.Usage)
+	in, out, cache, write, writeLong, reasoning := usageArgs(a.Usage)
 	headers := ""
 	if len(a.FailureHeaders) > 0 {
 		b, _ := json.Marshal(a.FailureHeaders)
@@ -150,11 +150,11 @@ func (rc *Recorder) Attempt(ctx context.Context, id string, a Attempt) error {
 	return rc.db.Tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO attempts (request_id, seq, started_at, provider_id, provider_handle, endpoint_id, endpoint_name, endpoint_url,
 			upstream_key_id, upstream_key_name, wire_model, shape, status, error, first_byte_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens,
-			rule, outcome, reason, action, failure_headers, failure_body, reported_model)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			rule, outcome, reason, action, failure_headers, failure_body, reported_model, cache_write_tokens, cache_write_long_tokens)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, a.Seq, store.Millis(a.StartedAt), a.ProviderID, a.Provider, a.EndpointID, a.Endpoint, a.EndpointURL,
 			a.UpstreamKeyID, a.UpstreamKey, a.WireModel, string(a.Shape), a.Status, a.Error, a.FirstByteMs, a.DurationMs, in, out, cache, reasoning,
-			a.Rule, a.Outcome, a.Reason, a.Action, headers, body, a.ReportedModel); err != nil {
+			a.Rule, a.Outcome, a.Reason, a.Action, headers, body, a.ReportedModel, write, writeLong); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE requests SET attempt_count = attempt_count + 1 WHERE id = ?`, id)
@@ -197,30 +197,43 @@ func (rc *Recorder) Finish(ctx context.Context, r *Request) error {
 	if r.FinishedAt != nil {
 		finished = store.Millis(*r.FinishedAt)
 	}
-	in, out, cache, reasoning := usageArgs(r.Usage)
+	in, out, cache, write, writeLong, reasoning := usageArgs(r.Usage)
 	return rc.db.Tx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE requests SET finished_at = ?, state = ?, status = ?, error_code = ?, error_message = ?,
 			model = ?, stream = ?, shape_out = ?, provider_id = ?, provider_handle = ?, endpoint_id = ?, endpoint_name = ?,
 			upstream_key_id = ?, upstream_key_name = ?, wire_model = ?, first_byte_ms = ?, duration_ms = ?,
-			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, reasoning_tokens = ?, summary = ?, pool = ? WHERE id = ?`,
+			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, cache_write_long_tokens = ?, reasoning_tokens = ?,
+			summary = ?, pool = ? WHERE id = ?`,
 			finished, r.State, r.Status, code, msg, r.Model, r.Stream, string(r.ShapeOut), r.ProviderID, r.Provider, r.EndpointID, r.Endpoint,
-			r.UpstreamKeyID, r.UpstreamKey, r.WireModel, r.FirstByteMs, r.DurationMs, in, out, cache, reasoning, r.Summary, r.Pool, r.ID)
+			r.UpstreamKeyID, r.UpstreamKey, r.WireModel, r.FirstByteMs, r.DurationMs, in, out, cache, write, writeLong, reasoning, r.Summary, r.Pool, r.ID)
 		return err
 	})
 }
 
-func usageArgs(u *usage.Usage) (in, out, cache, reasoning any) {
+func usageArgs(u *usage.Usage) (in, out, cache, write, writeLong, reasoning any) {
 	if u == nil {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil, nil
 	}
-	return u.Input, u.Output, u.CacheRead, u.Reasoning
+	return u.Input, u.Output, u.CacheRead, u.CacheWrite, u.CacheWriteLong, u.Reasoning
 }
 
-func usageOf(in, out, cache, reasoning sql.NullInt64) *usage.Usage {
-	if !in.Valid && !out.Valid {
+// usageColumns are the token columns of requests and attempts, in the order
+// usageCounts scans them.
+const usageColumns = `input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_long_tokens, reasoning_tokens`
+
+// usageCounts scans usageColumns.
+type usageCounts struct{ in, out, cache, write, writeLong, reasoning sql.NullInt64 }
+
+func (c *usageCounts) dest() []any {
+	return []any{&c.in, &c.out, &c.cache, &c.write, &c.writeLong, &c.reasoning}
+}
+
+func (c usageCounts) usage() *usage.Usage {
+	if !c.in.Valid && !c.out.Valid {
 		return nil
 	}
-	return &usage.Usage{Input: in.Int64, Output: out.Int64, CacheRead: cache.Int64, Reasoning: reasoning.Int64}
+	return &usage.Usage{Input: c.in.Int64, Output: c.out.Int64, CacheRead: c.cache.Int64, CacheWrite: c.write.Int64,
+		CacheWriteLong: c.writeLong.Int64, Reasoning: c.reasoning.Int64}
 }
 
 func msPtr(v sql.NullInt64) *int64 {

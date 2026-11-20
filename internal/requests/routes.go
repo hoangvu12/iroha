@@ -26,20 +26,21 @@ type RequestPage struct {
 
 const requestColumns = `id, started_at, finished_at, state, status, error_code, error_message, caller_kind, gateway_key_id, caller_name,
 	route, shape_in, shape_out, model, stream, provider_id, provider_handle, endpoint_id, endpoint_name, upstream_key_id, upstream_key_name,
-	wire_model, first_byte_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, attempt_count, summary,
+	wire_model, first_byte_ms, duration_ms, ` + usageColumns + `, attempt_count, summary,
 	pool, rev,
 	EXISTS (SELECT 1 FROM captures c WHERE c.request_id = requests.id)`
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var r Request
 	var started int64
-	var finished, firstByte, duration, in, out, cache, reasoning sql.NullInt64
+	var finished, firstByte, duration sql.NullInt64
+	var counts usageCounts
 	var code, msg, shapeIn, shapeOut string
-	err := row.Scan(&r.ID, &started, &finished, &r.State, &r.Status, &code, &msg, &r.Caller.Kind, &r.Caller.GatewayKeyID, &r.Caller.Name,
+	dest := []any{&r.ID, &started, &finished, &r.State, &r.Status, &code, &msg, &r.Caller.Kind, &r.Caller.GatewayKeyID, &r.Caller.Name,
 		&r.Route, &shapeIn, &shapeOut, &r.Model, &r.Stream, &r.ProviderID, &r.Provider, &r.EndpointID, &r.Endpoint, &r.UpstreamKeyID, &r.UpstreamKey,
-		&r.WireModel, &firstByte, &duration, &in, &out, &cache, &reasoning, &r.AttemptCount, &r.Summary,
-		&r.Pool, &r.rev,
-		&r.Captured)
+		&r.WireModel, &firstByte, &duration}
+	dest = append(append(dest, counts.dest()...), &r.AttemptCount, &r.Summary, &r.Pool, &r.rev, &r.Captured)
+	err := row.Scan(dest...)
 	if err != nil {
 		return r, err
 	}
@@ -53,14 +54,14 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	}
 	r.ShapeIn, r.ShapeOut = shape.Shape(shapeIn), shape.Shape(shapeOut)
 	r.FirstByteMs, r.DurationMs = msPtr(firstByte), msPtr(duration)
-	r.Usage = usageOf(in, out, cache, reasoning)
+	r.Usage = counts.usage()
 	return r, nil
 }
 
 func attempts(ctx context.Context, db *store.DB, id string) ([]Attempt, error) {
 	rows, err := db.QueryContext(ctx, `SELECT seq, started_at, provider_id, provider_handle, endpoint_id, endpoint_name, endpoint_url,
 		upstream_key_id, upstream_key_name, wire_model, shape, status, error, first_byte_ms, duration_ms,
-		input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, rule, outcome, reason, action, failure_headers, failure_body, reported_model
+		`+usageColumns+`, rule, outcome, reason, action, failure_headers, failure_body, reported_model
 		FROM attempts WHERE request_id = ? ORDER BY seq`, id)
 	if err != nil {
 		return nil, err
@@ -71,11 +72,13 @@ func attempts(ctx context.Context, db *store.DB, id string) ([]Attempt, error) {
 		var a Attempt
 		var started int64
 		var sh string
-		var firstByte, duration, in, outT, cache, reasoning sql.NullInt64
+		var firstByte, duration sql.NullInt64
+		var counts usageCounts
 		var headers string
-		if err := rows.Scan(&a.Seq, &started, &a.ProviderID, &a.Provider, &a.EndpointID, &a.Endpoint, &a.EndpointURL,
-			&a.UpstreamKeyID, &a.UpstreamKey, &a.WireModel, &sh, &a.Status, &a.Error, &firstByte, &duration,
-			&in, &outT, &cache, &reasoning, &a.Rule, &a.Outcome, &a.Reason, &a.Action, &headers, &a.FailureBody, &a.ReportedModel); err != nil {
+		dest := []any{&a.Seq, &started, &a.ProviderID, &a.Provider, &a.EndpointID, &a.Endpoint, &a.EndpointURL,
+			&a.UpstreamKeyID, &a.UpstreamKey, &a.WireModel, &sh, &a.Status, &a.Error, &firstByte, &duration}
+		dest = append(append(dest, counts.dest()...), &a.Rule, &a.Outcome, &a.Reason, &a.Action, &headers, &a.FailureBody, &a.ReportedModel)
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		if headers != "" {
@@ -83,7 +86,7 @@ func attempts(ctx context.Context, db *store.DB, id string) ([]Attempt, error) {
 		}
 		a.StartedAt, a.Shape = store.FromMillis(started), shape.Shape(sh)
 		a.FirstByteMs, a.DurationMs = msPtr(firstByte), msPtr(duration)
-		a.Usage = usageOf(in, outT, cache, reasoning)
+		a.Usage = counts.usage()
 		out = append(out, a)
 	}
 	return out, rows.Err()

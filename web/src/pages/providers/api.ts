@@ -131,6 +131,9 @@ export type Facts = {
   architecture?: { input_modalities?: string[]; output_modalities?: string[] };
 };
 
+/** Some overrides of a model: a value sets one, null removes it, a field left out stays. */
+export type FactsPatch = { [K in keyof Facts]?: Facts[K] | null };
+
 export type Model = {
   id: string;
   model: string;
@@ -453,7 +456,9 @@ export const calls = {
 
   saveModel: (h: string, body: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts }) => api.post<ModelResult>(`${P(h)}/models`, body),
   /** Many models' changes in one call and one Audit Entry; each item applies or fails on its own. */
-  saveModels: (h: string, items: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts }[]) => api.post<BulkResult<Model>>(`${P(h)}/models/bulk`, { items }),
+  /** `metadata_patch` changes only the overrides it names (null removes one); the rest stay as each model has them. */
+  saveModels: (h: string, items: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts; metadata_patch?: FactsPatch }[]) =>
+    api.post<BulkResult<Model>>(`${P(h)}/models/bulk`, { items }),
   refreshModels: (h: string) => api.post<RefreshResult>(`${P(h)}/models/refresh`, {}, { timeoutMs: 120_000 }),
   resetModels: (h: string) => api.post<{ removed: string[]; kept: number }>(`${P(h)}/models/reset`),
 
@@ -464,6 +469,8 @@ export const calls = {
   /** Read-only: which rule a typed failure matches and what it does (nothing is sent or stored). */
   classify: (h: string, body: FailureInput) => api.post<Classification>(`${P(h)}/rules/classify`, body),
 
+  /** Reads the Pool as the server has it now (for a change built on its whole member list). */
+  pool: (name: string) => api.get<Pool>(`/api/pools/${seg(name)}`),
   createPool: (body: { name: string; members?: MemberInput[]; maker?: string }) => api.post<PoolResult>("/api/pools", body),
   updatePool: (name: string, body: { name?: string; members?: MemberInput[]; maker?: string; budget?: Partial<Pool["budget"]> }) =>
     api.patch<PoolResult>(`/api/pools/${seg(name)}`, body),

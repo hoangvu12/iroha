@@ -174,7 +174,7 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
             // On for several members at once, mixed shown (UI ticket 30).
             bulk={({ rows }) => (
               <>
-                <MembersBulkEdit pool={name} members={order} rows={rows} at={barSave} size={phone ? "sm" : "md"} />
+                <MembersBulkEdit pool={name} rows={rows} at={barSave} size={phone ? "sm" : "md"} />
                 <SaveStatus save={barSave} saving={false} className="ml-1" />
               </>
             )}

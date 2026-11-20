@@ -1,8 +1,10 @@
 package models
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -92,6 +94,9 @@ type ModelChange struct {
 	Hidden *bool  `json:"hidden,omitempty" doc:"true: Callers never see it and asking for it is refused (404 model_not_found), even if it was never discovered; false: show it again."`
 	// Metadata replaces the Owner's overrides (ticket 11).
 	Metadata *modelmeta.Facts `json:"metadata,omitempty" doc:"Replaces your metadata overrides of the model: the fields Callers' model lists show (context_length, max_input_tokens, max_output_tokens, architecture, reasoning, reasoning_levels, chat). Each field sent beats what the Provider and models.dev say; {} removes every override. Overrides never change whether the model is listed or routed."`
+	// MetadataPatch changes only the overrides it names (review fix 1 of
+	// UI batch 2), so a bulk edit never rewrites the others from a stale copy.
+	MetadataPatch json.RawMessage `json:"metadata_patch,omitempty" doc:"Changes only the overrides named, keeping the others as the model has them: an object with fields of metadata, each set to a value to override it or to null to remove that override, e.g. {\"context_length\": 200000, \"chat\": null}. Not with metadata."`
 }
 
 // ModelResult is the response of a single model change.
@@ -393,20 +398,36 @@ func (h handlers) change(m *audit.Mutation, p provRef, in ModelChange) (Model, e
 		return Model{}, api.BadRequest(modelHint, "model %q is not a model ID.", model)
 	}
 	added, hidden := in.Added, in.Hidden
-	if added == nil && hidden == nil && in.Metadata == nil {
+	if in.Metadata != nil && in.MetadataPatch != nil {
+		return Model{}, api.BadRequest("Send metadata to replace every override, or metadata_patch to change some.", "metadata and metadata_patch were both sent.")
+	}
+	if added == nil && hidden == nil && in.Metadata == nil && in.MetadataPatch == nil {
 		t := true
 		added = &t
 	}
+	id := entryID(p.id, model)
+	meta := in.Metadata
+	if in.MetadataPatch != nil {
+		var current string
+		err := m.Tx.QueryRowContext(m.Ctx, `SELECT overrides FROM provider_models WHERE id = ?`, id).Scan(&current)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Model{}, err
+		}
+		f, err := patchOverrides(modelmeta.Parse(current), in.MetadataPatch)
+		if err != nil {
+			return Model{}, err
+		}
+		meta = &f
+	}
 	var overrides *string
-	if in.Metadata != nil {
-		f, err := checkOverrides(*in.Metadata)
+	if meta != nil {
+		f, err := checkOverrides(*meta)
 		if err != nil {
 			return Model{}, err
 		}
 		s := f.String()
 		overrides = &s
 	}
-	id := entryID(p.id, model)
 	if err := m.Track(Resource, id); err != nil {
 		return Model{}, err
 	}
@@ -420,6 +441,37 @@ func (h handlers) change(m *audit.Mutation, p provRef, in ModelChange) (Model, e
 	}
 	out, _, err := readEntry(m.Ctx, m.Tx, p.id, model, m.Now)
 	return out, err
+}
+
+// patchOverrides applies a metadata_patch to the current overrides: each
+// top-level field sent replaces that override, null removes it.
+func patchOverrides(current modelmeta.Facts, patch json.RawMessage) (modelmeta.Facts, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(patch, &fields); err != nil || fields == nil {
+		return current, api.BadRequest(overridesHint, "metadata_patch must be an object of metadata fields.")
+	}
+	merged := map[string]json.RawMessage{}
+	if b, err := json.Marshal(current); err == nil {
+		_ = json.Unmarshal(b, &merged)
+	}
+	for k, v := range fields {
+		if string(v) == "null" {
+			delete(merged, k)
+		} else {
+			merged[k] = v
+		}
+	}
+	b, err := json.Marshal(merged)
+	if err != nil {
+		return current, err
+	}
+	var out modelmeta.Facts
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&out); err != nil {
+		return current, api.BadRequest(overridesHint, "metadata_patch is not valid metadata: %v.", err)
+	}
+	return out, nil
 }
 
 // CallerModel is one model of the Caller-facing list: the OpenAI list entry

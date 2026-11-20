@@ -53,6 +53,7 @@ func (s *Server) routes() []api.Route {
 		s.gateway().Routes(),
 		s.gateway().AdminRoutes(),
 		s.gateway().PreviewRoutes(),
+		s.gateway().ClassifyRoutes(),
 		providers.OverviewRoutes(s.db),
 		s.gateway().TestRoutes(),
 		testchat.Routes(s.models(), gatewaykeys.New(s.db), s.db),

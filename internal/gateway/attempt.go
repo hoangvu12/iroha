@@ -274,7 +274,7 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// A failure: read it (within the budget) for the rules and the record.
-		data, err := io.ReadAll(io.LimitReader(resp.Body, requests.MaxFailureBody))
+		data, err := failureBody(resp)
 		if err != nil {
 			a.Error = "reading the error body: " + transportError(err)
 		}
@@ -288,33 +288,15 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 		defer x.answerEnded()
 	}
 
-	// An error sent as a 2xx answer (embedded.go) is a failure like any other.
-	if body := embeddedError(resp, cr.stream); body != nil {
+	// A 2xx answer may still be a failure (answerFailure); it then fails the
+	// Attempt like any other.
+	if body := answerFailure(resp, cr.stream, call.norm, call.tr != nil); body != nil {
 		f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), body
 		a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(body)
 		return a, f
 	}
 
 	stream := cr.stream && isEventStream(resp.Header)
-	// A whole answer is normalised before anything else reads it; one the
-	// normalisers find is a failure sent as a success is a failed Attempt.
-	if !stream {
-		if body := normaliseBody(resp, call.norm); body != nil {
-			f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), body
-			a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(body)
-			return a, f
-		}
-		// An answer to translate must be JSON; anything else (an HTML page
-		// sent with 200) is a failure of this Attempt, which the Failure
-		// Rules read as a 502, so the budget moves on to another key.
-		if call.tr != nil {
-			if body := notJSON(resp); body != nil {
-				f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), body
-				a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(body)
-				return a, f
-			}
-		}
-	}
 
 	// Usage and the model that served are read from the Provider's own
 	// answer, before any echo or translation.

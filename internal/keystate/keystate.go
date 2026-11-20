@@ -456,6 +456,15 @@ func visible(r Record, now time.Time) string {
 	return st.State
 }
 
+// FirstCooling is when a cooling decided by d ends for a key (or key and
+// model) that has not been cooling within the last hour: the reset time the
+// response named, else the rule's fixed time, else DefaultCooling. Repeats
+// double the default (Fail); this is the first step.
+func FirstCooling(d rules.Decision, now time.Time) time.Time {
+	until, _ := coolingEnd(nil, d, now)
+	return until
+}
+
 // coolingEnd is when a new cooling ends and its repeat level, given the
 // previous cooling of the same scope (nil when none).
 func coolingEnd(prev *row, d rules.Decision, now time.Time) (time.Time, int) {

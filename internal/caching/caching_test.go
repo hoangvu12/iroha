@@ -1,6 +1,7 @@
 package caching_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/hoangvu12/iroha/internal/caching"
@@ -36,6 +37,9 @@ func TestPolicyFollowsShapeHostAndSettings(t *testing.T) {
 		{"Gemini's OpenAI API refuses unknown fields", shape.OpenAIChat, "https://generativelanguage.googleapis.com/v1beta/openai", "", "", caching.AsBefore, false},
 		{"Mistral refuses unknown fields", shape.OpenAIChat, "https://api.mistral.ai/v1", "", "", caching.AsBefore, false},
 		{"on wins over the host", shape.OpenAIChat, "https://api.mistral.ai/v1", "", "on", caching.AsBefore, true},
+		{"an explicit on wins over Kimi's default", shape.AnthropicMessages, "https://api.moonshot.ai/anthropic", "on", "", caching.Blocks, false},
+		{"an explicit on wins over DeepSeek's default", shape.AnthropicMessages, "https://api.deepseek.com/anthropic", "on", "", caching.Blocks, false},
+		{"an explicit on on Anthropic's own API", shape.AnthropicMessages, "https://api.anthropic.com/v1", "on", "", caching.Blocks, false},
 		{"Gemini Endpoints get neither", shape.Gemini, "https://generativelanguage.googleapis.com/v1beta", "on", "on", caching.AsBefore, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,6 +48,24 @@ func TestPolicyFollowsShapeHostAndSettings(t *testing.T) {
 				t.Errorf("For(%s, %s, %q, %q) = %+v, want markers %q, key %v", tc.sh, tc.url, tc.markers, tc.key, p, tc.want, tc.wantKey)
 			}
 		})
+	}
+}
+
+// When the Owner's on overrides what a host is known to do with markers,
+// the summary says so instead of the setting being silently ignored.
+func TestTheSummaryWarnsWhenOnGoesAgainstTheHost(t *testing.T) {
+	kimi := caching.For(shape.AnthropicMessages, "https://api.moonshot.ai/anthropic", "on", "")
+	if s := kimi.Describe(shape.AnthropicMessages); !strings.Contains(s, "refuses") || !strings.Contains(s, "top-level") {
+		t.Errorf("Kimi with on: %s", s)
+	}
+	deepseek := caching.For(shape.AnthropicMessages, "https://api.deepseek.com/anthropic", "on", "")
+	if s := deepseek.Describe(shape.AnthropicMessages); !strings.Contains(s, "ignores") {
+		t.Errorf("DeepSeek with on: %s", s)
+	}
+	for _, url := range []string{"https://api.moonshot.ai/anthropic", "https://relay.example/v1"} {
+		if s := caching.For(shape.AnthropicMessages, url, "", "").Describe(shape.AnthropicMessages); strings.Contains(s, "refuses") {
+			t.Errorf("%s by default: %s", url, s)
+		}
 	}
 }
 

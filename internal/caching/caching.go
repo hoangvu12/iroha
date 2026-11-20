@@ -71,6 +71,9 @@ type Policy struct {
 	// Anthropic Endpoints always take metadata; OpenAI Endpoints follow
 	// send_prompt_cache_key, since a strict one refuses user alike.
 	Fields bool
+	// Note warns when the Owner's setting goes against what the host is known
+	// to do (markers on where they are refused or ignored); Describe adds it.
+	Note string
 }
 
 // Hosts that decide a default (a domain matches itself and its subdomains).
@@ -83,7 +86,10 @@ var (
 )
 
 // For is the policy of an Endpoint speaking sh at url with the Owner's
-// cache_markers and send_prompt_cache_key settings.
+// cache_markers and send_prompt_cache_key settings. Only the default
+// follows the host; an explicit on or off is the Owner's and wins (on
+// toward Anthropic is block markers, with a Note where the host refuses or
+// ignores them).
 func For(sh shape.Shape, url, markers, promptCacheKey string) Policy {
 	host := hosts.Of(url)
 	var p Policy
@@ -92,6 +98,14 @@ func For(sh shape.Shape, url, markers, promptCacheKey string) Policy {
 		switch {
 		case markers == Off:
 			p.Markers = Strip
+		case markers == On: // the Owner's on wins over what the host is known to do
+			p.Markers = Blocks
+			switch {
+			case matches(host, topOnlyHosts):
+				p.Note = "This host refuses cache markers other than one top-level cache_control, so with on its translated Requests may be refused (or, when the refusal names the field, asked again without markers); the default sends the top-level one."
+			case matches(host, ignoreHosts):
+				p.Note = "This host ignores cache markers (it caches on its own), so they change nothing there."
+			}
 		case matches(host, topOnlyHosts):
 			p.Markers = TopOnly
 		case matches(host, topLevelHosts):
@@ -146,11 +160,15 @@ func (p Policy) Describe(sh shape.Shape) string {
 			parts = append(parts, "no prompt_cache_key is added")
 		}
 	}
-	if len(parts) == 0 {
-		return "Nothing is added for the prompt cache."
+	s := "Nothing is added for the prompt cache."
+	if len(parts) > 0 {
+		s = strings.Join(parts, "; ")
+		s = strings.ToUpper(s[:1]) + s[1:] + "."
 	}
-	s := strings.Join(parts, "; ")
-	return strings.ToUpper(s[:1]) + s[1:] + "."
+	if p.Note != "" {
+		s += " " + p.Note
+	}
+	return s
 }
 
 func matches(host string, domains []string) bool { return hosts.Matches(host, domains...) }

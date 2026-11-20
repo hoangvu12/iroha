@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hoangvu12/iroha/internal/affinity"
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/clock"
 	"github.com/hoangvu12/iroha/internal/store"
@@ -58,7 +59,14 @@ var filterParams = append([]api.Param{
 	{Name: "q", Description: "Text search: part of the Request ID, model, Caller name or Provider handle."},
 }, timeParams...)
 
-var affinitySources = []string{"header", "claude_code", "codex", "session_id", "opencode", "prompt_cache_key", "prefix", "none"}
+// affinitySources are the values of affinity_source: affinity.Sources.
+var affinitySources = func() []string {
+	out := make([]string, len(affinity.Sources))
+	for i, s := range affinity.Sources {
+		out[i] = string(s)
+	}
+	return out
+}()
 
 const timeHint = "Use an RFC 3339 time (2026-01-02T15:04:05Z) or a duration such as 1h."
 

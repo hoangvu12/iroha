@@ -1,4 +1,4 @@
-import type { ComponentType, CSSProperties, KeyboardEvent } from "react";
+import type { ComponentType, CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { Dialog, DialogContent } from "@ui-sdk/react/dialog";
@@ -133,7 +133,10 @@ export function SheetStack({ chat = true }: { chat?: boolean }) {
   const room = viewport - shift;
   const width = phone ? room : Math.min(SHEET_WIDTH, room);
 
-  return shown.map(({ entry, open, depth }) => {
+  // A press that only dismisses a menu or select in a sheet doesn't close the stack too.
+  const popupAtPress = useRef(false);
+
+  const frames = shown.map(({ entry, open, depth }) => {
     const index = stack.findIndex((e) => e.id === entry.id);
     const top = open && index === stack.length - 1;
     // Wholly off screen (or behind the top sheet on a phone): out of reach of Tab and screen readers.
@@ -154,7 +157,38 @@ export function SheetStack({ chat = true }: { chat?: boolean }) {
       />
     );
   });
+
+  return (
+    <>
+      {/* One backdrop for the whole stack (UI ticket 27): a click on it closes every sheet. */}
+      <div
+        data-sheet-backdrop=""
+        data-open={stack.length > 0 || undefined}
+        aria-hidden="true"
+        className={backdropClass}
+        onPointerDown={() => (popupAtPress.current = popupOpen())}
+        // Focus stays in the sheet, so closing gives it back to what opened the first sheet.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          if (!popupAtPress.current) close(0);
+          popupAtPress.current = false;
+        }}
+      />
+      {frames}
+    </>
+  );
 }
+
+// Dims the page under the stack (spec story 10, UI ticket 27), fading with the
+// sheets on their durations: in as the first opens, out as the last leaves
+// (the slide tokens are 0 under reduced motion, so it shows and goes at once).
+// Above the page and sidebar (z-20), under the chat panel (z-30), which stays
+// usable; the sheets are in the top layer, above both.
+const backdropClass = cn(
+  "fixed inset-0 z-[25] bg-overlay opacity-0 pointer-events-none",
+  "[transition:opacity_var(--duration-sheet-out)_var(--ease-drawer)]",
+  "data-open:pointer-events-auto data-open:opacity-100 data-open:[transition-duration:var(--duration-sheet-in)]",
+);
 
 // The Sheet recipe (architecture.md "UI motion system") for a stack. Each
 // sheet rests at `--sheet-depth` widths left of the right edge, less the
@@ -220,8 +254,19 @@ function SheetFrame({
   }, [entry.opened, entry.id, open]);
 
   // Focus goes back to the link that opened the sheet, else into the sheet now on top.
+  // When several close at once (the backdrop, an older sheet's X), a link in a
+  // sheet that is closing too hands over to what opened that sheet, down to
+  // what opened the first one.
   const focusAfter = () => {
-    const o = sheets.opener(entry.id);
+    let id = entry.id;
+    let o = sheets.opener(id);
+    for (let hops = 0; o && hops < 50; hops++) {
+      const from = o.closest("[data-sheet-id]");
+      const fromId = Number(from?.getAttribute("data-sheet-id"));
+      if (!from || sheets.stack.some((e) => e.id === fromId)) break;
+      id = fromId;
+      o = sheets.opener(id);
+    }
     const opener = o instanceof HTMLElement && o.isConnected ? o : null;
     const nowTop = document.querySelector<HTMLElement>("[data-sheet][data-top]");
     if (opener && (!nowTop || nowTop.contains(opener))) return opener;
@@ -234,6 +279,17 @@ function SheetFrame({
     if ((e.target as Element).closest("[popover]") !== e.currentTarget) return;
     e.preventDefault();
     sheets.close();
+  };
+
+  // A click on an older sheet brings it forward (closes the sheets above it).
+  // A link in it opens its record from this level itself (and marks the click
+  // handled); a drag that selected text is reading, not a click.
+  const onClick = (e: MouseEvent<HTMLDivElement>) => {
+    if (top || !open || e.defaultPrevented) return;
+    // In a menu, or a dialog opened from this sheet: not a click on the sheet.
+    if ((e.target as Element).closest('[popover], dialog, [role="dialog"], [role="alertdialog"]') !== e.currentTarget) return;
+    if (window.getSelection()?.isCollapsed === false) return;
+    sheets.close(index + 1);
   };
 
   // The body doesn't re-render when only the stack's motion moves it (the chat coming and going, a sheet above opening).
@@ -284,6 +340,7 @@ function SheetFrame({
         finalFocus={focusAfter}
         inert={away || undefined}
         onKeyDown={onKeyDown}
+        onClick={onClick}
         style={style}
         className={frameClass}
       >

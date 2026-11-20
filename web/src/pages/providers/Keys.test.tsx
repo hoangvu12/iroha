@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAgent } from "@ui-sdk/react/agent";
@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "@/ui/toast";
 import type { Endpoint, Provider, UpstreamKey } from "./api";
+import { SheetStackProvider } from "@/sheets/stack";
 import { KeysTab } from "./Keys";
 
 let approve = false;
@@ -55,8 +56,10 @@ function renderTab(keys: UpstreamKey[], url = "/providers/acme/keys", { provider
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={[url]}>
-        <KeysTab handle="acme" provider={provider} adding={false} setAdding={() => {}} />
-        <Where />
+        <SheetStackProvider>
+          <KeysTab handle="acme" provider={provider} adding={false} setAdding={() => {}} />
+          <Where />
+        </SheetStackProvider>
       </MemoryRouter>
       <Toaster />
     </QueryClientProvider>,
@@ -210,12 +213,20 @@ test("a row's menu: Test in Chat opens the chat on the key; Delete… asks, nami
   await waitFor(() => expect(posts(fetch)).toEqual([["/api/providers/acme/keys/bulk/delete", { items: ["team-2"] }]]));
 });
 
-test("clicking a row, or its name with the keyboard, opens the key", async () => {
+test("clicking a row, or its name with the keyboard, opens the key's sheet", async () => {
   const user = userEvent.setup();
   renderTab([key(1), key(2)]);
   await user.click(within((await screen.findAllByRole("row"))[2]).getByText("Active"));
-  expect(where()).toContain("key=team-2");
-  expect(await screen.findByRole("dialog", { name: "team-2" })).toBeTruthy();
+  await waitFor(() => expect(decodeURIComponent(where())).toBe("?sheet=key:acme/team-2"));
+  await user.click(screen.getByRole("button", { name: "Open team-1" }));
+  await waitFor(() => expect(decodeURIComponent(where())).toBe("?sheet=key:acme/team-1"));
+  // No key dialog any more (UI ticket 27).
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("an old link to a key's dialog (?key=) opens its sheet instead", async () => {
+  renderTab([key(1), key(2)], "/providers/acme/keys?sort=state&key=team-1");
+  await waitFor(() => expect(decodeURIComponent(where())).toBe("?sort=state&sheet=key:acme/team-1"));
 });
 
 test("an agent filters, selects and tests keys, and needs a person to delete one", async () => {
@@ -241,31 +252,4 @@ test("an agent filters, selects and tests keys, and needs a person to delete one
   const remove = { steps: [{ ref: "More for team-3", action: "press", args: ["Delete…"] }, { ref: "Delete team-3?", action: "press", args: ["Delete key"] }] };
   expect((await agent.act(remove)).ok).toBe(false);
   expect(posts(fetch).some(([u]) => u.endsWith("/delete"))).toBe(false);
-});
-
-// Motion (UI ticket 17): the key dialog stays mounted while it leaves, so the
-// dialog recipe's exit plays (it used to vanish), showing the key it was about.
-test("closing a key's dialog plays its exit, still showing that key, then it goes", async () => {
-  let end = () => {};
-  const finished = new Promise<void>((r) => (end = r));
-  const running = { finished, effect: { getComputedTiming: () => ({ endTime: 60_000, localTime: 0 }) } } as unknown as Animation;
-  const before = Element.prototype.getAnimations;
-  try {
-    const user = userEvent.setup();
-    renderTab([key(1), key(2)], "/providers/acme/keys?key=team-1");
-    const dialog = await screen.findByRole("dialog", { name: "team-1" });
-    // From here on the dialog's exit runs until the test ends it (jsdom has no transitions).
-    Element.prototype.getAnimations = function (this: Element) {
-      return this === dialog ? [running] : [];
-    };
-    await user.click(within(dialog).getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(where()).not.toContain("key="));
-    expect(dialog.isConnected).toBe(true);
-    expect(dialog.hasAttribute("data-ending-style")).toBe(true);
-    expect(within(dialog).getByRole("heading", { name: "team-1" })).toBeTruthy();
-    await act(async () => end());
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  } finally {
-    Element.prototype.getAnimations = before;
-  }
 });

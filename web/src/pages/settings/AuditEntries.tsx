@@ -15,7 +15,8 @@ import { cn } from "@/ui/cn";
 import { riseIn } from "@/ui/Reveal";
 import { Chip, EmptyState } from "@/ui/States";
 import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
-import { type EntryFilter, type ResourceOption, useAuditEntries, useAuditFilters, useInvalidateAll } from "./api";
+import { useRefreshConfiguration } from "@/api/refresh";
+import { type EntryFilter, type ResourceOption, useAuditEntries, useAuditFilters } from "./api";
 import { ChangedName, EntryChanges, RevertNote } from "./Changes";
 import { clockTime, dayLabel } from "./format";
 import { SAMPLE_AUDIT_ENTRIES } from "./samples";
@@ -362,7 +363,8 @@ function revertError(e: unknown): string {
  * Named "Revert <summary>" so each row's button is its own for agents.
  */
 function RevertControl({ entry }: { entry: AuditEntry }) {
-  const invalidate = useInvalidateAll();
+  // A revert can change any record, so everything showing configuration refreshes (UI ticket 32).
+  const invalidate = useRefreshConfiguration();
   const reverting = useSave({ refresh: invalidate, describe: (e) => `Couldn't revert. ${revertError(e)}` });
   if (reverting.done) return <SaveStatus save={reverting} className="whitespace-nowrap" />;
   if (entry.reverted_by) return <span className="whitespace-nowrap text-[14px] text-fg-muted">Reverted</span>;

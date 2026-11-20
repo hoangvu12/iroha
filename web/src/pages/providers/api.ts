@@ -382,7 +382,7 @@ export function useRefresh() {
   // Resolves once the refetches are in, so an inline result shows on fresh data.
   return () =>
     Promise.all(
-      [qk.providers, qk.pools, qk.overview, ["rules"], ["route-preview"], ["audit-entries"], qk.gatewayKeys, ["gateway-keys"]].map((k) =>
+      [qk.providers, qk.pools, qk.overview, ["rules"], ["route-preview"], ["audit-entries"], qk.gatewayKeys, ["gateway-keys"], ["test-models"]].map((k) =>
         qc.invalidateQueries({ queryKey: k }),
       ),
     );

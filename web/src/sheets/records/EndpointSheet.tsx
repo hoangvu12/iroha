@@ -168,11 +168,7 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
           >
             {/* One column: a sheet is narrower than the dialog was. */}
             <EndpointFields f={f} setF={setF} isNew={false} wide={false} />
-            {(error || saving.error) && (
-              <p role="alert" className="text-[13px] text-danger-text">
-                {error ?? saving.error}
-              </p>
-            )}
+            <SaveError save={saving} error={error} />
             <div className="flex flex-wrap justify-end gap-2">
               <Button onClick={() => setEditing(false)}>Cancel</Button>
               <Button type="submit" variant="primary" loading={saving.pending}>

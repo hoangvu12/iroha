@@ -117,6 +117,16 @@ test("a failed save shows its error under the field until the next try", async (
   expect(screen.queryByText("Renamed to team-5", onPage)).toBeNull();
 });
 
+test("SaveError shows a form's own problem in the same alert line, before the save's failure", () => {
+  const save = { error: "team-6 is taken." } as Parameters<typeof SaveError>[0]["save"];
+  const { rerender } = render(<SaveError save={save} error="Name is required." />);
+  expect(screen.getByRole("alert").textContent).toBe("Name is required.");
+  rerender(<SaveError save={save} error={null} />);
+  expect(screen.getByRole("alert").textContent).toBe("team-6 is taken.");
+  rerender(<SaveError save={{ ...save, error: undefined }} />);
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 test("a switch saving on toggle shows its new state at once, is busy, and goes back if the save fails", async () => {
   const user = setup();
   let fail!: (e: Error) => void;

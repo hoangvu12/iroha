@@ -194,11 +194,12 @@ export function SaveStatus({ save, className, saving = true }: { save: Save; cla
 }
 
 /** A failed change, under the field that made it. */
-export function SaveError({ save, className }: { save: Save; className?: string }) {
-  if (!save.error) return null;
+export function SaveError({ save, error, className }: { save: Save; /** A problem found before saving (a form check); shown instead of the save's failure. */ error?: string | null; className?: string }) {
+  const text = error || save.error;
+  if (!text) return null;
   return (
     <p role="alert" className={cn("text-[13px] text-danger-text", className)}>
-      {save.error}
+      {text}
     </p>
   );
 }

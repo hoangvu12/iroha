@@ -196,11 +196,7 @@ function ModelDetails({ m, provider, refetch }: { m: Model; provider: string; re
           >
             <p className="text-[14px] text-fg-muted">What Callers' model lists say of it. Empty fields use {provider}'s own list, then models.dev. They never change routing.</p>
             <ModelFields m={m} handle={provider} f={f} setF={setF} />
-            {(error || detailsSave.error) && (
-              <p role="alert" className="text-[13px] text-danger-text">
-                {error ?? detailsSave.error}
-              </p>
-            )}
+            <SaveError save={detailsSave} error={error} />
             <div className="flex flex-wrap justify-end gap-2">
               <Button onClick={() => setEditing(false)}>Cancel</Button>
               <Button type="submit" variant="primary" loading={detailsSave.pending}>

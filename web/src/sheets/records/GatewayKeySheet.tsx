@@ -7,7 +7,7 @@ import { type GatewayKey, useGatewayKey, useInvalidateKeys, useUpdateKey } from 
 import { RequestsCount, ScopeModels } from "@/pages/gateway-keys/bits";
 import { type Draft, sameScope, toDraft, toScope } from "@/pages/gateway-keys/scope";
 import { ScopeEditor } from "@/pages/gateway-keys/ScopeEditor";
-import { SaveStatus, useSave } from "@/ui/SaveStatus";
+import { SaveError, SaveStatus, useSave } from "@/ui/SaveStatus";
 import { maskSecret } from "@/pages/providers/api";
 import { Status } from "@/ui/bits";
 import { Button } from "@/ui/Button";
@@ -131,11 +131,7 @@ function Access({ k }: { k: GatewayKey }) {
             setError(undefined);
           }}
         />
-        {(error || saving.error) && (
-          <p role="alert" className="mt-3 text-[13px] text-danger-text">
-            {error ?? saving.error}
-          </p>
-        )}
+        <SaveError save={saving} error={error} className="mt-3" />
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button onClick={() => setEditing(false)}>Cancel</Button>
           <Button variant="primary" loading={saving.pending} onClick={save}>

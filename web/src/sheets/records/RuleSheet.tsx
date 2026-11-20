@@ -166,11 +166,7 @@ function RuleDetails({ r, n, count, most, provider }: { r: Rule; n: number; coun
             {builtin && <p className="text-[14px] text-fg-muted">Saving adds your own rule of this name, which replaces the built-in one until you restore it.</p>}
             <RuleFormFields f={f} set={set} handle={provider} isNew={false} />
             {replay && <ReplayNote replay={replay} />}
-            {(error || saving.error) && (
-              <p role="alert" className="text-[13px] text-danger-text">
-                {error ?? saving.error}
-              </p>
-            )}
+            <SaveError save={saving} error={error} />
             <div className="flex flex-wrap justify-end gap-2">
               <Button onClick={() => setEditing(false)}>Cancel</Button>
               <Button loading={checking} onClick={() => void check()}>

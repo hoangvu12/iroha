@@ -353,8 +353,7 @@ func (h handlers) bulkUpdateRoute() api.Route {
 		Method: http.MethodPost, Path: "/api/providers/{provider}/keys/bulk/update", Tag: "Upstream Keys",
 		Summary: "Enable, disable or restrict many Upstream Keys of a Provider in one change",
 		Description: `Body {"items": [{"key": "key-1", "enabled": true, "endpoints": ["eu"]}, {"key": "uk_...", "enabled": true}]}. ` +
-			"Each item names one key (name or ID) and only the fields to change; fields left out stay as that key has them. " +
-			"Names and secrets are changed one key at a time (PATCH). Each item is applied or refused on its own; one Audit Entry covers them all, so one revert undoes it.",
+			"Names and secrets are changed one key at a time (PATCH).",
 		Query:   []api.Param{audit.DryRun},
 		Request: audit.BulkRequest[BulkUpdateUpstreamKey]{}, Response: audit.BulkResult[UpstreamKey]{},
 		Handle: func(c *api.Call) (any, error) {
@@ -368,8 +367,8 @@ func (h handlers) bulkUpdateRoute() api.Route {
 			}
 			var sl stateLogs
 			res, err := audit.Bulk(h.tr, c, "upstream_key.update", "Edited", in.Items, func(m *audit.Mutation, it BulkUpdateUpstreamKey) (UpstreamKey, error) {
-				if strings.TrimSpace(it.Key) == "" {
-					return UpstreamKey{}, api.BadRequest(`Name the key in each item: {"key": "key-1", ...}.`, "An item has no key.")
+				if err := audit.ItemKey(it.Key, "key-1"); err != nil {
+					return UpstreamKey{}, err
 				}
 				id, err := resolveChild(m.Ctx, m.Tx, "upstream_keys", "Upstream Key", "keys", p, it.Key)
 				if err != nil {

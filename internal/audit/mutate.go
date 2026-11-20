@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
@@ -249,6 +250,15 @@ type BulkResult[T any] struct {
 	Succeeded  int           `json:"succeeded"`
 	Failed     int           `json:"failed"`
 	Items      []BulkItem[T] `json:"items"`
+}
+
+// ItemKey is the check every bulk/update item starts with: it must name the
+// record it changes in "key". example is a name shown in the hint.
+func ItemKey(key, example string) error {
+	if strings.TrimSpace(key) == "" {
+		return api.BadRequest(`Name the key in each item: {"key": "`+example+`", ...}.`, "An item has no key.")
+	}
+	return nil
 }
 
 // Bulk runs fn for each item in one transaction, each item inside its own

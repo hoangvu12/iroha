@@ -7,10 +7,22 @@
 
 **Blocked by:** none
 
-**Status:** open
+**Status:** done
 
 Owner request, 2026-11-20 (proposed in ticket 31's Comments). Ticket 33 runs at the same time and changes how a Flow step opens (a `rule` sheet instead of the dialog): keep your RulesFlow edits additive (the panel and highlight state), don't touch step click handling.
 
-- [ ] Classify route answers what the engine decides; Go tests for the cases above; skill and OpenAPI updated
-- [ ] Try-a-failure panel with examples; path and result highlighted; tests incl. agent test
-- [ ] Checked in headless Chrome, light, dark and phone width
+- [x] Classify route answers what the engine decides; Go tests for the cases above; skill and OpenAPI updated
+- [x] Try-a-failure panel with examples; path and result highlighted; tests incl. agent test
+- [x] Checked in headless Chrome, light, dark and phone width
+
+## Comments
+
+**API.** `POST /api/providers/{provider}/rules/classify` (`internal/gateway/classify.go`), following the provider-scoped route convention. Body `{status, body?, headers?, timeout?, model?, endpoint?, upstream_key?}`; answer: `failure` (false for a 2xx that is no error: relayed, no rule tried), `rule` (empty = the engine's fallback), `outcome`, the `status` it was read as, `embedded`, `reason` (the line the Requests page shows), `key_effect`, `request_effect`, and for cooling outcomes `cooling_seconds` with `cooling_from` (`response` / `rule` / `default`). It runs the same code as an Attempt, not a copy: the reading of an upstream answer was extracted from `attempt` into `failureBody` and `answerFailure` (`embedded.go`; errors inside a 2xx, normaliser failures, non-JSON on a translated path), which `attempt` now calls; the route builds an `http.Response` from what was typed and calls them, then the live `rules.Set.Classify` and `noCredential`. The first cooling comes from `keystate.FirstCooling`, which wraps the same `coolingEnd` that `Fail` uses. Read-only: no Audit Entry, no Key State, no hit, no log (it takes `dry_run` only because every admin POST must). The skill (`26_failure_rules.md`) has a "Try a failure" paragraph; OpenAPI comes from the route.
+
+**UI.** In the Flow view, a "Try a failure" panel (`RulesTry.tsx`) sits above the flow: Status (0 = no response), Endpoint (only when the Provider has several, since host rules match on its host), Body in a code field highlighted with ticket 23's tokenizer (a coloured `<pre>` under a transparent UI SDK Textarea), optional Headers as `Name: value` lines, and examples "429 rate limit", "401 invalid key", "404 model not found" and "200 with an error". "Try this failure" (named so agents can tell it from "Try next key") shows the result in words above the flow, e.g. "Rule 6, dashscope-model-refused, matches: the key gets a Model Gap for this model; the Request tries the next key." with "Read as <reason> on <endpoint>". In the flow, rules passed on the way say "Didn't match", rails down to the match are lit, the matched step gets a ring, "Matched", a lit branch and the engine's effect words (e.g. "Cool 30 s for the model" from Retry-After where the rule says 2 min), and later steps are dimmed. With no match, the End card is lit ("Decided here") and the fallback line that didn't apply is dimmed. Editing any input, or the rules list changing (an edit or a switch), clears the highlight. Phones show the same thing stacked ("It matches, so" inside the step). The highlight changes colour only, on `duration-hover`, so reduced motion needs nothing extra; there's no scroll.
+
+**Fixed on the way (ticket 31's flow).** On desktop each step card had `w-full` next to `w-[520px]`. `cn` only joins classes, so `w-full` won and pushed the "matches" branch and effect card off screen; ticket 31's own `flow-light.png` shows it. I removed `w-full` from the base classes. It's one line in `Step`, next to ticket 33's area, but it doesn't touch click handling.
+
+**Test-first** (the `tdd` skill). Go: `TestClassify...` failed with 404 before the route existed. Its later cases (an Owner rule winning, a switched-off rule skipped, the fallback, an error inside a 200, SSE bodies, host scope, keyless) were written after the route, and each one exercises the code it names. Web: `RulesTry.test.tsx` was all red before the panel existed (seven tests, including the agent test). `go build/vet/test ./...` pass. `npm --prefix web run build` passes. Web tests: 416 pass. In the full run, `requests/Feed.test.tsx`'s "numbered pages" test hit its 15 s timeout once on this loaded machine (as ticket 31 saw); it passes alone.
+
+**Browser checks** (headless Chrome, seeded DashScope Provider with Owner rules, an override, a switched-off built-in, two Endpoints): light and dark at 1440 px, phone 390 px light and dark (no sideways scroll, 390/390). Cases checked: a 429 with Retry-After, a Model Gap, an error inside a 200 (read as 502, server-error), no rule matched (418, with bad-request switched off), and no response (with network switched off). Screenshots and plans: `iroha-v2-notes/v2-ui/shots/34/`.

@@ -203,7 +203,8 @@ function Step({
       data-off={off || undefined}
       className={cn(
         // As on the route view: hover changes border only (duration-hover); no press scale on a card.
-        "relative w-full rounded-xl border bg-bg shadow-sm hover:border-border-strong",
+        // Width comes from the layout line below only: cn doesn't merge, and a w-full here beat w-[520px], pushing the branch off screen.
+        "relative rounded-xl border bg-bg shadow-sm hover:border-border-strong",
         traceMotion,
         stacked ? "w-full max-w-[560px]" : "w-[520px] shrink-0",
         off ? "border-dashed border-border bg-bg/70 shadow-none" : "border-border",

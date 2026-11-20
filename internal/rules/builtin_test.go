@@ -30,6 +30,7 @@ const (
 	openrouterModeration   = `{"error":{"code":403,"message":"anthropic/claude-3-opus requires moderation on OpenAI. Your input was flagged for \"violence\". No credits were charged.","metadata":{"reasons":["violence"],"provider_name":"OpenAI"}}}`
 	openrouterStreamError  = `{"id":"gen-1","object":"chat.completion.chunk","created":1767225600,"model":"x/y","error":{"code":"server_error","message":"Provider disconnected"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}`
 	deepaiSpent            = `{"error":{"message":"Free daily Theos are not available right now. Try again at 2026-01-01T12:01:30+00:00.","type":"network_bound","code":"network_bound"}}`
+	deepaiTheosShort       = `{"error":{"message":"You do not have enough Theos left for this request. Start a new conversation, or wait for your Theos to refresh at 2026-01-01T09:30:00+00:00.","type":"theos_insufficient","code":"theos_insufficient"}}`
 	deepaiCheckIn          = `{"error":{"message":"DeepAI models are temporarily unavailable. Try again later.","type":"check_in_refused","code":"check_in_refused"}}`
 )
 
@@ -137,7 +138,8 @@ var quirkCases = []quirkCase{
 	{"bare 404", "FAIL-36", rules.Failure{Host: nousHost, Status: 404, Body: []byte(`{"status":404,"message":"Not found"}`)}, "bad-request", rules.FailRequest, 0, 0, 0},
 
 	// DeepAI (through the Owner's deepai-proxy, so any host)
-	{"pool spent with refill time", "FAIL-38", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiSpent)}, "deepai-pool-spent", rules.CoolingKey, 12*time.Hour + 90*time.Second, 0, 0},
+	{"pool spent with refill time", "FAIL-38", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiSpent)}, "deepai-pool-spent", rules.CoolingKeyModel, 12*time.Hour + 90*time.Second, 0, 0},
+	{"theos cannot cover the request", "FAIL-38", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiTheosShort)}, "deepai-pool-spent", rules.CoolingKeyModel, 9*time.Hour + 30*time.Minute, 0, 0},
 	{"check-in refused", "FAIL-39", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiCheckIn)}, "deepai-check-in-refused", rules.RetryElsewhere, 0, 0, 0},
 
 	// Anthropic

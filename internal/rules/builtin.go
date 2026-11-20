@@ -202,11 +202,16 @@ var Builtin = []Rule{
 		Description: "\"Your credit balance is too low\" (Anthropic answers it as a 400): billing, not a bad request. Cool the key 15 min and try another.",
 	},
 	{
-		// FAIL-38, USE-17: DeepAI's daily Theos pool is spent; the message
-		// names the refill time.
-		Name: "deepai-pool-spent", Code: []string{"network_bound"},
-		Outcome: CoolingKey, Reset: []string{`body:try again at (\d{4}-\d\d-\d\d[t ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:z|[+-]\d\d:?\d\d)?)`},
-		Description: "DeepAI network_bound (\"Free daily Theos are not available right now. Try again at <time>\"): the key's daily pool is spent. Cool the key until the time the message names.",
+		// FAIL-38, USE-17: DeepAI's daily Theos cannot cover the request; the
+		// message names the time the allowance refills. The deepai-proxy passes
+		// the upstream refusal through unchanged, so the code is the upstream's
+		// "theos_insufficient" and the message reads "wait for your Theos to
+		// refresh at <time>"; the proxy's own wording, "try again at <time>",
+		// is accepted too.
+		Name: "deepai-pool-spent", Code: []string{"theos_insufficient", "network_bound"},
+		Outcome:     CoolingKeyModel,
+		Reset:       []string{`body:(?:try again at|wait for your Theos to refresh at)\s+(\d{4}-\d\d-\d\d[t ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:z|[+-]\d\d:?\d\d)?)`},
+		Description: "DeepAI's daily Theos cannot cover this request (\"You do not have enough Theos left for this request. Start a new conversation, or wait for your Theos to refresh at <time>\"): the request is too big for the account's daily allowance, or the allowance is spent. Cool the key for this model until the time the message names, so the router moves on to a key whose allowance can cover the request.",
 	},
 	{
 		// FAIL-39, USE-18: a refused check-in says nothing about the key.

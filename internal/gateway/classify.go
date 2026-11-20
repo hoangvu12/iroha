@@ -113,7 +113,7 @@ func (g *Gateway) classifyRoute(c *api.Call) (any, error) {
 		until := keystate.FirstCooling(d, now)
 		out.CoolingSeconds = int((until.Sub(now) + time.Second - 1) / time.Second)
 		switch {
-		case !d.ResetAt.IsZero():
+		case !d.ResetAt.IsZero() && d.ResetAt.After(now):
 			out.CoolingFrom = "response"
 		case d.Cooling > 0:
 			out.CoolingFrom = "rule"

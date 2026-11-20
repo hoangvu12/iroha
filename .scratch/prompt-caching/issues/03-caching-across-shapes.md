@@ -36,6 +36,5 @@ Same-Shape passthrough doesn't change. Go tests: golden files per direction (mar
 **Deferred / worth knowing**:
 
 - A Caller's marker on a non-text Chat part (an image, a tool result) can't be matched to a block by text and is left out; Iroha's own markers are then added only if none of the Caller's were placed.
-- Toward OpenAI Responses from Anthropic only `prompt_cache_key` is added (RelayKit already copies `metadata`); no `user` mapping there.
 - Host lists are code (like normalisers), not settings; a Provider that changes its handling needs a code change or the Endpoint's `on`/`off`.
 - Markers within the 4 that RelayKit splits differently from the Caller's parts (a list-content system prompt stays two blocks) count as separate markers, so the clamp may drop one more than the Caller expected.

@@ -183,6 +183,36 @@ func TestDerivedPromptCacheKeyOnlyWhenTheRequestHasNone(t *testing.T) {
 	}
 }
 
+// Toward OpenAI Responses an Anthropic Caller's plain metadata.user_id
+// becomes user, as toward Chat; Claude Code's session is not a user, and no
+// Caching asked adds nothing.
+func TestAnthropicToResponsesMapsAPlainUserID(t *testing.T) {
+	send := func(userID string, c translate.Caching) (map[string]any, []string) {
+		t.Helper()
+		tr, err := translate.New(shape.AnthropicMessages, shape.OpenAIResponses, translate.Options{Model: "m", ID: "r", Now: now, Caching: c})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(map[string]any{"model": "m", "max_tokens": 10, "metadata": map[string]any{"user_id": userID},
+			"messages": []any{map[string]any{"role": "user", "content": "hi"}}})
+		out, err := tr.Request(context.Background(), body, "m")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return object(t, out), tr.Added
+	}
+	on := translate.Caching{Fields: true, PromptCacheKey: "c1a6f3b0-0000-5000-8000-000000000009"}
+	if req, added := send("user-7", on); req["user"] != "user-7" || req["prompt_cache_key"] != on.PromptCacheKey || strings.Join(added, ",") != "user,prompt_cache_key" {
+		t.Errorf("user %v, prompt_cache_key %v, added %v", req["user"], req["prompt_cache_key"], added)
+	}
+	if req, _ := send(`{"device_id":"d","session_id":"s-1"}`, on); req["user"] != nil {
+		t.Errorf("Claude Code's session sent as user: %v", req["user"])
+	}
+	if req, added := send("user-7", translate.Caching{}); req["user"] != nil || len(added) != 0 {
+		t.Errorf("no Caching, yet user %v, added %v", req["user"], added)
+	}
+}
+
 // Translation with no Caching asked adds nothing (the zero value): the
 // golden files of tickets 13-16 are unchanged, and so is this.
 func TestNoCachingAddsNothing(t *testing.T) {

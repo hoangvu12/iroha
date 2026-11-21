@@ -1,7 +1,3 @@
-// Package audit is the shared machinery of every admin resource: name-or-ID
-// addressing, audited mutations with dry run, bulk calls with per-item
-// results, Audit Entries and revert. docs/agents/architecture.md ("Add an
-// admin resource") shows how a resource plugs in.
 package audit
 
 import (
@@ -11,50 +7,42 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/hoangvu12/iroha/internal/api"
 )
 
-// Querier reads rows; *sql.Tx, *sql.DB and *store.DB satisfy it.
 type Querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// Resource describes one kind of configuration record (Admin Token,
-// Provider, Upstream Key...) to the audit machinery. T is its snapshot: the
-// configuration fields an Audit Entry records and a revert restores, as a
-// JSON-encodable struct. Leave runtime state (last used, Key State, counters)
-// out of T: it changes without Audit Entries and would make every revert
-// look like a conflict.
+// Resource's T is a JSON-encodable snapshot of the record's configuration.
+// Leave runtime state (last used, Key State, counters) out of T: it changes
+// without Audit Entries and would make every revert look like a conflict.
 type Resource[T any] struct {
-	Name   string // stored in Audit Entries and filterable: "admin_token"
-	Label  string // "Admin Token"
-	Plural string // "Admin Tokens"
+	Name   string // snake_case, stored in Audit Entries: "admin_token"
+	Label  string
+	Plural string
 	Path   string // the list route, named in not-found hints: "/api/admin-tokens"
 
-	// Table and NameColumn let Resolve find a record by ID (column id) or
-	// by name. NameColumn defaults to "name".
+	// Table must have an id column. NameColumn defaults to "name".
 	Table, NameColumn string
 
-	// Secrets lists top-level snapshot fields shown masked in Audit Entry
-	// views (they stay whole in storage so a revert can restore them).
+	// Secrets lists top-level snapshot fields masked in Audit Entry views;
+	// storage keeps them whole.
 	Secrets []string
 
-	// NameOf returns the record's display name from a snapshot.
 	NameOf func(T) string
-	// Load returns the snapshot of record id, or nil (and no error) when it
-	// does not exist.
+	// Load returns nil and no error when the record does not exist.
 	Load func(ctx context.Context, q Querier, id string) (*T, error)
-	// Restore makes record id equal to snap, or deletes it when snap is nil.
-	// Update in place (INSERT ... ON CONFLICT(id) DO UPDATE), never delete
-	// and re-insert, so foreign-key cascades do not take children with it.
-	// Return an *api.Error (409) when the state forbids it, e.g. the name is
-	// now taken by another record.
+	// Restore deletes the record when snap is nil. Update in place (INSERT
+	// ... ON CONFLICT(id) DO UPDATE), never delete and re-insert, so
+	// foreign-key cascades do not take children with it. Return an
+	// *api.Error (409) when the state forbids it.
 	Restore func(ctx context.Context, tx *sql.Tx, id string, snap *T) error
 }
 
-// Tracker is a registered Resource of any snapshot type.
 type Tracker interface {
 	resourceName() string
 	load(ctx context.Context, q Querier, id string) (json.RawMessage, string, error)
@@ -67,8 +55,8 @@ var (
 	registry   = map[string]Tracker{}
 )
 
-// Register makes r known to revert and returns it. Call it from a
-// package-level var; it panics on a duplicate name or a missing function.
+// Call Register from a package-level var; it panics on a duplicate name or
+// a missing field.
 func Register[T any](r *Resource[T]) *Resource[T] {
 	if r.Name == "" || r.Label == "" || r.Plural == "" || r.Path == "" || r.Table == "" ||
 		r.NameOf == nil || r.Load == nil || r.Restore == nil {
@@ -93,7 +81,6 @@ func lookup(name string) (Tracker, bool) {
 	return t, ok
 }
 
-// ResourceNames lists registered resource names, sorted.
 func ResourceNames() []string {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -105,21 +92,45 @@ func ResourceNames() []string {
 	return out
 }
 
-// Resolve returns the ID of the record addressed by ref, which is its ID or
-// its name. An ID wins when a name happens to equal another record's ID.
-// A missing record is a 404 not_found whose hint names the list route.
+// Resolve takes an ID or a name; an ID wins when a name equals another
+// record's ID.
 func (r *Resource[T]) Resolve(ctx context.Context, q Querier, ref string) (string, error) {
-	var id string
-	err := q.QueryRowContext(ctx,
-		`SELECT id FROM `+r.Table+` WHERE id = ? OR `+r.NameColumn+` = ? ORDER BY id = ? DESC LIMIT 1`,
-		ref, ref, ref).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
+	id, err := r.Find(ctx, q, ref)
+	if err == nil && id == "" {
 		return "", r.NotFound(ref)
 	}
 	return id, err
 }
 
-// Get resolves ref and loads the record's snapshot.
+func (r *Resource[T]) Find(ctx context.Context, q Querier, ref string) (string, error) {
+	var id string
+	err := q.QueryRowContext(ctx,
+		`SELECT id FROM `+r.Table+` WHERE id = ? OR `+r.NameColumn+` = ? ORDER BY id = ? DESC LIMIT 1`,
+		ref, ref, ref).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
+func (r *Resource[T]) Taken(id, name, put string) *api.Error {
+	article := "A"
+	if strings.ContainsRune("AEIOU", rune(r.Label[0])) {
+		article = "An"
+	}
+	return api.Conflict("name_taken", fmt.Sprintf("Pick another name, or update that %s with PUT %s.", r.Label, put),
+		"%s %s named %q exists.", article, r.Label, name).
+		WithDetails(map[string]string{"resource": r.Name, "id": id, "name": name})
+}
+
+func CheckPutName(field, ref, sent, current string) error {
+	if sent == "" || sent == ref || sent == current {
+		return nil
+	}
+	return api.BadRequest(fmt.Sprintf("Leave %s out of the body (the path names the record), or rename it with PATCH.", field),
+		"The body's %s %q differs from the path's %q.", field, sent, ref)
+}
+
 func (r *Resource[T]) Get(ctx context.Context, q Querier, ref string) (string, *T, error) {
 	id, err := r.Resolve(ctx, q, ref)
 	if err != nil {
@@ -132,7 +143,6 @@ func (r *Resource[T]) Get(ctx context.Context, q Querier, ref string) (string, *
 	return id, v, err
 }
 
-// NotFound is the uniform 404 for a ref that names no record.
 func (r *Resource[T]) NotFound(ref string) *api.Error {
 	return api.NotFound(
 		fmt.Sprintf("List %s with GET %s; address one by its name or ID.", r.Plural, r.Path),

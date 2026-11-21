@@ -12,8 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// addProvider creates a Provider with one OpenAI Chat Endpoint on a new
-// fake upstream (whose model list names "<handle>-model") and one key.
 func addProvider(t *testing.T, srv *testkit.Server, handle string, extra map[string]any) *testkit.Upstream {
 	t.Helper()
 	up := testkit.NewOpenAIChat(t)
@@ -28,7 +26,6 @@ func addProvider(t *testing.T, srv *testkit.Server, handle string, extra map[str
 	return up
 }
 
-// lists counts the model list reads a fake received.
 func lists(up *testkit.Upstream) int {
 	n := 0
 	for _, r := range up.Requests() {
@@ -50,7 +47,6 @@ func schedule(t *testing.T, srv *testkit.Server) map[string]modelrefresh.Entry {
 	return out
 }
 
-// dailyAt parses an Entry's daily_at.
 func dailyAt(t *testing.T, e modelrefresh.Entry) time.Duration {
 	t.Helper()
 	var h, m int
@@ -70,8 +66,6 @@ func TestFirstRefreshesAreSpreadOverTheFirstHourThenEachProviderRefreshesDailyAt
 		ups[h] = addProvider(t, srv, h, nil)
 	}
 
-	// Each Provider has its own time of day; never refreshed, it is due
-	// at that time's minutes within the first hour, not at startup.
 	sched := schedule(t, srv)
 	for _, h := range handles {
 		e := sched[h]
@@ -84,8 +78,6 @@ func TestFirstRefreshesAreSpreadOverTheFirstHourThenEachProviderRefreshesDailyAt
 		}
 	}
 
-	// Walk two and a half days, one job run (15 min) at a time: exactly the
-	// Providers due are refreshed, each once.
 	refreshed := map[string][]time.Time{}
 	srv.SettleJobs()
 	for _, h := range handles {
@@ -120,8 +112,6 @@ func TestFirstRefreshesAreSpreadOverTheFirstHourThenEachProviderRefreshesDailyAt
 			t.Fatalf("%s refreshed at %v", h, got)
 		}
 		for i, r := range got[1:] {
-			// The refresh runs at the first tick at or after daily_at, which
-			// may fall after midnight (daily_at 23:53 runs at 00:00).
 			if d := (timeOfDay(r) - at + 24*time.Hour) % (24 * time.Hour); d >= modelrefresh.Tick {
 				t.Fatalf("%s refresh %d at %v, daily_at %s", h, i+1, r, sched[h].DailyAt)
 			}
@@ -131,8 +121,6 @@ func TestFirstRefreshesAreSpreadOverTheFirstHourThenEachProviderRefreshesDailyAt
 		}
 	}
 
-	// Each refresh is logged, each job run too, linked to the Provider
-	// when the run refreshed one.
 	if ev := srv.Logs("kind=discovery&provider=alpha&limit=100"); len(ev) < 2*len(refreshed["alpha"]) {
 		t.Fatalf("discovery events of alpha = %d for %d refreshes", len(ev), len(refreshed["alpha"]))
 	}
@@ -174,7 +162,6 @@ func TestARefreshByHandCountsAsTheDaysAndOnlyEnabledProvidersAreScheduled(t *tes
 		t.Fatalf("manual = %+v", e)
 	}
 
-	// Refreshed by hand at 00:00, acme is next due at its time at least 12 h later.
 	srv.Admin.Post("/api/providers/acme/models/refresh", nil).Expect(200)
 	e := schedule(t, srv)["acme"]
 	at := dailyAt(t, e)
@@ -186,7 +173,6 @@ func TestARefreshByHandCountsAsTheDaysAndOnlyEnabledProvidersAreScheduled(t *tes
 		t.Fatalf("acme after a refresh by hand = %+v, want next %v", e, want)
 	}
 
-	// Nothing is due: a dry run says so and names the next one.
 	run := srv.RunJob(modelrefresh.JobName, "dry_run=true")
 	if run.Outcome != "ok" || run.Details["due"] != float64(0) || run.Details["next_provider"] != "acme" ||
 		run.Summary != "No model list was due; next: acme at "+want.Format("2006-01-02 15:04 UTC")+"." {
@@ -204,12 +190,11 @@ func TestARefreshByHandCountsAsTheDaysAndOnlyEnabledProvidersAreScheduled(t *tes
 		t.Fatalf("list reads: acme %d, off %d, manual %d", lists(acme), lists(off), lists(manual))
 	}
 
-	// A dry run when one is due names it and reads nothing.
 	srv.Admin.Patch("/api/providers/off", map[string]any{"enabled": true}).Expect(200)
 	if e := schedule(t, srv)["off"]; !e.Scheduled || e.NextRefreshAt == nil {
 		t.Fatalf("off once enabled = %+v", e)
 	}
-	srv.Clock.Advance(time.Hour) // past off's first hour
+	srv.Clock.Advance(time.Hour)
 	run = srv.RunJob(modelrefresh.JobName, "dry_run=true")
 	if lists(off) == 0 {
 		if !run.DryRun || run.Summary != "Would refresh 1 model list: off." {
@@ -228,15 +213,12 @@ func TestARestartKeepsTheTimesAndSpreadsWhatFellDueWhileDown(t *testing.T) {
 	srv.Admin.Post("/api/providers/acme/models/refresh", nil).Expect(200)
 	next := *schedule(t, srv)["acme"].NextRefreshAt
 
-	// A restart changes nothing.
 	srv.Clock.Advance(time.Hour)
 	srv.Restart()
 	if e := schedule(t, srv)["acme"]; !e.NextRefreshAt.Equal(next) {
 		t.Fatalf("after a restart next = %v, want %v", e.NextRefreshAt, next)
 	}
 
-	// Down for three days: the missed refresh is due within the hour after
-	// the start, at the Provider's minutes, not at the start itself.
 	srv.Stop()
 	srv.Clock.Advance(72 * time.Hour)
 	srv.Restart()
@@ -258,13 +240,9 @@ func TestARestartKeepsTheTimesAndSpreadsWhatFellDueWhileDown(t *testing.T) {
 	}
 }
 
-// The spec: background work never changes or deletes Upstream Keys. Keys
-// in every state, a model list answering 401, and days of both jobs: the
-// keys read exactly as before, and no job wrote a Key State or an Audit Entry.
 func TestNoJobChangesOrDeletesUpstreamKeys(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
-	// Affinity off: keys in turn, so the 401 below lands on key-1.
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme", "discovery": "key", "affinity": "off"}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"url": up.URL(), "shape": "openai-chat"}).Expect(201)
 	for _, s := range []string{"sk-test-a", "sk-test-b", "sk-test-c", "sk-test-d"} {
@@ -278,8 +256,6 @@ func TestNoJobChangesOrDeletesUpstreamKeys(t *testing.T) {
 	caller := srv.Client(gk.GatewayKey.Secret)
 	up.Enqueue(up.ErrorCode(401, "invalid_api_key", "Incorrect API key provided"))
 	caller.Post("/providers/acme/v1/chat/completions", map[string]any{"model": "gpt-x", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}).Expect(200)
-	// key-1 is now invalid, key-3 disabled; key-2's model list is refused
-	// as unauthorized, key-4's lists models.
 	up.Handle(http.MethodGet, "/v1/models", func(r *testkit.Received) testkit.Reply {
 		if r.Bearer() == "sk-test-d" {
 			return testkit.JSON(200, map[string]any{"data": []any{map[string]any{"id": "gpt-x"}}})(r)
@@ -306,7 +282,6 @@ func TestNoJobChangesOrDeletesUpstreamKeys(t *testing.T) {
 		t.Fatalf("keys before = %s", before)
 	}
 	keyEvents := len(srv.Logs("kind=key.state&limit=100"))
-	// USE-65: no job sends anything but a GET upstream (no inference, no key probe).
 	writes := func() int {
 		n := 0
 		for _, r := range up.Requests() {
@@ -338,7 +313,6 @@ func TestNoJobChangesOrDeletesUpstreamKeys(t *testing.T) {
 	if len(audits.Entries) != beforeAudits {
 		t.Fatalf("Audit Entries went from %d to %d", beforeAudits, len(audits.Entries))
 	}
-	// The jobs did run: lists were read (and refused), history was deleted.
 	if lists(up) < 3 {
 		t.Fatalf("model list reads = %d", lists(up))
 	}

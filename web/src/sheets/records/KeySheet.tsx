@@ -24,12 +24,6 @@ import { useSheets } from "../stack";
 
 const keyQuery = (provider: string, key: string) => ["providers", provider, "keys", "one", key];
 
-/**
- * An Upstream Key's sheet: everything the Keys tab's key dialog had (UI
- * ticket 27). The sheet stays open, so every result shows in it, where it
- * was asked for: a new secret under the key, a rename beside the name, the
- * rest under the actions.
- */
 export default function KeySheet({ record, index }: SheetBodyProps<"key">) {
   const { provider, key } = record;
   const q = useQuery({
@@ -54,7 +48,6 @@ export default function KeySheet({ record, index }: SheetBodyProps<"key">) {
   return (
     <>
       <SheetBar kind="Upstream Key" page={page} />
-      {/* Keyed by the key's id: a rename keeps its fields, another key starts afresh. */}
       <KeyDetails key={q.data.id} k={q.data} provider={provider} index={index} refetch={() => q.refetch()} />
     </>
   );
@@ -85,7 +78,6 @@ function KeyDetails({ k, provider, index, refetch }: { k: UpstreamKey; provider:
     void nameSave.run(
       async () => {
         const res = await calls.updateKey(provider, k.name, { name: to });
-        // The sheet follows the key to its new name, with no reload of what it shows.
         qc.setQueryData(keyQuery(provider, to), res.upstream_key);
         sheets.replace(index, rec.key(provider, to));
         return res;
@@ -126,7 +118,6 @@ function KeyDetails({ k, provider, index, refetch }: { k: UpstreamKey; provider:
   const restrict = () =>
     void actionSave.run(() => calls.restrictToWorking(provider, k.name), { message: `${k.name} restricted to the Endpoints it works on` });
 
-  // Asks first; the key is gone afterwards, so its sheet closes and the result (with Undo) toasts.
   const askDelete = () =>
     confirm.ask({
       title: `Delete ${k.name}?`,
@@ -135,7 +126,6 @@ function KeyDetails({ k, provider, index, refetch }: { k: UpstreamKey; provider:
       onConfirm: async () => {
         const res = await calls.bulkKeys(provider, "delete", [k.name]);
         void refreshAll();
-        // Toast: the key's sheet closes with the key.
         reportBulk(res, [k.name], "deleted", setResults, refreshAll);
         if (res.failed === 0) {
           const at = sheets.stack.findIndex((e) => recordKey(e.record) === recordKey(rec.key(provider, k.name)));
@@ -172,7 +162,6 @@ function KeyDetails({ k, provider, index, refetch }: { k: UpstreamKey; provider:
           Delete {k.name}…
         </Button>
       </SheetActions>
-      {/* Its own line under the buttons that caused it, so a long result never squeezes them. */}
       <div className="-mt-2 flex min-h-0 flex-wrap items-center gap-x-2 pb-5 empty:hidden">
         <SaveStatus save={actionSave} saving={false} />
         <SaveError save={actionSave} />

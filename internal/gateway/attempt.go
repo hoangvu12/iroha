@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
@@ -27,22 +26,15 @@ import (
 	"github.com/hoangvu12/iroha/internal/usage"
 )
 
-// Operation paths appended to an Endpoint's base URL.
 const (
 	opChat     = "/chat/completions"
 	opMessages = "/messages"
 )
 
-// idempotencyHeader carries one value per Request on every Attempt: the
-// Caller's own, else one Iroha mints (newExchange).
 const idempotencyHeader = "Idempotency-Key"
 
-// maxUpstreamBody caps a buffered upstream answer.
 const maxUpstreamBody = 256 << 20
 
-// blockedHeaders are Caller headers never forwarded: credentials (a Gateway
-// Key must never reach a Provider), hop-by-hop and transport headers, and
-// headers that identify the Caller's network.
 var blockedHeaders = map[string]bool{
 	"authorization": true, "proxy-authorization": true, "x-api-key": true, "api-key": true, "x-goog-api-key": true,
 	"cookie": true, "set-cookie": true,
@@ -67,11 +59,6 @@ func forwardable(name string) bool {
 	return true
 }
 
-// outbound builds the upstream request of one Attempt: the Endpoint's URL
-// plus op, the Caller's forwardable headers, then the Endpoint's static
-// headers and the Upstream Key per its auth style (planner.Endpoint.Authorize).
-// A key with an empty secret, or an Endpoint with auth style none, sends no
-// credential at all; a Caller header in the auth slot is dropped either way.
 func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []byte, op string, stream bool) (*http.Request, error) {
 	ep := c.Endpoint
 	if err := ep.CheckAuth(); err != nil {
@@ -106,16 +93,13 @@ func outbound(ctx context.Context, c planner.Candidate, in http.Header, body []b
 	return req, nil
 }
 
-// preparePassthrough returns the body to send to an Endpoint speaking the
-// Caller's Shape: the Caller's bytes, with the wire model when an Endpoint
-// renames it, and on OpenAI Chat streams with stream_options.include_usage
-// so usage can be recorded. injected reports that Iroha asked for usage the
-// Caller did not.
 func preparePassthrough(body []byte, cr callerRequest, wireModel string) (out []byte, injected bool) {
 	out = body
-	if wireModel != cr.bodyModel && cr.shape != shape.Gemini { // Gemini's model is in the URL (opFor)
+	if wireModel != cr.modelAsWritten && cr.shape != shape.Gemini { // Gemini's model is in the URL
 		out, _ = setField(out, "model", jsonString(wireModel))
 	}
+	// OpenAI Chat streams report usage only with stream_options.include_usage,
+	// in a last chunk whose choices are empty.
 	if cr.shape == shape.OpenAIChat && cr.stream && !cr.includeUsage {
 		opts := map[string]any{}
 		if raw, ok := field(out, "stream_options"); ok {
@@ -131,68 +115,45 @@ func preparePassthrough(body []byte, cr callerRequest, wireModel string) (out []
 	return out, injected
 }
 
-// errFirstByte cancels an Attempt that reached the Request's first-byte deadline.
 var errFirstByte = errors.New("no response within the Request's time budget")
 
-// deadlineContext is parent, cancelled with errFirstByte when the clock
-// reaches deadline unless disarm is called first. release frees it.
 func deadlineContext(parent context.Context, c clock.Clock, deadline time.Time) (ctx context.Context, disarm, release func()) {
 	ctx, cancel := context.WithCancelCause(parent)
-	t := c.NewTimer(deadline.Sub(c.Now()))
-	stop := make(chan struct{})
-	var once sync.Once
-	go func() {
-		select {
-		case <-t.C():
-			cancel(errFirstByte)
-		case <-stop:
-			t.Stop()
-		case <-ctx.Done():
-			t.Stop()
-		}
-	}()
-	// Stopping the timer here, not only in the goroutine, means that once
-	// disarm returns the deadline can no longer fire, however soon the
-	// clock moves on.
-	disarm = func() { once.Do(func() { t.Stop(); close(stop) }) }
-	return ctx, disarm, func() { disarm(); cancel(context.Canceled) }
+	timeUp := newAlarm(c, deadline.Sub(c.Now()), func() { cancel(errFirstByte) })
+	return ctx, timeUp.stop, func() { timeUp.stop(); cancel(context.Canceled) }
 }
 
-// upstreamCall is what one Attempt sends and how its answer reaches the
-// Caller: passed through (the Endpoint speaks the Caller's Shape) or
-// translated. Either way the Endpoint's normalisers apply to the body sent
-// and to the answer, before it is passed through or translated.
 type upstreamCall struct {
 	body   []byte
 	header http.Header
-	tr     *translate.Translation // nil on passthrough
-	pass   *passRelay             // passthrough only
+	tr     *translate.Translation
+	pass   *passRelay
 	norm   normalise.Set
+	added  cacheAdditions
 }
 
-// prepare builds the upstream call of candidate c. A non-nil error answers
-// the Caller: no other candidate would do better.
-func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (upstreamCall, *api.Error) {
+func (x *exchange) prepare(s step, body []byte, cr callerRequest) (upstreamCall, *api.Error) {
+	c := s.c
 	ep := c.Endpoint.Shape
-	call := upstreamCall{header: x.sessionHeaders(c, x.r.Header), norm: normalise.For(c.Endpoint.URL, ep)} // caching.go
-	x.added, x.addedPass = nil, false
+	call := upstreamCall{header: x.sessionHeaders(c, x.r.Header), norm: normalise.For(c.Endpoint.URL, ep)}
 	if ep == shape.AnthropicMessages && call.header.Get("Anthropic-Version") == "" {
 		call.header = call.header.Clone()
 		call.header.Set("Anthropic-Version", shape.AnthropicVersion)
 	}
 	if ep == cr.shape {
 		out, injected := preparePassthrough(body, cr, c.WireModel)
-		call.body = call.norm.RequestBody(x.passthroughCaching(c, out))
+		out, call.added = x.passthroughCaching(c, out, s.withoutCacheAdditions)
+		call.body = call.norm.RequestBody(out)
 		call.pass = &passRelay{shape: ep, model: cr.model, dropUsageChunk: injected}
 		return call, nil
 	}
 	if ep != shape.AnthropicMessages && call.header.Get("Anthropic-Version")+call.header.Get("Anthropic-Beta") != "" {
-		call.header = call.header.Clone() // the Caller's Anthropic headers mean nothing to another Shape
+		call.header = call.header.Clone()
 		call.header.Del("Anthropic-Version")
 		call.header.Del("Anthropic-Beta")
 	}
 	tr, err := translate.New(cr.shape, ep, translate.Options{Model: cr.model, ID: x.rec.ID, Now: x.g.clock.Now(), Stream: cr.stream,
-		Caching: x.cachingFor(c)})
+		Caching: x.cachingFor(c, s.withoutCacheAdditions)})
 	if err != nil {
 		return call, api.Errorf(http.StatusInternalServerError, "translation_failed", "Report this; the Request cannot be translated.", "%v", err)
 	}
@@ -210,21 +171,15 @@ func (x *exchange) prepare(c planner.Candidate, body []byte, cr callerRequest) (
 		return call, api.Errorf(http.StatusInternalServerError, "translation_failed", "Report this with the Request ID; the request could not be translated.", "%v", err)
 	}
 	call.body, call.tr = call.norm.RequestBody(out), tr
-	x.added = tr.Added
+	call.added = cacheAdditions{fields: tr.Added}
 	return call, nil
 }
 
-// attempt makes one Attempt of a Request. A 2xx answer is relayed to the
-// Caller (passed through or translated) and the Request is answered
-// (failure is nil); so is a fault no other candidate can fix (a broken
-// Endpoint, a redirect, a request that cannot be translated) or the Caller
-// going away. Any other outcome returns the failure for the Failure Rules,
-// with nothing sent to the Caller. The Attempt is returned for recording;
-// the caller records it.
-func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerRequest, deadline time.Time) (a requests.Attempt, failure *rules.Failure) {
+func (x *exchange) attempt(s step, body []byte, cr callerRequest) (a requests.Attempt, failure *rules.Failure, added cacheAdditions) {
 	g := x.g
+	c, deadline := s.c, s.deadline
 	started := g.clock.Now()
-	a = requests.Attempt{Seq: seq, StartedAt: started.UTC(), ProviderID: c.Provider.ID, Provider: c.Provider.Handle,
+	a = requests.Attempt{Seq: s.seq, StartedAt: started.UTC(), ProviderID: c.Provider.ID, Provider: c.Provider.Handle,
 		EndpointID: c.Endpoint.ID, Endpoint: c.Endpoint.Name, EndpointURL: c.Endpoint.URL,
 		UpstreamKeyID: c.Key.ID, UpstreamKey: c.Key.Name, WireModel: c.WireModel, Shape: c.Endpoint.Shape}
 	x.rec.ProviderID, x.rec.Provider = c.Provider.ID, c.Provider.Handle
@@ -235,11 +190,11 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 	handle := c.Provider.Handle
 	f := &rules.Failure{Provider: handle, Host: hosts.Of(c.Endpoint.URL)}
 
-	call, perr := x.prepare(c, body, cr)
+	call, perr := x.prepare(s, body, cr)
 	if perr != nil {
 		a.Error = perr.Message
 		x.fail(perr)
-		return a, nil
+		return a, nil, call.added
 	}
 	ctx, disarm, release := deadlineContext(x.ctx, g.clock, deadline)
 	defer release()
@@ -248,9 +203,9 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 		a.Error = err.Error()
 		x.fail(api.Errorf(http.StatusBadGateway, "endpoint_misconfigured",
 			"Ask the Owner to fix the Endpoint (GET /api/providers/"+handle+"/endpoints).", "%s", a.Error))
-		return a, nil
+		return a, nil, call.added
 	}
-	if x.idempotencyKey != "" && req.Header.Get(idempotencyHeader) == "" {
+	if req.Header.Get(idempotencyHeader) == "" {
 		req.Header.Set(idempotencyHeader, x.idempotencyKey)
 	}
 	resp, err := g.http.Do(req)
@@ -259,13 +214,13 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 		switch {
 		case x.ctx.Err() != nil:
 			x.stopped()
-			return a, nil
+			return a, nil, call.added
 		case context.Cause(ctx) == errFirstByte:
 			a.Error = fmt.Sprintf("no response within the time budget (%s)", deadline.Sub(x.start).Round(time.Second))
 			f.Timeout = true
 		}
 		f.Err = a.Error
-		return a, f
+		return a, f, call.added
 	}
 	defer resp.Body.Close()
 	a.Status = resp.StatusCode
@@ -277,36 +232,31 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 		x.fail(api.Errorf(http.StatusBadGateway, "upstream_redirect",
 			"Ask the Owner to set the Endpoint URL to where the Provider redirects; Iroha never follows redirects.",
 			"Provider %s answered %d, a redirect.", handle, resp.StatusCode))
-		return a, nil
+		return a, nil, call.added
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// A failure: read it (within the budget) for the rules and the record.
 		data, err := failureBody(resp)
 		if err != nil {
 			a.Error = "reading the error body: " + transportError(err)
 		}
 		f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), data
 		a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(data)
-		return a, f
+		return a, f, call.added
 	}
-	disarm() // the first byte arrived: the answer may now take its time
+	disarm()
 	if !cr.stream {
-		x.answerBegan() // pad.go: a late body still reaches the Caller in time
-		defer x.answerEnded()
+		x.answerBegan()
+		defer x.out.answerEnded()
 	}
 
-	// A 2xx answer may still be a failure (answerFailure); it then fails the
-	// Attempt like any other.
 	if body, _ := answerFailure(resp, cr.stream, call.norm, call.tr != nil); body != nil {
 		f.Status, f.Header, f.Body = resp.StatusCode, resp.Header.Clone(), body
 		a.FailureHeaders, a.FailureBody = failureHeaders(resp.Header), string(body)
-		return a, f
+		return a, f, call.added
 	}
 
 	stream := cr.stream && isEventStream(resp.Header)
 
-	// Usage and the model that served are read from the Provider's own
-	// answer, before any echo or translation.
 	ur := usage.NewReader(c.Endpoint.Shape)
 	rm := &reportedModel{shape: c.Endpoint.Shape}
 	var res relayResult
@@ -329,10 +279,9 @@ func (x *exchange) attempt(seq int, c planner.Candidate, body []byte, cr callerR
 		a.FirstByteMs = ms(t.Sub(started))
 		x.rec.FirstByteMs = ms(t.Sub(x.start))
 	}
-	return a, nil
+	return a, nil, call.added
 }
 
-// failureHeaders flattens response headers for the record, without cookies.
 func failureHeaders(h http.Header) map[string]string {
 	out := make(map[string]string, len(h))
 	for k, vs := range h {
@@ -344,10 +293,9 @@ func failureHeaders(h http.Header) map[string]string {
 	return out
 }
 
-// recordAttempt stores a finished Attempt and logs it.
 func (x *exchange) recordAttempt(a requests.Attempt) {
 	x.rec.AttemptCount++
-	if x.begun {
+	if x.recorded {
 		if err := x.g.rec.Attempt(x.ctx, x.rec.ID, a); err != nil {
 			x.g.log.Error("recording an Attempt failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
 		}
@@ -366,9 +314,6 @@ func (x *exchange) recordAttempt(a requests.Attempt) {
 	x.g.log.Info("attempt finished", attrs...)
 }
 
-// stopped handles the end of x.ctx: the Caller went away, or Iroha is
-// shutting down and the Request outlived the drain limit, which the Caller
-// is told in its Shape (an error event when the stream is under way).
 func (x *exchange) stopped() {
 	if context.Cause(x.ctx) == ErrShuttingDown {
 		x.fail(api.Errorf(http.StatusServiceUnavailable, "shutting_down",
@@ -379,16 +324,17 @@ func (x *exchange) stopped() {
 	x.callerGone()
 }
 
-// callerGone records that the Caller went away before the answer ended.
+const statusClientClosedRequest = 499
+
 func (x *exchange) callerGone() {
-	if x.rec.Status == 0 && !x.isCommitted() {
-		x.rec.Status = 499 // no status reached the Caller
+	if x.rec.Status == 0 && !x.out.isCommitted() {
+		x.rec.Status = statusClientClosedRequest
 	}
 	x.rec.Error = &requests.Failure{Code: "caller_gone", Message: "The Caller closed the connection before the answer ended."}
 }
 
-// transportError describes a failed round trip without the URL (which, with
-// query-parameter auth, could hold a secret).
+// A *url.Error's message includes the URL, which holds the key under
+// query-parameter auth.
 func transportError(err error) string {
 	var ue *url.Error
 	if errors.As(err, &ue) {
@@ -399,27 +345,23 @@ func transportError(err error) string {
 
 func isEventStream(h http.Header) bool { return requests.IsEventStream(h.Get("Content-Type")) }
 
-// relayResult is how relaying an answer went.
 type relayResult struct {
-	firstByte  time.Time // when the answer began arriving (a whole body: when Iroha began reading it)
-	firstToken time.Time // streams: the first event carrying content (firsttoken.go)
-	err        string    // what broke, when the answer did not end cleanly
+	firstByte  time.Time
+	firstToken time.Time
+	err        string
 }
 
-// sawEvent notes one upstream event ev of a stream in Shape sh.
 func (r *relayResult) sawEvent(sh shape.Shape, ev []byte, now time.Time) {
 	if r.firstByte.IsZero() {
 		r.firstByte = now
 	}
 	if r.firstToken.IsZero() {
-		if data, ok := eventData(ev); ok && tokenEvent(sh, data) {
+		if data, ok := eventData(ev); ok && carriesContent(sh, data) {
 			r.firstToken = now
 		}
 	}
 }
 
-// ttft is the answer's time to first token: its first content event, else
-// its first byte.
 func (r relayResult) ttft() time.Time {
 	if !r.firstToken.IsZero() {
 		return r.firstToken
@@ -427,37 +369,18 @@ func (r relayResult) ttft() time.Time {
 	return r.firstByte
 }
 
-// writeHead sends the status line: the upstream status and content type
-// (fallback def), plus Iroha's own headers. No other upstream header reaches
-// the Caller. When Iroha already committed the response (stream.go) the
-// Caller has its 200 and stream headers: a stream carries on in them, and
-// a non-stream answer cannot be sent, so writeHead reports false. After a
-// non-stream commit (pad.go) the answer's body follows the padding.
-func (x *exchange) writeHead(resp *http.Response, def string, stream bool) bool {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if x.committed {
-		return stream || x.padded
-	}
+func (x *exchange) startAnswer(resp *http.Response, defaultType string, stream bool) (answerFits bool) {
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
-		ct = def
+		ct = defaultType
 	}
-	x.w.Header().Set("Content-Type", ct)
-	if stream {
-		x.w.Header().Set("Cache-Control", "no-cache")
+	sent, answerFits := x.out.writeHead(resp.StatusCode, ct, stream)
+	if sent {
+		x.rec.Status = resp.StatusCode
 	}
-	x.wrote, x.streaming = true, stream
-	x.rec.Status = resp.StatusCode
-	x.w.WriteHeader(resp.StatusCode)
-	if f, ok := x.w.(http.Flusher); stream && ok {
-		f.Flush()
-	}
-	return true
+	return answerFits
 }
 
-// relayBuffered reads the whole answer, lets transform adjust it and writes
-// it. An error from transform answers the Caller instead.
 func (x *exchange) relayBuffered(resp *http.Response, transform func(status int, body []byte) ([]byte, *api.Error)) relayResult {
 	res := relayResult{firstByte: x.g.clock.Now()}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody))
@@ -477,33 +400,29 @@ func (x *exchange) relayBuffered(resp *http.Response, transform func(status int,
 		x.fail(terr)
 		return res
 	}
-	if !x.writeHead(resp, "application/json", false) {
+	if !x.startAnswer(resp, "application/json", false) {
 		res.err = "the Provider answered a stream request without a stream"
 		x.fail(api.Errorf(http.StatusBadGateway, "upstream_not_streamed", "Retry without stream: true, or ask the Owner to check the Endpoint; the Provider answered this stream request with a single "+
 			resp.Header.Get("Content-Type")+" body, which cannot follow the stream Iroha had already begun.",
 			"Provider %s did not stream its answer.", x.rec.Provider))
 		return res
 	}
-	if err := x.send(data); err != nil {
+	if err := x.out.send(data); err != nil {
 		x.callerGone()
 	}
-	x.end()
+	x.out.end()
 	return res
 }
 
-// relayStream forwards a server-sent event stream event by event, flushing
-// each as it arrives. The normaliser ns (nil when none applies) sees each
-// event's data first; transform then sees each data payload and may change
-// or drop its event. A stream that breaks off ends with an error event.
 func (x *exchange) relayStream(resp *http.Response, sh shape.Shape, transform func(payload []byte) ([]byte, bool), ns *normalise.Stream) relayResult {
 	var res relayResult
-	defer x.end()
-	x.writeHead(resp, "text/event-stream", true)
+	defer x.out.end()
+	x.startAnswer(resp, "text/event-stream", true)
 	send := func(out []byte) bool {
 		if out == nil {
 			return true
 		}
-		if werr := x.send(out); werr != nil {
+		if werr := x.out.send(out); werr != nil {
 			res.err = "the Caller went away mid-stream"
 			x.callerGone()
 			return false
@@ -529,7 +448,7 @@ func (x *exchange) relayStream(resp *http.Response, sh shape.Shape, transform fu
 		if err == nil {
 			continue
 		}
-		if errors.Is(err, io.EOF) && ns != nil { // the Provider ended its answer
+		if errors.Is(err, io.EOF) && ns != nil {
 			for _, p := range ns.End() {
 				if out, drop := transform(p); !drop && !send(frameData(out)) {
 					return res
@@ -553,15 +472,7 @@ func (x *exchange) relayStream(resp *http.Response, sh shape.Shape, transform fu
 	}
 }
 
-// end marks the answer complete, so the keeper writes nothing more.
-func (x *exchange) end() {
-	x.mu.Lock()
-	x.ended = true
-	x.mu.Unlock()
-}
-
-// readEvent reads one server-sent event: lines up to and including a blank
-// line. At the end of the body it returns what it has with the error.
+// A server-sent event ends at a blank line.
 func readEvent(br *bufio.Reader) ([]byte, error) {
 	var ev []byte
 	for {
@@ -576,11 +487,7 @@ func readEvent(br *bufio.Reader) ([]byte, error) {
 	}
 }
 
-// normaliseEvent passes one upstream event through the normaliser ns and
-// transform and returns what to send the Caller (nil: nothing). An event the
-// normaliser leaves alone keeps its bytes; events it rewrites or adds are
-// written as data-only events (normalisers exist for OpenAI Chat streams,
-// which name no events).
+// OpenAI Chat streams name no events, so rewritten events go out data-only.
 func normaliseEvent(ev []byte, ns *normalise.Stream, transform func([]byte) ([]byte, bool)) ([]byte, error) {
 	data, ok := eventData(ev)
 	if ns == nil || !ok {
@@ -602,15 +509,11 @@ func normaliseEvent(ev []byte, ns *normalise.Stream, transform func([]byte) ([]b
 	return out, nil
 }
 
-// frameData frames one data payload as a server-sent event.
 func frameData(p []byte) []byte {
 	return append(append([]byte("data: "), p...), "\n\n"...)
 }
 
-// normaliseBody runs the normalisers over a whole 2xx answer and puts the
-// result back as resp.Body. It returns the answer when the normalisers find
-// it is a failure the Provider sent as a success, nil otherwise.
-func normaliseBody(resp *http.Response, norm normalise.Set) []byte {
+func normaliserFailure(resp *http.Response, norm normalise.Set) []byte {
 	if norm.Empty() {
 		return nil
 	}
@@ -627,14 +530,12 @@ func normaliseBody(resp *http.Response, norm normalise.Set) []byte {
 	if err != nil {
 		rest = io.MultiReader(rest, errReader{err})
 	} else {
-		rest = io.MultiReader(rest, resp.Body) // anything past the limit
+		rest = io.MultiReader(rest, resp.Body)
 	}
 	resp.Body = readCloser{rest, resp.Body}
 	return nil
 }
 
-// mapData applies f to every data line of an event. It returns ev itself
-// when nothing changed and nil when f drops the event.
 func mapData(ev []byte, f func([]byte) ([]byte, bool)) []byte {
 	var out []byte
 	changed := false
@@ -666,9 +567,6 @@ func mapData(ev []byte, f func([]byte) ([]byte, bool)) []byte {
 	return out
 }
 
-// passRelay adjusts a passed-through answer on its way to the Caller: the
-// model echoes the Caller's name, usage is read, and an OpenAI Chat usage
-// chunk the Caller did not ask for is dropped. Nothing else changes.
 type passRelay struct {
 	shape          shape.Shape
 	model          string
@@ -683,7 +581,7 @@ func (c *passRelay) body(status int, b []byte) ([]byte, *api.Error) {
 	}
 	c.usage.Body(b)
 	c.reported.read(b)
-	return specOf(c.shape).echoBody(b, c.model), nil
+	return specOrChat(c.shape).echoBody(b, c.model), nil
 }
 
 func (c *passRelay) data(p []byte) ([]byte, bool) {
@@ -697,10 +595,9 @@ func (c *passRelay) data(p []byte) ([]byte, bool) {
 			return nil, true
 		}
 	}
-	return specOf(c.shape).echoEvent(p, c.model), false
+	return specOrChat(c.shape).echoEvent(p, c.model), false
 }
 
-// translatedBody converts a whole translated answer for the Caller.
 func translatedBody(x *exchange, tr *translate.Translation, ur *usage.Reader, rm *reportedModel) func(int, []byte) ([]byte, *api.Error) {
 	return func(status int, b []byte) ([]byte, *api.Error) {
 		ur.Body(b)
@@ -715,14 +612,10 @@ func translatedBody(x *exchange, tr *translate.Translation, ur *usage.Reader, rm
 	}
 }
 
-// relayTranslatedStream converts an upstream stream event by event into the
-// Caller's Shape and sends each result as it is ready. An error event from
-// the Provider, or a stream that ends before its answer did, ends the
-// Caller's stream with the Shape's error event.
 func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Translation, cr callerRequest, ur *usage.Reader, rm *reportedModel, ns *normalise.Stream) relayResult {
 	var res relayResult
-	defer x.end()
-	x.writeHead(resp, "text/event-stream", true)
+	defer x.out.end()
+	x.startAnswer(resp, "text/event-stream", true)
 	st, err := tr.Stream(translate.StreamOptions{IncludeUsage: cr.includeUsage})
 	if err != nil {
 		res.err = err.Error()
@@ -734,8 +627,6 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 		x.fail(api.Errorf(http.StatusBadGateway, code, "Retry; GET /api/requests/"+x.rec.ID+" (Admin Token) shows the Attempt.",
 			"Provider %s's stream failed: %s", x.rec.Provider, msg))
 	}
-	// feed translates one upstream data payload and sends the result; false
-	// when the stream is over.
 	feed := func(data []byte) bool {
 		ur.Event(data)
 		rm.read(data)
@@ -750,7 +641,7 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 			return false
 		}
 		if len(out) > 0 {
-			if werr := x.send(out); werr != nil {
+			if werr := x.out.send(out); werr != nil {
 				res.err = "the Caller went away mid-stream"
 				x.callerGone()
 				return false
@@ -762,7 +653,7 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 	for {
 		ev, rerr := readEvent(br)
 		if data, ok := eventData(ev); ok {
-			res.sawEvent(rm.shape, ev, x.g.clock.Now()) // rm reads the Endpoint's Shape
+			res.sawEvent(rm.shape, ev, x.g.clock.Now())
 			payloads := [][]byte{data}
 			if ns != nil {
 				var nerr error
@@ -780,7 +671,7 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 		if rerr == nil {
 			continue
 		}
-		if errors.Is(rerr, io.EOF) && ns != nil { // the Provider ended its answer
+		if errors.Is(rerr, io.EOF) && ns != nil {
 			for _, p := range ns.End() {
 				if !feed(p) {
 					return res
@@ -804,7 +695,7 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 			broken("upstream_stream_broken", terr.Error())
 			return res
 		}
-		if werr := x.send(out); werr != nil {
+		if werr := x.out.send(out); werr != nil {
 			res.err = "the Caller went away mid-stream"
 			x.callerGone()
 		}
@@ -812,8 +703,7 @@ func (x *exchange) relayTranslatedStream(resp *http.Response, tr *translate.Tran
 	}
 }
 
-// eventData returns the data of one server-sent event, multi-line data
-// joined with newlines; ok is false for an event without data (a comment).
+// SSE joins an event's data lines with newlines; a comment carries no data.
 func eventData(ev []byte) (data []byte, ok bool) {
 	for _, line := range bytes.Split(ev, []byte("\n")) {
 		line = bytes.TrimRight(line, "\r")

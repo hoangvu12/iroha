@@ -9,8 +9,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// What a translated request to each kind of Endpoint gets, by its Shape,
-// host and the Owner's two settings (prompt caching 03).
 func TestPolicyFollowsShapeHostAndSettings(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -30,18 +28,18 @@ func TestPolicyFollowsShapeHostAndSettings(t *testing.T) {
 		{"off strips toward Anthropic", shape.AnthropicMessages, "https://api.anthropic.com/v1", "off", "", caching.Strip, false},
 		{"OpenRouter honours markers on Chat", shape.OpenAIChat, "https://openrouter.ai/api/v1", "", "", caching.Keep, true},
 		{"Qwen honours markers on Chat", shape.OpenAIChat, "https://dashscope.aliyuncs.com/compatible-mode/v1", "", "", caching.Keep, true},
-		{"another Chat Endpoint stays as before", shape.OpenAIChat, "https://api.openai.com/v1", "", "", caching.AsBefore, true},
+		{"another Chat Endpoint stays as before", shape.OpenAIChat, "https://api.openai.com/v1", "", "", caching.AsConverted, true},
 		{"on keeps markers on any Chat Endpoint", shape.OpenAIChat, "https://api.openai.com/v1", "on", "", caching.Keep, true},
 		{"off strips on Chat", shape.OpenAIChat, "https://openrouter.ai/api/v1", "off", "", caching.Strip, true},
-		{"prompt_cache_key off", shape.OpenAIChat, "https://api.openai.com/v1", "", "off", caching.AsBefore, false},
-		{"Responses gets the key", shape.OpenAIResponses, "https://api.openai.com/v1", "", "", caching.AsBefore, true},
-		{"Gemini's OpenAI API refuses unknown fields", shape.OpenAIChat, "https://generativelanguage.googleapis.com/v1beta/openai", "", "", caching.AsBefore, false},
-		{"Mistral refuses unknown fields", shape.OpenAIChat, "https://api.mistral.ai/v1", "", "", caching.AsBefore, false},
-		{"on wins over the host", shape.OpenAIChat, "https://api.mistral.ai/v1", "", "on", caching.AsBefore, true},
+		{"prompt_cache_key off", shape.OpenAIChat, "https://api.openai.com/v1", "", "off", caching.AsConverted, false},
+		{"Responses gets the key", shape.OpenAIResponses, "https://api.openai.com/v1", "", "", caching.AsConverted, true},
+		{"Gemini's OpenAI API refuses unknown fields", shape.OpenAIChat, "https://generativelanguage.googleapis.com/v1beta/openai", "", "", caching.AsConverted, false},
+		{"Mistral refuses unknown fields", shape.OpenAIChat, "https://api.mistral.ai/v1", "", "", caching.AsConverted, false},
+		{"on wins over the host", shape.OpenAIChat, "https://api.mistral.ai/v1", "", "on", caching.AsConverted, true},
 		{"an explicit on wins over Kimi's default", shape.AnthropicMessages, "https://api.moonshot.ai/anthropic", "on", "", caching.Blocks, false},
 		{"an explicit on wins over DeepSeek's default", shape.AnthropicMessages, "https://api.deepseek.com/anthropic", "on", "", caching.Blocks, false},
 		{"an explicit on on Anthropic's own API", shape.AnthropicMessages, "https://api.anthropic.com/v1", "on", "", caching.Blocks, false},
-		{"Gemini Endpoints get neither", shape.Gemini, "https://generativelanguage.googleapis.com/v1beta", "on", "on", caching.AsBefore, false},
+		{"Gemini Endpoints get neither", shape.Gemini, "https://generativelanguage.googleapis.com/v1beta", "on", "on", caching.AsConverted, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := caching.For(tc.sh, tc.url, caching.Settings{CacheMarkers: tc.markers, SendPromptCacheKey: tc.key})
@@ -52,8 +50,6 @@ func TestPolicyFollowsShapeHostAndSettings(t *testing.T) {
 	}
 }
 
-// When the Owner's on overrides what a host is known to do with markers,
-// the summary says so instead of the setting being silently ignored.
 func TestTheSummaryWarnsWhenOnGoesAgainstTheHost(t *testing.T) {
 	kimi := caching.For(shape.AnthropicMessages, "https://api.moonshot.ai/anthropic", caching.Settings{CacheMarkers: "on"})
 	if s := kimi.Describe(shape.AnthropicMessages); !strings.Contains(s, "refuses") || !strings.Contains(s, "top-level") {
@@ -70,8 +66,6 @@ func TestTheSummaryWarnsWhenOnGoesAgainstTheHost(t *testing.T) {
 	}
 }
 
-// Conversation fields go wherever they can be read: always to Anthropic,
-// to OpenAI Endpoints with the prompt_cache_key (a strict one refuses both).
 func TestFieldsFollowThePromptCacheKeyOnOpenAIEndpoints(t *testing.T) {
 	if !caching.For(shape.AnthropicMessages, "https://x.example", caching.Settings{CacheMarkers: "off", SendPromptCacheKey: "off"}).Fields {
 		t.Error("Anthropic Endpoints always take metadata.user_id")
@@ -84,9 +78,6 @@ func TestFieldsFollowThePromptCacheKeyOnOpenAIEndpoints(t *testing.T) {
 	}
 }
 
-// Prompt caching 04: the session headers go to every Shape, strict hosts
-// included (they refuse unknown body fields, not headers); only
-// send_prompt_cache_key off turns them off.
 func TestSessionHeadersGoEverywhereUnlessOff(t *testing.T) {
 	for _, sh := range []shape.Shape{shape.OpenAIChat, shape.OpenAIResponses, shape.AnthropicMessages, shape.Gemini} {
 		for _, url := range []string{"https://relay.example/v1", "https://generativelanguage.googleapis.com/v1beta/openai"} {
@@ -109,8 +100,6 @@ func TestSessionHeadersGoEverywhereUnlessOff(t *testing.T) {
 	}
 }
 
-// SetSessionHeaders adds the derived value only where the Caller sent no
-// header of its own (session-id and session_id are one slot).
 func TestSetSessionHeadersKeepsTheCallersOwn(t *testing.T) {
 	h := http.Header{}
 	h.Set("X-Session-Id", "theirs")
@@ -132,8 +121,6 @@ func TestSetSessionHeadersKeepsTheCallersOwn(t *testing.T) {
 	}
 }
 
-// A patch sets only the settings it carries, trimmed and lowercased, and
-// names the setting it refuses.
 func TestSettingsApplyAPatch(t *testing.T) {
 	on, off, bad := " ON ", "off", "sometimes"
 	s := caching.Settings{CacheMarkers: "off"}
@@ -159,10 +146,6 @@ func TestSettingValuesAreChecked(t *testing.T) {
 	}
 }
 
-// A refusal of a field Iroha added is told from any other 400 by what the
-// Providers really answer when a field is unknown, with the field named as
-// a parameter: the role error naming 'user' and a Provider echoing the
-// request body are not refusals.
 func TestRefusedFindsTheAddedFieldAnEndpointRefuses(t *testing.T) {
 	added := []string{"cache_control", "metadata", "user", "prompt_cache_key"}
 	for _, tc := range []struct{ name, body, want string }{
@@ -196,8 +179,6 @@ func TestRefusedFindsTheAddedFieldAnEndpointRefuses(t *testing.T) {
 	}
 }
 
-// The derived prompt_cache_key is a UUID made from the affinity value, the
-// same for the same conversation, never longer than OpenAI's 64 characters.
 func TestPromptCacheKeyIsAUUIDOfTheAffinityValue(t *testing.T) {
 	a := caching.PromptCacheKey("3f2a")
 	if len(a) != 36 || a != caching.PromptCacheKey("3f2a") || a == caching.PromptCacheKey("3f2b") {

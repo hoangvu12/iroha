@@ -2,8 +2,6 @@ package rules
 
 import "testing"
 
-// One wording of what an outcome does, shared by the rules list and Try a
-// failure (review fixes, UI batch 2).
 func TestOutcomeWords(t *testing.T) {
 	for _, c := range []struct {
 		o           Outcome

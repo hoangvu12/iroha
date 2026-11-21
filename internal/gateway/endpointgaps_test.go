@@ -11,12 +11,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// Endpoint Gaps (ticket 40): an auth refusal on one Endpoint of a key that
-// works on another is about that Endpoint, not the key.
-
-// gapped sets up Provider acme with Endpoints b (listed first, the "new
-// region") and a, and key k that works on a and has an Endpoint Gap on b.
-// b refuses k from then on.
 func gapped(t *testing.T) (*testkit.Server, *testkit.Client, *testkit.Upstream, *testkit.Upstream) {
 	t.Helper()
 	srv := testkit.Start(t)
@@ -26,8 +20,7 @@ func gapped(t *testing.T) (*testkit.Server, *testkit.Client, *testkit.Upstream, 
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "a", "url": a.URL(), "shape": "openai-chat"}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"name": "k", "secret": "sk-test-k", "endpoints": []string{"a"}}).Expect(201)
 	caller := srv.Client(issue(t, srv, "pi", all))
-	caller.Post(chatPath, chat("m")).Expect(200) // k works on a
-	// The Owner lifts the restriction, forgetting that k does not work on b.
+	caller.Post(chatPath, chat("m")).Expect(200)
 	srv.Admin.Patch("/api/providers/acme/keys/k", map[string]any{"endpoints": []string{}}).Expect(200)
 	b.Default(b.Error(401, "Incorrect API key provided"))
 	caller.Post(chatPath, chat("m")).Expect(200)
@@ -58,7 +51,6 @@ func TestAKeyRefusedOnOneEndpointKeepsServingTheOneItWorksOn(t *testing.T) {
 		t.Fatalf("worked_on = %+v", k.WorkedOn)
 	}
 
-	// Unrestricted, k is tried on b first; b refuses it as a bad key.
 	srv.Admin.Patch("/api/providers/acme/keys/k", map[string]any{"endpoints": []string{}}).Expect(200)
 	b.Default(b.Error(401, "Incorrect API key provided"))
 	resp := caller.Post(chatPath, chat("m")).Expect(200)
@@ -73,7 +65,6 @@ func TestAKeyRefusedOnOneEndpointKeepsServingTheOneItWorksOn(t *testing.T) {
 		t.Fatalf("key = %+v gaps %+v", k.State, k.EndpointGaps)
 	}
 
-	// From now on b never sees k; a serves every Request at the first Attempt.
 	before := b.Count()
 	for range 3 {
 		resp := caller.Post(chatPath, chat("m")).Expect(200)
@@ -93,7 +84,6 @@ func TestAKeyRefusedOnOneEndpointKeepsServingTheOneItWorksOn(t *testing.T) {
 		t.Fatalf("key.state events = %+v", ev)
 	}
 
-	// The route preview shows the skip, typed, with the Endpoint.
 	var pv gateway.RoutePreview
 	srv.Admin.Get("/api/route-preview?model=acme/m").Expect(200).JSON(&pv)
 	m := pv.Members[0]
@@ -102,7 +92,6 @@ func TestAKeyRefusedOnOneEndpointKeepsServingTheOneItWorksOn(t *testing.T) {
 		t.Fatalf("preview = %+v", m)
 	}
 
-	// The list of a Provider's Endpoint Gaps, and the summary.
 	var gl providers.EndpointGapList
 	srv.Admin.Get("/api/providers/acme/endpoint-gaps").Expect(200).JSON(&gl)
 	if len(gl.EndpointGaps) != 1 || gl.EndpointGaps[0].UpstreamKey != "k" || gl.EndpointGaps[0].Endpoint != "b" {
@@ -153,8 +142,6 @@ func TestAKeyRefusedWhereItLastWorkedBecomesInvalidAndLosesItsGaps(t *testing.T)
 	}
 }
 
-// The Owner's own rule with outcome invalid refines the same way: the
-// refinement is how invalid is applied, whichever rule said it.
 func TestAnOwnerRuleSayingInvalidAlsoMakesAnEndpointGap(t *testing.T) {
 	srv, caller, a, b := gapped(t)
 	srv.Admin.Patch("/api/providers/acme/keys/k", map[string]any{"endpoints": []string{"a"}}).Expect(200)
@@ -193,7 +180,6 @@ func TestTheOwnerClearsAnEndpointGapAndCanUndoIt(t *testing.T) {
 		t.Fatalf("after revert = %+v", k.EndpointGaps)
 	}
 
-	// In bulk, one Audit Entry.
 	var bulk struct {
 		AuditEntry string `json:"audit_entry"`
 		Succeeded  int
@@ -206,18 +192,15 @@ func TestTheOwnerClearsAnEndpointGapAndCanUndoIt(t *testing.T) {
 
 func TestAPassingKeyTestOnTheEndpointClearsItsGap(t *testing.T) {
 	srv, _, _, b := gapped(t)
-	// The default test Endpoint skips the gapped one; a pass on a leaves b's gap.
 	var res gateway.KeyTestResult
 	srv.Admin.Post("/api/providers/acme/keys/k/test?model=m", nil).Expect(200).JSON(&res)
 	if !res.Passed || res.Endpoint != "a" || gapNames(readKey(t, srv, "k")) != "b" {
 		t.Fatalf("test on a = %+v", res)
 	}
-	// A failing test on b keeps the gap (k still works on a), and k stays active.
 	srv.Admin.Post("/api/providers/acme/keys/k/test?model=m&endpoint=b", nil).Expect(200).JSON(&res)
 	if res.Passed || res.Outcome != "invalid" || res.State.State != "active" || !strings.Contains(res.Action, "Endpoint Gap") {
 		t.Fatalf("failing test on b = %+v", res)
 	}
-	// The Provider now accepts k on b.
 	b.Enqueue(b.Text("OK"))
 	srv.Admin.Post("/api/providers/acme/keys/k/test?model=m&endpoint=b", nil).Expect(200).JSON(&res)
 	k := readKey(t, srv, "k")
@@ -234,12 +217,10 @@ func TestEditingTheKeysSecretOrRestrictionClearsItsGaps(t *testing.T) {
 		if len(res.UpstreamKey.EndpointGaps) != 0 || len(res.UpstreamKey.WorkedOn) != 0 {
 			t.Fatalf("after secret change = %+v", res.UpstreamKey)
 		}
-		// The new secret has worked nowhere yet: a refusal on b makes it invalid.
 		caller.Post(chatPath, chat("m")).Expect(502)
 		if k := readKey(t, srv, "k"); k.State.State != "invalid" || a.Last().Bearer() == "sk-test-new" {
 			t.Fatalf("key = %+v", k.State)
 		}
-		// Reverting the edit brings the old secret and its gap back.
 		srv.Admin.Post("/api/audit-entries/"+res.AuditEntry+"/revert", nil).Expect(200)
 		if k := readKey(t, srv, "k"); k.Secret != "sk-test-k" || gapNames(k) != "b" {
 			t.Fatalf("after revert = %+v", k)
@@ -252,7 +233,6 @@ func TestEditingTheKeysSecretOrRestrictionClearsItsGaps(t *testing.T) {
 		if len(res.UpstreamKey.EndpointGaps) != 0 || len(res.UpstreamKey.WorkedOn) != 1 {
 			t.Fatalf("after restriction = %+v", res.UpstreamKey)
 		}
-		// A rename or disable is not an edit that clears it.
 		srv.Admin.Post("/api/audit-entries/"+res.AuditEntry+"/revert", nil).Expect(200)
 		srv.Admin.Patch("/api/providers/acme/keys/k", map[string]any{"name": "k2"}).Expect(200)
 		srv.Admin.Post("/api/providers/acme/keys/k2/disable", nil).Expect(200)
@@ -276,7 +256,6 @@ func TestRestrictingAKeyToTheEndpointsItWorksOn(t *testing.T) {
 	if res.Outcome != "updated" || !slices.Equal(k.Endpoints, []string{"a"}) || len(k.EndpointGaps) != 0 || res.AuditEntry == "" {
 		t.Fatalf("restricted = %+v; key %+v", res, k)
 	}
-	// Nothing to restrict any more.
 	var again providers.UpstreamKeyResult
 	srv.Admin.Post("/api/providers/acme/keys/k/restrict-to-working-endpoints", nil).Expect(200).JSON(&again)
 	if again.Outcome != "unchanged" || again.AuditEntry != "" {
@@ -287,7 +266,6 @@ func TestRestrictingAKeyToTheEndpointsItWorksOn(t *testing.T) {
 	if b.Count() != before {
 		t.Fatal("the restricted key reached b")
 	}
-	// The Audit Entry undoes both: unrestricted, gap back.
 	var entries struct {
 		Entries []struct{ ID, Summary string } `json:"entries"`
 	}
@@ -300,7 +278,6 @@ func TestRestrictingAKeyToTheEndpointsItWorksOn(t *testing.T) {
 		t.Fatalf("after revert = %+v", k)
 	}
 
-	// In bulk, per item.
 	var bulk struct {
 		Succeeded, Failed int
 	}
@@ -317,7 +294,6 @@ func TestRestrictingAKeyGappedOnEveryEndpointItMayUseIsRefused(t *testing.T) {
 	if e.Code != "no_working_endpoint" || e.Hint == "" {
 		t.Fatalf("error = %+v", e)
 	}
-	// Every key left out by a gap: the Caller learns why.
 	var ce callerError
 	srv.Client(issue(t, srv, "pi2", all)).Post(chatPath, chat("m")).Expect(503).JSON(&ce)
 	if !strings.Contains(ce.Error.Message, "Endpoint Gap") {
@@ -325,8 +301,6 @@ func TestRestrictingAKeyGappedOnEveryEndpointItMayUseIsRefused(t *testing.T) {
 	}
 }
 
-// Where a key worked is written like last_used_at: at most once a minute
-// per key and Endpoint.
 func TestWhereAKeyWorkedIsWrittenAtMostOnceAMinute(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)

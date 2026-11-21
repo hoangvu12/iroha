@@ -10,15 +10,8 @@ import (
 	"github.com/hoangvu12/iroha/internal/translate"
 )
 
-// Structured output (ticket 30; catalog REQ-45, REQ-59) and Anthropic
-// search_result blocks (REQ-57).
-
-// schemaJSON is a Caller's JSON schema whose properties are not in
-// alphabetical order: models fill them in schema order, so the order must
-// reach the Provider.
 const schemaJSON = `{"type":"object","properties":{"reasoning":{"type":"string"},"answer":{"type":"string"}},"required":["reasoning","answer"],"additionalProperties":false}`
 
-// structuredRequests are the same structured-output request in each Shape.
 var structuredRequests = map[shape.Shape]string{
 	shape.OpenAIChat: `{"model":"m","messages":[{"role":"user","content":"hi"}],
 		"response_format":{"type":"json_schema","json_schema":{"name":"verdict","description":"A verdict","strict":true,"schema":` + schemaJSON + `}}}`,
@@ -30,8 +23,6 @@ var structuredRequests = map[shape.Shape]string{
 		"generationConfig":{"responseMimeType":"application/json","responseJsonSchema":` + schemaJSON + `}}`,
 }
 
-// rawRequest translates a Caller's request and returns the bytes sent
-// upstream (key order intact) and the Translation.
 func rawRequest(t *testing.T, from, to shape.Shape, req string) (string, *translate.Translation) {
 	t.Helper()
 	tr, err := translate.New(from, to, translate.Options{Model: "m", ID: "req_1", Now: now})
@@ -45,8 +36,6 @@ func rawRequest(t *testing.T, from, to shape.Shape, req string) (string, *transl
 	return string(out), tr
 }
 
-// sentSchema finds the format and schema in a request sent to an Endpoint
-// of the Shape to, as raw JSON.
 func sentSchema(t *testing.T, to shape.Shape, sent string) (format map[string]json.RawMessage, schema string) {
 	t.Helper()
 	var req map[string]json.RawMessage
@@ -80,10 +69,6 @@ func sentSchema(t *testing.T, to shape.Shape, sent string) (format map[string]js
 	return format, string(format["schema"])
 }
 
-// REQ-45, REQ-59: a JSON schema the Caller asks for reaches every other
-// Shape's Endpoint in that Shape's own field, its properties in the
-// Caller's order. (Gemini Endpoints from Chat and Responses get RelayKit's
-// responseSchema, which keeps no order.)
 func TestAJSONSchemaReachesEveryShape(t *testing.T) {
 	for from, req := range structuredRequests {
 		for _, to := range translate.Targets(from) {
@@ -123,8 +108,6 @@ func TestAJSONSchemaReachesEveryShape(t *testing.T) {
 	}
 }
 
-// A name, description and strict flag the Caller gave survive between the
-// OpenAI Shapes; a format from a Shape without names gets "response".
 func TestSchemaNamesCarryOverOrAreMade(t *testing.T) {
 	sent, _ := rawRequest(t, shape.OpenAIResponses, shape.OpenAIChat, structuredRequests[shape.OpenAIResponses])
 	format, _ := sentSchema(t, shape.OpenAIChat, sent)
@@ -139,8 +122,6 @@ func TestSchemaNamesCarryOverOrAreMade(t *testing.T) {
 	}
 }
 
-// Anthropic's legacy top-level output_format reads like output_config.format;
-// and output_config's effort is kept beside a format written there.
 func TestAnthropicLegacyOutputFormatAndEffortSideBySide(t *testing.T) {
 	legacy := `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"output_format":{"type":"json_schema","schema":` + schemaJSON + `}}`
 	sent, _ := rawRequest(t, shape.AnthropicMessages, shape.OpenAIChat, legacy)
@@ -155,9 +136,6 @@ func TestAnthropicLegacyOutputFormatAndEffortSideBySide(t *testing.T) {
 	}
 }
 
-// JSON mode without a schema: the OpenAI Shapes and Gemini carry it; an
-// Anthropic Endpoint has no such mode, so it is dropped with a diagnostic
-// (the Caller's prompt already asks for JSON: OpenAI requires that).
 func TestJSONModeWithoutASchema(t *testing.T) {
 	jsonMode := map[shape.Shape]string{
 		shape.OpenAIChat:      `{"model":"m","messages":[{"role":"user","content":"reply in JSON"}],"response_format":{"type":"json_object"}}`,
@@ -189,10 +167,6 @@ func TestJSONModeWithoutASchema(t *testing.T) {
 	}
 }
 
-// Anthropic takes a subset of JSON Schema. Keywords outside it are not
-// refused: as Anthropic's own SDKs do, they move into the description (the
-// model still reads them) and every object gets additionalProperties false.
-// oneOf becomes anyOf.
 func TestSchemaKeywordsAnthropicCannotTakeMoveIntoTheDescription(t *testing.T) {
 	req := `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"v","schema":
 		{"type":"object","properties":{
@@ -239,8 +213,6 @@ func TestSchemaKeywordsAnthropicCannotTakeMoveIntoTheDescription(t *testing.T) {
 	}
 }
 
-// A Gemini Caller's responseSchema (OpenAPI types, nullable,
-// propertyOrdering) becomes JSON Schema, in propertyOrdering's order.
 func TestGeminiResponseSchemaBecomesJSONSchema(t *testing.T) {
 	req := `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","responseSchema":
 		{"type":"OBJECT","properties":{"answer":{"type":"STRING","nullable":true},"reasoning":{"type":"STRING"}},"propertyOrdering":["reasoning","answer"]}}}`
@@ -252,10 +224,6 @@ func TestGeminiResponseSchemaBecomesJSONSchema(t *testing.T) {
 	}
 }
 
-// REQ-57: an Anthropic search_result block, at the top of a message or in a
-// tool_result, no longer makes the Request untranslatable: it becomes text
-// naming its title and source, so the RAG context reaches the model.
-// (Citations of it exist only in Anthropic answers.)
 func TestSearchResultBlocksBecomeText(t *testing.T) {
 	sr := `{"type":"search_result","source":"https://example.com/doc","title":"Doc","content":[{"type":"text","text":"Fact one."},{"type":"text","text":"Fact two."}],"citations":{"enabled":true}}`
 	req := `{"model":"m","max_tokens":10,"tools":[{"name":"kb","input_schema":{"type":"object"}}],"output_config":{"format":{"type":"json_schema","schema":` + schemaJSON + `}},"messages":[

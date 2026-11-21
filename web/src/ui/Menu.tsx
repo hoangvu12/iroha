@@ -24,18 +24,11 @@ import { popupClass } from "./popup";
 import { ScrollArea } from "./ScrollArea";
 import { Tip } from "./Tooltip";
 
-// Menus (the ⋯ on rows, the Owner menu, the Requests filters) on UI SDK's
-// Menu: one Menu per row, its trigger named for the row.
-
 export const Menu = SdkMenu;
 export const MenuTrigger = SdkMenuTrigger;
 
 type Icon = ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
 
-// An icon-only trigger, named by its label, which is also its tooltip.
-// `copy` is the result of a copy from one of its items (useCopy): the menu has
-// closed back to this trigger, so its icon shows the result for a moment. The
-// name stays, so agents still find the row's menu; the result is announced.
 export function MenuIconTrigger({
   icon,
   label,
@@ -115,7 +108,6 @@ export function MenuItem({
 }) {
   return (
     <SdkMenuItem
-      // The menu closes at once; a returned Promise would keep it open and pending.
       onSelect={onSelect && ((e) => void onSelect(e))}
       disabled={disabled}
       destructive={danger}
@@ -148,7 +140,6 @@ export function MenuRadioGroup({
   );
 }
 
-// Radio items close the menu: each is a choice, not a setting to toggle along.
 export function MenuRadioItem({ value, children, label, count }: { value: string; children: ReactNode; label?: string; count?: number }) {
   return (
     <SdkMenuRadioItem value={value} label={label} closeOnSelect className={cn(itemClass, "relative pl-8")}>
@@ -196,7 +187,6 @@ export function MenuGroup({ label, children }: { label: ReactNode; children: Rea
   );
 }
 
-// A line of text in a menu that is not an item, like a status or "Loading…".
 export function MenuLabel({ children }: { children: ReactNode }) {
   return <div className={labelClass}>{children}</div>;
 }
@@ -206,9 +196,6 @@ export function MenuSeparator() {
 }
 
 export function SubMenu({ label, value, children }: { label: string; value?: ReactNode; children: ReactNode }) {
-  // Beside its item there's no room on a phone: UI SDK flips a side placement
-  // to the other side but only shifts it along that side, so it would hang off
-  // the screen. Under its item it shifts sideways to stay fully on screen.
   const phone = useIsPhone();
   return (
     <MenuSub>

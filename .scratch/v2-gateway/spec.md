@@ -155,7 +155,7 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 90. As an agent, I want to address Providers, Endpoints, keys, Pools, Gateway Keys and rules by handle or name, so that I do not need to look up IDs first.
 91. As an agent, I want every change to accept a dry run that reports exactly what would change, so that I can check before acting.
 92. As an agent, I want bulk versions of changes with per-item results, so that one call handles forty keys and partial failure is visible.
-93. As an agent, I want creates to be safe to repeat (create-or-update by name), so that re-running my work does not make duplicates.
+93. As an agent, I want a create that is safe to repeat (`PUT /api/<resource>/{name}` creates the record or updates it, while `POST` only creates and refuses a taken name with 409), so that re-running my work does not make duplicates.
 94. As an agent, I want errors to say what to do next, so that I can recover without a human.
 95. As an agent, I want to read Iroha's structured logs through the API with filters by time, level, Request, Provider and kind, so that I can diagnose problems without SSH.
 96. As an agent, I want to read a Request's full explanation through the API, so that I can turn a new failure into a Failure Rule.
@@ -217,7 +217,7 @@ A from-scratch rewrite, Iroha v2: one Go binary with SQLite and an embedded Reac
 ### Admin API (ADR-0007)
 - REST under `/api/`, JSON, Admin Token bearer or Owner session. Resources: providers, endpoints, keys, models, pools, gateway keys, admin tokens, rules, requests, logs, audit, settings, jobs, test.
 - Addressing by handle or name everywhere, IDs also accepted.
-- Every mutating call accepts `dry_run`; bulk endpoints return per-item results; creates are create-or-update by name.
+- Every mutating call accepts `dry_run`; bulk endpoints return per-item results; `POST` creates (a taken name is 409 `name_taken`), `PUT .../{name}` creates or updates, `PATCH` edits.
 - Errors carry a machine code, a message and a hint naming the next action.
 - Every mutation writes an Audit Entry (actor, before, after); `revert` restores the before-state.
 - `GET /skill.md` serves the agent skill; `GET /api/openapi.json` serves the description. Both are generated or checked from the same route definitions so they cannot drift.

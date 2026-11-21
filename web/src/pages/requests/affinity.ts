@@ -3,7 +3,6 @@ import type { Affinity } from "./api";
 const SOURCES: Record<Affinity["source"], string> = {
   header: "Iroha-Session header",
   claude_code: "Claude Code session",
-  // Several Callers send these two headers, so the label names the header and who is known to send it
   codex: "session-id or thread-id header: Codex, pi",
   session_id: "session ID",
   opencode: "x-session-affinity header: OpenCode, pi",
@@ -12,7 +11,6 @@ const SOURCES: Record<Affinity["source"], string> = {
   none: "no conversation",
 };
 
-/** Why the Request's Upstream Key was chosen, in one line, or nothing for Requests recorded before conversation affinity. */
 export function affinityReason(a: Affinity | undefined): string | undefined {
   if (!a) return undefined;
   const from = SOURCES[a.source] ?? a.source;

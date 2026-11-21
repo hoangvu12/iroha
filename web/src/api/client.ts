@@ -1,21 +1,16 @@
-// The UI's only way to talk to Iroha: the public admin API (GET
-// /api/openapi.json, GET /skill.md), authenticated by the Owner session
-// cookie. No private endpoints exist for the UI.
-
 export type ErrorBody = {
   error: { code: string; message: string; hint?: string; details?: unknown };
 };
 
-/** A failed call. `call` is the short mono line the error state shows. */
 export class ApiError extends Error {
-  readonly status: number; // 0 when Iroha never answered
+  readonly status: number | null;
   readonly code: string;
   readonly hint: string;
   readonly details: unknown;
   readonly method: string;
   readonly path: string;
 
-  constructor(o: { status: number; code: string; message: string; hint?: string; details?: unknown; method: string; path: string }) {
+  constructor(o: { status: number | null; code: string; message: string; hint?: string; details?: unknown; method: string; path: string }) {
     super(o.message);
     this.name = "ApiError";
     this.status = o.status;
@@ -26,11 +21,10 @@ export class ApiError extends Error {
     this.path = o.path;
   }
 
-  /** "GET /api/requests timed out", "POST /api/providers answered 409 name_taken". */
   get call(): string {
     const where = `${this.method} ${this.path.split("?")[0]}`;
     if (this.code === "timeout") return `${where} timed out`;
-    if (this.status === 0) return `${where} got no answer`;
+    if (this.status === null) return `${where} got no answer`;
     return `${where} answered ${this.status} ${this.code}`;
   }
 }
@@ -39,19 +33,16 @@ export function isApiError(e: unknown): e is ApiError {
   return e instanceof ApiError;
 }
 
-/** What went wrong, for a line under a field or in a dialog: Iroha's message and its hint ("Name taken. Pick another name."). */
 export function errorText(e: unknown): string {
   if (isApiError(e)) return e.hint ? `${e.message} ${e.hint}` : e.message;
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Codes that mean "this browser is not signed in any more". */
 const signedOutCodes = new Set(["admin_token_missing", "owner_session_invalid", "owner_session_expired", "owner_session_revoked"]);
 
 type Listener = (e: ApiError) => void;
 const signedOutListeners = new Set<Listener>();
 
-/** Called whenever a call finds the session gone; the auth gate shows the login. */
 export function onSignedOut(fn: Listener): () => void {
   signedOutListeners.add(fn);
   return () => signedOutListeners.delete(fn);
@@ -99,8 +90,8 @@ export async function request<T>(method: string, path: string, body?: unknown, o
     if (opts.signal?.aborted) throw err;
     throw new ApiError(
       timedOut
-        ? { status: 0, code: "timeout", message: `Iroha didn't answer within ${Math.round(timeoutMs / 1000)} s. It may be restarting.`, method, path: url }
-        : { status: 0, code: "network", message: "Couldn't reach Iroha. Check the connection.", method, path: url },
+        ? { status: null, code: "timeout", message: `Iroha didn't answer within ${Math.round(timeoutMs / 1000)} s. It may be restarting.`, method, path: url }
+        : { status: null, code: "network", message: "Couldn't reach Iroha. Check the connection.", method, path: url },
     );
   } finally {
     clearTimeout(timer);
@@ -134,7 +125,6 @@ export async function request<T>(method: string, path: string, body?: unknown, o
   return data as T;
 }
 
-/** Thin verbs over request(). Paths are admin API paths, e.g. "/api/admin-tokens". */
 export const api = {
   get: <T>(path: string, opts?: RequestOptions) => request<T>("GET", path, undefined, opts),
   post: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>("POST", path, body ?? {}, opts),
@@ -143,5 +133,4 @@ export const api = {
   delete: <T>(path: string, opts?: RequestOptions) => request<T>("DELETE", path, undefined, opts),
 };
 
-/** Encode one path segment (a name or ID). */
 export const seg = (s: string) => encodeURIComponent(s);

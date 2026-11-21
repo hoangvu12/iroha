@@ -11,12 +11,6 @@ import { DONE_MS, SaveStatus, useSave } from "./SaveStatus";
 import { Segmented } from "./Segmented";
 import { Switch } from "./Switch";
 
-// Motion of the tables (UI ticket 16): rows added or removed after an action
-// enter and leave, the bulk bar leaves as one crossfade with the toolbar, a
-// slow page change dims, and the shared table controls take their values from
-// the motion tokens. jsdom has no transitions: a stubbed running animation
-// keeps an exit going until the test ends it, as in app/ChatSheet.test.tsx.
-
 type Fruit = { id: string; name: string };
 const FRUITS: Fruit[] = [
   { id: "1", name: "apple" },
@@ -56,10 +50,8 @@ test("a row removed from the data stays where it was, hidden from readers and in
   expect(gone.hasAttribute("data-ending-style")).toBe(true);
   expect(gone.hasAttribute("inert")).toBe(true);
   expect(gone.getAttribute("aria-hidden")).toBe("true");
-  // In its old place, between the rows still there; readers only see those.
   expect([...container.querySelectorAll("[data-rows] > [data-row-id]")].map((r) => r.getAttribute("data-row-id"))).toEqual(["1", "2", "3"]);
   expect(bodyRows()).toHaveLength(2);
-  // Opacity only, the list-out duration.
   expect(classesOf(gone)).toEqual(expect.arrayContaining(["data-ending-style:opacity-0", "data-ending-style:duration-list-out"]));
   endTransitions();
   await waitFor(() => expect(rowEl(container, "2")).toBeNull());
@@ -91,7 +83,6 @@ test("sorting, searching, a new page, the first load and a whole new data set mo
   expect(marked()).toBe(0);
   rerender(<Fruits data={many} search="fruit-0" />);
   expect(marked()).toBe(0);
-  // Another record's rows (no row in common): drawn at once.
   rerender(<Fruits data={[{ id: "x", name: "xigua" }]} />);
   expect(marked()).toBe(0);
   expect(rowEl(container, "1")).toBeNull();
@@ -112,9 +103,7 @@ test("clearing the selection: the bar fades out in place, inert, while the toolb
   await user.click(screen.getByRole("checkbox", { name: "Select apple" }));
   const bar = screen.getByRole("group", { name: "1 selected" });
   expect(screen.queryByRole("textbox", { name: "Search fruit" })).toBeNull();
-  // A synchronous click: the toolbar's starting style lasts one frame.
   fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
-  // Still drawn with what it said, leaving: opacity only, list-out.
   expect(bar.isConnected).toBe(true);
   expect(bar.textContent).toContain("1 selected");
   expect(bar.hasAttribute("data-ending-style")).toBe(true);
@@ -158,8 +147,6 @@ test("expanded details fade in", async () => {
   expect(classesOf(cell)).toEqual(expect.arrayContaining(["transition-opacity", "duration-fade", "ease-out", "starting:opacity-0"]));
   expect(container.querySelectorAll("[data-ending-style]").length).toBe(0);
 });
-
-// ---- Shared table controls: tokens only ----
 
 function expectOnlyTokens(el: Element) {
   const typed = classesOf(el).filter((c) => /(^|:)(duration-[1-9]|scale-\d|ease-\[cubic)/.test(c) || c === "transition-transform");
@@ -210,7 +197,7 @@ test("selection checkboxes and segmented items change colour only, on hover's du
 });
 
 test("Copied crossfades in on the fade token", async () => {
-  const user = userEvent.setup(); // stubs the Clipboard API
+  const user = userEvent.setup();
   render(<CopyButton icon value="sk-1" what="Key" />);
   await user.click(screen.getByRole("button", { name: "Copy the Key" }));
   const icon = await waitFor(() => screen.getByRole("button", { name: "Copied" }).querySelector("svg")!);
@@ -260,7 +247,6 @@ test("a row's quiet button: hidden until the row is hovered where there is hover
   expect(rule).not.toMatch(/transition/);
 });
 
-// Rows with a selection that leave are selected no more, and the bar leaves with them.
 test("deleting the selected rows: they fade where they were and the bar leaves with them", async () => {
   runningTransitions();
   const user = userEvent.setup();

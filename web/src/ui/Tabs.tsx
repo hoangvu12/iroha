@@ -7,17 +7,10 @@ import { ScrollArea } from "./ScrollArea";
 type Variant = "underline" | "segmented";
 const VariantContext = createContext<Variant>("underline");
 
-/** UI SDK Tabs root: `value` + `onValueChange`, or a value from the URL (see RouteTabs). */
 export function Tabs(props: ComponentProps<typeof Root>) {
   return <Root {...props} />;
 }
 
-/**
- * The row of tabs. `underline` (page sections) scrolls sideways on narrow
- * screens with no visible bar and fades at the edge that continues;
- * `segmented` is the pill switch (Request views, Captured sides). Both
- * slide an indicator to the selected tab.
- */
 export function TabList({ label, variant = "underline", className, children }: { label: string; variant?: Variant; className?: string; children: ReactNode }) {
   if (variant === "segmented")
     return (
@@ -56,10 +49,6 @@ export function TabPanel(props: ComponentProps<typeof TabsPanel>) {
   return <TabsPanel {...props} />;
 }
 
-/**
- * Tabs that are routes (Provider, Pool, Settings): each tab is a Link, the
- * current route's `value` selects it, and `children` is its panel.
- */
 export function RouteTabs({
   label,
   value,

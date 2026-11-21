@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Deploy Iroha to a Linux server over SSH keys: build the binary for the
-# server, copy it, back up the database, swap the binary, restart the systemd
-# service, check readiness, and roll back automatically when the check fails.
-# The runbook is in GET /skill.md ("Deploying Iroha"); run with --help for
-# the options.
-#
-# Never reads, writes or prompts for a password: SSH runs in BatchMode with
-# public-key authentication only, and sudo on the server runs with -n.
 set -euo pipefail
 
 usage() {
@@ -79,7 +71,7 @@ RUN_AS=${IROHA_DEPLOY_RUN_AS:-iroha}
 VERSION="" ARCH="" BINARY="" TIMEOUT=60 KEEP=5
 INSTALL_UNIT=0 MODE=deploy DRY_RUN=0 NO_UI=0
 
-die() { # die CODE MESSAGE
+die() {
 	printf 'deploy: %s\n' "$2" >&2
 	[ "$1" = 2 ] || printf 'IROHA_DEPLOY failed nothing_changed=yes\n'
 	exit "$1"
@@ -123,16 +115,17 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-# Values end up in a systemd unit, remote command lines and ldflags, so
-# allow only plain characters.
-[[ $DIR =~ ^/[A-Za-z0-9_./-]+$ ]] || die 2 "--dir must be an absolute path of plain characters, got '$DIR'"
-[[ $SERVICE =~ ^[A-Za-z0-9_.-]+$ ]] || die 2 "--service: plain characters only, got '$SERVICE'"
-[[ $RUN_AS =~ ^[a-z_][a-z0-9_-]*$ ]] || die 2 "--run-as: not a user name: '$RUN_AS'"
-[[ $ADDR =~ ^([A-Za-z0-9.-]*|\[[0-9a-fA-F:]+\]):[0-9]+$ ]] || die 2 "--addr must be host:port, got '$ADDR'"
-[[ $TIMEOUT =~ ^[1-9][0-9]*$ ]] || die 2 "--timeout must be whole seconds, got '$TIMEOUT'"
-[[ $KEEP =~ ^[1-9][0-9]*$ ]] || die 2 "--keep must be at least 1, got '$KEEP'"
-[ -z "$ARCH" ] || [[ $ARCH =~ ^(amd64|arm64)$ ]] || die 2 "--arch must be amd64 or arm64, got '$ARCH'"
-[ -z "$VERSION" ] || [[ $VERSION =~ ^[A-Za-z0-9._+-]+$ ]] || die 2 "--version: plain characters only, got '$VERSION'"
+require_plain_values() {
+	[[ $DIR =~ ^/[A-Za-z0-9_./-]+$ ]] || die 2 "--dir must be an absolute path of plain characters, got '$DIR'"
+	[[ $SERVICE =~ ^[A-Za-z0-9_.-]+$ ]] || die 2 "--service: plain characters only, got '$SERVICE'"
+	[[ $RUN_AS =~ ^[a-z_][a-z0-9_-]*$ ]] || die 2 "--run-as: not a user name: '$RUN_AS'"
+	[[ $ADDR =~ ^([A-Za-z0-9.-]*|\[[0-9a-fA-F:]+\]):[0-9]+$ ]] || die 2 "--addr must be host:port, got '$ADDR'"
+	[[ $TIMEOUT =~ ^[1-9][0-9]*$ ]] || die 2 "--timeout must be whole seconds, got '$TIMEOUT'"
+	[[ $KEEP =~ ^[1-9][0-9]*$ ]] || die 2 "--keep must be at least 1, got '$KEEP'"
+	[ -z "$ARCH" ] || [[ $ARCH =~ ^(amd64|arm64)$ ]] || die 2 "--arch must be amd64 or arm64, got '$ARCH'"
+	[ -z "$VERSION" ] || [[ $VERSION =~ ^[A-Za-z0-9._+-]+$ ]] || die 2 "--version: plain characters only, got '$VERSION'"
+}
+require_plain_values
 if [ -z "$READY_URL" ]; then
 	host_part=${ADDR%:*}
 	case $host_part in "" | 0.0.0.0) host_part=127.0.0.1 ;; "[::]") host_part="[::1]" ;; esac
@@ -163,8 +156,6 @@ fi
 export MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1
 native_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 
-# Public-key authentication only, never a prompt: BatchMode makes ssh fail
-# instead of asking for a password, passphrase or host-key confirmation.
 SSH_OPTS=(
 	-o BatchMode=yes
 	-o PreferredAuthentications=publickey
@@ -185,11 +176,8 @@ unset SSH_ASKPASS DISPLAY
 TARGET="$SSH_USER@$HOST"
 
 show() { printf '+'; printf ' %q' "$@"; printf '\n'; }
-# run CMD...: run it, or only show it under --dry-run.
 run() { if [ "$DRY_RUN" = 1 ]; then show "$@"; else "$@"; fi; }
-# remote_sh LINE: run a shell command line on the server.
 remote_sh() { run ssh "${SSH_OPTS[@]}" "$TARGET" "$1" </dev/null; }
-# remote CMD...: run CMD on the server; arguments are quoted for its shell.
 remote() { remote_sh "$(printf '%q ' "$@")"; }
 
 ssh_failed() {

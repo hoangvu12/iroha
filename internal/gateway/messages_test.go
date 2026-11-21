@@ -15,8 +15,6 @@ import (
 
 const messagesPath = "/providers/acme/v1/messages"
 
-// addEndpointProvider creates Provider handle with one Endpoint of shape at
-// url (auth style per the Shape's custom) and one Upstream Key.
 func addEndpointProvider(t *testing.T, srv *testkit.Server, handle, sh, url, secret string) {
 	t.Helper()
 	srv.Admin.Post("/api/providers", map[string]any{"handle": handle}).Expect(201)
@@ -32,8 +30,7 @@ func messages(model string) map[string]any {
 	return map[string]any{"model": model, "max_tokens": 256, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
 }
 
-// claudeCaller sends its Gateway Key the way the Anthropic SDK and Claude
-// Code do.
+// The Anthropic SDK and Claude Code send the key in x-api-key.
 func claudeCaller(t *testing.T, srv *testkit.Server) *testkit.Client {
 	return srv.Anon.WithHeader("x-api-key", issue(t, srv, "claude-code", all))
 }
@@ -59,8 +56,6 @@ func TestMessagesPassThroughToAnAnthropicEndpoint(t *testing.T) {
 		t.Fatalf("request = %+v usage %+v", r, r.Usage)
 	}
 
-	// Streamed: events pass through with their names; message_start names
-	// the model asked for, and usage spread over two events is recorded.
 	srv.Admin.Patch("/api/providers/acme/endpoints/default", map[string]any{"renames": map[string]string{"sonnet": "claude-sonnet-4-5"}}).OK()
 	st := messages("sonnet")
 	st["stream"] = true
@@ -116,8 +111,6 @@ func TestMessagesAreTranslatedForAnOpenAIChatEndpoint(t *testing.T) {
 		t.Fatalf("request = %+v", r)
 	}
 
-	// Streamed: OpenAI chunks become Anthropic events, usage included
-	// (Iroha asked the Provider for it).
 	req["stream"] = true
 	resp = caller.Post(messagesPath, req).Expect(200)
 	if opts, _ := up.Last().Map(t)["stream_options"].(map[string]any); opts["include_usage"] != true {
@@ -154,7 +147,6 @@ func TestChatIsTranslatedForAnAnthropicEndpoint(t *testing.T) {
 	addEndpointProvider(t, srv, "acme", "anthropic-messages", up.URL(), "sk-test-ant")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// A tool call comes back under the Caller's own tool name.
 	up.Enqueue(testkit.JSON(200, map[string]any{
 		"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-sonnet-4-5", "stop_reason": "tool_use",
 		"content": []any{
@@ -200,8 +192,6 @@ func TestChatIsTranslatedForAnAnthropicEndpoint(t *testing.T) {
 		t.Fatalf("request = %+v usage %+v", r, r.Usage)
 	}
 
-	// Streamed, without include_usage: no usage chunk reaches the Caller,
-	// but usage is still recorded.
 	req["stream"] = true
 	resp = caller.Post(chatPath, req).Expect(200)
 	events := resp.Events()
@@ -256,8 +246,6 @@ func TestMessagesErrorsUseTheAnthropicEnvelope(t *testing.T) {
 	if !strings.Contains(resp.Text(), `"code":"model_required"`) || !strings.Contains(resp.Text(), "Anthropic Messages") {
 		t.Fatalf("error = %s", resp.Body)
 	}
-	// A body the translation cannot read is the Caller's to fix; the
-	// Provider is never called.
 	resp = caller.Post(messagesPath, `{"model":"m","max_tokens":1,"messages":"hi"}`).Expect(400)
 	resp.JSON(&e)
 	if e.Error.Code != "untranslatable_request" || e.Error.Type != "invalid_request_error" || up.Count() != 0 {
@@ -332,7 +320,6 @@ func TestAnAnthropicStreamIsKeptAliveWithPings(t *testing.T) {
 	if events[len(events)-1].Event != "message_stop" {
 		t.Fatalf("events = %+v", events)
 	}
-	// A committed stream that then fails gets Anthropic's error event.
 	up.Enqueue(testkit.Hang())
 	ch = make(chan *liveStream, 1)
 	go func() {

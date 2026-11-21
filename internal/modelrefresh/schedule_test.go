@@ -29,7 +29,6 @@ func TestDailyTimesAreStableAndSpreadAcrossTheDay(t *testing.T) {
 }
 
 func TestNextRefresh(t *testing.T) {
-	// A Provider ID whose daily time is known: search for one at 10:37.
 	id := ""
 	for i := 0; id == ""; i++ {
 		if c := fmt.Sprintf("pr_%d", i); DailyAt(c) == 10*time.Hour+37*time.Minute {

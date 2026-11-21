@@ -7,89 +7,66 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// codec is everything translation knows about one Shape. A Shape is
-// translatable once it has a codec in codecs.
-type codec struct {
+type shapeFormat struct {
 	shape  shape.Shape
-	format types.RelayFormat // RelayKit's name for the Shape
+	format types.RelayFormat
+}
 
-	// The RelayKit DTOs a request, a whole answer and one stream event of
-	// this Shape decode into (pointers).
-	request, answer, event func() any
-	// setModel names the model in a decoded request of this Shape.
-	setModel func(req any, model string)
+type callerCodec struct {
+	shapeFormat
 
-	// As the Endpoint's Shape:
-
-	// prepareRequest fixes a request converted to this Shape before it is
-	// sent: sanitised tool names, what the stream must include.
-	prepareRequest func(req map[string]any, t *Translation)
-	// upstream reads one stream event of this Shape from an Endpoint.
-	upstream func(data []byte) upstreamEvent
-	// fixUp, if set, corrects a decoded answer or stream event from an
-	// Endpoint (a DTO from answer or event) before it is converted.
-	fixUp func(v any)
-	// writeFormat writes the structured output the Caller asked for in
-	// this Shape's terms (format.go), before prepareRequest.
-	writeFormat func(req map[string]any, f *outputFormat, t *Translation)
-
-	// As the Caller's Shape:
-
-	// tidyAnswer fixes a whole answer converted to this Shape: the
-	// Caller's model, restored tool names, clean usage (u is RelayKit's).
-	tidyAnswer func(m map[string]any, t *Translation, u *dto.Usage)
-	// newWriter writes a stream converted to this Shape to the Caller.
-	newWriter func(t *Translation, o StreamOptions) streamWriter
-	// streamID, if set, names a stream converted to this Shape (and the
-	// items the converter derives from it); otherwise the converter does.
-	streamID func(t *Translation) string
-	// noteRequest, when set, reads what the Caller's decoded request asks
-	// of the answer (Gemini: whether thoughts are wanted).
+	request     func() any
+	setModel    func(req any, model string)
+	rewrite     func(body []byte) []byte
 	noteRequest func(req any, t *Translation)
-	// readFormat reads the structured output a decoded request asks for
-	// (format.go); nil when it asks for none.
-	readFormat func(req any) *outputFormat
-	// rewrite, if set, fixes the Caller's raw body before it is decoded
-	// into the request DTO, for what the DTO cannot hold (Anthropic's
-	// search_result blocks).
-	rewrite func(body []byte) []byte
-	// chatHop: answers are converted to this Shape through OpenAI Chat,
-	// whose form tidyAnswer (Translation.chat) and the writer (chatReader)
-	// see (hop.go).
-	chatHop bool
+	readFormat  func(req any) *outputFormat
+
+	tidyAnswer     func(m map[string]any, t *Translation, u *dto.Usage)
+	newWriter      func(t *Translation, o StreamOptions) streamWriter
+	streamID       func(t *Translation) string
+	answersViaChat bool
 }
 
-// codecs are the translatable Shapes. Tickets 14 (OpenAI Responses) and 15
-// (Gemini) add theirs here.
-var codecs = map[shape.Shape]*codec{
-	shape.OpenAIChat:        chatCodec,
-	shape.AnthropicMessages: anthropicCodec,
-	shape.OpenAIResponses:   responsesCodec,
-	shape.Gemini:            geminiCodec,
+type endpointCodec struct {
+	shapeFormat
+
+	declaredTools  func(req map[string]any) []string
+	prepareRequest func(req map[string]any, t *Translation)
+	writeFormat    func(req map[string]any, f *outputFormat, t *Translation)
+
+	answer, event func() any
+	upstream      func(data []byte) upstreamEvent
+	fixUp         func(v any)
 }
 
-func (c *codec) fixUpstream(v any) {
+type shapeCodecs struct {
+	caller   *callerCodec
+	endpoint *endpointCodec
+}
+
+var codecs = map[shape.Shape]shapeCodecs{
+	shape.OpenAIChat:        {chatCaller, chatEndpoint},
+	shape.AnthropicMessages: {anthropicCaller, anthropicEndpoint},
+	shape.OpenAIResponses:   {responsesCaller, responsesEndpoint},
+	shape.Gemini:            {geminiCaller, geminiEndpoint},
+}
+
+func (c *endpointCodec) fixUpstream(v any) {
 	if c.fixUp != nil {
 		c.fixUp(v)
 	}
 }
 
-// upstreamEvent is what one upstream stream event means.
 type upstreamEvent struct {
-	feed     bool           // convert it
-	complete bool           // the answer is complete (a final event arrived)
-	err      *UpstreamError // the Provider reported an error: the stream is over
+	feed     bool
+	complete bool
+	err      *UpstreamError
 }
 
-// streamWriter writes one converted stream to the Caller.
 type streamWriter interface {
-	// write tidies and frames one converted event; nil drops it.
 	write(m map[string]any) []byte
-	// end is what closes a complete stream, given the stream's usage.
 	end(u *dto.Usage) []byte
 }
-
-// JSON object helpers for the fix-ups.
 
 func obj(v any) map[string]any {
 	m, _ := v.(map[string]any)
@@ -106,7 +83,6 @@ func str(v any) string {
 	return s
 }
 
-// pick returns the named keys of m that are present and not null.
 func pick(m map[string]any, keys ...string) map[string]any {
 	out := map[string]any{}
 	for _, k := range keys {

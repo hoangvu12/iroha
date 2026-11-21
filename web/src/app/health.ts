@@ -10,7 +10,6 @@ export type HealthState =
 
 const POLL_MS = 15_000;
 
-/** Readiness from GET /readyz, polled every 15 s and on focus. */
 export function useHealth(): HealthState {
   const q = useQuery({
     queryKey: ["readyz"],
@@ -23,7 +22,7 @@ export function useHealth(): HealthState {
   });
   if (q.data && !q.isError) return { state: "ready", version: q.data.version };
   if (q.error instanceof ApiError) {
-    return q.error.status === 0
+    return q.error.status === null
       ? { state: "unreachable", message: q.error.message, call: q.error.call }
       : { state: "not_ready", message: q.error.message, call: q.error.call };
   }

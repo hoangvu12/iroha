@@ -4,14 +4,10 @@ import { isApiError } from "@/api/client";
 import { Button, IconButton } from "./Button";
 import { cn } from "./cn";
 
-// Page states from C25. Each keeps the page around it: render them inside
-// the table area, under the table header, not instead of the page.
-
 function Centered({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("flex flex-col items-center px-4 py-14 text-center", className)}>{children}</div>;
 }
 
-/** Empty: one sentence and the one action that fills the page. */
 export function EmptyState({
   icon: Icon,
   title,
@@ -37,10 +33,8 @@ export function EmptyState({
   );
 }
 
-/** `name` says which filter in words when `label` isn't plain text; the × is named "Remove filter <name>". */
 export type FilterChip = { label: ReactNode; name?: string; onRemove: () => void };
 
-/** A filter shown as a removable chip; used above tables and in NoResults. */
 export function Chip({ label, name, onRemove }: FilterChip) {
   const what = name ?? (typeof label === "string" ? label : "");
   return (
@@ -51,7 +45,6 @@ export function Chip({ label, name, onRemove }: FilterChip) {
   );
 }
 
-/** No results: the filters stay on screen as chips, with Clear filters. */
 export function NoResults({
   title,
   description,
@@ -81,13 +74,9 @@ export function NoResults({
   );
 }
 
-/**
- * Error: says what failed, offers Try again, and shows the failed call in
- * small mono text ("GET /api/requests timed out").
- */
 export function ErrorState({ title, error, onRetry }: { title: ReactNode; error: unknown; onRetry?: () => void }) {
   const message = isApiError(error) ? error.message : error instanceof Error ? error.message : String(error);
-  const hint = isApiError(error) && error.status >= 400 ? error.hint : "";
+  const hint = isApiError(error) && error.status !== null && error.status >= 400 ? error.hint : "";
   return (
     <Centered>
       <span className="mb-4 inline-flex size-10 items-center justify-center rounded-lg bg-danger-tint text-danger-text">

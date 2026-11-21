@@ -4,14 +4,9 @@ import type { Save } from "@/ui/SaveStatus";
 import type { Facts, FactsPatch, KeyEdit, Member, Model, Provider, UpstreamKey } from "./api";
 import { calls, natural, useRefresh } from "./api";
 
-// What each Provider table edits together (UI ticket 30; the reasons are in
-// the ticket's Comments). Names and secrets are never bulk-edited.
-
-/** Upstream Keys: Enabled, and the Endpoints each may use (when the Provider has several). */
 export function KeysBulkEdit({ handle, provider, rows, at, size }: { handle: string; provider?: Provider; rows: UpstreamKey[]; at: Save; size?: "sm" | "md" }) {
   const refresh = useRefresh();
   const eps = (provider?.endpoints ?? []).map((e) => e.name);
-  // No restriction means every Endpoint, so it shows as each one ticked.
   const allowed = (k: UpstreamKey) => (k.endpoints.length ? k.endpoints : eps);
   const fields: BulkField<UpstreamKey>[] = [
     { kind: "boolean", id: "enabled", label: "Enabled", on: "enabled", get: (k) => k.enabled, hint: "A disabled key gets no traffic until it is enabled again." },
@@ -28,8 +23,6 @@ export function KeysBulkEdit({ handle, provider, rows, at, size }: { handle: str
 
   const apply = async (c: BulkChanges) => {
     const ordered = [...rows].sort((a, b) => natural(a.name, b.name));
-    // Endpoints go as the change, not as lists built from the rows: the rows may have been
-    // read pages ago, and the server applies it to each key's list as it is now.
     const set = c.endpoints as SetChange | undefined;
     const items = ordered.map((k) => {
       const item: KeyEdit = { key: k.id };
@@ -49,7 +42,6 @@ const tri = (b?: boolean) => (b === undefined ? "" : b ? "yes" : "no");
 const tokens = (n?: number) => (n ? String(n) : "");
 const num = (s: string) => (s.trim() ? Number(s.replace(/[_,\s]/g, "")) : undefined);
 
-/** Models: Hidden from Callers, Pinned to the list, and the Owner's metadata overrides. */
 export function ModelsBulkEdit({ handle, rows, at, size }: { handle: string; rows: Model[]; at: Save; size?: "sm" | "md" }) {
   const refresh = useRefresh();
   const fields: BulkField<Model>[] = [
@@ -96,8 +88,6 @@ export function ModelsBulkEdit({ handle, rows, at, size }: { handle: string; row
       if (v !== undefined && !(Number.isInteger(v) && v > 0)) throw new Error("Token counts are whole numbers above 0.");
       counts[k] = v;
     }
-    // Only the changed overrides go out (null removes one): the rows may have been read
-    // pages ago, and the server keeps each model's others as they are now.
     const patch: FactsPatch = {};
     if (typeof c.chat === "string") patch.chat = c.chat ? (c.chat as Facts["chat"]) : null;
     if (typeof c.reasoning === "string") patch.reasoning = c.reasoning ? c.reasoning === "yes" : null;
@@ -116,11 +106,6 @@ export function ModelsBulkEdit({ handle, rows, at, size }: { handle: string; row
   return <BulkEdit rows={rows} noun={["model", "models"]} fields={fields} at={at} onApply={apply} size={size} />;
 }
 
-/**
- * A Pool's members: On. The whole list is saved in one change, so it all applies or none does.
- * The list is read again just before saving, so a member changed or added elsewhere since the
- * tab loaded keeps that change.
- */
 export function MembersBulkEdit({ pool, rows, at, size }: { pool: string; rows: Member[]; at: Save; size?: "sm" | "md" }) {
   const refresh = useRefresh();
   const key = (m: Pick<Member, "provider" | "model">) => `${m.provider}/${m.model}`;

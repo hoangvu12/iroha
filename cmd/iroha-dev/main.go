@@ -58,7 +58,6 @@ The UI is served only when internal/webui/dist was built before this binary:
   npm --prefix web ci && npm --prefix web run build
 `
 
-// options are the launcher's flags.
 type options struct {
 	port          int
 	dataDir       string
@@ -138,13 +137,11 @@ type Output struct {
 	Warnings      []string          `json:"warnings,omitempty"`
 }
 
-// Fake is one fake upstream.
 type Fake struct {
 	URL     string `json:"url" doc:"the Endpoint URL to configure"`
 	Control string `json:"control"`
 }
 
-// MakeFail says how to make the fakes fail.
 type MakeFail struct {
 	How        string            `json:"how"`
 	Replies    map[string]string `json:"replies"`
@@ -152,14 +149,12 @@ type MakeFail struct {
 	KeyMarkers string            `json:"key_markers"`
 }
 
-// state is what a later run on the same data dir needs: the Admin Token is
-// shown only on the first start, and the fakes get new ports every run.
 type state struct {
 	AdminToken    string            `json:"admin_token"`
 	OwnerPassword string            `json:"owner_password"`
 	GatewayKeys   map[string]string `json:"gateway_keys"`
 	Seed          string            `json:"seed"`
-	Fakes         map[string]string `json:"fakes"` // Shape -> origin
+	Fakes         map[string]string `json:"fakes"`
 }
 
 const stateFile = "iroha-dev.json"
@@ -223,7 +218,6 @@ func run(ctx context.Context, o options, clk clock.Clock, stdout, stderr io.Writ
 	app, err := server.New(ctx, server.Options{
 		Config: config.Config{
 			DataDir: dir, Addr: ln.Addr().String(), LogFormat: "json", DrainTimeout: 5 * time.Second,
-			// ModelsDev, LogoFavicons and LogoMakers stay empty: never fetched.
 		},
 		Version:    "dev",
 		Clock:      clk,
@@ -234,13 +228,14 @@ func run(ctx context.Context, o options, clk clock.Clock, stdout, stderr io.Writ
 		ln.Close()
 		return fmt.Errorf("start Iroha on %s: %w (if the data dir is from a newer Iroha, use a fresh --data-dir)", dir, err)
 	}
-	serveErr := make(chan error, 1)
-	go func() { serveErr <- app.Serve(ln) }()
+	var serveErr error
+	served := make(chan struct{})
+	go func() { serveErr = app.Serve(ln); close(served) }()
 	defer func() {
 		sctx, cancel := clock.WithTimeout(context.Background(), clk, 5*time.Second)
 		defer cancel()
 		_ = app.Shutdown(sctx, "iroha-dev stop")
-		<-serveErr
+		<-served
 	}()
 	base := "http://" + ln.Addr().String()
 
@@ -278,7 +273,7 @@ func run(ctx context.Context, o options, clk clock.Clock, stdout, stderr io.Writ
 	}
 	boot := app.BootstrapToken().Secret
 	switch {
-	case boot != "": // a fresh data dir
+	case boot != "":
 		admin.token = boot
 		out.AdminToken = boot
 		if err := admin.do(ctx, "PUT", "/api/owner-password", map[string]any{"password": o.ownerPassword}, nil); err != nil {
@@ -291,7 +286,7 @@ func run(ctx context.Context, o options, clk clock.Clock, stdout, stderr io.Writ
 			}
 			out.Seeded, out.GatewayKeys = seeded, keys
 		}
-	case prior != nil: // a data dir an earlier run made
+	case prior != nil:
 		admin.token = prior.AdminToken
 		out.AdminToken, out.OwnerPassword, out.GatewayKeys, out.Seed = prior.AdminToken, prior.OwnerPassword, prior.GatewayKeys, prior.Seed
 		moved, err := repoint(ctx, admin, prior.Fakes, origins)
@@ -304,7 +299,7 @@ func run(ctx context.Context, o options, clk clock.Clock, stdout, stderr io.Writ
 	default:
 		return fmt.Errorf("%s already holds an Iroha that iroha-dev did not start (no %s, and the bootstrap Admin Token is shown only once): pick an empty --data-dir or omit it", dir, stateFile)
 	}
-	for _, u := range fakes { // start every run with clean fakes
+	for _, u := range fakes {
 		u.Reset()
 		u.SetUsage(10, 5)
 	}
@@ -361,15 +356,12 @@ func run(ctx context.Context, o options, clk clock.Clock, stdout, stderr io.Writ
 		fmt.Fprintln(stderr, "iroha-dev: stopping (stop_url)")
 	case <-exit:
 		fmt.Fprintf(stderr, "iroha-dev: stopping (--exit-after %s)\n", o.exitAfter)
-	case err := <-serveErr:
-		serveErr <- err // for the deferred shutdown
-		return fmt.Errorf("Iroha stopped serving: %w", err)
+	case <-served:
+		return fmt.Errorf("Iroha stopped serving: %w", serveErr)
 	}
 	return nil
 }
 
-// envFile is the Output as sh assignments, so a verifier sources it instead
-// of parsing JSON and keeps secrets off its command lines.
 func envFile(o Output) string {
 	var b strings.Builder
 	set := func(name, value string) {
@@ -408,8 +400,6 @@ func waitReady(ctx context.Context, clk clock.Clock, c *client) (healthz, error)
 	return h, errors.New("Iroha did not become ready within 10 s; see the log file in the data dir")
 }
 
-// localOnly is Iroha's outbound client: it dials loopback addresses only,
-// so no Attempt, discovery or key test can reach a real Provider.
 func localOnly() *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = nil
@@ -427,7 +417,6 @@ func localOnly() *http.Client {
 	return &http.Client{Transport: tr}
 }
 
-// repoint moves Endpoints on an earlier run's fakes to this run's.
 func repoint(ctx context.Context, c *client, old, now map[string]string) (int, error) {
 	var provs struct {
 		Providers []struct {

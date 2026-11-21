@@ -24,11 +24,6 @@ import { useEditing } from "./editing";
 const modelQuery = (provider: string, model: string) => ["providers", provider, "models", "one", model];
 const SHOWN_GAPS = 8;
 
-/**
- * A model of a Provider's list (UI ticket 33: it was the Models tab's
- * details dialog): where each fact comes from, the keys refused it, the
- * Pools that use it, and the Owner's choices (hide, pin, details) in place.
- */
 export default function ModelSheet({ record }: SheetBodyProps<"model">) {
   const { provider, model } = record;
   const q = useQuery({
@@ -55,13 +50,11 @@ export default function ModelSheet({ record }: SheetBodyProps<"model">) {
   return (
     <>
       <SheetBar kind="Model" page={page} />
-      {/* Keyed by the entry's id: another model swapped into this sheet starts afresh. */}
       <ModelDetails key={q.data.id} m={q.data} provider={provider} refetch={() => q.refetch()} />
     </>
   );
 }
 
-/** A model named somewhere (a Request, a Pool member, a Gateway Key's scope) that the Provider's list doesn't hold. */
 function NotListed({ provider, model, refetch }: { provider: string; model: string; refetch: () => Promise<unknown> }) {
   const { refresh } = useSheetRefresh(refetch);
   const saving = useSave({ refresh, describe: errorText });
@@ -116,7 +109,6 @@ function ModelDetails({ m, provider, refetch }: { m: Model; provider: string; re
       message: (r) => `Model Gaps of ${m.model} cleared on ${plural(r.succeeded, "key")}`,
     });
 
-  // Asks first; a model only the Owner added leaves the list, so its sheet closes and the result (with Undo) toasts.
   const askRemove = () =>
     confirm.ask({
       title: `Remove ${m.model} from ${provider}?`,
@@ -125,7 +117,6 @@ function ModelDetails({ m, provider, refetch }: { m: Model; provider: string; re
       onConfirm: async () => {
         const res = await calls.saveModel(provider, { model: m.model, added: false });
         void refreshAll();
-        // Toast: the model's sheet closes as it leaves the list.
         notifyChange(`${m.model} removed`, res, { onUndone: refreshAll });
         const at = sheets.stack.findIndex((s) => recordKey(s.record) === recordKey(rec.model(provider, m.model)));
         if (at >= 0) sheets.close(at);
@@ -232,7 +223,6 @@ function ModelDetails({ m, provider, refetch }: { m: Model; provider: string; re
             </Fact>
             <Fact label="Chat">{m.metadata.chat === "unsupported" ? "Doesn't chat" : "Chats"}</Fact>
             <Fact label="Named by" wide>
-              {/* Neither: an entry kept only for the Owner's details (a POST with metadata alone). */}
               {m.discovered ? (m.endpoints.length ? m.endpoints.join(", ") : "discovery") : m.added ? "you (added by hand)" : "Nobody: only your details for it are kept"}
               {m.added && m.discovered && <span className="text-fg-muted"> · pinned by you</span>}
             </Fact>

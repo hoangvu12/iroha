@@ -6,10 +6,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// UI ticket 32: admin API answers hold configuration and secrets (Upstream
-// Keys, Gateway Keys) and the UI keeps its own cache (TanStack Query), so
-// no browser or proxy stores them: every /api/ answer, errors included, is
-// no-store unless the route says otherwise (logos do).
 func TestAdminAPIAnswersAreNeverStored(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).OK()

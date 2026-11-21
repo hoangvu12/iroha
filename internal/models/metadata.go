@@ -12,24 +12,13 @@ import (
 	"github.com/hoangvu12/iroha/internal/modelmeta"
 )
 
-// Model metadata (ticket 11). Each entry has three layers, resolved field
-// by field by modelmeta.Resolve: the Owner's overrides (provider_models.
-// overrides, audited with the entry), what the Provider's list reported
-// (provider_models.reported, read with modelmeta.Normalize at serve time),
-// and what models.dev said at the last lookup (provider_models.external,
-// written by supplement after each refresh and each Owner change, and used
-// only while the Provider's brand is still the one it was looked up under).
-// Metadata never decides whether a model is listed or routed.
-
-// How the models.dev lookup of a refresh went.
 const (
-	ModelsDevOK          = "ok"          // looked up in a fresh catalog
-	ModelsDevStale       = "stale"       // models.dev unreachable now; looked up in the last catalog read
-	ModelsDevUnavailable = "unavailable" // models.dev never read; earlier lookups kept
-	ModelsDevOff         = "off"         // Iroha runs without models.dev (--models-dev none)
+	ModelsDevOK          = "ok"
+	ModelsDevStale       = "stale"
+	ModelsDevUnavailable = "unavailable"
+	ModelsDevOff         = "off"
 )
 
-// layers are what each source says of one entry.
 type layers struct {
 	overrides, reported, external modelmeta.Facts
 }
@@ -45,16 +34,12 @@ func entryLayers(brand, reported, overrides, external, externalBrand string) lay
 	return l
 }
 
-// served is what Callers see of the entry.
 func (l layers) served() modelmeta.Facts {
 	return modelmeta.Served(modelmeta.Resolve(l.overrides, l.reported, l.external))
 }
 
-// Metadata is what Callers see of each model of one Provider's list.
 type Metadata map[string]modelmeta.Facts
 
-// Of is what Callers see of model: its facts, or only chat "ok" for a model
-// the list does not hold.
 func (m Metadata) Of(model string) modelmeta.Facts {
 	if f, ok := m[model]; ok {
 		return f
@@ -62,8 +47,6 @@ func (m Metadata) Of(model string) modelmeta.Facts {
 	return modelmeta.Served(modelmeta.Facts{})
 }
 
-// Metadata reads, in one query, what Callers see of every model of a
-// Provider's list. The global /v1/models (ticket 12) uses it per Provider.
 func (s *Store) Metadata(ctx context.Context, providerID string) (Metadata, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT m.model, m.reported, m.overrides, m.external, m.external_brand, p.models_dev_brand
 		FROM provider_models m JOIN providers p ON p.id = m.provider_id WHERE m.provider_id = ?`, providerID)
@@ -82,16 +65,13 @@ func (s *Store) Metadata(ctx context.Context, providerID string) (Metadata, erro
 	return out, rows.Err()
 }
 
-// supplement looks a Provider's entries up in models.dev (only the models
-// named, or all when only is nil) and stores what it finds. It never fails
-// because of models.dev: an unreachable catalog keeps earlier lookups.
 func (s *Store) supplement(ctx context.Context, providerID string, only []string) (string, error) {
 	if !s.meta.Enabled() {
 		return ModelsDevOff, nil
 	}
 	cat, err := s.meta.Catalog(ctx)
 	if cat == nil {
-		return ModelsDevUnavailable, nil // the Source logged why
+		return ModelsDevUnavailable, nil
 	}
 	outcome := ModelsDevOK
 	if err != nil {
@@ -142,17 +122,12 @@ func (s *Store) supplement(ctx context.Context, providerID string, only []string
 	})
 }
 
-// supplementAfterChange looks the models an Owner change named up in
-// models.dev, after the change committed. Failures are only logged: the
-// change itself succeeded.
 func (s *Store) supplementAfterChange(ctx context.Context, p provRef, models []string) {
 	if _, err := s.supplement(context.WithoutCancel(ctx), p.id, models); err != nil {
 		s.log.Error("models.dev lookup after a model change failed", logs.Kind(logs.KindGeneric), logs.Provider(p.handle), "err", err.Error())
 	}
 }
 
-// lookUp looks the model of a committed Owner change up in models.dev and
-// returns its entry re-read.
 func (s *Store) lookUp(ctx context.Context, p provRef, m Model) (Model, error) {
 	s.supplementAfterChange(ctx, p, []string{m.Model})
 	out, ok, err := readEntry(ctx, s.db, p.id, m.Model, s.clock.Now())
@@ -162,7 +137,6 @@ func (s *Store) lookUp(ctx context.Context, p provRef, m Model) (Model, error) {
 	return out, nil
 }
 
-// Override limits.
 const (
 	maxTokens = 1 << 40
 	maxWords  = 16
@@ -173,7 +147,6 @@ var wordPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,31}$`)
 const overridesHint = "Send metadata as the fields Callers' model lists show, e.g. {\"context_length\": 1000000, \"max_output_tokens\": 64000, " +
 	"\"architecture\": {\"input_modalities\": [\"text\", \"image\"]}, \"reasoning\": true, \"reasoning_levels\": [\"low\", \"high\"], \"chat\": \"ok\"}; {} clears every override."
 
-// checkOverrides validates and normalises Owner overrides.
 func checkOverrides(f modelmeta.Facts) (modelmeta.Facts, error) {
 	for name, v := range map[string]*int64{"context_length": f.ContextLength, "max_input_tokens": f.MaxInputTokens, "max_output_tokens": f.MaxOutputTokens} {
 		if v != nil && (*v <= 0 || *v > maxTokens) {
@@ -224,7 +197,6 @@ func checkOverrides(f modelmeta.Facts) (modelmeta.Facts, error) {
 	return f, nil
 }
 
-// setMetadata fills an entry's metadata fields from its layers.
 func (m *Model) setMetadata(l layers) {
 	m.Metadata = l.served()
 	m.Overrides, m.Reported, m.ModelsDev = l.overrides, l.reported, l.external

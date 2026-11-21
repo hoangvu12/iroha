@@ -48,7 +48,6 @@ func Open(ctx context.Context, path string, c clock.Clock) (*DB, error) {
 	return &DB{DB: sqlDB, Path: path, clock: c}, nil
 }
 
-// Clock returns the clock the store was opened with.
 func (db *DB) Clock() clock.Clock { return db.clock }
 
 // Tx runs fn in a write transaction, committing when fn returns nil.
@@ -109,7 +108,6 @@ func NullMillis(v sql.NullInt64) time.Time {
 	return FromMillis(v.Int64)
 }
 
-// filepathToURI turns a Windows or Unix path into the path part of a file: URI.
 func filepathToURI(p string) string {
 	u := url.URL{Path: toSlash(p)}
 	return u.EscapedPath()

@@ -13,8 +13,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// snapshot is what an Audit Entry records of a Gateway Key: configuration,
-// not last_used_at.
 type snapshot struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
@@ -25,7 +23,6 @@ type snapshot struct {
 	RevokedAt *time.Time `json:"revoked_at"`
 }
 
-// Resource is the Gateway Key resource of the audit machinery.
 var Resource = audit.Register(&audit.Resource[snapshot]{
 	Name: "gateway_key", Label: "Gateway Key", Plural: "Gateway Keys", Path: "/api/gateway-keys",
 	Table: "gateway_keys", Secrets: []string{"secret"},
@@ -72,11 +69,12 @@ func nameFree(ctx context.Context, q audit.Querier, name, id string) error {
 		"Another Gateway Key (%s) is already named %q.", other, name)
 }
 
-// CreateGatewayKey is the body of POST /api/gateway-keys and each item of its bulk.
+// CreateGatewayKey is the body of POST and PUT /api/gateway-keys and each
+// item of their bulk.
 type CreateGatewayKey struct {
-	Name    string `json:"name" doc:"Unique name, usually the Caller it is issued to. Repeating a create with an existing name updates that key."`
-	Scope   *Scope `json:"scope,omitempty" doc:"What the key may use. Required for a new key; omit to keep the scope of an existing one."`
-	Capture *bool  `json:"capture,omitempty" doc:"Store the full prompt and response of this key's Requests. Default false for a new key; omit to keep the current setting."`
+	Name    string `json:"name" doc:"Unique name, usually the Caller it is issued to. On PUT the path names the key: leave it out or send the same name."`
+	Scope   *Scope `json:"scope,omitempty" doc:"What the key may use. Required for a new key; on PUT, omit to keep the scope of an existing one."`
+	Capture *bool  `json:"capture,omitempty" doc:"Store the full prompt and response of this key's Requests. Default false for a new key; on PUT, omit to keep the current setting."`
 }
 
 // UpdateGatewayKey is the body of PATCH /api/gateway-keys/{key}.
@@ -105,7 +103,6 @@ type GatewayKeyList struct {
 
 const revokedForever = "Revoked Gateway Keys never work again; issue a new key instead."
 
-// Routes returns the Gateway Key routes.
 func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 	h := handlers{tr: tr, db: db}
 	const tag = "Gateway Keys"
@@ -133,8 +130,8 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/gateway-keys", Tag: tag,
-			Summary:     "Issue a Gateway GatewayKey, or update the one with that name",
-			Description: "Answers 201 with the new key (secret included). A revoked name cannot be reused.",
+			Summary:     "Issue a Gateway Key",
+			Description: "Answers 201 with the new key, secret included. A name in use answers 409 name_taken (PUT /api/gateway-keys/{key} updates that key); a revoked key's name cannot be reused (409 gateway_key_revoked).",
 			Query:       []api.Param{audit.DryRun},
 			Request:     CreateGatewayKey{}, Response: GatewayKeyResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -145,7 +142,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 				var out GatewayKey
 				res, err := h.tr.Mutate(c, "gateway_key.create", "Issued", func(m *audit.Mutation) error {
 					var err error
-					out, err = h.upsert(m, in)
+					out, err = h.create(m, in)
 					return err
 				})
 				return GatewayKeyResult{Result: res, GatewayKey: out}, err
@@ -153,8 +150,8 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/gateway-keys/bulk", Tag: tag,
-			Summary:     "Issue or update many Gateway Keys, each by name",
-			Description: "Each item is applied or refused on its own; read failed and each item's error.",
+			Summary:     "Issue many Gateway Keys",
+			Description: "Each item is issued or refused on its own (a name in use: 409 name_taken); read failed and each item's error.",
 			Query:       []api.Param{audit.DryRun},
 			Request:     audit.BulkRequest[CreateGatewayKey]{}, Response: audit.BulkResult[GatewayKey]{},
 			Handle: func(c *api.Call) (any, error) {
@@ -162,7 +159,43 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 				if err := c.Decode(&in); err != nil {
 					return nil, err
 				}
-				return audit.Bulk(h.tr, c, "gateway_key.create", "Issued", in.Items, h.upsert)
+				return audit.Bulk(h.tr, c, "gateway_key.create", "Issued", in.Items, h.create)
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/gateway-keys/{key}", Tag: tag,
+			Summary:     "Issue or update the Gateway Key of that name",
+			Description: "Answers 201 with a new key named as the path (secret included; scope required), or 200 when the key exists (outcome updated or unchanged): fields sent are applied, the others kept. A revoked key cannot be updated.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     CreateGatewayKey{}, Response: GatewayKeyResult{},
+			Handle: func(c *api.Call) (any, error) {
+				var in CreateGatewayKey
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				var out GatewayKey
+				res, err := h.tr.Mutate(c, "gateway_key.update", "Saved", func(m *audit.Mutation) error {
+					var err error
+					out, err = h.put(m, c.Path("key"), in)
+					return err
+				})
+				return GatewayKeyResult{Result: res, GatewayKey: out}, err
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/gateway-keys/bulk", Tag: tag,
+			Summary:     "Issue or update many Gateway Keys, each by name",
+			Description: "Each item is PUT /api/gateway-keys/{key} with the item's name, applied or refused on its own; read failed and each item's error.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     audit.BulkRequest[CreateGatewayKey]{}, Response: audit.BulkResult[GatewayKey]{},
+			Handle: func(c *api.Call) (any, error) {
+				var in audit.BulkRequest[CreateGatewayKey]
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				return audit.Bulk(h.tr, c, "gateway_key.update", "Saved", in.Items, func(m *audit.Mutation, in CreateGatewayKey) (GatewayKey, error) {
+					return h.put(m, in.Name, in)
+				})
 			},
 		},
 		{
@@ -315,7 +348,12 @@ func (h handlers) list(c *api.Call) (any, error) {
 	return out, nil
 }
 
-func (h handlers) upsert(m *audit.Mutation, in CreateGatewayKey) (GatewayKey, error) {
+func revokedName(name string) *api.Error {
+	return api.Conflict("gateway_key_revoked", "Pick another name for the new key; revoked keys and their names stay as a record.",
+		"The Gateway Key %q was revoked; it cannot be issued again.", name)
+}
+
+func (h handlers) create(m *audit.Mutation, in CreateGatewayKey) (GatewayKey, error) {
 	if err := api.CheckName("name", in.Name); err != nil {
 		return GatewayKey{}, err
 	}
@@ -324,13 +362,12 @@ func (h handlers) upsert(m *audit.Mutation, in CreateGatewayKey) (GatewayKey, er
 	if err == nil {
 		k, err := byID(m.Ctx, m.Tx, id, m.Now)
 		if err != nil {
-			return k, err
+			return GatewayKey{}, err
 		}
 		if k.Revoked {
-			return k, api.Conflict("gateway_key_revoked", "Pick another name for the new key; revoked keys and their names stay as a record.",
-				"The Gateway Key %q was revoked; it cannot be issued again.", in.Name)
+			return GatewayKey{}, revokedName(in.Name)
 		}
-		return h.update(m, id, UpdateGatewayKey{Scope: in.Scope, Capture: in.Capture})
+		return GatewayKey{}, Resource.Taken(id, in.Name, "/api/gateway-keys/"+in.Name)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return GatewayKey{}, err
@@ -352,6 +389,33 @@ func (h handlers) upsert(m *audit.Mutation, in CreateGatewayKey) (GatewayKey, er
 		return GatewayKey{}, err
 	}
 	return byID(m.Ctx, m.Tx, id, m.Now)
+}
+
+func (h handlers) put(m *audit.Mutation, ref string, in CreateGatewayKey) (GatewayKey, error) {
+	id, err := Resource.Find(m.Ctx, m.Tx, ref)
+	if err != nil {
+		return GatewayKey{}, err
+	}
+	if id == "" {
+		if err := audit.CheckPutName("name", ref, in.Name, ""); err != nil {
+			return GatewayKey{}, err
+		}
+		m.Act("gateway_key.create", "Issued")
+		in.Name = ref
+		return h.create(m, in)
+	}
+	k, err := byID(m.Ctx, m.Tx, id, m.Now)
+	if err != nil {
+		return k, err
+	}
+	if err := audit.CheckPutName("name", ref, in.Name, k.Name); err != nil {
+		return GatewayKey{}, err
+	}
+	if k.Revoked {
+		return k, revokedName(k.Name)
+	}
+	m.Act("gateway_key.update", "Edited")
+	return h.update(m, id, UpdateGatewayKey{Scope: in.Scope, Capture: in.Capture})
 }
 
 func (h handlers) update(m *audit.Mutation, id string, in UpdateGatewayKey) (GatewayKey, error) {

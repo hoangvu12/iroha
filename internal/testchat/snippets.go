@@ -10,9 +10,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Snippets are ready-to-run programs sending a test's request to the
-// Gateway as a Caller would: the global route of its Shape, its body, the
-// Gateway Key in the Shape's usual header.
 type Snippets struct {
 	URL        string `json:"url" doc:"The Gateway URL the snippets call."`
 	Curl       string `json:"curl"`
@@ -21,13 +18,8 @@ type Snippets struct {
 	KeyEnv     bool   `json:"key_env" doc:"true: no Gateway Key was named (as), so the snippets read one from the IROHA_KEY environment variable."`
 }
 
-// KeyEnv is the environment variable snippets read the Gateway Key from
-// when the test is not sent as one.
 const KeyEnv = "IROHA_KEY"
 
-// MakeSnippets writes the snippets for b against the Gateway at base (no
-// trailing slash). secret is the Gateway Key to embed; "" reads IROHA_KEY.
-// Pins (Upstream Key, Endpoint) are test-only and not carried.
 func MakeSnippets(s Send, b Built, base, secret string) Snippets {
 	base = strings.TrimRight(base, "/")
 	url := base + b.Path
@@ -41,7 +33,6 @@ func MakeSnippets(s Send, b Built, base, secret string) Snippets {
 	return out
 }
 
-// authHeader is the header a Caller of the Shape usually sends its key in.
 func authHeader(sh shape.Shape) (name, prefix string) {
 	switch sh {
 	case shape.AnthropicMessages:
@@ -75,7 +66,6 @@ func curlSnippet(b Built, url, secret string) string {
 	return strings.Join(lines, " \\\n") + "\n"
 }
 
-// shellQuote quotes s for a POSIX shell.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 func pyString(s string) string {
@@ -205,7 +195,6 @@ type field struct {
 	value json.RawMessage
 }
 
-// topLevel lists an object's fields in order.
 func topLevel(raw []byte) []field {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
@@ -228,8 +217,6 @@ func topLevel(raw []byte) []field {
 
 var identifier = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
 
-// literal writes a JSON value as a Python or TypeScript literal, indented
-// by two (TypeScript) or four (Python) spaces per level, keys in order.
 func literal(raw []byte, depth int, f flavor) string {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -306,7 +293,6 @@ func literal(raw []byte, depth int, f flavor) string {
 	return b.String()
 }
 
-// marshal is json.Marshal without HTML escaping.
 func marshal(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

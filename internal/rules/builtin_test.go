@@ -9,10 +9,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/rules"
 )
 
-// Recorded upstream bodies, from v1's adapter tests and fixtures (paths in
-// iroha-v2-notes/v1-tests-and-fixtures.md) and the Providers' documentation.
-// Catalog IDs refer to docs/research/v1-case-catalog.md.
-
 const (
 	dashscopeArrearage = `{"error":{"code":"Arrearage","type":"Arrearage","param":null,"message":"Access denied, please make sure your account is in good standing."}}`
 	// DashScope's native (non-compatible-mode) envelope is flat.
@@ -63,19 +59,18 @@ const (
 
 type quirkCase struct {
 	name    string
-	ids     string // catalog cases
+	ids     string
 	f       rules.Failure
 	rule    string
 	outcome rules.Outcome
-	reset   time.Duration // 0: none
-	cooling time.Duration // 0: the default
-	status  int           // the status read; 0: the upstream status
+	reset   time.Duration
+	cooling time.Duration
+	status  int
 }
 
 var billing = rules.BillingCooling * time.Second
 
 var quirkCases = []quirkCase{
-	// DashScope
 	{"arrearage", "FAIL-01", rules.Failure{Host: dsHost, Status: 400, Body: []byte(dashscopeArrearage)}, "dashscope-arrearage", rules.CoolingKey, 0, billing, 0},
 	{"arrearage flat envelope, CN region", "FAIL-01", rules.Failure{Host: "dashscope.aliyuncs.com", Status: 400, Body: []byte(dashscopeArrearageFlat)}, "dashscope-arrearage", rules.CoolingKey, 0, billing, 0},
 	{"arrearage on a host that is not DashScope", "FAIL-01", rules.Failure{Host: anyHost, Status: 400, Body: []byte(dashscopeArrearage)}, "bad-request", rules.FailRequest, 0, 0, 0},
@@ -92,7 +87,6 @@ var quirkCases = []quirkCase{
 	{"400 invalid_parameter_error for a bad temperature", "FAIL-04", rules.Failure{Host: dsHost, Status: 400, Body: []byte(`{"error":{"code":"invalid_parameter_error","message":"The value of temperature must be in [0, 2)."}}`)}, "bad-request", rules.FailRequest, 0, 0, 0},
 	{"data inspection failed", "FAIL-07", rules.Failure{Host: dsHost, Status: 400, Body: dashscope("data_inspection_failed", "Input data may contain inappropriate content.", "data_inspection_failed")}, "dashscope-data-inspection", rules.RetryElsewhere, 0, 0, 0},
 
-	// Z.ai / BigModel
 	{"1113 no balance", "FAIL-13", rules.Failure{Host: zaiHost, Status: 429, Body: zai("1113")}, "zai-plan-billing", rules.CoolingKey, 0, billing, 0},
 	{"1309 coding plan expired", "FAIL-13", rules.Failure{Host: zaiHost, Status: 429, Body: zai("1309")}, "zai-plan-billing", rules.CoolingKey, 0, billing, 0},
 	{"1314 enterprise plan expired, BigModel", "FAIL-13", rules.Failure{Host: "open.bigmodel.cn", Status: 429, Body: zai("1314")}, "zai-plan-billing", rules.CoolingKey, 0, billing, 0},
@@ -112,7 +106,6 @@ var quirkCases = []quirkCase{
 	{"1234 network error", "FAIL-20", rules.Failure{Host: zaiHost, Status: 500, Body: zai("1234")}, "server-error", rules.RetryElsewhere, 0, 0, 0},
 	{"Z.ai code elsewhere is a plain 429", "FAIL-12", rules.Failure{Host: anyHost, Status: 429, Body: zai("1113")}, "rate-limited", rules.CoolingKeyModel, 0, 0, 0},
 
-	// MiniMax
 	{"402 insufficient balance", "FAIL-23", rules.Failure{Host: mmHost, Status: 402, Body: []byte(minimax402)}, "minimax-insufficient-balance", rules.CoolingKey, 0, billing, 0},
 	{"429 rate limit with Retry-After", "FAIL-24", rules.Failure{Host: mmHost, Status: 429, Header: hdr("Retry-After", "45"), Body: []byte(minimax429)}, "minimax-rate-limit", rules.CoolingKey, 45 * time.Second, 0, 0},
 	{"bare 402", "FAIL-25", rules.Failure{Host: mmHost, Status: 402, Body: []byte("not-json")}, "payment-required", rules.CoolingKey, 0, 0, 0},
@@ -124,7 +117,6 @@ var quirkCases = []quirkCase{
 	{"base_resp 2049 in a 200 answer", "FAIL-27", rules.Failure{Host: mmHost, Status: 200, Body: []byte(`{"base_resp":{"status_code":2049,"status_msg":"invalid api key"}}`)}, "minimax-base-resp-auth", rules.Invalid, 0, 0, 502},
 	{"base_resp 1027 in a 200 answer", "FAIL-27", rules.Failure{Host: mmHost, Status: 200, Body: []byte(`{"base_resp":{"status_code":1027,"status_msg":"output new_sensitive"}}`)}, "minimax-base-resp-request", rules.FailRequest, 0, 0, 502},
 
-	// Mistral
 	{"402 monthly spending limit", "FAIL-29, FAIL-30", rules.Failure{Host: misHost, Status: 402, Body: []byte(mistral402)}, "mistral-billing", rules.CoolingKey, 0, billing, 0},
 	{"402 spending limit as a 200 error body", "FAIL-30, FAIL-79", rules.Failure{Host: misHost, Status: 200, Body: []byte(mistral402)}, "mistral-billing", rules.CoolingKey, 0, billing, 402},
 	{"bare 402", "FAIL-31", rules.Failure{Host: misHost, Status: 402, Body: []byte(`{"object":"error","message":"Payment required","type":"payment_required","param":null,"code":null}`)}, "payment-required", rules.CoolingKey, 0, 0, 0},
@@ -133,14 +125,12 @@ var quirkCases = []quirkCase{
 	{"422 extra_forbidden", "FAIL-33", rules.Failure{Host: misHost, Status: 422, Body: []byte(mistral422)}, "bad-request", rules.FailRequest, 0, 0, 0},
 	{"400 invalid_model", "FAIL-33", rules.Failure{Host: misHost, Status: 400, Body: []byte(`{"object":"error","message":"Invalid model: mistral-x","type":"invalid_model","param":null,"code":"1500"}`)}, "bad-request", rules.FailRequest, 0, 0, 0},
 
-	// Nous Research
 	{"404 insufficient credits", "FAIL-34, FAIL-35", rules.Failure{Host: nousHost, Status: 404, Body: []byte(nousCredits)}, "nous-insufficient-credits", rules.CoolingKey, 0, billing, 0},
 	{"404 insufficient credits in a 200 stream", "FAIL-34, FAIL-79", rules.Failure{Host: nousHost, Status: 200, Body: sse(nousCredits)}, "nous-insufficient-credits", rules.CoolingKey, 0, billing, 404},
 	{"404 model_not_found", "FAIL-36", rules.Failure{Host: nousHost, Status: 404, Body: []byte(`{"status":404,"message":"Model not found","code":"model_not_found"}`)}, "model-not-found", rules.ModelGap, 0, 0, 0},
 	{"credits code on a 429", "FAIL-36", rules.Failure{Host: nousHost, Status: 429, Body: []byte(`{"status":429,"message":"slow down","code":"insufficient_credits_for_paid_model"}`)}, "rate-limited", rules.CoolingKeyModel, 0, 0, 0},
 	{"bare 404", "FAIL-36", rules.Failure{Host: nousHost, Status: 404, Body: []byte(`{"status":404,"message":"Not found"}`)}, "bad-request", rules.FailRequest, 0, 0, 0},
 
-	// DeepAI (through the Owner's deepai-proxy, so any host)
 	{"pool spent with refill time", "FAIL-38", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiSpent)}, "deepai-pool-spent", rules.CoolingKeyModel, 12*time.Hour + 90*time.Second, 0, 0},
 	{"theos cannot cover the request", "FAIL-38", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiTheosShort)}, "deepai-pool-spent", rules.CoolingKeyModel, 9*time.Hour + 30*time.Minute, 0, 0},
 	{"check-in refused", "FAIL-39", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiCheckIn)}, "deepai-check-in-refused", rules.RetryElsewhere, 0, 0, 0},
@@ -148,7 +138,6 @@ var quirkCases = []quirkCase{
 	{"Cloudflare blocked the request's signature", "USE-20", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(cloudflareBlocked)}, "edge-blocked-request", rules.FailRequest, 0, 0, 0},
 	{"the day's Theos are used up", "USE-21", rules.Failure{Host: "deepai.internal", Status: 403, Body: []byte(deepaiExhausted)}, "deepai-theos-exhausted", rules.CoolingKeyModel, 23*time.Hour + 43*time.Minute + 51*time.Second, 0, 0},
 
-	// Anthropic
 	{"400 credit balance too low", "FAIL-43", rules.Failure{Host: "api.anthropic.com", Status: 400, Body: []byte(anthropicCredit)}, "credit-balance-too-low", rules.CoolingKey, 0, billing, 0},
 	{"402 billing_error", "FAIL-40, FAIL-43", rules.Failure{Host: "api.anthropic.com", Status: 402, Body: []byte(`{"type":"error","error":{"type":"billing_error","message":"Billing issue"}}`)}, "payment-required", rules.CoolingKey, 0, 0, 0},
 	{"529 overloaded", "FAIL-42", rules.Failure{Host: "api.anthropic.com", Status: 529, Body: []byte(anthropicOverloaded)}, "server-error", rules.RetryElsewhere, 0, 0, 0},
@@ -156,7 +145,6 @@ var quirkCases = []quirkCase{
 	{"rate_limit_error inside a 200 answer", "FAIL-40, FAIL-41", rules.Failure{Host: "relay.example.com", Status: 200, Header: hdr("Retry-After", "20"),
 		Body: []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}`)}, "rate-limited", rules.CoolingKeyModel, 20 * time.Second, 0, 429},
 
-	// OpenAI, OpenRouter and other OpenAI-compatible Providers
 	{"429 insufficient_quota", "FAIL-45", rules.Failure{Host: "api.openai.com", Status: 429, Body: []byte(openaiQuota)}, "insufficient-quota", rules.CoolingKey, 0, billing, 0},
 	{"OpenRouter 403 moderation", "FAIL-45", rules.Failure{Host: orHost, Status: 403, Body: []byte(openrouterModeration)}, "openrouter-moderation", rules.FailRequest, 0, 0, 0},
 	{"OpenRouter 402 credits", "FAIL-45", rules.Failure{Host: orHost, Status: 402, Body: []byte(`{"error":{"code":402,"message":"This request requires more credits, or fewer max_tokens."}}`)}, "payment-required", rules.CoolingKey, 0, 0, 0},
@@ -192,13 +180,11 @@ func TestBuiltinQuirkRulesClassifyTheRecordedBodies(t *testing.T) {
 	}
 }
 
-// Every built-in rule has at least one recorded body that it decides.
 func TestEveryBuiltinRuleHasARecordedCase(t *testing.T) {
 	covered := map[string]bool{}
 	for _, tc := range quirkCases {
 		covered[tc.rule] = true
 	}
-	// The generic rules are covered in rules_test.go.
 	for _, n := range []string{"unauthorized", "forbidden-model", "forbidden", "model-not-found", "endpoint-path-not-found", "endpoint-body-too-large", "rate-limited", "upstream-timeout", "network", "bad-request"} {
 		covered[n] = true
 	}
@@ -231,8 +217,6 @@ func TestEmbeddedErrorsAreToldFromAnswers(t *testing.T) {
 }
 
 func TestHostListsPrefixCodesAndBodyResets(t *testing.T) {
-	// An Owner reaching DashScope through a relay overrides the built-in by
-	// name with the relay's host added; fields left out keep their values.
 	over := rules.Builtin[slices.IndexFunc(rules.Builtin, func(r rules.Rule) bool { return r.Name == "dashscope-arrearage" })]
 	over.Host = "aliyuncs.com, relay.example.com."
 	set := rules.MustCompile(rules.Merge([]rules.Rule{over}, rules.Builtin))

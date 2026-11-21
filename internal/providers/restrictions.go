@@ -11,12 +11,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/audit"
 )
 
-// Restricting an Upstream Key to some Endpoints (upstream_key_endpoints).
-// A key without rows may use every Endpoint of its Provider. Audit
-// snapshots of a key hold the Endpoint IDs, so renaming an Endpoint never
-// makes a key's Audit Entry conflict.
-
-// pairs runs query (key ID, value) and groups the values by key.
 func pairs(ctx context.Context, q queryer, query string, args ...any) (map[string][]string, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -36,19 +30,16 @@ func pairs(ctx context.Context, q queryer, query string, args ...any) (map[strin
 
 const restrictionOrder = ` ORDER BY e.created_at, e.rowid`
 
-// keyEndpointIDs maps each restricted key of a Provider to its Endpoint IDs.
 func keyEndpointIDs(ctx context.Context, q queryer, providerID string) (map[string][]string, error) {
 	return pairs(ctx, q, `SELECT ke.key_id, e.id FROM upstream_key_endpoints ke JOIN endpoints e ON e.id = ke.endpoint_id
 		WHERE e.provider_id = ?`+restrictionOrder, providerID)
 }
 
-// keyEndpointNamesByKey maps each restricted key of a Provider to its Endpoint names.
 func keyEndpointNamesByKey(ctx context.Context, q queryer, providerID string) (map[string][]string, error) {
 	return pairs(ctx, q, `SELECT ke.key_id, e.name FROM upstream_key_endpoints ke JOIN endpoints e ON e.id = ke.endpoint_id
 		WHERE e.provider_id = ?`+restrictionOrder, providerID)
 }
 
-// keyEndpointNames lists the names of the Endpoints key id is restricted to.
 func keyEndpointNames(ctx context.Context, q queryer, id string) ([]string, error) {
 	m, err := pairs(ctx, q, `SELECT ke.key_id, e.name FROM upstream_key_endpoints ke JOIN endpoints e ON e.id = ke.endpoint_id
 		WHERE ke.key_id = ?`+restrictionOrder, id)
@@ -61,7 +52,6 @@ func keyEndpointNames(ctx context.Context, q queryer, id string) ([]string, erro
 	return m[id], nil
 }
 
-// keyEndpointIDsOf lists, sorted, the Endpoint IDs key id is restricted to.
 func keyEndpointIDsOf(ctx context.Context, q audit.Querier, id string) ([]string, error) {
 	var list sql.NullString
 	err := q.QueryRowContext(ctx, `SELECT group_concat(endpoint_id, ',') FROM
@@ -74,8 +64,6 @@ func keyEndpointIDsOf(ctx context.Context, q audit.Querier, id string) ([]string
 	return out, nil
 }
 
-// writeKeyEndpoints replaces key id's restriction with endpointIDs, which
-// must be Endpoints of providerID.
 func writeKeyEndpoints(ctx context.Context, q *sql.Tx, providerID, id string, endpointIDs []string) error {
 	for _, e := range endpointIDs {
 		var owner string
@@ -96,10 +84,6 @@ func writeKeyEndpoints(ctx context.Context, q *sql.Tx, providerID, id string, en
 	return nil
 }
 
-// changeKeyEndpoints is key id's Endpoint list (IDs) as it is now, with add
-// added and remove taken off: a key with no restriction starts from every
-// Endpoint of p, and a list left with every Endpoint or none is no
-// restriction ([]).
 func changeKeyEndpoints(ctx context.Context, q *sql.Tx, p ref, id string, add, remove []string) ([]string, error) {
 	addIDs, err := resolveEndpoints(ctx, q, p, add)
 	if err != nil {
@@ -135,7 +119,6 @@ func changeKeyEndpoints(ctx context.Context, q *sql.Tx, p ref, id string, add, r
 	return next, nil
 }
 
-// providerEndpointIDs is every Endpoint of a Provider, sorted.
 func providerEndpointIDs(ctx context.Context, q queryer, providerID string) ([]string, error) {
 	rows, err := q.QueryContext(ctx, `SELECT id FROM endpoints WHERE provider_id = ? ORDER BY id`, providerID)
 	if err != nil {
@@ -153,8 +136,6 @@ func providerEndpointIDs(ctx context.Context, q queryer, providerID string) ([]s
 	return out, rows.Err()
 }
 
-// resolveEndpoints resolves Endpoint names or IDs of Provider p, sorted
-// and without duplicates.
 func resolveEndpoints(ctx context.Context, q queryer, p ref, refs []string) ([]string, error) {
 	out := make([]string, 0, len(refs))
 	for _, r := range refs {
@@ -168,9 +149,6 @@ func resolveEndpoints(ctx context.Context, q queryer, p ref, refs []string) ([]s
 	return slices.Compact(out), nil
 }
 
-// releaseEndpoint removes Endpoint id from the restriction of every key of
-// Provider p, tracking each key. A key restricted to that Endpoint alone
-// would be left with nowhere to go, so the change is refused instead.
 func releaseEndpoint(m *audit.Mutation, p ref, id string) error {
 	rows, err := m.Tx.QueryContext(m.Ctx, `SELECT k.id, k.name, (SELECT count(*) FROM upstream_key_endpoints x WHERE x.key_id = k.id)
 		FROM upstream_key_endpoints ke JOIN upstream_keys k ON k.id = ke.key_id WHERE ke.endpoint_id = ? ORDER BY k.created_at, k.rowid`, id)

@@ -48,9 +48,6 @@ test("Dialog is UI SDK's dialog, named by its title; Close and Escape close it a
   expect(document.activeElement).toBe(opener);
 });
 
-// Ticket 28: the "scrollable overlay". The dialog part is a layer over the
-// whole window that scrolls; the visible dialog sits in it at its natural
-// height, so its body never scrolls in a box of its own.
 test("a dialog scrolls as a page: the dialog layer scrolls and its body has no scroll box of its own", async () => {
   const user = userEvent.setup();
   render(
@@ -70,7 +67,6 @@ test("a dialog scrolls as a page: the dialog layer scrolls and its body has no s
   expect(dialog.className).toContain("inset-0");
   expect(dialog.querySelector("[data-slot^=scroll-area]"), "no inner Scroll Area").toBeNull();
   expect(dialog.className, "no height limit on the dialog").not.toMatch(/max-h-\[/);
-  // The visible dialog holds the title, the body, the footer and the Close button.
   const panel = dialog.querySelector("[data-dialog-panel]")!;
   expect(panel.textContent).toContain("Line 59");
   expect(panel.contains(screen.getByRole("button", { name: "Save key" }))).toBe(true);
@@ -95,7 +91,6 @@ test("a press on the space around the dialog closes it and focus returns to the 
   await user.click(dialog.querySelector("[data-dialog-panel]")!);
   expect(screen.getByRole("dialog", { name: "Add endpoint" })).toBeTruthy();
 
-  // The layer around the dialog (above, below and beside it) reads as outside.
   await user.click(dialog.firstElementChild!);
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(document.activeElement).toBe(opener);

@@ -1,14 +1,11 @@
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { animateIn, animateOut } from "@ui-sdk/core";
-import { useChatPanel } from "./chat-panel";
+import { useChatPanel, useReportChatSlideStart } from "./chat-panel";
 
 export const CHAT_WIDTH = 460;
 
-// The sheet recipe (architecture.md "UI motion system"): in and out along the
-// right edge on the drawer curve, opacity on its own short fade so reduced
-// motion (slide tokens at 0) still fades. data-instant drops the transition
-// for the C key and the /chat page swap.
 const sheetClass = [
   "fixed inset-y-0 right-0 z-30 flex max-w-full flex-col border-l border-border bg-subtle shadow-elevated",
   "[transition:translate_var(--duration-sheet-in)_var(--ease-drawer),opacity_var(--duration-fade)_var(--ease-out)]",
@@ -18,49 +15,58 @@ const sheetClass = [
   "data-instant:transition-none",
 ].join(" ");
 
-/**
- * The chat panel's slot on the right. It stays mounted while it slides out
- * (inert, so nothing in it takes focus or clicks), and turns back from where
- * it is when opened again mid-exit. `hidden` is the /chat page, where the
- * full-page chat takes its place at once.
- */
+function slideIn(el: HTMLElement, onSlideStart: () => void): () => void {
+  const leftStartingStyle = new MutationObserver(() => {
+    if (el.hasAttribute("data-starting-style")) return;
+    leftStartingStyle.disconnect();
+    flushSync(onSlideStart);
+  });
+  leftStartingStyle.observe(el, { attributeFilter: ["data-starting-style"] });
+  const stop = animateIn(el);
+  return () => {
+    leftStartingStyle.disconnect();
+    stop();
+  };
+}
+
+function useReturnFocus(panel: RefObject<HTMLElement | null>): () => void {
+  const lastFocusOutside = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const note = (e: FocusEvent) => {
+      if (e.target instanceof HTMLElement && !panel.current?.contains(e.target)) lastFocusOutside.current = e.target;
+    };
+    document.addEventListener("focusin", note);
+    return () => document.removeEventListener("focusin", note);
+  }, [panel]);
+  return () => {
+    if (panel.current?.contains(document.activeElement) && lastFocusOutside.current?.isConnected) lastFocusOutside.current.focus({ preventScroll: true });
+  };
+}
+
 export function ChatSheet({ hidden, children }: { hidden: boolean; children: ReactNode }) {
   const chat = useChatPanel();
+  const reportSlideStart = useReportChatSlideStart();
   const show = chat.isOpen && !hidden;
   const [present, setPresent] = useState(show);
   if (show && !present) setPresent(true);
   const ref = useRef<HTMLElement>(null);
   const leaving = useRef(false);
   const wasOpen = useRef(chat.isOpen);
-
-  // Where focus was outside the sheet last (the trigger that opened it: a Test
-  // button, the sidebar's Chat, a row menu's ⋯ once the menu gave focus back).
-  // Closing with focus inside gives it back there, not to the page body.
-  const outside = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    const note = (e: FocusEvent) => {
-      if (e.target instanceof HTMLElement && !ref.current?.contains(e.target)) outside.current = e.target;
-    };
-    document.addEventListener("focusin", note);
-    return () => document.removeEventListener("focusin", note);
-  }, []);
+  const returnFocus = useReturnFocus(ref);
 
   useLayoutEffect(() => {
-    // Only the panel's own open and close slide; a route change swaps it at once.
     const instant = chat.instant || wasOpen.current === chat.isOpen;
     wasOpen.current = chat.isOpen;
     const el = ref.current;
     if (!el) return;
-    // Closed (not swapped for the /chat page) while focus was in it: back to the trigger.
-    if (!show && !chat.isOpen && el.contains(document.activeElement) && outside.current?.isConnected) outside.current.focus({ preventScroll: true });
+    if (!show && !chat.isOpen) returnFocus();
     if (show) {
-      // Reopened mid-exit: the exit's cleanup already lifted data-ending-style,
-      // so the running transition turns back on its own.
-      if (leaving.current) {
+      if (leaving.current || instant) {
         leaving.current = false;
+        reportSlideStart();
         return;
       }
-      return instant ? undefined : animateIn(el);
+      return slideIn(el, reportSlideStart);
     }
     if (instant) {
       leaving.current = false;
@@ -72,7 +78,6 @@ export function ChatSheet({ hidden, children }: { hidden: boolean; children: Rea
       leaving.current = false;
       setPresent(false);
     });
-    // Runs when the sheet is asked to show or hide; `instant` is read with it.
   }, [show]);
 
   if (!present) return null;

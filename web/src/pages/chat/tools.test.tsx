@@ -5,7 +5,7 @@ import { createAgent } from "@ui-sdk/react/agent";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { popupMotionClass } from "@/ui/popup";
-import { DEFAULT_SETTINGS, normalizeSettings, sendBody } from "./api";
+import { DEFAULT_SETTINGS, migrateLegacySettings, sendBody } from "./api";
 import { callAToolChip, ToolsButton } from "./tools";
 
 const agent = createAgent();
@@ -143,9 +143,9 @@ test("Call a tool turns every tool on when none is, and asks for one that is on"
 });
 
 test("chats saved with the old tool check keep get_weather; the send body carries the chosen tools", () => {
-  expect(normalizeSettings({ model: "a/b", shape: "gemini", reasoning: "low", toolCheck: true } as never).tools).toEqual(["get_weather"]);
-  expect(normalizeSettings({ model: "a/b", shape: "gemini", reasoning: "low", toolCheck: false } as never).tools).toEqual([]);
-  expect(normalizeSettings({ ...DEFAULT_SETTINGS, tools: ["calculate"] }).tools).toEqual(["calculate"]);
+  expect(migrateLegacySettings({ model: "a/b", shape: "gemini", reasoning: "low", toolCheck: true }).tools).toEqual(["get_weather"]);
+  expect(migrateLegacySettings({ model: "a/b", shape: "gemini", reasoning: "low", toolCheck: false }).tools).toEqual([]);
+  expect(migrateLegacySettings({ ...DEFAULT_SETTINGS, tools: ["calculate"] }).tools).toEqual(["calculate"]);
   const body = sendBody({ ...DEFAULT_SETTINGS, model: "a/b", tools: ["calculate", "get_time"] }, undefined, []);
   expect(body.tools).toEqual(["calculate", "get_time"]);
   expect("tool_check" in body).toBe(false);

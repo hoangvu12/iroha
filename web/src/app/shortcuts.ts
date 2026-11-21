@@ -4,7 +4,6 @@ import { useChatActions } from "./chat-panel";
 import { NAV } from "./nav";
 import { popupOpen } from "@/ui/popup";
 
-/** True when a key press belongs to whatever has focus, not to the app. */
 function typingInto(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
@@ -17,11 +16,6 @@ function typingInto(target: EventTarget | null): boolean {
   return false;
 }
 
-/**
- * Single-key navigation from every page: P, G, R open their pages and C
- * toggles the chat. Ignored while typing, with modifier keys, and while a
- * modal dialog or menu is open.
- */
 export function useNavShortcuts() {
   const navigate = useNavigate();
   const chat = useChatActions();
@@ -33,7 +27,7 @@ export function useNavShortcuts() {
       const item = NAV.find((n) => n.key.toLowerCase() === e.key.toLowerCase());
       if (!item) return;
       e.preventDefault();
-      if (item.action === "chat") chat.toggle({ instant: true }); // a key: no slide
+      if (item.action === "chat") chat.toggle({ instant: true });
       else navigate(item.to);
     };
     window.addEventListener("keydown", onKey);

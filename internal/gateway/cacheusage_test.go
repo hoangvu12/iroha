@@ -7,8 +7,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/usage"
 )
 
-// Cache writes are recorded on the Request and on its Attempt, beside the
-// reads, with input still counting every prompt token.
 func TestCacheWritesAreRecordedOnTheRequestAndItsAttempt(t *testing.T) {
 	srv := testkit.Start(t)
 	ant := testkit.NewAnthropic(t)
@@ -31,8 +29,6 @@ func TestCacheWritesAreRecordedOnTheRequestAndItsAttempt(t *testing.T) {
 		t.Fatalf("attempts = %+v", r.Attempts)
 	}
 
-	// A streamed Chat answer from Qwen (writes in prompt_tokens_details) and
-	// one from DeepSeek (reads in prompt_cache_hit_tokens).
 	chat := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "qwen", chat.URL(), "sk-test-qwen")
 	caller := srv.Client(issue(t, srv, "zeron-fleet", all))

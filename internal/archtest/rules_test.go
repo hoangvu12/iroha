@@ -17,20 +17,15 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// Each test below is one rule of docs/agents/architecture.md. An allow-list
-// entry is an exception someone decided on: give the reason next to it.
-
 const timeDoc = `see architecture.md, "Rules everyone follows", Time`
 
-// wallClock lists the calls that read or wait on the wall clock, with what to
-// use instead.
 var wallClock = map[string]map[string]string{
 	"time": {
 		"Now":       "c.Now()",
 		"Since":     "clock.Since(c, t)",
 		"Until":     "t.Sub(c.Now())",
 		"After":     "clock.After(c, d), or c.NewTimer(d) when it may be stopped",
-		"AfterFunc": "c.NewTimer(d) and a goroutine waiting on its C()",
+		"AfterFunc": "c.AfterFunc(d, f)",
 		"NewTimer":  "c.NewTimer(d)",
 		"NewTicker": "c.NewTicker(d)",
 		"Tick":      "c.NewTicker(d)",
@@ -44,16 +39,11 @@ var wallClock = map[string]map[string]string{
 	},
 }
 
-// wallClockPackages may use the wall clock directly.
 var wallClockPackages = map[string]string{
 	"internal/clock":   "it is the wall clock behind clock.Real",
 	"internal/testkit": "test harness: waits in real time for the server and fake upstreams, never for behaviour under test",
 }
 
-// wallClockAllowed lists single uses elsewhere, keyed "file Func pkg.Name"
-// (Func is the enclosing function, "Type.Method" for methods), with why.
-// None today: cmd/ follows the rule too (cmd/iroha leaves server.Run to
-// default to clock.Real).
 var wallClockAllowed = map[string]string{}
 
 func TestTimeComesFromTheInjectedClock(t *testing.T) {
@@ -78,16 +68,14 @@ func TestTimeComesFromTheInjectedClock(t *testing.T) {
 	}
 }
 
-// thirdParty lists every module outside the standard library that non-test
-// code may import, and the package directories allowed to.
 var thirdParty = map[string]struct {
 	dirs []string
 	why  string
 }{
 	"github.com/QuantumNous/new-api/relaykit": {[]string{"internal/translate"},
 		"ADR-0004: internal/translate is the only importer of RelayKit; other packages call translate.New"},
-	"modernc.org/sqlite": {[]string{"internal/store", "internal/v1import"},
-		"the driver is opened by store.Open; internal/v1import also opens the retired v1 database read-only to import it"},
+	"modernc.org/sqlite": {[]string{"internal/store"},
+		"the driver is opened by store.Open"},
 }
 
 func TestImportsStayInTheirPackages(t *testing.T) {
@@ -120,21 +108,22 @@ func isStd(p string) bool {
 	return !strings.Contains(first, ".")
 }
 
-// purePackages are the packages the package map calls pure. Strict ones are
-// pure through everything they import from the module; modelmeta is pure
-// apart from Source, which fetches models.dev with an injected *http.Client,
-// clock and logger, so only its own imports are checked and outbound HTTP is
-// allowed.
-var purePackages = map[string]bool{ // dir -> strict
-	"internal/rules":     true,
-	"internal/planner":   true,
-	"internal/affinity":  true,
-	"internal/caching":   true,
-	"internal/normalise": true,
-	"internal/modelmeta": false,
+type purity int
+
+const (
+	pureThroughEverythingImported purity = iota
+	pureApartFromFetching
+)
+
+var purePackages = map[string]purity{
+	"internal/rules":     pureThroughEverythingImported,
+	"internal/planner":   pureThroughEverythingImported,
+	"internal/affinity":  pureThroughEverythingImported,
+	"internal/caching":   pureThroughEverythingImported,
+	"internal/normalise": pureThroughEverythingImported,
+	"internal/modelmeta": pureApartFromFetching,
 }
 
-// impureImports are what a pure package must not import, with the reason.
 var impureImports = map[string]string{
 	"database/sql":              "the database",
 	"modernc.org/sqlite":        "the database",
@@ -143,8 +132,6 @@ var impureImports = map[string]string{
 	module + "/internal/server": "the server",
 }
 
-// strictImpureImports are also refused for the strict pure packages: they
-// get the time, facts and headers as arguments and return values to log.
 var strictImpureImports = map[string]string{
 	"os":                       "the file system and environment",
 	"log/slog":                 "logging",
@@ -152,9 +139,6 @@ var strictImpureImports = map[string]string{
 	module + "/internal/clock": "the clock (take now as an argument)",
 }
 
-// httpServer are the net/http names of server code; httpOutbound of calls
-// out. Types like http.Header and helpers like http.CanonicalHeaderKey are
-// fine in pure code.
 var (
 	httpServer   = []string{"Server", "ListenAndServe", "ListenAndServeTLS", "Serve", "ServeTLS", "Handler", "HandlerFunc", "Handle", "HandleFunc", "ResponseWriter", "ServeMux", "NewServeMux", "Request", "Flusher", "Hijacker", "ResponseController", "NewResponseController"}
 	httpOutbound = []string{"Client", "DefaultClient", "Transport", "DefaultTransport", "Get", "Post", "PostForm", "Head", "NewRequest", "NewRequestWithContext"}
@@ -167,7 +151,7 @@ func TestPurePackagesStayPure(t *testing.T) {
 	}
 	const fix = "keep the package pure (package map: pure and table-tested): take what you need as arguments " +
 		"(values, http.Header, now) and let the caller (a store-backed or route package) do the I/O"
-	reported := map[string]bool{} // a shared import is reported once
+	reported := map[string]bool{}
 	report := func(where, rule, via string) {
 		if !reported[where+rule] {
 			reported[where+rule] = true
@@ -176,13 +160,12 @@ func TestPurePackagesStayPure(t *testing.T) {
 	}
 	dirs := slices.Sorted(maps.Keys(purePackages))
 	for _, dir := range dirs {
-		strict := purePackages[dir]
+		strict := purePackages[dir] == pureThroughEverythingImported
 		if len(byDir[dir]) == 0 {
 			t.Errorf("%s: listed in purePackages but has no Go files; update internal/archtest/rules_test.go", dir)
 			continue
 		}
-		// The package and, when strict, every module package it reaches.
-		seen := map[string]string{dir: dir} // dir -> import chain from the pure package
+		seen := map[string]string{dir: dir}
 		queue := []string{dir}
 		for len(queue) > 0 {
 			d := queue[0]
@@ -199,7 +182,7 @@ func TestPurePackagesStayPure(t *testing.T) {
 					}
 					if bad {
 						report(s.pos(im), "pure package imports "+p+" ("+what+")", via)
-						continue // not followed: the import itself is the fault
+						continue
 					}
 					if strict && strings.HasPrefix(p, module+"/") {
 						sub := strings.TrimPrefix(p, module+"/")
@@ -223,11 +206,8 @@ func TestPurePackagesStayPure(t *testing.T) {
 	}
 }
 
-// hostnameAllowed lists reads of a URL's host outside internal/hosts that are
-// not an Endpoint's host, keyed "file Func", with why.
 var hostnameAllowed = map[string]string{
-	"internal/testchat/answers.go page":     "a URL the model asked the test tool to fetch, not an Endpoint; only names the page",
-	"internal/v1import/plan.go mapProvider": "a Gateway Key name hint from a v1 Endpoint URL, keeping the host as v1 wrote it; compares nothing",
+	"internal/testchat/answers.go page": "a URL the model asked the test tool to fetch, not an Endpoint; only names the page",
 }
 
 func TestEndpointHostsComeFromHostsOf(t *testing.T) {
@@ -255,8 +235,6 @@ func TestEndpointHostsComeFromHostsOf(t *testing.T) {
 	}
 }
 
-// globalDeps are the package-level ways to reach a dependency that modules
-// must take explicitly instead.
 var globalDeps = map[string]map[string]string{
 	"log/slog": {
 		"Default": "take a *slog.Logger", "SetDefault": "take a *slog.Logger",
@@ -278,7 +256,10 @@ var globalDeps = map[string]map[string]string{
 	},
 }
 
-// globalDepTypes are dependency types no package-level var may hold.
+var globalDepsPackages = map[string]string{
+	"internal/testkit": "test harness: builds the dependencies it hands to the server",
+}
+
 var globalDepTypes = map[string]map[string]bool{
 	"database/sql":             {"DB": true},
 	module + "/internal/store": {"DB": true},
@@ -290,8 +271,8 @@ var globalDepTypes = map[string]map[string]bool{
 func TestDependenciesArePassedExplicitly(t *testing.T) {
 	const doc = `modules take *store.DB, *slog.Logger, clock.Clock and *http.Client explicitly; see architecture.md, "Rules everyone follows"`
 	for _, s := range sources(t) {
-		if s.dir == "internal/testkit" {
-			continue // the harness builds the dependencies it hands to the server
+		if _, ok := globalDepsPackages[s.dir]; ok {
+			continue
 		}
 		for pkg, names := range globalDeps {
 			s.selectors(pkg, func(sel *ast.SelectorExpr) {
@@ -334,8 +315,6 @@ func TestDependenciesArePassedExplicitly(t *testing.T) {
 
 var (
 	sqlComment = regexp.MustCompile(`--[^\n]*`)
-	// timeColumn finds a column definition named *_at: at the start of a
-	// line, after "(" or ",", or after ADD COLUMN.
 	timeColumn = regexp.MustCompile(`(?i)(?:^|[,(]|\bADD\s+COLUMN)\s*(\w+_at)\s+(\w+)`)
 	sqlType    = regexp.MustCompile(`(?i)^(TEXT|REAL|BLOB|NUMERIC|INT|INTEGER|BIGINT|DATETIME|TIMESTAMP|DATE|TIME|VARCHAR|CHAR|FLOAT|DOUBLE|DECIMAL|BOOLEAN)$`)
 )

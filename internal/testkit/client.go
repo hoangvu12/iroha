@@ -12,24 +12,20 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 )
 
-// Client sends HTTP requests to the test server. Every method fails the
-// test on a transport error, so tests only deal with responses.
 type Client struct {
 	t       testing.TB
 	srv     *Server
-	Token   string         // sent as a Bearer token when not empty
-	Hdr     http.Header    // extra headers on every request
-	Cookies []*http.Cookie // sent on every request (an Owner session)
+	Token   string
+	Hdr     http.Header
+	Cookies []*http.Cookie
 }
 
-// WithCookie returns a copy of the client that also sends cookie c.
 func (c *Client) WithCookie(ck *http.Cookie) *Client {
 	cp := *c
 	cp.Cookies = append(append([]*http.Cookie(nil), c.Cookies...), ck)
 	return &cp
 }
 
-// Cookie returns the cookie named name that the response set, or nil.
 func (r *Response) Cookie(name string) *http.Cookie {
 	for _, c := range (&http.Response{Header: r.Header}).Cookies() {
 		if c.Name == name {
@@ -39,8 +35,6 @@ func (r *Response) Cookie(name string) *http.Cookie {
 	return nil
 }
 
-// WithHeader returns a copy of the client that also sends key: value
-// (e.g. x-api-key for Caller auth).
 func (c *Client) WithHeader(key, value string) *Client {
 	cp := *c
 	cp.Hdr = c.Hdr.Clone()
@@ -59,9 +53,6 @@ func (c *Client) Patch(path string, body any) *Response {
 	return c.Do(http.MethodPatch, path, body)
 }
 
-// Do sends a request and reads the whole response. body may be nil, a
-// string or []byte (sent as is), or anything else (sent as JSON). path is
-// relative to the server URL unless it starts with http.
 func (c *Client) Do(method, path string, body any) *Response {
 	c.t.Helper()
 	resp := c.Open(method, path, body)
@@ -73,8 +64,6 @@ func (c *Client) Do(method, path string, body any) *Response {
 	return &Response{t: c.t, Method: method, Path: path, Status: resp.StatusCode, Header: resp.Header, Body: b}
 }
 
-// Open sends a request and returns the live response, for reading a stream
-// as it arrives. The caller closes the body.
 func (c *Client) Open(method, path string, body any) *http.Response {
 	c.t.Helper()
 	var r io.Reader
@@ -120,7 +109,6 @@ func (c *Client) Open(method, path string, body any) *http.Response {
 	return resp
 }
 
-// Response is a fully read response.
 type Response struct {
 	t      testing.TB
 	Method string
@@ -130,7 +118,6 @@ type Response struct {
 	Body   []byte
 }
 
-// Expect fails the test unless the status is want. It returns r for chaining.
 func (r *Response) Expect(want int) *Response {
 	r.t.Helper()
 	if r.Status != want {
@@ -139,7 +126,6 @@ func (r *Response) Expect(want int) *Response {
 	return r
 }
 
-// OK fails the test unless the status is 2xx.
 func (r *Response) OK() *Response {
 	r.t.Helper()
 	if r.Status < 200 || r.Status > 299 {
@@ -148,7 +134,6 @@ func (r *Response) OK() *Response {
 	return r
 }
 
-// JSON decodes the body into v.
 func (r *Response) JSON(v any) *Response {
 	r.t.Helper()
 	if err := json.Unmarshal(r.Body, v); err != nil {
@@ -157,7 +142,6 @@ func (r *Response) JSON(v any) *Response {
 	return r
 }
 
-// Map decodes the body as a JSON object.
 func (r *Response) Map() map[string]any {
 	r.t.Helper()
 	var m map[string]any
@@ -165,10 +149,8 @@ func (r *Response) Map() map[string]any {
 	return m
 }
 
-// Text is the body as a string.
 func (r *Response) Text() string { return string(r.Body) }
 
-// Err decodes the admin API error envelope, failing if there is none.
 func (r *Response) Err() api.Error {
 	r.t.Helper()
 	var b struct {
@@ -181,17 +163,13 @@ func (r *Response) Err() api.Error {
 	return *b.Error
 }
 
-// Event is one server-sent event.
 type Event struct {
-	Event string // the "event:" field, empty if none
-	Data  string // "data:" lines joined by \n
+	Event string
+	Data  string
 }
 
-// Events parses the body as server-sent events. Comment lines (keep-alives)
-// are skipped.
 func (r *Response) Events() []Event { return ParseSSE(r.Body) }
 
-// ParseSSE parses server-sent events.
 func ParseSSE(body []byte) []Event {
 	var out []Event
 	var cur Event

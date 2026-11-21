@@ -8,7 +8,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// credentials renders where a received request carried a credential.
 func credentials(r *testkit.Received) string {
 	var out []string
 	for _, h := range []string{"Authorization", "X-Api-Key", "Api-Key"} {
@@ -35,7 +34,7 @@ func TestEachAuthStyleSendsTheKeyItsWayAndKeylessSendsNothing(t *testing.T) {
 		{"xapikey", map[string]any{"auth_style": "x-api-key"}, map[string]any{"secret": "sk-test-2"}, "X-Api-Key=sk-test-2"},
 		{"header", map[string]any{"auth_style": "header", "auth_param": "api-key"}, map[string]any{"secret": "sk-test-3"}, "Api-Key=sk-test-3"},
 		{"query", map[string]any{"auth_style": "query", "auth_param": "key"}, map[string]any{"secret": "sk-test-4"}, "?key=sk-test-4"},
-		{"none", map[string]any{"auth_style": "none"}, map[string]any{"name": "key-1", "secret": "sk-test-5"}, ""}, // the Endpoint also added the key "keyless" (41)
+		{"none", map[string]any{"auth_style": "none"}, map[string]any{"name": "key-1", "secret": "sk-test-5"}, ""},
 		{"keyless", map[string]any{"auth_style": "header", "auth_param": "X-Custom-Auth"}, map[string]any{"name": "free"}, ""},
 	}
 	for _, tc := range cases {
@@ -45,8 +44,6 @@ func TestEachAuthStyleSendsTheKeyItsWayAndKeylessSendsNothing(t *testing.T) {
 		srv.Admin.Post("/api/providers/"+tc.handle+"/endpoints", tc.ep).Expect(201)
 		srv.Admin.Post("/api/providers/"+tc.handle+"/keys", tc.key).Expect(201)
 	}
-	// The Caller sends its Gateway Key and headers that collide with auth
-	// slots and static headers.
 	caller := srv.Anon.WithHeader("x-api-key", issue(t, srv, "pi", all)).
 		WithHeader("X-Custom-Auth", "caller-value").WithHeader("OpenAI-Beta", "caller").WithHeader("X-Trace", "kept")
 	for _, tc := range cases {
@@ -58,13 +55,11 @@ func TestEachAuthStyleSendsTheKeyItsWayAndKeylessSendsNothing(t *testing.T) {
 		if got.Header.Get("X-Title") != "Iroha" || got.Header.Get("OpenAI-Beta") != "fixed" || got.Header.Get("X-Trace") != "kept" || got.Path != "/v1/chat/completions" {
 			t.Errorf("%s: headers %v path %s", tc.handle, got.Header, got.Path)
 		}
-		// A Caller header in the auth slot never passes, even when no key is sent.
 		if slot := got.Header.Get("X-Custom-Auth"); (tc.handle == "keyless") != (slot == "") {
 			t.Errorf("%s: X-Custom-Auth = %q", tc.handle, slot)
 		}
 	}
 
-	// The key test sends the key in the Endpoint's auth style too.
 	for _, tc := range cases {
 		key := "key-1"
 		if tc.handle == "keyless" {
@@ -102,7 +97,6 @@ func TestKeyTestsSpeakTheEndpointsShape(t *testing.T) {
 		got.Header.Get("X-Api-Key") != "sk-test-c" || got.Header.Get("Authorization") != "" || got.Header.Get("Anthropic-Version") == "" || got.Model != "claude-sonnet-4-5" {
 		t.Fatalf("anthropic test = %+v; upstream got %s %v %s", res, got.Path, got.Header, got.Body)
 	}
-	// A key restricted elsewhere cannot be tested on gemini.
 	if e := srv.Admin.Post("/api/providers/acme/keys/claude-key/test?model=g&endpoint=gemini", nil).Expect(409).Err(); e.Code != "endpoint_not_allowed" || e.Hint == "" {
 		t.Fatalf("restricted test: %+v", e)
 	}
@@ -147,10 +141,9 @@ func TestARestrictedKeyIsNeverSentToOtherEndpoints(t *testing.T) {
 		map[string]any{"name": "plan", "secret": "sk-test-plan", "endpoints": []string{"us"}},
 		map[string]any{"name": "any", "secret": "sk-test-any"},
 	}}).Expect(200)
-	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
+	roundRobin(t, srv, "acme")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// eu fails every time, so each Request walks every candidate it has.
 	eu.Default(eu.Error(503, "down"))
 	for range 4 {
 		caller.Post(chatPath, chat("m")).Expect(200)
@@ -164,8 +157,6 @@ func TestARestrictedKeyIsNeverSentToOtherEndpoints(t *testing.T) {
 		t.Fatalf("us got %s, eu got %d", bearers(us, 0), eu.Count())
 	}
 
-	// Restricted to an Endpoint of another Shape, the key serves only
-	// through translation (ticket 13), and only on that Endpoint.
 	claude := testkit.NewAnthropic(t)
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "claude", "url": claude.URL(), "shape": "anthropic-messages"}).Expect(201)
 	srv.Admin.Patch("/api/providers/acme/keys/plan", map[string]any{"endpoints": []string{"claude"}}).Expect(200)

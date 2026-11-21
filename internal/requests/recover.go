@@ -9,17 +9,11 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// KindInterrupted is logged at startup for each Request the previous run
-// left unfinished.
 var KindInterrupted = logs.NewKind("request.interrupted", "At startup: a Request the previous run of Iroha never finished (crash or forced stop) was marked interrupted. Linked to the Request and Provider.")
 
-// interruptedMessage explains an interrupted Request.
 const interruptedMessage = "Iroha stopped (crash or forced restart) before this Request finished; the Caller's connection was lost."
 
-// Recover marks every Request still in progress as interrupted. Call it at
-// startup, before serving: nothing can be in flight yet, so any Request in
-// progress belongs to a run of Iroha that ended without finishing it.
-func Recover(ctx context.Context, db *store.DB, log *slog.Logger) (int, error) {
+func closeInterrupted(ctx context.Context, db *store.DB, log *slog.Logger) error {
 	type left struct{ id, provider string }
 	var found []left
 	err := db.Tx(ctx, func(tx *sql.Tx) error {
@@ -39,8 +33,6 @@ func Recover(ctx context.Context, db *store.DB, log *slog.Logger) (int, error) {
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		// The serving Provider is recorded only at the end; the last
-		// Attempt says which Provider was being tried.
 		_, err = tx.ExecContext(ctx, `UPDATE requests SET state = ?, error_code = 'interrupted', error_message = ?,
 			provider_handle = coalesce(nullif(provider_handle, ''), (SELECT a.provider_handle FROM attempts a WHERE a.request_id = requests.id ORDER BY a.seq DESC LIMIT 1), ''),
 			provider_id = coalesce(nullif(provider_id, ''), (SELECT a.provider_id FROM attempts a WHERE a.request_id = requests.id ORDER BY a.seq DESC LIMIT 1), '')
@@ -56,7 +48,7 @@ func Recover(ctx context.Context, db *store.DB, log *slog.Logger) (int, error) {
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return err
 	}
 	for _, l := range found {
 		attrs := []any{logs.Kind(KindInterrupted), logs.Request(l.id)}
@@ -65,5 +57,5 @@ func Recover(ctx context.Context, db *store.DB, log *slog.Logger) (int, error) {
 		}
 		log.Warn("a Request was interrupted by the previous stop", attrs...)
 	}
-	return len(found), nil
+	return nil
 }

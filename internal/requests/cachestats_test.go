@@ -17,15 +17,12 @@ func chatAnswer(prompt, cached, written int) testkit.Responder {
 	})
 }
 
-// The cached share per Upstream Key (and Provider, model, Caller): stats
-// filtered by key and Endpoint, and grouped, one row per group.
 func TestStatsGroupCacheUsageByKeyProviderModelAndCaller(t *testing.T) {
 	srv := testkit.Start(t)
 	warm, cold := testkit.NewOpenAIChat(t), testkit.NewOpenAIChat(t)
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "first", "url": warm.URL(), "shape": "openai-chat"}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "second", "url": cold.URL(), "shape": "openai-chat"}).Expect(201)
-	// Each key goes to one Endpoint, so which upstream answered says which key served.
 	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"name": "k1", "secret": "sk-test-1", "endpoints": []string{"first"}}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"name": "k2", "secret": "sk-test-2", "endpoints": []string{"second"}}).Expect(201)
 	var keys struct {
@@ -40,7 +37,7 @@ func TestStatsGroupCacheUsageByKeyProviderModelAndCaller(t *testing.T) {
 	warm.Enqueue(chatAnswer(1000, 600, 100), chatAnswer(1000, 600, 100))
 	cold.Enqueue(chatAnswer(500, 0, 400), chatAnswer(500, 0, 400))
 	alice, _ := keyNamed(t, srv, "alice")
-	for range 4 { // round-robin: two Requests per key
+	for range 4 {
 		alice.Post(chatPath, `{"model":"m1","messages":[]}`).Expect(200)
 	}
 	insert(t, srv, "req_test1", requests.CallerTest, "", "Test", "m1", "", 200, 0)
@@ -74,7 +71,6 @@ func TestStatsGroupCacheUsageByKeyProviderModelAndCaller(t *testing.T) {
 		}
 	}
 
-	// One row per key; tests left out with caller_kind=gateway_key.
 	s = statsOf(t, srv, "group_by=upstream_key&caller_kind=gateway_key")
 	want := []requests.StatsGroup{
 		{Provider: "acme", UpstreamKeyID: ids["k1"], UpstreamKey: "k1", Requests: 2, CacheHits: 2,
@@ -86,7 +82,6 @@ func TestStatsGroupCacheUsageByKeyProviderModelAndCaller(t *testing.T) {
 		t.Fatalf("groups by key = %+v\nwant %+v", s.Groups, want)
 	}
 
-	// Groups combine: Provider and model; Caller (test Requests apart).
 	s = statsOf(t, srv, "group_by=provider&group_by=model&caller_kind=gateway_key")
 	if len(s.Groups) != 1 || s.Groups[0].Provider != "acme" || s.Groups[0].Model != "m1" || s.Groups[0].UpstreamKey != "" || s.Groups[0].Requests != 4 || s.Groups[0].Tokens.CacheRead != 1200 {
 		t.Fatalf("groups by Provider and model = %+v", s.Groups)
@@ -102,8 +97,6 @@ func TestStatsGroupCacheUsageByKeyProviderModelAndCaller(t *testing.T) {
 	}
 }
 
-// exclude_tests=true leaves out the Requests sent from the test chat, on
-// the stats and the list alike; caller_kind keeps working.
 func TestExcludeTestsLeavesOutTestRequests(t *testing.T) {
 	srv := testkit.Start(t)
 	insert(t, srv, "req_key1", requests.CallerGatewayKey, "gk_1", "alice", "m1", "acme", 200, 0)

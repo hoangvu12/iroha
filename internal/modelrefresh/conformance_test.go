@@ -12,17 +12,12 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// USE-43, USE-63: a Provider whose model list never answers holds only its
-// own refresh, for 30 s: other jobs still run meanwhile, the other Provider
-// due in the same run is refreshed, and the run ends ok, naming both.
 func TestAHungModelListNeitherStallsOtherJobsNorOtherProviders(t *testing.T) {
 	srv := testkit.Start(t)
 	hung := addProvider(t, srv, "hung", nil)
 	hung.Handle(http.MethodGet, "/v1/models", testkit.Hang())
 	fine := addProvider(t, srv, "fine", nil)
 
-	// Switched off for the first hour, both are overdue once switched on,
-	// so the next run refreshes both.
 	for _, h := range []string{"hung", "fine"} {
 		srv.Admin.Patch("/api/providers/"+h, map[string]any{"enabled": false}).Expect(200)
 	}
@@ -39,7 +34,6 @@ func TestAHungModelListNeitherStallsOtherJobsNorOtherProviders(t *testing.T) {
 	srv.Clock.Advance(modelrefresh.Tick)
 	hung.Await(1)
 
-	// The refresh waits on the hung list; another job runs at once.
 	var view jobs.JobView
 	srv.Admin.Get("/api/jobs/" + modelrefresh.JobName).Expect(200).JSON(&view)
 	if !view.Running {
@@ -49,7 +43,6 @@ func TestAHungModelListNeitherStallsOtherJobsNorOtherProviders(t *testing.T) {
 		t.Fatalf("retention during a hung refresh = %+v", run)
 	}
 
-	// 30 s later the hung list gives up; the run goes on and ends.
 	srv.Clock.Advance(30 * time.Second)
 	srv.SettleJobs()
 	if lists(fine) != 1 || lists(hung) != 1 {

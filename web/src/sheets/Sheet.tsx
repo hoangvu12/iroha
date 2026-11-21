@@ -13,12 +13,6 @@ import { Skeleton, useIsSample } from "@/ui/Skeleton";
 import { ErrorState } from "@/ui/States";
 import { Tip } from "@/ui/Tooltip";
 
-// The parts every record sheet is made of: the bar (kind, Open page, Close),
-// the title (logo, name, state), the scrolling body with its sections and
-// facts, and the actions row. A sheet's body renders inside the stack's
-// DialogContent, so DialogTitle names the sheet.
-
-/** The bar at the top: what kind of record, extra buttons, "Open page" and Close (Back on phones). */
 export function SheetBar({ kind, page, start, children }: { kind: ReactNode; page?: string; start?: ReactNode; children?: ReactNode }) {
   const phone = useIsPhone();
   return (
@@ -49,7 +43,6 @@ export function SheetBar({ kind, page, start, children }: { kind: ReactNode; pag
   );
 }
 
-/** The record's logo, name (the sheet's accessible name, after its kind), state and a line under it. */
 export function SheetTitle({
   kind,
   logo,
@@ -65,7 +58,6 @@ export function SheetTitle({
   subtitle?: ReactNode;
   state?: ReactNode;
 }) {
-  // A skeleton's sample must not name the sheet (UI ticket 02).
   const Title = useIsSample() ? "h2" : DialogTitle;
   return (
     <header className="flex items-start gap-3.5 pb-5 pt-6">
@@ -83,7 +75,6 @@ export function SheetTitle({
 
 export function SheetBody({ children }: { children: ReactNode }) {
   return (
-    // Scrolling past its end doesn't scroll the page behind; the end clears a phone's home bar.
     <ScrollArea className="flex-1" contentClassName="px-6 pb-[calc(2.5rem+env(safe-area-inset-bottom))]" viewportClassName="overscroll-contain">
       {children}
     </ScrollArea>
@@ -115,7 +106,6 @@ export function Fact({ label, children, mono, wide }: { label: string; children:
   );
 }
 
-/** A list of linked records, one per row. */
 export function LinkList({ children }: { children: ReactNode }) {
   return <ul className="divide-y divide-border rounded-lg border border-border text-[14.5px]">{children}</ul>;
 }
@@ -129,7 +119,6 @@ export function LinkRow({ children, aside }: { children: ReactNode; aside?: Reac
   );
 }
 
-/** The common actions (Test, enable or disable, copy) under the title. */
 export function SheetActions({ children, result }: { children: ReactNode; result?: ReactNode }) {
   return (
     <div className="pb-5">
@@ -143,16 +132,13 @@ export function SheetActions({ children, result }: { children: ReactNode; result
   );
 }
 
-/** Copies `text` and says "Copied" in place (`CopyButton`, UI ticket 04). */
 export function CopyIconButton({ text, what }: { text: string; what: string }) {
   return <CopyButton icon value={text} what={what} label={`Copy ${what}`} />;
 }
 
 export const none = <span className="text-fg-subtle">–</span>;
 
-/** Loading, missing (404) and failed bodies, inside the sheet. */
 export function SheetLoading({ name }: { name: string }) {
-  // A record sheet's title, actions and facts, drawn by Skullet (UI ticket 02).
   return (
     <SheetBody>
       <DialogTitle className="sr-only">{name}</DialogTitle>
@@ -197,7 +183,6 @@ const SAMPLE_SHEET = {
   ],
 };
 
-/** A section's list of linked records while it loads. */
 export function LinkListLoading({ label }: { label: string }) {
   return (
     <Skeleton data={undefined} sample={SAMPLE_LINK_ROWS} label={label}>

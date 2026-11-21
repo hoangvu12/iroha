@@ -8,11 +8,6 @@ import { ErrorState } from "@/ui/States";
 import { LoginPage } from "@/pages/login/LoginPage";
 import { SetupPage } from "@/pages/login/SetupPage";
 
-/**
- * Shows the setup screen until an Owner password exists, the login screen
- * while signed out, and the app otherwise. Any call that finds the session
- * gone (expired, revoked) brings the login back at the same address.
- */
 export function AuthGate({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const session = useSession();
@@ -30,8 +25,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
     [qc],
   );
 
-  // Signed out: forget the skeleton shapes remembered from this session's pages. After the
-  // commit that unmounts them, because Skullet saves a skeleton's shape as it unmounts.
   const signedOut = session.data?.signed_in === false;
   useEffect(() => {
     if (signedOut) forgetShapes();

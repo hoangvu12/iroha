@@ -13,7 +13,6 @@ function Where() {
   const l = useLocation();
   return <output aria-label="Where">{l.search}</output>;
 }
-/** The sheets the URL holds (an existing rule opens in its sheet, UI ticket 33). */
 const sheetsOpen = () => new URLSearchParams(screen.getByLabelText("Where").textContent ?? "").getAll("sheet");
 
 const agent = createAgent();
@@ -47,8 +46,9 @@ const FLOW_RULES = [
   rule("server-error", 2, { enabled: false, status: ["5xx"], outcome: "retry_elsewhere", key_effect: "No change", request_effect: "Try next key", hits: 0 }),
 ];
 
-function renderTab(list: Rule[] = RULES) {
+function renderTab(list: Rule[] = RULES, { adding = false, post }: { adding?: boolean; post?: () => Response } = {}) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (u, init) => {
+    if (post && init?.method === "POST") return post();
     if (String(u).startsWith("/api/rules?") || ((init?.method ?? "GET") === "GET" && String(u).startsWith("/api/rules"))) return answer({ rules: list });
     return answer({ dry_run: false, audit_entry: "aud_1", changes: [], rule: list[0] });
   });
@@ -57,7 +57,7 @@ function renderTab(list: Rule[] = RULES) {
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={["/providers/acme/rules"]}>
         <SheetStackProvider>
-          <RulesTab handle="acme" adding={false} setAdding={() => {}} />
+          <RulesTab handle="acme" adding={adding} setAdding={() => {}} />
           <Where />
         </SheetStackProvider>
       </MemoryRouter>
@@ -73,11 +73,31 @@ const calls = (fetch: ReturnType<typeof renderTab>, method: string) => fetch.moc
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.unstubAllGlobals());
 
+const taken = () =>
+  new Response(
+    JSON.stringify({ error: { code: "name_taken", message: 'A Failure Rule named "rate-limited" exists.', hint: "Pick another name, or update that Failure Rule with PUT /api/rules/rate-limited." } }),
+    { status: 409, headers: { "Content-Type": "application/json" } },
+  );
+
+test("Add rule creates only, checked or saved: the server's refusal of a taken name shows in the dialog", async () => {
+  const user = userEvent.setup();
+  const fetch = renderTab(RULES, { adding: true, post: taken });
+  const dialog = await screen.findByRole("dialog", { name: "Add rule" });
+  await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "rate-limited");
+  await user.type(within(dialog).getByRole("textbox", { name: "Status" }), "429");
+  const message = "A rule is already named rate-limited. Pick another name, or use Change on rate-limited to replace it.";
+  await user.click(within(dialog).getByRole("button", { name: "Check against last week" }));
+  expect(await within(dialog).findByText(message)).toBeTruthy();
+  await user.click(within(dialog).getByRole("button", { name: "Add rule" }));
+  await waitFor(() => expect(calls(fetch, "POST")).toEqual(["/api/rules?dry_run=true", "/api/rules"]));
+  expect(within(dialog).getByText(message)).toBeTruthy();
+  expect(fetch.mock.calls.some(([u]) => String(u).startsWith("/api/rules/rate-limited"))).toBe(false);
+});
+
 test("rules keep the order they run in: the first matching rule decides", async () => {
   renderTab();
   await screen.findByRole("table", { name: "Failure Rules" });
   expect(rows().map((r) => within(r).getAllByRole("cell")[0].textContent)).toEqual(["mine", "rate-limited", "server-error"]);
-  // Sorting would hide which rule wins, so the headers don't sort.
   expect(screen.queryByRole("button", { name: /^Sort by/ })).toBeNull();
 });
 
@@ -110,7 +130,6 @@ test("Delete… on the Owner's rule is red and asks, naming it", async () => {
   await waitFor(() => expect(calls(fetch, "DELETE")).toEqual(["/api/rules/mine"]));
 });
 
-// The Flow view (UI ticket 31): the same rules as the steps a failure falls through.
 const flow = () => screen.findByRole("list", { name: "Failure Rules, in the order they're tried" });
 const steps = () => within(screen.getByRole("list", { name: "Failure Rules, in the order they're tried" })).getAllByRole("listitem");
 
@@ -124,7 +143,6 @@ test("Flow shows the rules as steps in the order they're tried, and the choice i
   expect(steps().map((s) => within(s).getByRole("button", { name: /^Open / }).getAttribute("aria-label"))).toEqual(["Open mine", "Open rate-limited", "Open server-error"]);
   expect(localStorage.getItem("iroha:rules:view")).toBe("flow");
 
-  // Back on the tab later, Flow is still the view.
   cleanup();
   renderTab();
   await flow();
@@ -139,18 +157,13 @@ test("each step says what it matches and, on a match, what happens to the key an
   expect(quota.textContent).toContain("Cool 60 s");
   expect(quota.textContent).toContain("Try next key");
   expect(quota.textContent).toContain("matches");
-  // The Owner's version of a built-in rule says it replaces it, and what the built-in did.
   expect(within(mine).getByText("Replaces built-in")).toBeTruthy();
-  // In the server's words (builtin_key_effect), as the key effect of any rule is.
   expect(mine.textContent).toContain("Built-in did: Cool 60 s");
   expect(mine.textContent).toContain("Return to Caller");
-  // A switched-off rule is passed over.
   expect(within(off).getByText("Off, skipped")).toBeTruthy();
   expect(off.textContent).toContain("skipped");
   expect(off.textContent).not.toContain("matches");
-  // Today's hits on each step.
   expect(within(quota).getByText("312")).toBeTruthy();
-  // After the last rule: what happens when none matched.
   expect(screen.getByText("No response or 5xx: try the next key")).toBeTruthy();
   expect(screen.getByText("Anything else: return the error to the Caller")).toBeTruthy();
 });

@@ -12,8 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// fakeModelsDev is models.dev with a brand entry, maker entries, an
-// embedding model and an ambiguous name.
 func fakeModelsDev(t *testing.T) *testkit.ModelsDev {
 	md := testkit.NewModelsDev(t)
 	md.SetProvider("zai-coding-plan", map[string]any{
@@ -30,12 +28,10 @@ func fakeModelsDev(t *testing.T) *testkit.ModelsDev {
 	return md
 }
 
-// serveList makes up's /v1/models answer these model objects.
 func serveList(up *testkit.Upstream, items ...map[string]any) {
 	up.Handle(http.MethodGet, "/v1/models", testkit.JSON(200, map[string]any{"object": "list", "data": items}))
 }
 
-// callerList reads a Provider's Caller-facing list, by model ID.
 func callerList(t *testing.T, c *testkit.Client, handle string) map[string]models.CallerModel {
 	t.Helper()
 	var out models.CallerModelList
@@ -57,7 +53,7 @@ func TestCallerListCarriesMetadataOwnerThenProviderThenModelsDev(t *testing.T) {
 	srv := testkit.Start(t, testkit.Options{ModelsDev: md.URL})
 	up := testkit.NewOpenAIChat(t)
 	serveList(up,
-		map[string]any{"id": "glm-4.6", "object": "model", "context_length": "1000000"}, // the Provider knows better than models.dev
+		map[string]any{"id": "glm-4.6", "object": "model", "context_length": "1000000"},
 		map[string]any{"id": "gpt-4o", "object": "model"},
 		map[string]any{"id": "text-embedding-3-small", "object": "model"},
 		map[string]any{"id": "shared", "object": "model"},
@@ -71,15 +67,11 @@ func TestCallerListCarriesMetadataOwnerThenProviderThenModelsDev(t *testing.T) {
 	caller := issue(t, srv, "pi", all)
 	got := callerList(t, caller, "acme")
 	want := map[string]string{
-		// Provider-reported context beats models.dev's; models.dev fills the rest.
-		"glm-4.6": `{"context_length":1000000,"max_output_tokens":131072,"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"reasoning":true,"reasoning_levels":["low","high"],"chat":"ok"}`,
-		// Not under the brand: found by name in the maker catalog.
-		"gpt-4o": `{"context_length":128000,"max_output_tokens":16384,"architecture":{"input_modalities":["text","image"],"output_modalities":["text"]},"chat":"ok"}`,
-		// Known not to chat, yet listed.
+		"glm-4.6":                `{"context_length":1000000,"max_output_tokens":131072,"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"reasoning":true,"reasoning_levels":["low","high"],"chat":"ok"}`,
+		"gpt-4o":                 `{"context_length":128000,"max_output_tokens":16384,"architecture":{"input_modalities":["text","image"],"output_modalities":["text"]},"chat":"ok"}`,
 		"text-embedding-3-small": `{"context_length":8191,"architecture":{"input_modalities":["text"],"output_modalities":["embedding"]},"chat":"unsupported"}`,
-		// Ambiguous in models.dev, or unknown: blank, and chat ok.
-		"shared":    `{"chat":"ok"}`,
-		"mystery-1": `{"chat":"ok"}`,
+		"shared":                 `{"chat":"ok"}`,
+		"mystery-1":              `{"chat":"ok"}`,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("caller list = %+v", got)
@@ -90,7 +82,6 @@ func TestCallerListCarriesMetadataOwnerThenProviderThenModelsDev(t *testing.T) {
 		}
 	}
 
-	// The Owner's override beats both.
 	var res models.ModelResult
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "glm-4.6", "metadata": map[string]any{"context_length": 200000, "chat": "ok"}}).
 		Expect(201).JSON(&res)
@@ -101,20 +92,17 @@ func TestCallerListCarriesMetadataOwnerThenProviderThenModelsDev(t *testing.T) {
 	if f := facts(callerList(t, caller, "acme")["glm-4.6"]); f != `{"context_length":200000,"max_output_tokens":131072,"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"reasoning":true,"reasoning_levels":["low","high"],"chat":"ok"}` {
 		t.Fatalf("glm-4.6 after override = %s", f)
 	}
-	// Overriding chat on a model known not to chat.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "text-embedding-3-small", "metadata": map[string]any{"chat": "ok"}}).Expect(201)
 	if c := callerList(t, caller, "acme")["text-embedding-3-small"].Chat; c != "ok" {
 		t.Fatalf("chat after override = %q", c)
 	}
 
-	// Metadata never decides routing: a model known not to chat is still forwarded.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "text-embedding-3-small", "metadata": map[string]any{}}).OK()
 	caller.Post(chatPath, chat("text-embedding-3-small")).OK()
 	if up.Last().Model != "text-embedding-3-small" {
 		t.Fatalf("upstream got %q", up.Last().Model)
 	}
 
-	// The admin list shows each layer.
 	l := list(t, srv, "q=gpt-4o")
 	if len(l.Models) != 1 || *l.Models[0].ModelsDev.ContextLength != 128000 || !l.Models[0].Reported.IsZero() || !l.Models[0].Overrides.IsZero() ||
 		l.Models[0].Metadata.Chat != "ok" {
@@ -142,7 +130,6 @@ func TestModelsDevOutageNeverFailsDiscovery(t *testing.T) {
 		t.Fatalf("models_dev events = %+v", ev)
 	}
 
-	// Back up: the next read (after the retry wait) fills the facts.
 	md.Fail(0)
 	srv.Clock.Advance(modelmeta.RetryAfter)
 	if r := refresh(t, srv); r.ModelsDev != "ok" {
@@ -152,7 +139,6 @@ func TestModelsDevOutageNeverFailsDiscovery(t *testing.T) {
 		t.Fatal("gpt-4o has no facts after models.dev came back")
 	}
 
-	// Down again once the cache is old: facts are kept from the last catalog.
 	md.Fail(http.StatusBadGateway)
 	srv.Clock.Advance(modelmeta.CacheTTL)
 	if r := refresh(t, srv); r.Outcome != "ok" || r.ModelsDev != "stale" {
@@ -171,7 +157,6 @@ func TestOwnerMetadataOverridesAreAuditedRevertibleAndOutliveDiscovery(t *testin
 	addProvider(t, srv, up.URL(), nil, "sk-test-one")
 	refresh(t, srv)
 
-	// Validation.
 	for _, bad := range []map[string]any{
 		{"context_length": -1},
 		{"chat": "maybe"},
@@ -182,7 +167,6 @@ func TestOwnerMetadataOverridesAreAuditedRevertibleAndOutliveDiscovery(t *testin
 		srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "gpt-4o", "metadata": bad}).Expect(400)
 	}
 
-	// A dry run changes nothing.
 	srv.Admin.Post("/api/providers/acme/models?dry_run=true", map[string]any{"model": "gpt-4o", "metadata": map[string]any{"max_output_tokens": 1}}).OK()
 	if l := list(t, srv, ""); !l.Models[0].Overrides.IsZero() {
 		t.Fatalf("dry run wrote overrides: %+v", l.Models[0])
@@ -196,7 +180,6 @@ func TestOwnerMetadataOverridesAreAuditedRevertibleAndOutliveDiscovery(t *testin
 		facts(models.CallerModel{Facts: res.Model.Overrides}) != `{"max_output_tokens":32000,"architecture":{"input_modalities":["text","image"]}}` {
 		t.Fatalf("override = %+v", res)
 	}
-	// Repeating it is unchanged.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "gpt-4o",
 		"metadata": map[string]any{"max_output_tokens": 32000, "architecture": map[string]any{"input_modalities": []string{"text", "image"}}}}).
 		Expect(200).JSON(&res)
@@ -204,7 +187,6 @@ func TestOwnerMetadataOverridesAreAuditedRevertibleAndOutliveDiscovery(t *testin
 		t.Fatalf("repeat = %+v", res.Result)
 	}
 
-	// Discovery dropping the model keeps the entry (not visible) and its override.
 	up.SetModels("other")
 	refresh(t, srv)
 	l := list(t, srv, "q=gpt-4o")
@@ -218,7 +200,6 @@ func TestOwnerMetadataOverridesAreAuditedRevertibleAndOutliveDiscovery(t *testin
 		t.Fatalf("listed again = %s", facts(m))
 	}
 
-	// Revert removes the override.
 	var entries audit.EntryPage
 	srv.Admin.Get("/api/audit-entries?record=acme/gpt-4o").OK().JSON(&entries)
 	if len(entries.Entries) != 1 {
@@ -229,7 +210,6 @@ func TestOwnerMetadataOverridesAreAuditedRevertibleAndOutliveDiscovery(t *testin
 		t.Fatalf("after revert = %s", facts(m))
 	}
 
-	// {} clears every override; an override-only entry the lists lack then goes.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "ghost", "metadata": map[string]any{"context_length": 5}}).Expect(201)
 	if l := list(t, srv, "q=ghost"); len(l.Models) != 1 || l.Models[0].Visible {
 		t.Fatalf("override-only entry = %+v", l.Models)
@@ -246,7 +226,6 @@ func TestOwnerMetadataOverridesAreAuditedRevertibleAndOutliveDiscovery(t *testin
 func TestOwnerAdditionsAreLookedUpAtOnceAndTheBrandDecides(t *testing.T) {
 	md := fakeModelsDev(t)
 	srv := testkit.Start(t, testkit.Options{ModelsDev: md.URL})
-	// A relay-style handle: its name says nothing; the brand does.
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme", "discovery": "none"}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"url": testkit.NewOpenAIChat(t).URL(), "shape": "openai-chat"}).Expect(201)
 	caller := issue(t, srv, "pi", all)
@@ -254,7 +233,7 @@ func TestOwnerAdditionsAreLookedUpAtOnceAndTheBrandDecides(t *testing.T) {
 	var res models.ModelResult
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "glm-4.6"}).Expect(201).JSON(&res)
 	if !res.Model.Added || !res.Model.ModelsDev.IsZero() {
-		t.Fatalf("added without a brand = %+v", res.Model) // glm-4.6 is only under the zai-coding-plan brand
+		t.Fatalf("added without a brand = %+v", res.Model)
 	}
 
 	srv.Admin.Patch("/api/providers/acme", map[string]any{"models_dev_brand": "zai-coding-plan"}).OK()
@@ -265,7 +244,6 @@ func TestOwnerAdditionsAreLookedUpAtOnceAndTheBrandDecides(t *testing.T) {
 	if p.ModelsDevBrand != "zai-coding-plan" {
 		t.Fatalf("brand = %q", p.ModelsDevBrand)
 	}
-	// The refresh (skipped: discovery none) still looks the list up.
 	if r := refresh(t, srv); r.Outcome != "skipped" || r.ModelsDev != "ok" {
 		t.Fatalf("refresh = %+v", r)
 	}
@@ -273,13 +251,11 @@ func TestOwnerAdditionsAreLookedUpAtOnceAndTheBrandDecides(t *testing.T) {
 		t.Fatalf("glm-4.6 under the brand = %v", c)
 	}
 
-	// Under another brand those facts no longer apply, even before a refresh.
 	srv.Admin.Patch("/api/providers/acme", map[string]any{"models_dev_brand": "anthropic"}).OK()
 	if f := facts(callerList(t, caller, "acme")["glm-4.6"]); f != `{"chat":"ok"}` {
 		t.Fatalf("glm-4.6 under another brand = %s", f)
 	}
 
-	// An addition is looked up at once (gpt-4o is in the maker catalog).
 	srv.Admin.Post("/api/providers/acme/models/bulk", map[string]any{"items": []any{map[string]any{"model": "gpt-4o"}}}).OK()
 	if c := callerList(t, caller, "acme")["gpt-4o"].ContextLength; c == nil || *c != 128000 {
 		t.Fatalf("gpt-4o right after adding = %v", c)

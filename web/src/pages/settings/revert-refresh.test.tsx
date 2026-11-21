@@ -6,11 +6,6 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { AuditEntry } from "@/api/types";
 import { AuditEntriesTab } from "./AuditEntries";
 
-// UI ticket 32: a Revert on Audit Entries can change any record (a key, a
-// Provider, a Gateway Key), so what other pages and open sheets keep of
-// configuration is refreshed; the Requests feed (history, not
-// configuration) is left alone.
-
 const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 
 const ENTRY: AuditEntry = {
@@ -37,7 +32,6 @@ test("a Revert refreshes the configuration other pages and sheets keep, not the 
     }),
   );
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-  // What other pages and sheets read before, still cached.
   const kept = {
     keys: ["providers", "acme", "keys"],
     keySheet: ["providers", "acme", "keys", "one", "team-1"],

@@ -4,9 +4,6 @@ import { createAgent } from "@ui-sdk/react/agent";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { loadedSheet, renderWithSheets, routes } from "./test-iroha";
 
-// UI ticket 33: a Gateway Key's access is edited in its sheet (the key's own
-// page keeps its dialog), and the models a scope narrows to link to their sheets.
-
 const agent = createAgent();
 const text = { ignore: "script, style, [data-ui-sdk-announcer]" };
 const saved = { ...routes };
@@ -48,7 +45,6 @@ test("Edit access turns the sheet's access into the editor; Save changes it and 
   const s = within(sheet);
   await user.click(s.getByRole("button", { name: "Edit access" }));
   expect(await s.findByRole("radiogroup", { name: "Access" })).toBeTruthy();
-  // In the sheet, not a dialog over it.
   expect(screen.queryAllByRole("dialog")).toEqual([sheet]);
   await user.click(await s.findByRole("checkbox", { name: "fast" }));
   await user.click(s.getByRole("button", { name: "Save access" }));

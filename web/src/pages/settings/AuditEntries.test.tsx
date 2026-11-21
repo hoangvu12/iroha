@@ -8,10 +8,6 @@ import type { AuditEntry } from "@/api/types";
 import { Toaster } from "@/ui/toast";
 import { AuditEntriesTab } from "./AuditEntries";
 
-// Settings → Audit Entries on the shared DataTable (UI ticket 08): numbered
-// pages over the API's older-than cursor, the filters kept in the URL, rows
-// that show their before and after, and Revert in the row.
-
 let approve = false;
 const agent = createAgent({ allow: (step) => !step.confirm || approve });
 const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -21,7 +17,6 @@ const BASE = Date.now();
 
 const entry = (i: number, o: Partial<AuditEntry> = {}): AuditEntry => ({
   id: `ae_${i}`,
-  // Newest first: entry 1 is the latest, a minute apart.
   time: new Date(BASE - i * 60_000).toISOString(),
   actor: { kind: "owner_session", id: "os_1", name: "Owner" },
   action: "update",
@@ -104,7 +99,6 @@ test("numbered pages read the next page from the API's cursor, a page at a time"
   expect(screen.getByText(/51–60 of 60 changes/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Page 4" })).toBeNull();
 
-  // Back to page 1 is already loaded: no new call.
   await user.click(screen.getByRole("button", { name: "Page 1" }));
   expect(within(rows()[0]).getByText("Upstream Key acme/team-1 disabled")).toBeTruthy();
   expect(lists(fetch)).toHaveLength(3);

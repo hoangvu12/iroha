@@ -19,8 +19,6 @@ func TestOf(t *testing.T) {
 	}
 }
 
-// A domain matches itself and its subdomains, whatever the case; nothing
-// else ends in it by accident.
 func TestMatches(t *testing.T) {
 	for _, tc := range []struct {
 		host    string
@@ -43,8 +41,6 @@ func TestMatches(t *testing.T) {
 	}
 }
 
-// List reads a comma-separated list of domains as Failure Rules and
-// normalisers write it.
 func TestList(t *testing.T) {
 	got := hosts.List(" Relay.Example.com., ,api.x.ai ")
 	if len(got) != 2 || got[0] != "relay.example.com" || got[1] != "api.x.ai" {

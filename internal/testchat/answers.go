@@ -13,11 +13,7 @@ import (
 	"unicode"
 )
 
-// How Iroha answers each test tool. Every answer is a JSON object (Gemini's
-// functionResponse needs one); a call it cannot answer gets {"error": ...},
-// as a real tool would say so.
-
-// toolAnswer is the result of one call, made up (or computed) by Iroha.
+// Every answer is a JSON object, errors included: Gemini's functionResponse.response must be one.
 func toolAnswer(c ToolCall, now time.Time) obj {
 	t := toolNamed(c.Name)
 	if t == nil {
@@ -67,7 +63,6 @@ func calculation(a map[string]any, _ time.Time) obj {
 	return obj{{"expression", expr}, {"result", number(v)}}
 }
 
-// number writes whole results without a fraction.
 func number(v float64) any {
 	if v == math.Trunc(v) && math.Abs(v) < 1e15 {
 		return int64(v)
@@ -75,7 +70,6 @@ func number(v float64) any {
 	return v
 }
 
-// hashOf is a stable number for made-up but repeatable answers.
 func hashOf(s string) uint32 {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(strings.ToLower(s)))
@@ -188,14 +182,8 @@ func order(a map[string]any, now time.Time) obj {
 		{"total", obj{{"amount", cents(total)}, {"currency", "USD"}}}}
 }
 
-// cents writes an amount of cents as a decimal number of dollars.
 func cents(c int) any { return number(float64(c) / 100) }
 
-// ---- calculate ----------------------------------------------------------------
-
-// evaluate computes an arithmetic expression: numbers, + - * / % ^ (or **),
-// parentheses, unary signs, the constants pi and e, and sqrt, abs, round,
-// floor, ceil, min, max.
 func evaluate(s string) (float64, error) {
 	if strings.TrimSpace(s) == "" {
 		return 0, fmt.Errorf("Give an expression.")
@@ -300,7 +288,7 @@ func (p *parser) power() (float64, error) {
 		return base, err
 	}
 	p.i++
-	exp, err := p.unary() // right-associative: 2^3^2 = 2^9
+	exp, err := p.unary()
 	return math.Pow(base, exp), err
 }
 

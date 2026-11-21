@@ -1,12 +1,3 @@
-// Package rules is the Failure Rule engine, a deep pure module: given a
-// failed Attempt (status or network failure, headers, body, Provider and
-// Endpoint host) and the time, it says which Failure Rule matched and what
-// that means for the Upstream Key, the model and the Request. It does no I/O.
-//
-// Rules are data (ADR-0005). The built-in ones are entries in builtin.go;
-// rules agents add through the admin API (ticket 06) are the same Rule
-// values, merged over the built-ins by name (Merge) and compiled into a Set.
-// Adding a built-in rule for a provider quirk is adding one Rule literal.
 package rules
 
 import (
@@ -23,47 +14,25 @@ import (
 	"github.com/hoangvu12/iroha/internal/hosts"
 )
 
-// Outcome is what a matched rule decides.
 type Outcome string
 
-// Outcomes. The Gateway acts on each: invalid and the cooling outcomes
-// change the Upstream Key's Key State, model_gap records a Model Gap
-// (ticket 08), and all but fail_request try the next candidate.
 const (
-	// Invalid: the Provider refused the key itself (revoked, account
-	// closed). The key stays out until a test passes or its secret changes.
-	Invalid Outcome = "invalid"
-	// CoolingKey: the key is refused for every model until a reset time.
-	CoolingKey Outcome = "cooling_key"
-	// CoolingKeyModel: the key is refused for this model until a reset
-	// time; it keeps serving other models. Three distinct models within
-	// five minutes escalate to CoolingKey.
+	Invalid         Outcome = "invalid"
+	CoolingKey      Outcome = "cooling_key"
 	CoolingKeyModel Outcome = "cooling_key_model"
-	// ModelGap: the key cannot serve this model at all (entitlement).
-	ModelGap Outcome = "model_gap"
-	// RetryElsewhere: a passing failure (5xx, network); try the next
-	// candidate and change nothing.
-	RetryElsewhere Outcome = "retry_elsewhere"
-	// FailRequest: the request itself is at fault (400); trying another key
-	// would fail the same way, so the Caller gets the Provider's answer.
-	FailRequest Outcome = "fail_request"
+	ModelGap        Outcome = "model_gap"
+	RetryElsewhere  Outcome = "retry_elsewhere"
+	FailRequest     Outcome = "fail_request"
 )
 
-// Outcomes lists every Outcome, for validation and documentation.
 var Outcomes = []Outcome{Invalid, CoolingKey, CoolingKeyModel, ModelGap, RetryElsewhere, FailRequest}
 
-// OutcomeEnum is the enum tag value for API documents.
 const OutcomeEnum = "invalid,cooling_key,cooling_key_model,model_gap,retry_elsewhere,fail_request"
 
-// Cools reports whether the outcome puts the key (or the key for one model)
-// into Cooling.
 func (o Outcome) Cools() bool { return o == CoolingKey || o == CoolingKeyModel }
 
-// Retries reports whether the Request moves on to the next candidate.
 func (o Outcome) Retries() bool { return o != FailRequest }
 
-// Rule is one Failure Rule. Every condition given must hold; a rule needs
-// at least one of Status, Code, Body or Header.
 type Rule struct {
 	Name           string            `json:"name" doc:"Unique name. A rule added with the name of a built-in rule overrides it."`
 	Description    string            `json:"description,omitempty" doc:"What the rule recognises and why it decides as it does."`
@@ -78,32 +47,23 @@ type Rule struct {
 	Reset          []string          `json:"reset,omitempty" doc:"For cooling outcomes: where the response names its reset time, tried in order before the Retry-After header: header:<name>, json:<dotted.path>, or body:<regexp> whose first group captures it from the body text. Values may be seconds to wait, a Unix time (seconds or milliseconds), an RFC 3339 or HTTP date, or a duration such as 6m0s."`
 }
 
-// Scoped reports whether the rule is limited to a Provider or a host.
 func (r Rule) Scoped() bool { return r.Provider != "" || r.Host != "" }
 
-// Failure is one failed Attempt as the engine sees it.
 type Failure struct {
 	Provider string // handle of the Provider
 	Host     string // host of the Endpoint URL
-	// Status is the upstream HTTP status; 0 when no response arrived. A 2xx
-	// status with an error body (see EmbeddedError) is read as the status
-	// the error stands for.
+	// Status is the upstream HTTP status; 0 when no response arrived.
 	Status  int
-	Timeout bool        // no response arrived within the Request's time budget
-	Err     string      // what went wrong when no response arrived
-	Header  http.Header // response headers
-	Body    []byte      // response body (the engine reads at most MaxBody bytes)
+	Timeout bool
+	Err     string
+	Header  http.Header
+	Body    []byte
 }
 
-// Decision is what the engine decided about a Failure.
 type Decision struct {
-	Rule    string  // name of the matched rule; "" when none matched
-	Outcome Outcome // what to do
-	// Reason is one line saying what the Provider answered, such as
-	// "429 rate_limit_exceeded: Slow down" or "timeout: no response in 60 s".
-	Reason string
-	// ResetAt is when a cooling ends, read from the response; zero when the
-	// response names no reset time.
+	Rule    string // name of the matched rule; "" when none matched
+	Outcome Outcome
+	Reason  string
 	ResetAt time.Time
 	// Cooling is the rule's fixed cooling duration; zero for the default.
 	Cooling time.Duration
@@ -113,14 +73,11 @@ type Decision struct {
 	Status int
 }
 
-// MaxBody is how much of a failure body the engine reads.
 const MaxBody = 16 << 10
 
-// MaxReset caps a reset time read from a response.
 const MaxReset = 7 * 24 * time.Hour
 
-// Set is a compiled list of rules in the order they are tried. It is
-// immutable and safe for concurrent use.
+// Set is immutable and safe for concurrent use.
 type Set struct {
 	rules []compiled
 }
@@ -134,22 +91,21 @@ type compiled struct {
 	reset  []resetSource
 }
 
-// resetSource is one place a response may name its reset time.
 type resetSource struct {
-	kind, arg string         // header, json or body
-	re        *regexp.Regexp // body: the first group captures the time
+	kind, arg string
+	re        *regexp.Regexp
 }
 
 type statusPattern struct {
 	exact   int
-	class   int // 1..5 for "1xx".."5xx"
+	class   int
 	network bool
 	timeout bool
 }
 
 type headerCond struct {
 	name string
-	re   *regexp.Regexp // nil: presence is enough
+	re   *regexp.Regexp
 }
 
 // Compile validates rules and orders them: rules limited to a Provider or
@@ -176,7 +132,6 @@ func Compile(rules []Rule) (*Set, error) {
 	return &Set{rules: append(scoped, global...)}, nil
 }
 
-// MustCompile is Compile for rules known to be valid (the built-ins).
 func MustCompile(rules []Rule) *Set {
 	s, err := Compile(rules)
 	if err != nil {
@@ -185,7 +140,6 @@ func MustCompile(rules []Rule) *Set {
 	return s
 }
 
-// Validate checks one rule without compiling a Set.
 func Validate(r Rule) error {
 	_, err := compile(r)
 	return err
@@ -291,7 +245,6 @@ func parseStatus(s string) (statusPattern, bool) {
 	return statusPattern{exact: n}, true
 }
 
-// Rules returns the rules in the order they are tried.
 func (s *Set) Rules() []Rule {
 	out := make([]Rule, len(s.rules))
 	for i, c := range s.rules {
@@ -306,7 +259,7 @@ func (s *Set) Rules() []Rule {
 //
 // An error that arrived inside a 2xx answer (an error event at the start of a
 // stream, or an error object in a 200 body) is read as the status it stands
-// for (EmbeddedStatus), so it matches the same rules as the plain answer.
+// for, so it matches the same rules as the plain answer.
 // A body that is a server-sent event stream is read by its first JSON data
 // payload.
 func (s *Set) Classify(f Failure, now time.Time) Decision {
@@ -378,10 +331,6 @@ func baseRespCode(obj map[string]any) string {
 	return ""
 }
 
-// embeddedStatus is the HTTP status an error inside a 2xx answer stands for:
-// a numeric error code or status in 400..599, else the status its error type
-// or code names (Anthropic's error types, OpenAI's codes, Google's statuses),
-// else 502, a failure of the Provider.
 func embeddedStatus(doc any) int {
 	obj := rootObject(doc)
 	if obj == nil {
@@ -424,15 +373,12 @@ func rootObject(doc any) map[string]any {
 	return obj
 }
 
-// input is what matching reads of a Failure, parsed once.
 type input struct {
-	body    []byte
-	doc     any // the body as JSON (a stream's first JSON data payload), nil when it is not JSON
-	codes   []string
-	message string
-	// text is what a body condition reads: the error's own fields when the
-	// body is JSON (errorText), the body itself otherwise (FAIL-49).
-	text []byte
+	body        []byte
+	doc         any
+	codes       []string
+	message     string
+	patternText []byte
 }
 
 func newInput(f Failure) *input {
@@ -485,20 +431,14 @@ func newInput(f Failure) *input {
 	if in.message == "" && in.doc == nil {
 		in.message = strings.TrimSpace(string(trimmed))
 	}
-	in.text = in.body
+	in.patternText = in.body
 	if in.doc != nil {
-		in.text = []byte(errorText(obj))
+		in.patternText = []byte(errorFieldsText(obj))
 	}
 	return in
 }
 
-// errorText is the human- and machine-readable part of a JSON error body,
-// the only part a body condition reads (as v1 did): the top-level error,
-// message, code, type, detail, msg and status, the same fields of the error
-// (or errors) object, and MiniMax's base_resp.status_msg. So a body that
-// merely echoes the request's "model" field, or has a field named "quota",
-// does not read as a refusal naming a model or billing.
-func errorText(obj map[string]any) string {
+func errorFieldsText(obj map[string]any) string {
 	if obj == nil {
 		return ""
 	}
@@ -529,7 +469,6 @@ func errorText(obj map[string]any) string {
 	return strings.Join(parts, "\n")
 }
 
-// scalar renders a JSON string or number as text.
 func scalar(v any) string {
 	switch x := v.(type) {
 	case string:
@@ -555,7 +494,7 @@ func (c *compiled) matches(f Failure, in *input) bool {
 	if len(c.codes) > 0 && !slices.ContainsFunc(c.codes, in.hasCode) {
 		return false
 	}
-	if c.body != nil && !c.body.Match(in.text) {
+	if c.body != nil && !c.body.Match(in.patternText) {
 		return false
 	}
 	for _, h := range c.header {
@@ -570,8 +509,6 @@ func (c *compiled) matches(f Failure, in *input) bool {
 	return true
 }
 
-// hasCode reports whether the body names code; a code ending in * matches
-// every code it begins.
 func (in *input) hasCode(code string) bool {
 	if prefix, ok := strings.CutSuffix(code, "*"); ok {
 		return slices.ContainsFunc(in.codes, func(c string) bool { return strings.HasPrefix(c, prefix) })
@@ -579,8 +516,6 @@ func (in *input) hasCode(code string) bool {
 	return slices.Contains(in.codes, code)
 }
 
-// MatchesHost reports whether the rule applies to an Endpoint on host: it
-// names no host, or host is one of its hosts or a subdomain of one.
 func (r Rule) MatchesHost(host string) bool {
 	if strings.TrimSpace(r.Host) == "" {
 		return true
@@ -618,9 +553,6 @@ func (p statusPattern) matches(f Failure) bool {
 	return f.Status == p.exact
 }
 
-// reason is the one-line description of what the Provider answered. f.Status
-// is the status the failure is read as; embedded says the Provider sent the
-// error inside a 2xx answer.
 func (in *input) reason(f Failure, embedded bool) string {
 	s := in.statusReason(f)
 	if embedded {
@@ -667,7 +599,6 @@ func clip(s string, n int) string {
 
 func utf8Start(b byte) bool { return b&0xC0 != 0x80 }
 
-// resetTime reads the reset time from the rule's sources, then Retry-After.
 func resetTime(sources []resetSource, h http.Header, in *input, now time.Time) time.Time {
 	all := append(slices.Clone(sources), resetSource{kind: "header", arg: "retry-after-ms"}, resetSource{kind: "header", arg: "retry-after"})
 	for _, src := range all {
@@ -695,7 +626,6 @@ func resetTime(sources []resetSource, h http.Header, in *input, now time.Time) t
 	return time.Time{}
 }
 
-// lookup follows a dotted path through JSON objects (and array indexes).
 func lookup(doc any, path string) any {
 	cur := doc
 	if arr, ok := cur.([]any); ok && len(arr) > 0 && !strings.HasPrefix(path, "0") {
@@ -733,9 +663,9 @@ func ParseReset(v string, now time.Time) (time.Time, bool) {
 		switch {
 		case n < 0:
 			return time.Time{}, false
-		case n >= 1e12: // Unix milliseconds
+		case n >= smallestUnixMillis:
 			return capReset(time.UnixMilli(int64(n)), now), true
-		case n >= 1e9: // Unix seconds
+		case n >= smallestUnixSeconds:
 			return capReset(time.Unix(int64(n), 0), now), true
 		}
 		return capReset(now.Add(time.Duration(n*float64(time.Second))), now), true
@@ -754,6 +684,11 @@ func ParseReset(v string, now time.Time) (time.Time, bool) {
 	}
 	return time.Time{}, false
 }
+
+const (
+	smallestUnixMillis  = 1e12
+	smallestUnixSeconds = 1e9
+)
 
 func capReset(t, now time.Time) time.Time {
 	if t.Before(now) {

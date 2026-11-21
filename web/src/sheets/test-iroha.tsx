@@ -4,14 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import { vi } from "vitest";
 import { ChatPanelProvider } from "@/app/chat-panel";
+import { ChatSheet } from "@/app/ChatSheet";
 import { SheetStack } from "./SheetStack";
 import { SheetStackProvider } from "./stack";
 
-// Sheet bodies load lazily and slide out before they unmount: on a busy run that takes longer than 1 s.
 configure({ asyncUtilTimeout: 4000 });
-
-// A fake Iroha for sheet tests: one Provider (acme) with an Endpoint and two
-// keys, a Gateway Key, a Pool and a Request served through them.
 
 const at = "2026-11-19T10:00:00Z";
 const endpoint = {
@@ -126,25 +123,17 @@ export function fakeIroha() {
   return fetch;
 }
 
-/**
- * The sheet named `name` once its body has loaded. While a body's chunk
- * loads, the stack shows a fallback with its own bar and the same name, and
- * the body's bar (the one with "Open page") replaces it: a button found in
- * the fallback can be gone by the time a click reaches it (busy runs).
- */
 export async function loadedSheet(name: string): Promise<HTMLElement> {
   const sheet = await screen.findByRole("dialog", { name });
   await within(sheet).findByRole("link", { name: "Open page" });
   return sheet;
 }
 
-/** The URL the router is at, for assertions. */
 export function Where() {
   const l = useLocation();
   return <output aria-label="Location">{decodeURIComponent(l.pathname + l.search)}</output>;
 }
 
-/** Renders `page` at `url` with the sheet stack, the chat panel slot and a fake Iroha. */
 export function renderWithSheets(page: ReactNode, url = "/page") {
   const fetch = fakeIroha();
   const router = createMemoryRouter(
@@ -156,6 +145,7 @@ export function renderWithSheets(page: ReactNode, url = "/page") {
             <SheetStackProvider>
               {page}
               <Where />
+              <ChatSheet hidden={false}>{null}</ChatSheet>
               <SheetStack />
             </SheetStackProvider>
           </ChatPanelProvider>

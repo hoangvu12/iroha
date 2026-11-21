@@ -79,15 +79,12 @@ test("with no model, the button opens the model search; arrows and Enter pick on
   await user.type(search, "o3");
   await within(popover).findByRole("option", { name: /^o3/ });
   await waitFor(() => expect(within(popover).queryByRole("option", { name: /gpt-4o/ })).toBeNull());
-  // First comes the typed ID itself, then the matches.
   expect(within(popover).getAllByRole("option")[0].textContent).toContain("Use “o3”");
   await user.keyboard("{ArrowDown}{Enter}");
   expect(latest.model).toBe("openai/o3");
-  // Back on the settings list, still open.
   await within(popover).findByRole("button", { name: /Shape/ });
 });
 
-/** Each model group's heading in order, without its logo and count. */
 const groupNames = (popover: HTMLElement) =>
   within(popover)
     .getAllByRole("group")
@@ -106,7 +103,6 @@ test("with a Provider's model picked, its models come first under its name, then
   await within(popover).findByRole("option", { name: /gpt-4o/ });
   expect(groupNames(popover)).toEqual(["zai", "Model Pools", "openai"]);
   expect(modelSearches.at(-1)?.searchParams.get("prefer")).toBe("zai/");
-  // The Owner can still pick any model.
   await user.type(within(popover).getByRole("combobox", { name: "Search models" }), "glm");
   await waitFor(() => expect(within(popover).queryByRole("option", { name: /gpt-4o/ })).toBeNull());
   expect(groupNames(popover)).toEqual(["zai", "Model Pools"]);
@@ -151,7 +147,6 @@ test("an agent reads the picker by names and changes its settings", async () => 
   renderComposer({ ...DEFAULT_SETTINGS, model: "openai/o3" });
   await user.click(screen.getByRole("button", { name: "Model openai/o3. Settings" }));
   await screen.findByRole("dialog", { name: "Model and settings" });
-  // Scroll areas are not controls; everything else needs a name.
   const components = agent.snapshot().filter((e) => !e.offPage && e.component !== "more" && e.component !== "scroll-area");
   for (const entry of components) expect(entry.label, `${entry.component} ${entry.ref} has no name`).toBeTruthy();
   const run = await agent.act({

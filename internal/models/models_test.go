@@ -18,8 +18,6 @@ func chat(model string) map[string]any {
 	return map[string]any{"model": model, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
 }
 
-// addProvider creates Provider acme with one OpenAI Chat Endpoint at url and
-// an Upstream Key per secret; extra fields go into the Provider's create body.
 func addProvider(t *testing.T, srv *testkit.Server, url string, extra map[string]any, secrets ...string) {
 	t.Helper()
 	body := map[string]any{"handle": "acme"}
@@ -80,7 +78,6 @@ func callerModels(t *testing.T, c *testkit.Client, handle string) string {
 	return strings.Join(ids, ",")
 }
 
-// inference counts the chat requests a fake received (not model lists).
 func inference(up *testkit.Upstream) int {
 	n := 0
 	for _, r := range up.Requests() {
@@ -97,7 +94,6 @@ func TestDiscoveryFillsTheListAndCallersSeeIt(t *testing.T) {
 	up.SetModels("gpt-b", "gpt-a", "gpt-a")
 	addProvider(t, srv, up.URL(), nil, "sk-test-one")
 
-	// Nothing is discovered until a refresh (or the daily job) runs.
 	if l := list(t, srv, ""); len(l.Models) != 0 || l.Discovery != "provider" || l.Strict || l.LastRefresh != nil {
 		t.Fatalf("list before refresh = %+v", l)
 	}
@@ -176,7 +172,6 @@ func TestDiscoveryAcceptsModelsArraysCustomURLsAndNone(t *testing.T) {
 		t.Fatalf("list = %+v", l)
 	}
 
-	// Discovery none: nothing is read and the list stays as it is.
 	srv.Admin.Patch("/api/providers/acme", map[string]any{"discovery": "none"}).Expect(200)
 	if r := refresh(t, srv); r.Outcome != "skipped" || !strings.Contains(r.Summary, "off") {
 		t.Fatalf("refresh with discovery none = %+v", r)
@@ -243,7 +238,6 @@ func TestFailedDiscoveryKeepsThePreviousListAndIsLogged(t *testing.T) {
 		t.Fatalf("first failure not logged with its status")
 	}
 
-	// A list that no longer names a model drops it.
 	up.Handle("GET", "/v1/models", testkit.JSON(200, map[string]any{"data": []any{map[string]any{"id": "m2"}}}))
 	if r := refresh(t, srv); r.Outcome != "ok" || strings.Join(r.Removed, ",") != "m1" {
 		t.Fatalf("refresh = %+v", r)
@@ -270,7 +264,6 @@ func TestOwnerAdditionsSurviveRefreshesAndAreAudited(t *testing.T) {
 	if res.Outcome != "unchanged" || res.AuditEntry != "" {
 		t.Fatalf("second add = %+v", res)
 	}
-	// Adding a discovered model marks it too, so it outlives discovery.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "m1", "added": true}).Expect(201)
 
 	up.SetModels("m9")
@@ -286,7 +279,6 @@ func TestOwnerAdditionsSurviveRefreshesAndAreAudited(t *testing.T) {
 		t.Fatalf("caller list = %s", got)
 	}
 
-	// Reverting the addition takes the model off again; revert of a revert puts it back.
 	var page audit.EntryPage
 	srv.Admin.Get("/api/audit-entries?record=acme/secret-model").Expect(200).JSON(&page)
 	if len(page.Entries) != 1 || page.Entries[0].Action != "model.change" || page.Entries[0].Changes[0].Resource != "model" {
@@ -297,7 +289,6 @@ func TestOwnerAdditionsSurviveRefreshesAndAreAudited(t *testing.T) {
 		t.Fatalf("list after revert = %s", names(l))
 	}
 
-	// Taking an addition off a model discovery does not find deletes it.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "m1", "added": false}).Expect(200).JSON(&res)
 	if res.Outcome != "deleted" || res.Model.Added || res.Model.Visible {
 		t.Fatalf("remove = %+v", res)
@@ -305,8 +296,6 @@ func TestOwnerAdditionsSurviveRefreshesAndAreAudited(t *testing.T) {
 	if l := list(t, srv, ""); names(l) != "m9" {
 		t.Fatalf("list = %s", names(l))
 	}
-	// MOD-61: taking an addition off a model discovery still finds keeps it,
-	// visible and discovered.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "m9", "added": true}).Expect(201)
 	res = models.ModelResult{}
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "m9", "added": false}).Expect(200).JSON(&res)
@@ -358,7 +347,6 @@ func TestHiddenModelsAreRefusedAndUnlisted(t *testing.T) {
 	}
 	caller.Post(chatPath, chat("m1")).Expect(200)
 
-	// Hidden survives refreshes; showing it again lets it through.
 	refresh(t, srv)
 	caller.Post(chatPath, chat("m2")).Expect(404)
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "m2", "hidden": false}).Expect(200)
@@ -376,7 +364,6 @@ func TestStrictProvidersRefuseUnlistedModelsOthersForwardThem(t *testing.T) {
 	refresh(t, srv)
 	caller := issue(t, srv, "pi", all)
 
-	// Not strict (the default): an unlisted model is forwarded.
 	caller.Post(chatPath, chat("aggregator/alias")).Expect(200)
 	if up.Last().Model != "aggregator/alias" {
 		t.Fatalf("unlisted model not forwarded")
@@ -399,7 +386,6 @@ func TestStrictProvidersRefuseUnlistedModelsOthersForwardThem(t *testing.T) {
 	}
 	caller.Post(chatPath, chat("listed")).Expect(200)
 
-	// Owner additions and Endpoint renames name models on purpose.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "hand-added"}).Expect(201)
 	caller.Post(chatPath, chat("hand-added")).Expect(200)
 	srv.Admin.Patch("/api/providers/acme/endpoints/default", map[string]any{"renames": map[string]string{"nice-name": "listed"}}).Expect(200)
@@ -409,7 +395,6 @@ func TestStrictProvidersRefuseUnlistedModelsOthersForwardThem(t *testing.T) {
 	}
 }
 
-// perKey answers GET /v1/models with a list per key (by bearer).
 type perKey struct {
 	mu    sync.Mutex
 	lists map[string][]string
@@ -467,8 +452,6 @@ func TestPerKeyListsPutCarriersFirstAndClearModelGaps(t *testing.T) {
 		t.Fatalf("list = %+v", l)
 	}
 
-	// Whatever the rotation, the carrier of big goes first; the other keys
-	// still follow (a list never excludes a key).
 	up.Default(func(r *testkit.Received) testkit.Reply { return up.Error(503, "busy")(r) })
 	for i := 0; i < 3; i++ {
 		from := len(up.Requests())
@@ -478,8 +461,6 @@ func TestPerKeyListsPutCarriersFirstAndClearModelGaps(t *testing.T) {
 		}
 	}
 
-	// key-1 is refused big (a Model Gap); once its own list names big, the
-	// next refresh clears the gap.
 	up.Default(func(r *testkit.Received) testkit.Reply {
 		if r.Bearer() == "sk-test-a" && r.Model == "big" {
 			return up.ErrorCode(404, "model_not_found", "The model big does not exist.")(r)
@@ -504,12 +485,10 @@ func TestPerKeyListsPutCarriersFirstAndClearModelGaps(t *testing.T) {
 	if l := list(t, srv, "filter=gaps"); l.Total != 0 {
 		t.Fatalf("gap still listed: %+v", l)
 	}
-	// Disabled keys' lists are kept (not read, not dropped).
 	if l := list(t, srv, "q=big"); strings.Join(l.Models[0].UpstreamKeys, ",") != "key-1,key-2" {
 		t.Fatalf("carriers = %+v", l.Models[0])
 	}
 
-	// Switching to per-Provider discovery drops the per-key lists at the next refresh.
 	srv.Admin.Patch("/api/providers/acme", map[string]any{"discovery": "provider"}).Expect(200)
 	refresh(t, srv)
 	if l := list(t, srv, ""); names(l) != "big,small" || len(l.Models[0].UpstreamKeys) != 0 {
@@ -601,8 +580,6 @@ func TestModelListSearchFilterAndPaging(t *testing.T) {
 	srv.Admin.Get("/api/providers/acme/models?filter=odd").Expect(400)
 }
 
-// UI ticket 33: the Model sheet reads one entry by its model ID (which may
-// hold slashes), with the same fields as the list.
 func TestOneModelIsReadByItsID(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -616,7 +593,6 @@ func TestOneModelIsReadByItsID(t *testing.T) {
 	if m.Model != "gpt-a" || !m.Discovered || !m.Hidden || m.Visible || strings.Join(m.Endpoints, ",") != "default" || m.Overrides.ContextLength == nil || *m.Overrides.ContextLength != 64000 || m.Metadata.ContextLength == nil || *m.Metadata.ContextLength != 64000 {
 		t.Fatalf("gpt-a = %+v", m)
 	}
-	// Slashes stay in the ID, escaped or not; the Provider is named by handle or ID.
 	var p struct{ ID string }
 	srv.Admin.Get("/api/providers/acme").Expect(200).JSON(&p)
 	for _, path := range []string{"/api/providers/acme/models/meta-llama/llama-3.3-70b", "/api/providers/" + p.ID + "/models/meta-llama%2Fllama-3.3-70b"} {
@@ -626,7 +602,6 @@ func TestOneModelIsReadByItsID(t *testing.T) {
 			t.Fatalf("%s = %+v", path, m)
 		}
 	}
-	// A model the list doesn't hold, and a Provider that doesn't exist, are 404s that say what to do.
 	r := srv.Admin.Get("/api/providers/acme/models/nope").Expect(404)
 	if !strings.Contains(r.Text(), "POST /api/providers/acme/models") {
 		t.Fatalf("404 = %s", r.Text())

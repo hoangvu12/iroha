@@ -11,16 +11,11 @@ import (
 	"github.com/hoangvu12/iroha/internal/keystate"
 )
 
-// Endpoint Gaps (ticket 40, keystate/endpointgaps.go): listing them,
-// clearing them by hand, and restricting a key to the Endpoints it works on.
-
-// EndpointGapEntry is one Endpoint Gap of a Provider's key.
 type EndpointGapEntry struct {
 	UpstreamKey string `json:"upstream_key" doc:"Name of the key."`
 	keystate.EndpointGap
 }
 
-// EndpointGapList is the response of GET /api/providers/{provider}/endpoint-gaps.
 type EndpointGapList struct {
 	EndpointGaps []EndpointGapEntry `json:"endpoint_gaps"`
 }
@@ -130,10 +125,8 @@ func (h handlers) endpointGapRoutes() []api.Route {
 	}
 }
 
-// keyChange is one audited change of key id of Provider p.
 type keyChange func(m *audit.Mutation, p ref, id string, sl *stateLogs) (UpstreamKey, error)
 
-// oneKey runs fn on the key the call addresses as one audited change.
 func (h handlers) oneKey(c *api.Call, action, verb string, fn keyChange) (UpstreamKeyResult, error) {
 	var out UpstreamKey
 	var p ref
@@ -156,7 +149,6 @@ func (h handlers) oneKey(c *api.Call, action, verb string, fn keyChange) (Upstre
 	return UpstreamKeyResult{Result: res, UpstreamKey: out}, err
 }
 
-// manyKeys runs fn on each key of a bulk body, one Audit Entry for all.
 func (h handlers) manyKeys(c *api.Call, action, verb string, fn keyChange) (audit.BulkResult[UpstreamKey], error) {
 	var in audit.BulkRequest[string]
 	if err := c.Decode(&in); err != nil {
@@ -180,8 +172,6 @@ func (h handlers) manyKeys(c *api.Call, action, verb string, fn keyChange) (audi
 	return res, err
 }
 
-// clearKeyEndpointGaps clears key id's Endpoint Gaps (only the one on
-// endpoint, a name or ID, when set) by hand.
 func (h handlers) clearKeyEndpointGaps(m *audit.Mutation, p ref, id, endpoint string, sl *stateLogs) (UpstreamKey, error) {
 	epID := ""
 	if endpoint != "" {
@@ -200,9 +190,6 @@ func (h handlers) clearKeyEndpointGaps(m *audit.Mutation, p ref, id, endpoint st
 	return readKey(m.Ctx, m.Tx, id, m.Now)
 }
 
-// restrictToWorking restricts key id to the Endpoints it may use now minus
-// those it has an Endpoint Gap on. The restriction edit clears the gaps
-// (updateKey), tracked in the same Audit Entry.
 func (h handlers) restrictToWorking(m *audit.Mutation, p ref, id string, sl *stateLogs) (UpstreamKey, error) {
 	k, err := readKey(m.Ctx, m.Tx, id, m.Now)
 	if err != nil {
@@ -237,10 +224,6 @@ func (h handlers) restrictToWorking(m *audit.Mutation, p ref, id string, sl *sta
 	return h.updateKey(m, p, id, UpdateUpstreamKey{Endpoints: &working}, sl)
 }
 
-// clearEndpointGaps deletes a key's Endpoint Gaps (only the one on
-// endpointID when set) inside an audited mutation, tracking each so the
-// Audit Entry can put it back. The events are logged with the mutation's
-// other state logs once it commits.
 func clearEndpointGaps(m *audit.Mutation, p ref, id, name, endpointID, why string, sl *stateLogs) error {
 	evs, err := keystate.ClearEndpointGaps(m.Ctx, m.Tx, keystate.Key{ID: id, Name: name, Provider: p.handle}, endpointID, why,
 		func(gid string) error { return m.Track(keystate.EndpointGapResource, gid) })

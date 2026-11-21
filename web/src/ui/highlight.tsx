@@ -1,22 +1,10 @@
 import type { ReactNode } from "react";
 import { memo, useMemo } from "react";
 
-// Syntax highlighting for code blocks (UI ticket 23): a small tokenizer
-// instead of a library. Everything Iroha shows is JSON (bodies, Audit Entry
-// values), headers, a stream's events, or a snippet Iroha itself wrote (curl,
-// Python, TypeScript), so a handful of regular expressions colour all of it;
-// Prism with these grammars would cost ~9 KB gzipped and a global, this ~1.5.
-// Colours are the --code-* tokens in styles/index.css (light and dark).
-
 export type Lang = "json" | "python" | "typescript" | "shell" | "headers" | "sse" | "text";
 export type TokenKind = "key" | "string" | "number" | "literal" | "keyword" | "function" | "comment";
 export type Token = { text: string; kind?: TokenKind };
 
-/**
- * Text longer than this is shown plain: a few hundred KB of coloured spans
- * would take the page seconds to lay out. Highlighting below it takes a few
- * milliseconds.
- */
 export const HIGHLIGHT_LIMIT = 100_000;
 
 const STRING = String.raw`"(?:[^"\\\n]|\\.)*"`;
@@ -24,10 +12,8 @@ const NUMBER = String.raw`-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b`;
 
 type Rule = [kind: TokenKind | ((m: string, groups: (string | undefined)[]) => Token[]), source: string];
 
-/** One lexer: alternatives tried left to right at each position; text between matches stays plain. */
 function lexer(rules: Rule[]) {
   const re = new RegExp(rules.map(([, s]) => `(${s})`).join("|"), "g");
-  // Where each rule's group starts, and how many groups of its own it has.
   const inner = rules.map(([, s]) => new RegExp(`${s}|`).exec("")!.length - 1);
   const starts: number[] = [];
   inner.reduce((g, n) => (starts.push(g), g + 1 + n), 1);
@@ -52,14 +38,12 @@ function lexer(rules: Rule[]) {
   };
 }
 
-/** Adds plain text, joined to plain text before it (fewer nodes). */
 function plain(out: Token[], text: string) {
   const prev = out[out.length - 1];
   if (prev && !prev.kind) prev.text += text;
   else out.push({ text });
 }
 
-/** A string followed by a colon is a key: `"model": ...`. */
 const stringOrKey: Rule = [(_, [str, colon]) => [{ text: str!, kind: colon !== undefined ? "key" : "string" }, ...(colon ? [{ text: colon }] : [])], `(${STRING})(\\s*:)?`];
 
 const json = lexer([stringOrKey, ["number", NUMBER], ["literal", String.raw`\b(?:true|false|null)\b`]]);
@@ -75,7 +59,6 @@ const python = lexer([
   ["literal", words("True False None")],
   ["number", NUMBER],
   call,
-  // A keyword argument: name=value (not ==).
   ["key", String.raw`\b[A-Za-z_]\w*(?==(?!=))`],
 ]);
 
@@ -87,21 +70,18 @@ const typescript = lexer([
   ["literal", words("true false null undefined")],
   ["number", NUMBER],
   call,
-  // An object key: name: value.
   ["key", String.raw`\b[A-Za-z_$][\w$]*(?=:)`],
 ]);
 
 const shell = lexer([
   ["comment", String.raw`(?:^|(?<=\s))#.*`],
   ["string", String.raw`'[^']*'|"(?:[^"\\]|\\.)*"`],
-  // The command at the start of a line.
   ["function", String.raw`^[A-Za-z_][\w.-]*`],
   ["keyword", String.raw`(?<=\s)--?[A-Za-z][\w-]*`],
 ]);
 
 const headerLine = lexer([["key", String.raw`^[^:\n]+(?=:)`]]);
 
-/** Runs a line-anchored lexer per line (`^` means the line's start). */
 function lexLines(text: string, lex: (t: string, out?: Token[]) => Token[]): Token[] {
   const out: Token[] = [];
   const lines = text.split("\n");
@@ -112,7 +92,6 @@ function lexLines(text: string, lex: (t: string, out?: Token[]) => Token[]): Tok
   return out;
 }
 
-/** A stream as sent: `event: x`, `data: {json}`, `: comment`. */
 function sse(text: string): Token[] {
   return lexLines(text, (line, out = []) => {
     if (line.startsWith(":")) {
@@ -132,7 +111,6 @@ function sse(text: string): Token[] {
   });
 }
 
-/** The text split into tokens; joined back it is the same text. */
 export function tokens(text: string, lang: Lang): Token[] {
   switch (lang) {
     case "json":
@@ -152,7 +130,6 @@ export function tokens(text: string, lang: Lang): Token[] {
   }
 }
 
-/** JSON, a stream, or other text (an HTML error page): what a body looks like. */
 export function langOf(text: string): Lang {
   const start = text.trimStart();
   if (start.startsWith("{") || start.startsWith("[")) return "json";
@@ -170,7 +147,6 @@ const colour: Record<TokenKind, string> = {
   comment: "text-code-comment",
 };
 
-/** Text coloured by `lang`; plain above HIGHLIGHT_LIMIT. Renders a fragment, so put it in a `<pre>` or `<code>`. */
 export const Code = memo(function Code({ text, lang }: { text: string; lang: Lang }) {
   const nodes = useMemo((): ReactNode => {
     if (lang === "text" || text.length > HIGHLIGHT_LIMIT) return text;

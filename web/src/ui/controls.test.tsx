@@ -104,7 +104,6 @@ test("Switch moves on the motion tokens: the thumb slides on press timing, the t
   const classes = (el: Element) => el.getAttribute("class")!.split(/\s+/);
   for (const k of ["transition-[translate]", "duration-press", "ease-out"]) expect(classes(thumb)).toContain(k);
   for (const k of ["transition-colors", "duration-hover", "ease-[ease]"]) expect(classes(track)).toContain(k);
-  // The tokens hold the thumb still under reduced motion (press is 0) and keep the colour fade.
   for (const el of [track, thumb]) expect(classes(el).filter((c) => c === "transition-transform" || c === "motion-reduce:transition-none" || /^duration-\d/.test(c))).toEqual([]);
 });
 

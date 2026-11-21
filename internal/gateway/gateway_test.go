@@ -17,8 +17,6 @@ import (
 
 const chatPath = "/providers/acme/v1/chat/completions"
 
-// addProvider creates a Provider with one OpenAI Chat Endpoint at up and an
-// Upstream Key per secret, through the admin API.
 func addProvider(t *testing.T, srv *testkit.Server, handle string, url string, secrets ...string) {
 	t.Helper()
 	srv.Admin.Post("/api/providers", map[string]any{"handle": handle}).Expect(201)
@@ -28,7 +26,6 @@ func addProvider(t *testing.T, srv *testkit.Server, handle string, url string, s
 	}
 }
 
-// issue creates a Gateway Key and returns its secret.
 func issue(t *testing.T, srv *testkit.Server, name string, scope any) string {
 	t.Helper()
 	var out struct {
@@ -63,13 +60,10 @@ func TestNonStreamedChatPassesThroughWithTheRequestedModelAndIsRecorded(t *testi
 	body := `{"model":"gpt-x",  "messages":[{"role":"user","content":"hi"}], "vendor_extra":{"a":[1,2]}}`
 	resp := caller.Post(chatPath, body).Expect(200)
 
-	// The upstream got the Caller's bytes untouched (plus the conversation's
-	// prompt_cache_key appended, prompt caching 04), with the Upstream Key.
 	got := up.Last()
 	if callerBytes(t, got.Body) != body || got.Path != "/v1/chat/completions" || got.Bearer() != "sk-test-one" {
 		t.Fatalf("upstream got path %s bearer %q body %s", got.Path, got.Bearer(), got.Body)
 	}
-	// The answer passes through, naming the model asked for.
 	m := resp.Map()
 	if m["model"] != "gpt-x" || m["provider_extra"] != "kept" || resp.Header.Get("Content-Type") != "application/json" {
 		t.Fatalf("answer = %s (content type %q)", resp.Body, resp.Header.Get("Content-Type"))
@@ -108,8 +102,6 @@ func TestNonStreamedChatPassesThroughWithTheRequestedModelAndIsRecorded(t *testi
 		t.Fatalf("attempt = %+v", a)
 	}
 
-	// Attempt and Request events are linked to the Request and Provider,
-	// and no secret is ever logged.
 	if ev := srv.Logs("kind=attempt,request&request_id=" + id + "&provider=acme"); len(ev) != 2 {
 		t.Fatalf("events = %+v", ev)
 	}
@@ -118,7 +110,6 @@ func TestNonStreamedChatPassesThroughWithTheRequestedModelAndIsRecorded(t *testi
 	}
 }
 
-// eventLines reads a live SSE body line by line on a goroutine.
 func eventLines(body io.Reader) <-chan string {
 	ch := make(chan string, 64)
 	go func() {
@@ -141,7 +132,7 @@ func TestStreamsFlowChunkByChunkAndUsageIsRecorded(t *testing.T) {
 	stream := up.Stream("Hel", "lo")
 	up.Enqueue(func(r *testkit.Received) testkit.Reply {
 		rep := stream(r)
-		rep.Chunks[2].Wait = hold // the "lo" chunk waits
+		rep.Chunks[2].Wait = hold
 		return rep
 	})
 
@@ -199,7 +190,6 @@ waitFirst:
 		t.Fatalf("text %q, events %+v", text.String(), events)
 	}
 
-	// Iroha asked the upstream for usage.
 	var sent struct {
 		StreamOptions struct {
 			IncludeUsage bool `json:"include_usage"`
@@ -381,14 +371,12 @@ func TestUnknownOrOutOfScopeProvidersGetTheUniformRefusal(t *testing.T) {
 		t.Fatal("a refused Request reached an upstream")
 	}
 
-	// Within a Provider, a narrowed scope refuses other models.
 	e := scoped.Post(chatPath, map[string]any{"model": "gpt-y", "messages": []any{}}).Expect(403)
 	if !strings.Contains(e.Text(), `"model_not_allowed"`) {
 		t.Fatalf("model outside scope: %s", e.Body)
 	}
 	scoped.Post(chatPath, body).Expect(200)
 
-	// Refusals are recorded with the reason.
 	var page requests.RequestPage
 	srv.Admin.Get("/api/requests?caller=friend&status=403").Expect(200).JSON(&page)
 	if len(page.Requests) != 6 || page.Requests[0].Error == nil || page.Requests[0].Error.Code != "model_not_allowed" ||
@@ -431,7 +419,6 @@ func TestUpstreamErrorsPassThroughAndFailuresAreExplained(t *testing.T) {
 	caller := srv.Client(issue(t, srv, "pi", all))
 	body := map[string]any{"model": "gpt-x", "messages": []any{}}
 
-	// A rate limit cools the only key; the Caller is told when to come back.
 	up.Enqueue(up.Error(429, "slow down").Header("Retry-After", "30"))
 	resp := caller.Post(chatPath, body).Expect(503)
 	if !strings.Contains(resp.Text(), "slow down") || !strings.Contains(resp.Text(), `"upstream_unavailable"`) || resp.Header.Get("Retry-After") != "30" {
@@ -442,7 +429,6 @@ func TestUpstreamErrorsPassThroughAndFailuresAreExplained(t *testing.T) {
 		t.Fatalf("recorded = %+v", r)
 	}
 
-	// An unreachable Endpoint is a 502 that says so.
 	resp = caller.Post("/providers/dead/v1/chat/completions", body).Expect(502)
 	var e struct {
 		Error struct {
@@ -459,7 +445,6 @@ func TestUpstreamErrorsPassThroughAndFailuresAreExplained(t *testing.T) {
 		t.Fatalf("recorded = %+v", r)
 	}
 
-	// A Provider with nothing to send to fails at once.
 	resp = caller.Post("/providers/empty/v1/chat/completions", body).Expect(503)
 	if !strings.Contains(resp.Text(), `"no_candidate"`) || !strings.Contains(resp.Text(), "no Upstream Keys") {
 		t.Fatalf("no candidate: %s", resp.Body)

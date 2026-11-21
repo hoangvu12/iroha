@@ -1,8 +1,5 @@
 package gateway_test
 
-// Conformance tests for behaviours of v1's case catalog
-// (docs/research/v1-case-catalog.md) that no other test pinned down.
-
 import (
 	"context"
 	"io"
@@ -18,8 +15,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// PRV-52, REQ-13: Caller headers that identify the Caller's network, trace
-// it or carry credentials never reach the upstream; vendor headers do.
 func TestCallerNetworkAndTraceHeadersNeverReachTheUpstreamButVendorHeadersDo(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -62,16 +57,13 @@ func TestCallerNetworkAndTraceHeadersNeverReachTheUpstreamButVendorHeadersDo(t *
 	}
 }
 
-// PRV-53, REQ-17: a Caller that sends no Content-Type or Accept gets
-// application/json for both upstream (text/event-stream as Accept on a
-// stream); headers the Caller did send are kept.
 func TestContentTypeAndAcceptAreDefaultedUpstreamAndTheCallersAreKept(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-one")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// A string body goes out without Content-Type, and Go sends no Accept.
+	// Go's HTTP client sends no Accept header.
 	caller.Post(chatPath, `{"model":"gpt-x","messages":[]}`).Expect(200)
 	if h := up.Last().Header; h.Get("Content-Type") != "application/json" || h.Get("Accept") != "application/json" {
 		t.Fatalf("buffered: Content-Type %q, Accept %q", h.Get("Content-Type"), h.Get("Accept"))
@@ -87,17 +79,12 @@ func TestContentTypeAndAcceptAreDefaultedUpstreamAndTheCallersAreKept(t *testing
 	}
 }
 
-// PRV-54, REQ-20, FAIL-100, TIME-11: an upstream redirect is never followed:
-// the redirect target gets nothing, no other key is tried, the Caller gets
-// 502 upstream_redirect and the key's state is untouched; a key test that
-// meets a redirect does not follow it either. A 422 is the Provider
-// refusing the request itself: upstream_rejected with status 422.
 func TestUpstreamRedirectsAreNeverFollowedAndRefusalsKeepTheirStatus(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	elsewhere := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
-	srv.NoConversationIDs("acme") // the 422 below is judged by the rules alone
+	srv.NoConversationIDs("acme")
 	caller := srv.Client(issue(t, srv, "pi", all))
 	moved := func(status int) testkit.Responder {
 		return testkit.Raw(status, "application/json", `{}`).Header("Location", elsewhere.URL()+"/chat/completions")
@@ -125,7 +112,6 @@ func TestUpstreamRedirectsAreNeverFollowedAndRefusalsKeepTheirStatus(t *testing.
 		}
 	}
 
-	// The key test does not follow a redirect and leaves the key alone.
 	up.Enqueue(moved(302))
 	var res gateway.KeyTestResult
 	srv.Admin.Post("/api/providers/acme/keys/key-1/test?model=gpt-x", nil).Expect(200).JSON(&res)
@@ -133,7 +119,6 @@ func TestUpstreamRedirectsAreNeverFollowedAndRefusalsKeepTheirStatus(t *testing.
 		t.Fatalf("key test = %+v; redirect target got %d", res, elsewhere.Count())
 	}
 
-	// 422: the request itself is refused, with the Provider's status.
 	before := up.Count()
 	up.Enqueue(up.Error(422, "messages: field required"))
 	var e callerError
@@ -146,8 +131,6 @@ func TestUpstreamRedirectsAreNeverFollowedAndRefusalsKeepTheirStatus(t *testing.
 	}
 }
 
-// REQ-21: a Caller's X-Request-Id is neither forwarded nor echoed; the
-// response names Iroha's own req_ ID.
 func TestACallersRequestIdIsReplacedAndNeverForwarded(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -165,8 +148,6 @@ func TestACallersRequestIdIsReplacedAndNeverForwarded(t *testing.T) {
 	readRequest(t, srv, id)
 }
 
-// REQ-09: inference operations Iroha does not serve (embeddings, images,
-// audio, moderation) answer a JSON 404 and reach no upstream.
 func TestUnservedInferenceOperationsAnswer404WithoutAnUpstreamCall(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -191,8 +172,6 @@ func TestUnservedInferenceOperationsAnswer404WithoutAnUpstreamCall(t *testing.T)
 	}
 }
 
-// REQ-64: only "stream": true streams; "true", 1 or anything else is
-// buffered, and nothing is added to the body.
 func TestOnlyAStreamOfLiteralTrueStreams(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -214,8 +193,6 @@ func TestOnlyAStreamOfLiteralTrueStreams(t *testing.T) {
 	}
 }
 
-// KEY-03: the Bearer scheme is matched whatever its case, and the token is
-// trimmed.
 func TestTheBearerSchemeIsCaseInsensitiveAndTheTokenTrimmed(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -231,8 +208,6 @@ func TestTheBearerSchemeIsCaseInsensitiveAndTheTokenTrimmed(t *testing.T) {
 	}
 }
 
-// KEY-06: a Gateway Key with scope all reaches Providers created after it,
-// and its model list shows them.
 func TestAnAllKeyReachesProvidersCreatedAfterIt(t *testing.T) {
 	srv := testkit.Start(t)
 	caller := srv.Client(issue(t, srv, "early", all))
@@ -254,12 +229,10 @@ func TestAnAllKeyReachesProvidersCreatedAfterIt(t *testing.T) {
 	}
 }
 
-// confHanging is an upstream that holds every request open until Iroha
-// drops it, optionally after sending the first chunk of a stream.
 type confHanging struct {
 	srv     *httptest.Server
-	arrived chan struct{} // closed when the request arrived (and the chunk was sent)
-	gone    chan struct{} // closed when Iroha ended the upstream request
+	arrived chan struct{}
+	gone    chan struct{}
 }
 
 func confNewHanging(t *testing.T, firstChunk string) *confHanging {
@@ -289,7 +262,6 @@ func confNewHanging(t *testing.T, firstChunk string) *confHanging {
 	return u
 }
 
-// confWait waits up to 10 s (real time) for ch to close.
 func confWait(t *testing.T, ch <-chan struct{}, what string) {
 	t.Helper()
 	select {
@@ -299,8 +271,6 @@ func confWait(t *testing.T, ch <-chan struct{}, what string) {
 	}
 }
 
-// confOnlyRequest waits until the server's only Request is completed and
-// returns it.
 func confOnlyRequest(t *testing.T, srv *testkit.Server) requests.Request {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -317,10 +287,6 @@ func confOnlyRequest(t *testing.T, srv *testkit.Server) requests.Request {
 	}
 }
 
-// PRV-55, REQ-69, FAIL-93, TIME-08: when the Caller goes away, the upstream
-// call ends with it (buffered, translated or mid-stream), the Request is
-// recorded caller_gone (499 when no status reached the Caller) and the
-// key's state is untouched.
 func TestACallerThatGoesAwayEndsTheUpstreamCallAndIsRecordedCallerGone(t *testing.T) {
 	const chunk = "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n\n"
 	cases := []struct {
@@ -388,9 +354,6 @@ func TestACallerThatGoesAwayEndsTheUpstreamCallAndIsRecordedCallerGone(t *testin
 	}
 }
 
-// REQ-26, REQ-27, FAIL-92: an upstream that answers a stream request with
-// one JSON body before Iroha committed the stream is passed on as JSON:
-// 200, the model echoed, usage and success recorded.
 func TestAJSONAnswerToAStreamRequestBeforeCommitmentIsPassedOn(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -418,19 +381,17 @@ func TestAJSONAnswerToAStreamRequestBeforeCommitmentIsPassedOn(t *testing.T) {
 	}
 }
 
-// TIME-06: once relayed bytes reached the Caller, a stream that breaks is
-// never continued on another key: the other key gets nothing.
 func TestAStreamThatBreaksAfterRelayingIsNeverRetriedOnAnotherKey(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
-	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
+	roundRobin(t, srv, "acme")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
 	stream := up.Stream("Hel", "lo")
 	up.Enqueue(func(r *testkit.Received) testkit.Reply {
 		rep := stream(r)
-		rep.Chunks = rep.Chunks[:2] // role and "Hel", then the connection drops
+		rep.Chunks = rep.Chunks[:2]
 		rep.Disconnect = true
 		return rep
 	})
@@ -448,8 +409,6 @@ func TestAStreamThatBreaksAfterRelayingIsNeverRetriedOnAnotherKey(t *testing.T) 
 	}
 }
 
-// KEY-12: revoking a Gateway Key lets its admitted stream finish; the next
-// Request with it is refused.
 func TestRevokingAGatewayKeyMidStreamLetsTheStreamFinish(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -460,7 +419,7 @@ func TestRevokingAGatewayKeyMidStreamLetsTheStreamFinish(t *testing.T) {
 	stream := up.Stream("Hel", "lo")
 	up.Enqueue(func(r *testkit.Received) testkit.Reply {
 		rep := stream(r)
-		rep.Chunks[2].Wait = hold // "lo" waits for the revoke
+		rep.Chunks[2].Wait = hold
 		return rep
 	})
 	s := headers(t, openStream(t, caller))
@@ -482,8 +441,6 @@ func TestRevokingAGatewayKeyMidStreamLetsTheStreamFinish(t *testing.T) {
 	}
 }
 
-// LOG-04: a Request refused because the plan is empty is recorded with
-// its status and error code, and no Attempt.
 func TestAnEmptyPlanRefusalIsRecordedWithoutAttempts(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -507,8 +464,6 @@ func TestAnEmptyPlanRefusalIsRecordedWithoutAttempts(t *testing.T) {
 	}
 }
 
-// PRV-10: one physical endpoint with the same secret can sit on several
-// Providers, each sending its own wire model.
 func TestProvidersSharingAnEndpointAndSecretEachSendTheirOwnWireModel(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)

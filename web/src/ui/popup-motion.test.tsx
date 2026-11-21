@@ -13,23 +13,15 @@ import { Select } from "./Select";
 import { notify, Toaster } from "./toast";
 import { Tip } from "./Tooltip";
 
-// Motion of the popups (UI ticket 14): every one takes its durations, curve,
-// scale and distance from the motion tokens (architecture.md "UI motion
-// system"), exits faster than it enters, and plays as a plain fade under
-// reduced motion because the tokens zero its scale and distance. jsdom has no
-// Tailwind, so this reads the classes on the real markup.
-
 afterEach(() => {
   act(() => void toast.dismiss());
 });
 
 const classesOf = (el: Element) => el.getAttribute("class")!.split(/\s+/);
 
-// No typed numbers: `duration-150`, `scale-96`, `ease-[cubic-bezier(...)]` (`duration-0`, no motion, is fine).
 function expectOnlyTokens(el: Element) {
   const typed = classesOf(el).filter((c) => /(^|:)(duration-[1-9]|scale-\d|ease-\[cubic)/.test(c));
   expect(typed, `${el.getAttribute("data-slot")} has typed motion values`).toEqual([]);
-  // The tokens already hold movement still under reduced motion and keep the fade.
   expect(classesOf(el)).not.toContain("motion-reduce:transition-none");
 }
 
@@ -156,7 +148,6 @@ describe("dialogs", () => {
     render(<Opener />);
     await user.click(screen.getByRole("button", { name: "Open it" }));
     expectDialogMotion(await screen.findByRole("dialog", { name: "Edit endpoint" }));
-    // The shared press (`@utility press`, ticket 13), as on every icon button.
     expect(classesOf(screen.getByRole("button", { name: "Close" }))).toContain("press");
   });
 
@@ -174,7 +165,6 @@ describe("dialogs", () => {
 
 describe("toasts", () => {
   test("a toast rises from the bottom edge over 400 ms with ease, the stack moving with it; a swiped one leaves the way it was thrown", async () => {
-    // (toast.tsx's height transition is UI SDK's toast recipe: --toast-height on an absolutely placed toast, layout stays inside it.)
     render(<Toaster />);
     act(() => void notify.success("3 keys disabled"));
     const el = (await screen.findByText("3 keys disabled")).closest("[data-slot=toast]")!;
@@ -188,17 +178,14 @@ describe("toasts", () => {
         "data-starting-style:opacity-0",
         "data-ending-style:opacity-0",
         "data-swiping:transition-none",
-        // The stack doesn't slide under reduced motion; toasts fade in place.
         "motion-reduce:transition-opacity",
         "motion-safe:data-[swipe-direction=right]:translate-x-full",
       ]),
     );
-    // It follows a finger dragging down, and leaves downward when thrown that way.
     expect(c.some((k) => k.startsWith("translate-y-[") && k.includes("--toast-swipe-y"))).toBe(true);
     expect(c.some((k) => k.startsWith("motion-safe:data-[swipe-direction=down]:translate-y-["))).toBe(true);
     expectOnlyTokens(el);
 
-    // The region is transparent and doesn't clip: its height follows the stack at once, no wasted layout per frame.
     const region = el.closest("[data-slot=toast-region]")!;
     expect(classesOf(region).filter((k) => /transition|duration/.test(k))).toEqual([]);
   });

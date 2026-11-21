@@ -58,7 +58,6 @@ func TestRetentionRunsEveryHourAndLogsEachRun(t *testing.T) {
 		t.Fatalf("job before any run = %+v", j)
 	}
 
-	// Nothing runs at startup or before the hour.
 	srv.Clock.Advance(59 * time.Minute)
 	srv.SettleJobs()
 	if ev := runs(srv, "kind=job.run"); len(ev) != 0 {
@@ -82,7 +81,6 @@ func TestRetentionRunsEveryHourAndLogsEachRun(t *testing.T) {
 		t.Fatalf("job.run events = %+v", ev)
 	}
 
-	// A restart keeps the hourly rhythm instead of starting over.
 	srv.Clock.Advance(30 * time.Minute)
 	srv.Restart()
 	if j := job(t, srv); !j.NextRunAt.Equal(testkit.Epoch.Add(2*time.Hour)) || j.LastRun == nil {
@@ -94,7 +92,6 @@ func TestRetentionRunsEveryHourAndLogsEachRun(t *testing.T) {
 		t.Fatalf("runs = %+v", j.Runs)
 	}
 
-	// A run overdue at startup (Iroha was down) happens at once.
 	srv.Stop()
 	srv.Clock.Advance(3 * time.Hour)
 	srv.Restart()
@@ -122,7 +119,6 @@ func TestRetentionDeletesWhatIsOlderThanEachSetting(t *testing.T) {
 		t.Fatal("the Request was not captured")
 	}
 
-	// Captures go after 3 days; the Request stays.
 	srv.Clock.Advance(3*24*time.Hour + time.Hour)
 	srv.SettleJobs()
 	if e := srv.Admin.Get("/api/requests/" + old + "/capture").Expect(404).Err(); e.Code != "capture_not_found" {
@@ -134,7 +130,6 @@ func TestRetentionDeletesWhatIsOlderThanEachSetting(t *testing.T) {
 	}
 	fresh := chat(t, debug)
 
-	// History kept for 1 day: a dry run says what would go and keeps it.
 	srv.Admin.Put("/api/settings/retention.history_days", map[string]any{"value": 1}).Expect(200)
 	dry := srv.RunJob("retention", "dry_run=true")
 	if !dry.DryRun || dry.ID != 0 || dry.Details["requests"] != float64(1) || !strings.HasPrefix(dry.Summary, "Would delete") {
@@ -151,7 +146,6 @@ func TestRetentionDeletesWhatIsOlderThanEachSetting(t *testing.T) {
 		t.Fatalf("last run = %+v, want %d", j.LastRun, run.ID)
 	}
 
-	// Logs kept for 30 days by default, then 1 day.
 	if ev := srv.Logs("kind=startup"); len(ev) != 1 {
 		t.Fatalf("startup events = %d", len(ev))
 	}
@@ -163,7 +157,6 @@ func TestRetentionDeletesWhatIsOlderThanEachSetting(t *testing.T) {
 	if ev := srv.Logs("kind=startup"); len(ev) != 0 {
 		t.Fatalf("the startup event outlived its retention: %+v", ev)
 	}
-	// Each run is logged, dry runs included.
 	ev := runs(srv, "kind=job.run&since=1m")
 	if len(ev) == 0 || ev[0].Attrs["trigger"] != "manual" || ev[0].Attrs["dry_run"] != false {
 		t.Fatalf("job.run events = %+v", ev)
@@ -173,9 +166,6 @@ func TestRetentionDeletesWhatIsOlderThanEachSetting(t *testing.T) {
 	}
 }
 
-// AUTH-11, USE-67: Owner sessions that were revoked or expired stay listed
-// for retention.logs_days after they stopped working, then the hourly job
-// deletes them; sessions still in use are never touched.
 func TestEndedOwnerSessionsAreDeletedAfterTheLogsRetention(t *testing.T) {
 	srv := testkit.Start(t)
 	ids := func(active string) []string {
@@ -192,17 +182,15 @@ func TestEndedOwnerSessionsAreDeletedAfterTheLogsRetention(t *testing.T) {
 		c.Get("/api/whoami").Expect(200).JSON(&a)
 		return a.ID
 	}
-	signedOut := srv.OwnerSession() // revoked at once
+	signedOut := srv.OwnerSession()
 	revokedID := whoami(signedOut)
 	signedOut.Delete("/api/session").Expect(204)
-	expiring := srv.OwnerSession() // expires after 30 days
+	expiring := srv.OwnerSession()
 	expiringID := whoami(expiring)
 	srv.Clock.Advance(20 * 24 * time.Hour)
-	later := srv.OwnerSession() // expires on day 50
+	later := srv.OwnerSession()
 	laterID := whoami(later)
 
-	// Day 30 + 1 h: the signed-out session ended 30 days and 1 h ago and goes;
-	// the one that expired an hour ago stays listed as inactive.
 	srv.Clock.Advance(10*24*time.Hour + time.Hour)
 	srv.SettleJobs()
 	if got := ids("false"); len(got) != 1 || got[0] != expiringID {
@@ -216,8 +204,6 @@ func TestEndedOwnerSessionsAreDeletedAfterTheLogsRetention(t *testing.T) {
 		t.Fatalf("dry run = %+v", dry)
 	}
 
-	// Day 60 + 1 h: the session that expired on day 30 goes; the one that
-	// expired on day 50 is still within the 30 days.
 	srv.Clock.Advance(30 * 24 * time.Hour)
 	srv.SettleJobs()
 	if got := ids(""); len(got) != 1 || got[0] != laterID {
@@ -228,8 +214,6 @@ func TestEndedOwnerSessionsAreDeletedAfterTheLogsRetention(t *testing.T) {
 	}
 }
 
-// runs reads job.run events of the retention job only (the daily model
-// refresh runs beside it).
 func runs(srv *testkit.Server, query string) []logs.Event {
 	var out []logs.Event
 	for _, e := range srv.Logs(query) {
@@ -299,7 +283,6 @@ func TestRetentionSettingsAreAuditedAndRevertible(t *testing.T) {
 		t.Fatalf("after revert = %+v", got)
 	}
 
-	// Bad values and names are refused with hints.
 	for _, body := range []any{map[string]any{"value": 0}, map[string]any{"value": "x"}, map[string]any{"value": 1.5}, map[string]any{}} {
 		if e := srv.Admin.Put(path, body).Expect(400).Err(); e.Hint == "" {
 			t.Errorf("%v: no hint", body)
@@ -309,7 +292,6 @@ func TestRetentionSettingsAreAuditedAndRevertible(t *testing.T) {
 		t.Fatalf("unknown setting hint = %q", e.Hint)
 	}
 
-	// Bulk applies items on their own; DELETE restores the default.
 	var bulk audit.BulkResult[settings.Setting]
 	srv.Admin.Post("/api/settings/bulk", map[string]any{"items": []any{
 		map[string]any{"name": "retention.history_days", "value": 14},

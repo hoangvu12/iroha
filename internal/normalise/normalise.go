@@ -1,23 +1,7 @@
-// Package normalise rewrites the content of requests and answers for
-// Provider quirks that a Failure Rule cannot express (ADR-0005): reasoning
-// written inline as <think> text, non-standard content blocks, fields a
-// Provider rejects on replayed turns, streams that end without a finish
-// reason.
-//
-// Normalisers work in the Endpoint's Shape. Request normalisers run on the
-// body sent to the Endpoint (the Caller's bytes on passthrough, the
-// translated body otherwise); response normalisers run on the Endpoint's
-// answer before it is passed through or translated, so both paths get them.
-// A normaliser that finds nothing to change leaves the bytes exactly as
-// they were: passthrough stays byte-preserving.
-//
-// Which normalisers apply to an Attempt follows from its Endpoint: the
-// Shape it speaks and, for a quirk of one service's API, its host (the rule
-// ticket 07 chose for built-in Failure Rules). Quirks of a model rather than
-// a service (DeepSeek, Qwen and MiniMax writing <think> text, GLM's content
-// blocks) apply on every host, since relays, OpenRouter and self-hosted
-// servers pass them on unchanged; each such rewrite acts only when the
-// non-standard construct is present.
+// Package normalise rewrites requests and answers for Provider quirks.
+// Quirks of a model rather than a service (DeepSeek, Qwen and MiniMax
+// writing <think> text, GLM's content blocks) apply on every host, since
+// relays, OpenRouter and self-hosted servers pass them on unchanged.
 package normalise
 
 import (
@@ -29,13 +13,11 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Sides a normaliser works on.
 const (
 	Request  = "request"
 	Response = "response"
 )
 
-// Normaliser describes one built-in normaliser.
 type Normaliser struct {
 	Name        string      `json:"name"`
 	Side        string      `json:"side" enum:"request,response" doc:"request: the body sent to the Endpoint; response: the Endpoint's answer, whole or streamed."`
@@ -45,7 +27,6 @@ type Normaliser struct {
 	Cases       []string    `json:"cases" doc:"Cases of the v1 case catalog it covers."`
 }
 
-// Names of the built-in normalisers.
 const (
 	ChatReasoningTags  = "chat-reasoning-tags"
 	ChatContentBlocks  = "chat-content-blocks"
@@ -57,7 +38,6 @@ const (
 
 const hostZai = "z.ai,bigmodel.cn"
 
-// Builtin are the normalisers that ship with Iroha.
 var Builtin = []Normaliser{
 	{
 		Name: ChatReasoningTags, Side: Response, Shape: shape.OpenAIChat,
@@ -91,14 +71,11 @@ var Builtin = []Normaliser{
 	},
 }
 
-// Set is the normalisers that apply to one Endpoint.
 type Set struct {
 	shape shape.Shape
 	on    map[string]bool
 }
 
-// For returns the normalisers applying to an Endpoint at endpointURL
-// speaking sh.
 func For(endpointURL string, sh shape.Shape) Set {
 	s := Set{shape: sh}
 	host := hosts.Of(endpointURL)
@@ -113,7 +90,6 @@ func For(endpointURL string, sh shape.Shape) Set {
 	return s
 }
 
-// Applying lists the built-in normalisers that apply to an Endpoint.
 func Applying(endpointURL string, sh shape.Shape) []Normaliser {
 	var out []Normaliser
 	host := hosts.Of(endpointURL)
@@ -127,7 +103,6 @@ func Applying(endpointURL string, sh shape.Shape) []Normaliser {
 
 func (s Set) has(name string) bool { return s.on[name] }
 
-// Empty reports whether no normaliser applies.
 func (s Set) Empty() bool { return len(s.on) == 0 }
 
 // Failure is a failure the Provider reported inside an answer it sent as a
@@ -142,7 +117,7 @@ func (s Set) RequestBody(body []byte) []byte {
 	if s.shape != shape.OpenAIChat || !s.has(ChatReplayedFields) {
 		return body
 	}
-	m, ok := decodeObject(body)
+	m, ok := decodeKeepingNumbers(body)
 	if !ok {
 		return body
 	}
@@ -158,7 +133,7 @@ func (s Set) RequestBody(body []byte) []byte {
 	if !changed {
 		return body
 	}
-	return encode(m, body)
+	return encodeUnescaped(m, body)
 }
 
 // Body returns a whole answer for the Caller (or for translation): body
@@ -180,8 +155,6 @@ func (s Set) Stream() *Stream {
 	return &Stream{set: s, choices: map[int]*choiceState{}}
 }
 
-// matchesHost reports whether host is one of hosts (comma-separated) or a
-// subdomain of one; an empty list matches every host.
 func matchesHost(list, host string) bool {
 	if strings.TrimSpace(list) == "" {
 		return true
@@ -189,11 +162,7 @@ func matchesHost(list, host string) bool {
 	return hosts.Matches(host, hosts.List(list)...)
 }
 
-// JSON helpers. Numbers are kept as written (json.Number), and encoding
-// never escapes HTML characters, so a rewritten body differs from the
-// original only where a normaliser changed it (and in key order).
-
-func decodeObject(b []byte) (map[string]any, bool) {
+func decodeKeepingNumbers(b []byte) (map[string]any, bool) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
 	var m map[string]any
@@ -203,14 +172,12 @@ func decodeObject(b []byte) (map[string]any, bool) {
 	return m, true
 }
 
-// encode marshals v; on failure (which a decoded value cannot cause) it
-// returns orig.
-func encode(v any, orig []byte) []byte {
+func encodeUnescaped(v any, fallback []byte) []byte {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
 	if enc.Encode(v) != nil {
-		return orig
+		return fallback
 	}
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 }

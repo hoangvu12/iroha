@@ -39,8 +39,6 @@ func TestJobRunsAreStoredLoggedAndReportFailures(t *testing.T) {
 		return v
 	}
 
-	// A scheduled run: stored, logged and linked to its Provider; a job's
-	// figures never override the event's own fields.
 	srv.Clock.Advance(10 * time.Minute)
 	srv.SettleJobs()
 	v := view()
@@ -52,7 +50,6 @@ func TestJobRunsAreStoredLoggedAndReportFailures(t *testing.T) {
 		t.Fatalf("events = %+v", ev)
 	}
 
-	// Failures and panics are failed runs, logged as errors.
 	mode.Store("fail")
 	if run := srv.RunJob("probe"); run.Outcome != "failed" || run.Error != "the upstream is down" || run.Trigger != "manual" {
 		t.Fatalf("failed run = %+v", run)
@@ -65,7 +62,6 @@ func TestJobRunsAreStoredLoggedAndReportFailures(t *testing.T) {
 		t.Fatalf("error events = %+v", ev)
 	}
 
-	// Dry runs are logged but not stored.
 	mode.Store("ok")
 	if run := srv.RunJob("probe", "dry_run=true"); !run.DryRun || run.ID != 0 || run.Outcome != "ok" {
 		t.Fatalf("dry run = %+v", run)
@@ -75,7 +71,6 @@ func TestJobRunsAreStoredLoggedAndReportFailures(t *testing.T) {
 	}
 	srv.Admin.Post("/api/jobs/probe/run?dry_run=maybe", nil).Expect(400)
 
-	// A run Iroha stops in the middle of is canceled, not failed.
 	mode.Store("block")
 	for len(started) > 0 {
 		<-started

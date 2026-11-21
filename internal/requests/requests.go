@@ -1,5 +1,3 @@
-// Package requests is Request and Attempt history: the Recorder the Gateway
-// writes through, and /api/requests to read it.
 package requests
 
 import (
@@ -7,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/shape"
@@ -14,24 +14,17 @@ import (
 	"github.com/hoangvu12/iroha/internal/usage"
 )
 
-// Request states.
 const (
-	StateInProgress = "in_progress"
-	StateCompleted  = "completed"
-	// StateInterrupted is a Request Iroha stopped serving without finishing
-	// it (a crash or a forced stop); it is set at the next startup.
+	StateInProgress  = "in_progress"
+	StateCompleted   = "completed"
 	StateInterrupted = "interrupted"
 )
 
-// Caller kinds.
 const (
 	CallerGatewayKey = "gateway_key"
-	// CallerTest is a Request sent from the test chat, named "Test" or
-	// "Test (as <Gateway Key name>)"; it never counts as that key's traffic.
-	CallerTest = "test"
+	CallerTest       = "test"
 )
 
-// Request is one Request as recorded and as the API returns it.
 type Request struct {
 	ID         string     `json:"id" doc:"Also returned to the Caller in the x-request-id header."`
 	StartedAt  time.Time  `json:"started_at"`
@@ -66,18 +59,15 @@ type Request struct {
 	Attempts     []Attempt    `json:"attempts,omitempty" doc:"Every Attempt in order (on GET /api/requests/{request} only)."`
 	Affinity     *Affinity    `json:"affinity,omitempty" doc:"How the Request's conversation chose its Upstream Key (conversation affinity); absent on Requests refused before planning and on Requests from before it existed."`
 
-	rev int64 // change counter (see GET /api/requests?changed_after=)
+	rev int64
 }
 
-// Affinity is how a Request's conversation chose its Upstream Key.
 type Affinity struct {
-	Source string `json:"source" enum:"header,claude_code,codex,session_id,opencode,prompt_cache_key,prefix,none" doc:"Where the conversation was found: the Iroha-Session header, Claude Code's session (x-claude-code-session-id or metadata.user_id), codex: the session_id, session-id or thread-id header (sent by Codex and others, such as pi), x-session-id or a body session_id, opencode: the x-session-affinity header (sent by OpenCode and others, such as pi), the body's prompt_cache_key, a hash of the prompt's start (system prompt, tool names, first user message), or none (an empty prompt)."`
-	Mode   string `json:"mode" enum:"on,off,control,none" doc:"on: the Provider's keys were ranked for the conversation; off: the Provider that served (or, when none did, the last Attempt's) has affinity off (round-robin); control: the conversation fell in the round-robin half of the affinity.experiment; none: no conversation (round-robin)."`
-	// PreferredServed is set when Mode is on.
-	PreferredServed *bool `json:"preferred_served,omitempty" doc:"With mode on: true when the key the conversation ranks first gave the Caller a successful (2xx) answer; false when another key did (the first was cooling or failed), the answer was not a success, or none came."`
+	Source          string `json:"source" enum:"header,claude_code,codex,session_id,opencode,prompt_cache_key,prefix,none" doc:"Where the conversation was found: the Iroha-Session header, Claude Code's session (x-claude-code-session-id or metadata.user_id), codex: the session_id, session-id or thread-id header (sent by Codex and others, such as pi), x-session-id or a body session_id, opencode: the x-session-affinity header (sent by OpenCode and others, such as pi), the body's prompt_cache_key, a hash of the prompt's start (system prompt, tool names, first user message), or none (an empty prompt)."`
+	Mode            string `json:"mode" enum:"on,off,control,none" doc:"on: the Provider's keys were ranked for the conversation; off: the Provider that served (or, when none did, the last Attempt's) has affinity off (round-robin); control: the conversation fell in the round-robin half of the affinity.experiment; none: no conversation (round-robin)."`
+	PreferredServed *bool  `json:"preferred_served,omitempty" doc:"With mode on: true when the key the conversation ranks first gave the Caller a successful (2xx) answer; false when another key did (the first was cooling or failed), the answer was not a success, or none came."`
 }
 
-// Affinity modes.
 const (
 	AffinityOn      = "on"
 	AffinityOff     = "off"
@@ -85,7 +75,6 @@ const (
 	AffinityNone    = "none"
 )
 
-// AffinityModes lists every mode, for filters.
 var AffinityModes = []string{AffinityOn, AffinityOff, AffinityControl, AffinityNone}
 
 func affinityArgs(a *Affinity) (source, mode string, preferred any) {
@@ -110,20 +99,17 @@ func affinityOf(source, mode string, preferred sql.NullBool) *Affinity {
 	return a
 }
 
-// Failure is why a Request failed.
 type Failure struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
-// Caller is who sent a Request.
 type Caller struct {
 	Kind         string `json:"kind" enum:"gateway_key,test"`
 	GatewayKeyID string `json:"gateway_key_id,omitempty"`
 	Name         string `json:"name" doc:"Gateway Key name at the time of the Request; for test Requests \"Test\" or \"Test (as <Gateway Key name>)\"."`
 }
 
-// Attempt is one transmission to a Provider.
 type Attempt struct {
 	Seq           int          `json:"seq" doc:"1 for the first Attempt of the Request, then 2, 3..."`
 	StartedAt     time.Time    `json:"started_at"`
@@ -143,7 +129,6 @@ type Attempt struct {
 	DurationMs    *int64       `json:"duration_ms,omitempty"`
 	Usage         *usage.Usage `json:"usage,omitempty"`
 
-	// Set on failed Attempts.
 	Rule           string            `json:"rule,omitempty" doc:"The Failure Rule the failure matched; absent when none did."`
 	Outcome        string            `json:"outcome,omitempty" enum:"invalid,cooling_key,cooling_key_model,model_gap,retry_elsewhere,fail_request" doc:"What the failure meant."`
 	Reason         string            `json:"reason,omitempty" doc:"What the Provider answered, in one line."`
@@ -152,19 +137,19 @@ type Attempt struct {
 	FailureBody    string            `json:"failure_body,omitempty" doc:"The upstream response body of a failed Attempt (at most 64 KiB)."`
 }
 
-// MaxFailureBody caps a stored failure body.
 const MaxFailureBody = 64 << 10
 
-// Recorder writes Requests and Attempts. Writes never use the Caller's
-// context, so a Caller going away cannot stop its Request being recorded.
 type Recorder struct {
 	db *store.DB
 }
 
-// NewRecorder returns a Recorder.
-func NewRecorder(db *store.DB) *Recorder { return &Recorder{db: db} }
+func OpenRecorder(ctx context.Context, db *store.DB, log *slog.Logger) (*Recorder, error) {
+	if err := closeInterrupted(ctx, db, log); err != nil {
+		return nil, fmt.Errorf("closing interrupted Requests: %w", err)
+	}
+	return &Recorder{db: db}, nil
+}
 
-// Begin records r as in progress.
 func (rc *Recorder) Begin(ctx context.Context, r *Request) error {
 	ctx = context.WithoutCancel(ctx)
 	r.State = StateInProgress
@@ -176,7 +161,6 @@ func (rc *Recorder) Begin(ctx context.Context, r *Request) error {
 	})
 }
 
-// Attempt records one finished Attempt of Request id.
 func (rc *Recorder) Attempt(ctx context.Context, id string, a Attempt) error {
 	ctx = context.WithoutCancel(ctx)
 	in, out, cache, write, writeLong, reasoning := usageArgs(a.Usage)
@@ -204,9 +188,6 @@ func (rc *Recorder) Attempt(ctx context.Context, id string, a Attempt) error {
 	})
 }
 
-// NoteProvider records the Provider a Request is being served by (and the
-// Model Pool it named, if any), as its first Attempt starts, so an
-// interrupted Request still names them.
 func (rc *Recorder) NoteProvider(ctx context.Context, id, providerID, handle, pool string) error {
 	ctx = context.WithoutCancel(ctx)
 	return rc.db.Tx(ctx, func(tx *sql.Tx) error {
@@ -215,8 +196,6 @@ func (rc *Recorder) NoteProvider(ctx context.Context, id, providerID, handle, po
 	})
 }
 
-// LastServedModel is the model (as the Caller named it) of the latest
-// Request a Provider answered with a 2xx; "" when there is none.
 func (rc *Recorder) LastServedModel(ctx context.Context, providerID string) (string, error) {
 	var m string
 	err := rc.db.QueryRowContext(ctx, `SELECT model FROM requests WHERE provider_id = ? AND status >= 200 AND status < 300 AND model != ''
@@ -227,7 +206,6 @@ func (rc *Recorder) LastServedModel(ctx context.Context, providerID string) (str
 	return m, err
 }
 
-// Finish records r as completed with everything it now says.
 func (rc *Recorder) Finish(ctx context.Context, r *Request) error {
 	ctx = context.WithoutCancel(ctx)
 	r.State = StateCompleted
@@ -261,11 +239,8 @@ func usageArgs(u *usage.Usage) (in, out, cache, write, writeLong, reasoning any)
 	return u.Input, u.Output, u.CacheRead, u.CacheWrite, u.CacheWriteLong, u.Reasoning
 }
 
-// usageColumns are the token columns of requests and attempts, in the order
-// usageCounts scans them.
 const usageColumns = `input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_long_tokens, reasoning_tokens`
 
-// usageCounts scans usageColumns.
 type usageCounts struct{ in, out, cache, write, writeLong, reasoning sql.NullInt64 }
 
 func (c *usageCounts) dest() []any {

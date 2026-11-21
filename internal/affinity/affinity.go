@@ -1,11 +1,3 @@
-// Package affinity identifies the conversation a Request belongs to, so the
-// planner can keep its turns on one Upstream Key (conversation affinity,
-// prompt-caching ticket 02). It is pure: Identify reads what the Caller
-// already sends (session headers of Iroha, Claude Code, Codex and OpenCode,
-// a session in the body, prompt_cache_key) and falls back to a hash of the
-// prompt's start. For scopes the conversation to one Gateway Key, Key to
-// one Provider and model, so Callers never steer each other and Pool
-// members rank their keys independently.
 package affinity
 
 import (
@@ -18,50 +10,35 @@ import (
 	"unicode"
 )
 
-// Source says where a conversation's identity came from.
 type Source string
 
-// Sources, in the order Identify tries them.
 const (
-	Header         Source = "header"           // Iroha-Session
-	ClaudeCode     Source = "claude_code"      // x-claude-code-session-id, or the session in metadata.user_id
-	Codex          Source = "codex"            // session_id, session-id or thread-id header (Codex, pi and others send them)
-	SessionID      Source = "session_id"       // x-session-id header, or session_id in the body
-	OpenCode       Source = "opencode"         // x-session-affinity header (OpenCode, pi and others)
-	PromptCacheKey Source = "prompt_cache_key" // the body's prompt_cache_key
-	Prefix         Source = "prefix"           // hash of the system prompt, tool names and first user message
-	None           Source = "none"             // nothing to go by (an empty prompt)
+	Header         Source = "header"
+	ClaudeCode     Source = "claude_code"
+	Codex          Source = "codex"
+	SessionID      Source = "session_id"
+	OpenCode       Source = "opencode"
+	PromptCacheKey Source = "prompt_cache_key"
+	Prefix         Source = "prefix"
+	None           Source = "none"
 )
 
-// Sources lists every Source, for enums and filters.
 var Sources = []Source{Header, ClaudeCode, Codex, SessionID, OpenCode, PromptCacheKey, Prefix, None}
 
-// SessionHeader is the header a Caller sends to name its conversation
-// itself. Like every iroha- header it is never forwarded.
 const SessionHeader = "Iroha-Session"
 
-// PrefixBytes is how much of each part of the prompt's start the prefix
-// hash reads: the system prompt, the tool names and the first user message.
 const PrefixBytes = 4 << 10
 
-// maxSession is the longest session value taken; a longer one is ignored.
 const maxSession = 256
 
-// Conversation is the conversation a Request belongs to.
 type Conversation struct {
 	Source Source
-	// ID is a hex digest naming the conversation; "" when Source is None.
-	// Session values are hashed alone, so one session sent in two places
-	// (the Claude Code header and metadata.user_id) is one conversation.
-	ID string
+	ID     string
 }
 
-// Identify finds the conversation of a Caller's Request from its headers
-// and body (any Shape). Plain user is never a session: it would put one
-// person's parallel conversations on one key.
 func Identify(h http.Header, body []byte) Conversation {
 	var b fields
-	_ = json.Unmarshal(body, &b) // a field of another type reads as absent
+	_ = json.Unmarshal(body, &b)
 
 	if v := session(h.Get(SessionHeader)); v != "" {
 		return sessionOf(Header, v)
@@ -95,7 +72,6 @@ func Identify(h http.Header, body []byte) Conversation {
 	return Conversation{Source: None}
 }
 
-// For is c scoped to one Gateway Key (empty for test sends without one).
 func (c Conversation) For(gatewayKeyID string) Conversation {
 	if c.ID == "" {
 		return c
@@ -103,8 +79,6 @@ func (c Conversation) For(gatewayKeyID string) Conversation {
 	return Conversation{Source: c.Source, ID: digest("caller", gatewayKeyID, c.ID)}
 }
 
-// Control reports whether the conversation falls in the experiment's
-// round-robin half (affinity.experiment half): about one in two do.
 func (c Conversation) Control() bool {
 	if c.ID == "" {
 		return false
@@ -113,10 +87,6 @@ func (c Conversation) Control() bool {
 	return strings.IndexByte("13579bdf", last) >= 0
 }
 
-// Key is the affinity value of a conversation (scoped to its Caller) on
-// one Provider and model: what the planner ranks that Provider's keys by,
-// and what a derived prompt_cache_key is made from. "" when there is no
-// conversation.
 func Key(conversation, providerID, model string) string {
 	if conversation == "" {
 		return ""
@@ -138,7 +108,6 @@ func sessionOf(s Source, v string) Conversation {
 	return Conversation{Source: s, ID: digest("session", v)}
 }
 
-// session is a usable session value: trimmed, printable, at most 256 bytes.
 func session(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" || len(v) > maxSession {
@@ -152,11 +121,9 @@ func session(v string) string {
 	return v
 }
 
-// legacyUserID is Claude Code's older metadata.user_id:
-// user_<hash>_account_<uuid>_session_<uuid>.
+// Claude Code's older metadata.user_id is user_<hash>_account_<uuid>_session_<uuid>.
 var legacyUserID = regexp.MustCompile(`_session_([A-Fa-f0-9-]+)$`)
 
-// claudeCodeSession is the session inside Claude Code's metadata.user_id.
 func claudeCodeSession(metadata json.RawMessage) string {
 	var m struct {
 		UserID json.RawMessage `json:"user_id"`
@@ -168,13 +135,6 @@ func claudeCodeSession(metadata json.RawMessage) string {
 	return s
 }
 
-// MetadataUserID reads an Anthropic metadata.user_id (raw JSON): either
-// Claude Code's value, which names a session (its JSON form, a string
-// holding {"session_id": ...}, or the legacy
-// user_<hash>_account_<uuid>_session_<uuid>; an object with session_id from
-// some Callers), or a plain user. At most one of user and sessionID is set;
-// neither when the value is empty, of another type, or Claude Code's form
-// without a usable session. Translation sends only a plain user on.
 func MetadataUserID(raw json.RawMessage) (user, sessionID string) {
 	var inner struct {
 		SessionID json.RawMessage `json:"session_id"`
@@ -182,7 +142,7 @@ func MetadataUserID(raw json.RawMessage) (user, sessionID string) {
 	u := strings.TrimSpace(str(raw))
 	switch {
 	case u == "":
-		if json.Unmarshal(raw, &inner) == nil { // an object, from some Callers
+		if json.Unmarshal(raw, &inner) == nil {
 			return "", session(str(inner.SessionID))
 		}
 		return "", ""
@@ -200,7 +160,6 @@ func MetadataUserID(raw json.RawMessage) (user, sessionID string) {
 	return u, ""
 }
 
-// str is a JSON string's value; "" for anything else.
 func str(raw json.RawMessage) string {
 	var s string
 	if json.Unmarshal(raw, &s) != nil {
@@ -209,15 +168,10 @@ func str(raw json.RawMessage) string {
 	return s
 }
 
-// fields are the parts of a body, in any Shape, that identify a
-// conversation. Each is read on its own, so one of an unexpected type
-// leaves the others usable.
 type fields struct {
-	Metadata       json.RawMessage `json:"metadata"`
-	SessionID      json.RawMessage `json:"session_id"`
-	PromptCacheKey json.RawMessage `json:"prompt_cache_key"`
-	// The prompt's start: Chat and Anthropic messages, Anthropic system,
-	// Responses instructions and input, Gemini systemInstruction and contents.
+	Metadata           json.RawMessage `json:"metadata"`
+	SessionID          json.RawMessage `json:"session_id"`
+	PromptCacheKey     json.RawMessage `json:"prompt_cache_key"`
 	Messages           json.RawMessage `json:"messages"`
 	System             json.RawMessage `json:"system"`
 	Instructions       json.RawMessage `json:"instructions"`
@@ -228,7 +182,6 @@ type fields struct {
 	Tools              json.RawMessage `json:"tools"`
 }
 
-// message is one turn in messages, input or contents.
 type message struct {
 	Type    string          `json:"type"`
 	Role    string          `json:"role"`
@@ -236,10 +189,6 @@ type message struct {
 	Parts   json.RawMessage `json:"parts"`
 }
 
-// prefix is the prompt's start as one string: the system prompt, the tool
-// names and the first user message, each cut at PrefixBytes; "" when all
-// three are empty (an empty prefix would put every such Request in one
-// conversation).
 func (b fields) prefix() string {
 	turns := b.turns()
 	system := firstText(text(b.System), text(b.Instructions), parts(b.SystemInstruction), parts(b.SystemInstruction2))
@@ -253,7 +202,7 @@ func (b fields) prefix() string {
 			user = firstText(text(m.Content), parts(m.Parts))
 		}
 	}
-	if user == "" { // Responses input as a plain string
+	if user == "" {
 		user = str(b.Input)
 	}
 	tools := cut(strings.Join(toolNames(b.Tools), "\n"))
@@ -264,7 +213,6 @@ func (b fields) prefix() string {
 	return system + "\x00" + tools + "\x00" + user
 }
 
-// turns are the conversation's messages in whichever field the Shape uses.
 func (b fields) turns() []message {
 	for _, raw := range []json.RawMessage{b.Messages, b.Input, b.Contents} {
 		var ms []message
@@ -291,9 +239,6 @@ func cut(s string) string {
 	return s
 }
 
-// text is the text of a content value: a string, or the text of its
-// parts (cache markers and other part fields are left out, since Callers
-// move them between turns).
 func text(raw json.RawMessage) string {
 	if s := str(raw); s != "" {
 		return s
@@ -301,9 +246,6 @@ func text(raw json.RawMessage) string {
 	return parts(raw)
 }
 
-// parts is the text of a list of content parts (Chat, Anthropic, Responses
-// and Gemini parts all carry it in text); a part without text counts by its
-// type, so an image-only message is not empty. It stops after PrefixBytes.
 func parts(raw json.RawMessage) string {
 	var ps []struct {
 		Type string `json:"type"`
@@ -313,7 +255,7 @@ func parts(raw json.RawMessage) string {
 		var one struct {
 			Parts json.RawMessage `json:"parts"`
 		}
-		if json.Unmarshal(raw, &one) == nil && len(one.Parts) > 0 { // Gemini systemInstruction
+		if json.Unmarshal(raw, &one) == nil && len(one.Parts) > 0 {
 			return parts(one.Parts)
 		}
 		return ""
@@ -334,8 +276,6 @@ func parts(raw json.RawMessage) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// toolNames lists the tools' names: Chat function.name, Anthropic and
-// Responses name, Gemini functionDeclarations[].name.
 func toolNames(raw json.RawMessage) []string {
 	var tools []struct {
 		Name     string `json:"name"`

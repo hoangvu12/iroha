@@ -25,8 +25,6 @@ func TestGlobalChatNamesTheProviderInTheModelAndEchoesIt(t *testing.T) {
 	body := `{"model":"acme/gpt-x", "messages":[{"role":"user","content":"hi"}], "vendor_extra":{"a":[1,2]}}`
 	resp := caller.Post("/v1/chat/completions", body).Expect(200)
 
-	// The Provider gets its own model ID; every other byte is the Caller's
-	// (plus the conversation's prompt_cache_key, prompt caching 04).
 	got := up.Last()
 	if want := strings.Replace(body, `"acme/gpt-x"`, `"gpt-x"`, 1); callerBytes(t, got.Body) != want || got.Path != "/v1/chat/completions" || got.Bearer() != "sk-test-one" {
 		t.Fatalf("upstream got %s bearer %q body %s", got.Path, got.Bearer(), got.Body)
@@ -39,7 +37,6 @@ func TestGlobalChatNamesTheProviderInTheModelAndEchoesIt(t *testing.T) {
 		t.Fatalf("request = %+v", r)
 	}
 
-	// Streamed: every chunk names the qualified model.
 	st := chatBody("acme/gpt-x")
 	st["stream"] = true
 	events := caller.Post("/v1/chat/completions", st).Expect(200).Events()
@@ -63,7 +60,6 @@ func TestGlobalModelIDsKeepTheirSlashesAfterTheHandle(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "router", up.URL(), "sk-test-one")
-	// A scope narrowed to the Provider's own model ID (slashes included).
 	caller := srv.Client(issue(t, srv, "narrow", map[string]any{"providers": []any{
 		map[string]any{"provider": "router", "models": []string{"meta-llama/llama-3.3-70b"}}}}))
 
@@ -79,14 +75,12 @@ func TestGlobalModelIDsKeepTheirSlashesAfterTheHandle(t *testing.T) {
 		t.Fatalf("request = %+v", r)
 	}
 
-	// An Endpoint rename applies to the Provider's model ID.
 	srv.Admin.Patch("/api/providers/router/endpoints/default", map[string]any{"renames": map[string]string{"meta-llama/llama-3.3-70b": "llama-3.3-70b-fp8"}}).OK()
 	resp = caller.Post("/v1/chat/completions", chatBody("router/meta-llama/llama-3.3-70b")).Expect(200)
 	if up.Last().Model != "llama-3.3-70b-fp8" || resp.Map()["model"] != "router/meta-llama/llama-3.3-70b" {
 		t.Fatalf("renamed: upstream %q answer %s", up.Last().Model, resp.Body)
 	}
 
-	// The narrowed scope still holds: the qualified name is not a scope entry.
 	if e := caller.Post("/v1/chat/completions", chatBody("router/meta-llama")).Expect(403).Err(); e.Code != "model_not_allowed" {
 		t.Fatalf("out of scope = %+v", e)
 	}
@@ -109,7 +103,6 @@ func TestGlobalRoutesRefuseUnqualifiedNamesWithAHint(t *testing.T) {
 			t.Fatalf("%q: request = %+v", model, r)
 		}
 	}
-	// Messages refuses in its own envelope.
 	resp := claudeCaller(t, srv).Post("/v1/messages", messages("claude-x")).Expect(400)
 	if m := resp.Map(); m["type"] != "error" || resp.Err().Code != "invalid_model_id" {
 		t.Fatalf("messages = %s", resp.Body)
@@ -131,7 +124,6 @@ func TestGlobalRoutesRefuseEveryProviderOutOfReachAlike(t *testing.T) {
 	caller := srv.Client(issue(t, srv, "narrow", map[string]any{"providers": []any{
 		map[string]any{"provider": "acme", "models": []string{"gpt-x"}}, map[string]any{"provider": "off"}, map[string]any{"provider": "gone"}}}))
 
-	// Unknown, out of scope, disabled, archived and impossible handles.
 	for _, h := range []string{"nope", "other", "off", "gone", "ACME"} {
 		e := caller.Post("/v1/chat/completions", chatBody(h+"/gpt-x")).Expect(403).Err()
 		want := `This Gateway Key may not use a Provider named "` + h + `", or there is none.`
@@ -142,7 +134,6 @@ func TestGlobalRoutesRefuseEveryProviderOutOfReachAlike(t *testing.T) {
 	if e := caller.Post("/v1/chat/completions", chatBody("acme/gpt-y")).Expect(403).Err(); e.Code != "model_not_allowed" {
 		t.Fatalf("model out of scope = %+v", e)
 	}
-	// A hidden model is refused as on the provider-scoped route.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "gpt-x", "hidden": true}).Expect(201)
 	if e := caller.Post("/v1/chat/completions", chatBody("acme/gpt-x")).Expect(404).Err(); e.Code != "model_not_found" {
 		t.Fatalf("hidden = %+v", e)
@@ -190,7 +181,6 @@ func TestGlobalMessagesPassThroughAndTranslateEchoingTheQualifiedName(t *testing
 	addEndpointProvider(t, srv, "glm", "openai-chat", oai.URL(), "sk-test-oai")
 	caller := claudeCaller(t, srv)
 
-	// Passthrough, buffered and streamed.
 	resp := caller.Post("/v1/messages", messages("claude/claude-x")).Expect(200)
 	if ant.Last().Model != "claude-x" || resp.Map()["model"] != "claude/claude-x" {
 		t.Fatalf("passthrough: upstream %q answer %s", ant.Last().Model, resp.Body)
@@ -202,7 +192,6 @@ func TestGlobalMessagesPassThroughAndTranslateEchoingTheQualifiedName(t *testing
 		t.Fatalf("passthrough stream = %+v", events)
 	}
 
-	// Translated to OpenAI Chat, buffered and streamed.
 	resp = caller.Post("/v1/messages", messages("glm/glm-4.6")).Expect(200)
 	if oai.Last().Model != "glm-4.6" || resp.Map()["model"] != "glm/glm-4.6" {
 		t.Fatalf("translated: upstream %q answer %s", oai.Last().Model, resp.Body)

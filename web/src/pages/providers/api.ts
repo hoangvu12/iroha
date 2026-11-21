@@ -1,11 +1,8 @@
+import { useCallback } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Stats, StatsGroup } from "@/pages/requests/api";
-import { api, isApiError, seg } from "@/api/client";
+import { api, type ApiError, isApiError, seg } from "@/api/client";
 import type { AuditResult, BulkResult } from "@/api/types";
-
-// Types and hooks of the Providers page (ticket 22). They mirror the Go
-// types (GET /api/openapi.json): Providers, Endpoints, Upstream Keys,
-// models, Failure Rules, Model Pools, the route preview and the overview.
 
 export type Shape = "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini";
 export const SHAPES: { value: Shape; label: string }[] = [
@@ -18,7 +15,6 @@ export const shapeLabel = (s: string) => SHAPES.find((x) => x.value === s)?.labe
 
 export type AuthStyle = "bearer" | "x-api-key" | "header" | "query" | "none";
 
-/** How an Endpoint sends the Upstream Key, in one set of words for the Endpoint dialog's choice and the Endpoint sheet. */
 export const AUTH_STYLES: { value: AuthStyle; label: string }[] = [
   { value: "bearer", label: "Authorization: Bearer <key>" },
   { value: "x-api-key", label: "x-api-key: <key>" },
@@ -27,7 +23,6 @@ export const AUTH_STYLES: { value: AuthStyle; label: string }[] = [
   { value: "none", label: "Not sent (no key needed)" },
 ];
 
-/** An Endpoint's auth style as shown on its record: the named header or parameter filled in ("api-key: <key>", "?key=<key>"). */
 export function authStyleLabel(style: string, param?: string): string {
   if (style === "header" && param) return `${param}: <key>`;
   if (style === "query" && param) return `?${param}=<key>`;
@@ -45,16 +40,12 @@ export type Endpoint = {
   static_headers: Record<string, string>;
   renames: Record<string, string>;
   discovery_url: string;
-  /** Prompt caching 03: markers on requests Iroha translates for this Endpoint ("" Iroha's default). */
   cache_markers?: CacheSetting;
-  /** Prompt caching 03/04: the conversation's ID, as prompt_cache_key (OpenAI Shapes, passthrough too) and session headers ("" Iroha's default). */
   send_prompt_cache_key?: CacheSetting;
-  /** What translated requests get for the prompt cache, from the settings, Shape and host. Read-only. */
   caching?: { markers: string; prompt_cache_key: boolean; summary: string };
   created_at: string;
 };
 
-/** An Endpoint's caching setting (cache_markers, send_prompt_cache_key): "" is Iroha's default. The form's Selects hold it as is. */
 export type CacheSetting = "" | "on" | "off";
 
 export const CACHE_SETTINGS: { value: CacheSetting; label: string }[] = [
@@ -97,7 +88,6 @@ export type KeyState = {
 
 export type ModelCooling = { model: string; reason: string; rule?: string; request_id?: string; since: string; until: string };
 export type ModelGap = { model: string; reason: string; rule?: string; request_id?: string; created_at: string; expires_at: string };
-/** The key was refused on this Endpoint after it worked on another (ticket 40); no expiry. */
 export type EndpointGap = { endpoint_id: string; endpoint: string; reason: string; rule?: string; request_id?: string; created_at: string };
 export type EndpointSuccess = { endpoint_id: string; endpoint: string; succeeded_at: string };
 
@@ -150,13 +140,8 @@ export type Facts = {
   architecture?: { input_modalities?: string[]; output_modalities?: string[] };
 };
 
-/**
- * One item of an Upstream Keys bulk update: a field left out stays. `endpoints` replaces the
- * key's list; `endpoints_add` / `endpoints_remove` change it as the server holds it now.
- */
 export type KeyEdit = { key: string; enabled?: boolean; endpoints?: string[]; endpoints_add?: string[]; endpoints_remove?: string[] };
 
-/** Some overrides of a model: a value sets one, null removes it, a field left out stays. */
 export type FactsPatch = { [K in keyof Facts]?: Facts[K] | null };
 
 export type Model = {
@@ -176,7 +161,6 @@ export type Model = {
   discovered_at?: string;
 };
 
-/** The filters of GET /api/providers/{p}/models (`visible`: what Callers see). */
 export type ModelFilter = "all" | "visible" | "discovered" | "added" | "hidden" | "gaps";
 export const MODEL_FILTERS: ModelFilter[] = ["all", "visible", "discovered", "added", "hidden", "gaps"];
 
@@ -228,24 +212,19 @@ export type Rule = RuleFields & {
   last_hit_at?: string;
   order: number;
   overrides?: RuleFields & { name: string };
-  /** With overrides: what the replaced built-in did to the key, in the words of key_effect. */
   builtin_key_effect?: string;
 };
 
 export type Replay = { attempts: number; changed: number; since: string; rules: { rule: string; now: number; after: number }[] };
 
-/** A failure the Owner types, for POST /api/providers/{p}/rules/classify (UI ticket 34). Status 0: no response. */
 export type FailureInput = { status: number; body?: string; headers?: Record<string, string>; model?: string; endpoint?: string; translated?: boolean };
 
-/** What the live Failure Rules decide for a FailureInput (Go `gateway.Classification`). */
 export type Classification = {
   dry_run: boolean;
   provider: string;
   endpoint?: string;
   host?: string;
-  /** false: a 2xx answer with no error in it, relayed to the Caller; no rule tried. */
   failure: boolean;
-  /** Absent when no rule matched (the engine's fallback decided). */
   rule?: string;
   outcome?: Outcome;
   status: number;
@@ -309,7 +288,6 @@ export type RoutePreview = {
 export type GatewayKeyLite = { id: string; name: string; revoked: boolean; scope: { all: boolean; pools?: string[] } };
 
 export type ProviderResult = AuditResult & { provider: Provider };
-/** keyless_key: the keyless key added with the Endpoint (auth style none on a Provider holding no keys). */
 export type EndpointResult = AuditResult & { endpoint: Endpoint; keyless_key?: UpstreamKey };
 export type KeyResult = AuditResult & { upstream_key: UpstreamKey };
 export type ModelResult = AuditResult & { model: Model };
@@ -329,7 +307,6 @@ export const qk = {
   gatewayKeys: ["providers-page", "gateway-keys"] as const,
 };
 
-/** Midnight today, local time: "today" in Requests today and Hits today. */
 export function startOfToday(): string {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -367,13 +344,8 @@ export function useKeys(handle: string) {
   });
 }
 
-/**
- * Each Upstream Key's cache usage over the last 24 h, by key ID: GET /api/requests/stats grouped by
- * upstream_key, test Requests left out (prompt caching 01). Keys with no Requests are absent.
- */
 export function useKeyCache(handle: string) {
   return useQuery({
-    // Under "requests": history, not configuration (api/refresh.ts).
     queryKey: ["requests", "stats", "key-cache", handle],
     queryFn: ({ signal }) =>
       api.get<Stats>("/api/requests/stats", { signal, query: { provider: handle, group_by: "upstream_key", since: "24h", exclude_tests: "true" } }),
@@ -382,7 +354,6 @@ export function useKeyCache(handle: string) {
   });
 }
 
-/** One page of a Provider's model list: the server searches, filters and cuts it (thousands of models cost one page). */
 export function useModels(handle: string, m: { q: string; filter: ModelFilter; offset: number; limit: number }) {
   return useQuery({
     queryKey: [...qk.models(handle), m],
@@ -395,7 +366,6 @@ export function useModels(handle: string, m: { q: string; filter: ModelFilter; o
   });
 }
 
-/** Model IDs a Provider lists, for pickers (first 500). */
 export function useModelIds(handle: string | undefined) {
   return useQuery({
     queryKey: [...qk.models(handle ?? ""), "ids"],
@@ -445,19 +415,19 @@ export function useGatewayKeys() {
   });
 }
 
-/** Every change here can touch any list (and an Undo anything), so they all refetch. */
 export function useRefresh() {
   const qc = useQueryClient();
-  // Resolves once the refetches are in, so an inline result shows on fresh data.
-  return () =>
-    Promise.all(
-      [qk.providers, qk.pools, qk.overview, ["rules"], ["route-preview"], ["audit-entries"], qk.gatewayKeys, ["gateway-keys"], ["test-models"]].map((k) =>
-        qc.invalidateQueries({ queryKey: k }),
+  return useCallback(
+    () =>
+      Promise.all(
+        [qk.providers, qk.pools, qk.overview, ["rules"], ["route-preview"], ["audit-entries"], qk.gatewayKeys, ["gateway-keys"], ["test-models"]].map((k) =>
+          qc.invalidateQueries({ queryKey: k }),
+        ),
       ),
-    );
+    [qc],
+  );
 }
 
-/** A mutation that refetches everything when it settles. */
 export function useChange<V, R>(fn: (v: V) => Promise<R>) {
   const refresh = useRefresh();
   return useMutation({ mutationFn: fn, onSettled: refresh });
@@ -465,6 +435,8 @@ export function useChange<V, R>(fn: (v: V) => Promise<R>) {
 
 const P = (h: string) => `/api/providers/${seg(h)}`;
 const dry = (d?: boolean) => ({ dry_run: d || undefined });
+
+export const nameTaken = (e: unknown): e is ApiError => isApiError(e) && e.code === "name_taken";
 
 export const calls = {
   createProvider: (body: { handle: string; name?: string }) => api.post<ProviderResult>("/api/providers", body),
@@ -474,11 +446,9 @@ export const calls = {
   updateEndpoint: (h: string, name: string, body: Partial<Endpoint>) => api.patch<EndpointResult>(`${P(h)}/endpoints/${seg(name)}`, body),
   deleteEndpoint: (h: string, name: string) => api.delete<EndpointResult>(`${P(h)}/endpoints/${seg(name)}`),
 
-  /** A key with no secret: Iroha sends no key with it. */
   addKeylessKey: (h: string, name: string) => api.post<KeyResult>(`${P(h)}/keys`, { name }),
   addKeys: (h: string, items: { secret: string }[], dryRun?: boolean) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }, { query: dry(dryRun) }),
-  restrictKeys: (h: string, items: { name: string; endpoints: string[] }[]) => api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }),
-  /** Edits many keys (by name or ID) in one change and one Audit Entry; fields an item leaves out stay as that key has them (UI ticket 30). */
+  restrictKeys: (h: string, items: { name: string; endpoints: string[] }[]) => api.put<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk`, { items }),
   editKeys: (h: string, items: KeyEdit[]) =>
     api.post<BulkResult<UpstreamKey>>(`${P(h)}/keys/bulk/update`, { items }),
   updateKey: (h: string, key: string, body: Partial<Pick<UpstreamKey, "name" | "secret" | "enabled" | "endpoints">>) =>
@@ -494,25 +464,23 @@ export const calls = {
   clearKeyGaps: (h: string, key: string, model?: string) => api.post<KeyResult>(`${P(h)}/keys/${seg(key)}/clear-model-gaps`, {}, { query: { model } }),
   clearEndpointGaps: (h: string, key: string, endpoint?: string) =>
     api.post<KeyResult>(`${P(h)}/keys/${seg(key)}/clear-endpoint-gaps`, {}, { query: { endpoint } }),
-  /** Restricts the key to the Endpoints it may use minus those it has an Endpoint Gap on (which clears the gaps). */
   restrictToWorking: (h: string, key: string) => api.post<KeyResult>(`${P(h)}/keys/${seg(key)}/restrict-to-working-endpoints`),
 
   saveModel: (h: string, body: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts }) => api.post<ModelResult>(`${P(h)}/models`, body),
-  /** Many models' changes in one call and one Audit Entry; each item applies or fails on its own. */
-  /** `metadata_patch` changes only the overrides it names (null removes one); the rest stay as each model has them. */
   saveModels: (h: string, items: { model: string; added?: boolean; hidden?: boolean; metadata?: Facts; metadata_patch?: FactsPatch }[]) =>
     api.post<BulkResult<Model>>(`${P(h)}/models/bulk`, { items }),
   refreshModels: (h: string) => api.post<RefreshResult>(`${P(h)}/models/refresh`, {}, { timeoutMs: 120_000 }),
   resetModels: (h: string) => api.post<{ removed: string[]; kept: number }>(`${P(h)}/models/reset`),
 
-  createRule: (body: RuleFields & { name: string; enabled?: boolean }, dryRun?: boolean) => api.post<RuleResult>("/api/rules", body, { query: dry(dryRun) }),
+  createRule: (body: RuleFields & { name: string; enabled?: boolean }, dryRun?: boolean) =>
+    api.post<RuleResult>("/api/rules", body, { query: dry(dryRun) }),
+  putRule: (name: string, body: Partial<RuleFields> & { enabled?: boolean }, dryRun?: boolean) =>
+    api.put<RuleResult>(`/api/rules/${seg(name)}`, body, { query: dry(dryRun) }),
   updateRule: (name: string, body: Partial<RuleFields>, dryRun?: boolean) => api.patch<RuleResult>(`/api/rules/${seg(name)}`, body, { query: dry(dryRun) }),
   switchRule: (name: string, on: boolean) => api.post<RuleResult>(`/api/rules/${seg(name)}/${on ? "enable" : "disable"}`),
   deleteRule: (name: string) => api.delete<RuleResult>(`/api/rules/${seg(name)}`),
-  /** Read-only: which rule a typed failure matches and what it does (nothing is sent or stored). */
   classify: (h: string, body: FailureInput) => api.post<Classification>(`${P(h)}/rules/classify`, body),
 
-  /** Reads the Pool as the server has it now (for a change built on its whole member list). */
   pool: (name: string) => api.get<Pool>(`/api/pools/${seg(name)}`),
   createPool: (body: { name: string; members?: MemberInput[]; maker?: string }) => api.post<PoolResult>("/api/pools", body),
   updatePool: (name: string, body: { name?: string; members?: MemberInput[]; maker?: string; budget?: Partial<Pool["budget"]> }) =>
@@ -520,7 +488,6 @@ export const calls = {
   deletePool: (name: string) => api.delete<PoolResult>(`/api/pools/${seg(name)}`),
 };
 
-/** "sk-…a91f": enough to recognise a key without showing it. Keyless slots say so. */
 export function maskSecret(s: string): string {
   if (!s) return "no secret";
   const dash = s.indexOf("-");
@@ -528,10 +495,8 @@ export function maskSecret(s: string): string {
   return `${prefix}…${s.slice(-4)}`;
 }
 
-/** Natural order: key-2 before key-10. */
 export const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
-/** The success rate shown in tables: succeeded / finished, or "–" with nothing finished. */
 export function successRate(t?: Pick<Traffic, "succeeded" | "failed">): number | undefined {
   if (!t) return undefined;
   const done = t.succeeded + t.failed;

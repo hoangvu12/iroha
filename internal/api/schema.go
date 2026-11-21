@@ -8,11 +8,6 @@ import (
 	"time"
 )
 
-// Schema reflection turns Go body types into JSON Schema (OpenAPI 3.1).
-// Field rules: the json tag names the field ("-" skips it); omitempty makes
-// it optional, otherwise it is required; a `doc:"..."` tag describes it; an
-// `enum:"a,b"` tag lists allowed values. Named structs become components.
-
 type schemaGen struct {
 	components map[string]any
 	names      map[reflect.Type]string
@@ -69,7 +64,7 @@ func (g *schemaGen) of(t reflect.Type) map[string]any {
 			return g.structSchema(t)
 		}
 		return map[string]any{"$ref": "#/components/schemas/" + g.component(t)}
-	default: // interfaces and anything else: any JSON value
+	default:
 		return map[string]any{}
 	}
 }
@@ -78,8 +73,6 @@ func (g *schemaGen) component(t reflect.Type) string {
 	if name, ok := g.names[t]; ok {
 		return name
 	}
-	// Generic instances are named after their arguments without package
-	// paths: BulkResult[github.com/x/admintokens.Token] -> BulkResult_Token.
 	name := strings.TrimRight(nonNameChars.ReplaceAllString(typeArgPath.ReplaceAllString(t.Name(), ""), "_"), "_")
 	if other, ok := g.taken[name]; ok && other != t {
 		pkg := t.PkgPath()
@@ -87,7 +80,7 @@ func (g *schemaGen) component(t reflect.Type) string {
 	}
 	g.names[t] = name
 	g.taken[name] = t
-	g.components[name] = map[string]any{} // placeholder for recursion
+	g.components[name] = map[string]any{}
 	g.components[name] = g.structSchema(t)
 	return name
 }

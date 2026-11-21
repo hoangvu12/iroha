@@ -1,18 +1,3 @@
-// Package modelmeta holds what Iroha knows about a model for Callers'
-// model lists (spec "Models and metadata"): context window, max input and
-// output tokens, modalities, reasoning support and levels, and whether it
-// chats. It is pure apart from Source (source.go), which fetches models.dev.
-//
-//   - Normalize reads one model object as a Provider's list or models.dev
-//     reports it, understanding the common field aliases and nested shapes.
-//   - Catalog.Lookup finds a model in models.dev: exact, dot-versus-dash, or
-//     a bare name with a single numbered release; never a fuzzy prefix, and
-//     ambiguous matches give nothing.
-//   - Resolve applies the precedence: Owner override, then Provider-reported,
-//     then models.dev, field by field.
-//   - Served is what Callers see: chat "ok" unless known not to chat.
-//
-// Metadata never affects whether a model is listed or routed.
 package modelmeta
 
 import (
@@ -42,13 +27,11 @@ type Architecture struct {
 	OutputModalities []string `json:"output_modalities,omitempty" doc:"e.g. [\"text\"]."`
 }
 
-// Chat values.
 const (
 	ChatOK          = "ok"
 	ChatUnsupported = "unsupported"
 )
 
-// IsZero reports whether nothing is known.
 func (f Facts) IsZero() bool {
 	return f.ContextLength == nil && f.MaxInputTokens == nil && f.MaxOutputTokens == nil && f.inputs() == nil && f.outputs() == nil &&
 		f.Reasoning == nil && len(f.ReasoningLevels) == 0 && f.Chat == ""
@@ -170,12 +153,9 @@ func Normalize(raw json.RawMessage) Facts {
 
 func normalize(m map[string]any) Facts {
 	var f Facts
-	f.ContextLength = firstInt(m, contextFields)
 	f.MaxInputTokens = firstInt(m, inputFields)
+	f.ContextLength = contextLengthOrMaxInput(m, f.MaxInputTokens)
 	f.MaxOutputTokens = firstInt(m, outputFields)
-	if f.ContextLength == nil {
-		f.ContextLength = f.MaxInputTokens // the window is at least what one request may send
-	}
 	in, out := modalities(m)
 	f.Architecture = architecture(in, out)
 	f.Reasoning, f.ReasoningLevels = reasoning(m)
@@ -183,7 +163,13 @@ func normalize(m map[string]any) Facts {
 	return f
 }
 
-// at follows a path of object keys.
+func contextLengthOrMaxInput(m map[string]any, maxInput *int64) *int64 {
+	if n := firstInt(m, contextFields); n != nil {
+		return n
+	}
+	return maxInput
+}
+
 func at(m map[string]any, path []string) (any, bool) {
 	var v any = m
 	for _, k := range path {
@@ -212,7 +198,6 @@ func firstInt(m map[string]any, paths [][]string) *int64 {
 // maxSafe is the largest integer every JSON reader holds exactly.
 const maxSafe = 1<<53 - 1
 
-// positiveInt reads a positive whole number, or a string holding one.
 func positiveInt(v any) (int64, bool) {
 	var x float64
 	switch t := v.(type) {
@@ -233,9 +218,7 @@ func positiveInt(v any) (int64, bool) {
 	return int64(x), true
 }
 
-// words reads an array of strings: trimmed, lower case, de-duplicated, in
-// order; nil when absent or empty.
-func words(v any) []string {
+func normalizedWords(v any) []string {
 	arr, ok := v.([]any)
 	if !ok {
 		return nil
@@ -256,7 +239,7 @@ func words(v any) []string {
 func firstWords(m map[string]any, paths ...[]string) []string {
 	for _, p := range paths {
 		if v, ok := at(m, p); ok {
-			if w := words(v); w != nil {
+			if w := normalizedWords(v); w != nil {
 				return w
 			}
 		}
@@ -278,7 +261,7 @@ func modalities(m map[string]any) (in, out []string) {
 					for _, p := range strings.Split(s, "+") {
 						w = append(w, p)
 					}
-					return words(w)
+					return normalizedWords(w)
 				}
 				if in == nil {
 					in = split(l)
@@ -292,7 +275,6 @@ func modalities(m map[string]any) (in, out []string) {
 	return in, out
 }
 
-// truth reads a boolean, or a word such as supported/not_supported.
 func truth(v any) (bool, bool) {
 	switch t := v.(type) {
 	case bool:
@@ -312,12 +294,11 @@ func truth(v any) (bool, bool) {
 	return false, false
 }
 
-// reasoning reads whether the model reasons and its effort levels.
 func reasoning(m map[string]any) (*bool, []string) {
 	var levels []string
 	for _, p := range levelFields {
 		if v, ok := at(m, p); ok {
-			if levels = words(v); levels != nil {
+			if levels = normalizedWords(v); levels != nil {
 				break
 			}
 		}
@@ -326,7 +307,7 @@ func reasoning(m map[string]any) (*bool, []string) {
 	if opts, ok := m["reasoning_options"].([]any); ok && levels == nil {
 		for _, o := range opts {
 			if obj, ok := o.(map[string]any); ok && obj["type"] == "effort" {
-				levels = words(obj["values"])
+				levels = normalizedWords(obj["values"])
 			}
 		}
 	}
@@ -362,14 +343,8 @@ func reasoning(m map[string]any) (*bool, []string) {
 	return known, levels
 }
 
-// chatEndpoints are endpoint names that mean a model chats through Iroha
-// (Iroha translates between the Shapes).
 var chatEndpoints = []string{"chat/completions", "responses", "messages", "generatecontent", "streamgeneratecontent"}
 
-// chat reads whether a model chats (catalog MOD-77, MOD-78): explicit
-// fields first, then the endpoints or generation methods it supports, then
-// modalities lacking text (unsupported), then text output with generative
-// evidence (ok). "" when unknown; never guessed from the name.
 func chat(m map[string]any, in, out []string) string {
 	for _, p := range [][]string{{"chat"}, {"capabilities", "chat"}, {"capabilities", "completion_chat"}} {
 		if v, ok := at(m, p); ok {
@@ -380,7 +355,7 @@ func chat(m map[string]any, in, out []string) string {
 	}
 	for _, p := range [][]string{{"supported_endpoints"}, {"supportedGenerationMethods"}} {
 		if v, ok := at(m, p); ok {
-			if eps := words(v); eps != nil {
+			if eps := normalizedWords(v); eps != nil {
 				for _, e := range eps {
 					e = strings.Trim(strings.TrimPrefix(strings.TrimPrefix(e, "/"), "v1/"), "/")
 					for _, c := range chatEndpoints {

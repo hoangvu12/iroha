@@ -17,7 +17,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// runFreeAddr is a loopback address nothing listens on right now.
 func runFreeAddr(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -29,8 +28,6 @@ func runFreeAddr(t *testing.T) string {
 	return addr
 }
 
-// RUN-01: a data directory Iroha cannot use stops the start: Run returns an
-// error naming the problem, nothing listens and no startup event is logged.
 func TestRunFailsBeforeListeningWhenTheDataDirectoryIsUnusable(t *testing.T) {
 	base := t.TempDir()
 	notADir := filepath.Join(base, "file")
@@ -67,7 +64,6 @@ func TestRunFailsBeforeListeningWhenTheDataDirectoryIsUnusable(t *testing.T) {
 			if strings.Contains(console.String(), `"kind":"startup"`) {
 				t.Fatalf("a startup event was logged:\n%s", console.String())
 			}
-			// Nothing holds the address.
 			ln, lerr := net.Listen("tcp", addr)
 			if lerr != nil {
 				t.Fatalf("%s is still taken after the failed start: %v", addr, lerr)
@@ -77,8 +73,6 @@ func TestRunFailsBeforeListeningWhenTheDataDirectoryIsUnusable(t *testing.T) {
 	}
 }
 
-// RUN-03: once a shutdown begins, /readyz answers 503 not_ready to anything
-// that still reaches it, while in-flight Requests drain.
 func TestReadinessTurnsOffAsSoonAsTheDrainBegins(t *testing.T) {
 	srv := testkit.Start(t)
 	gate := make(chan struct{})
@@ -115,8 +109,6 @@ func TestReadinessTurnsOffAsSoonAsTheDrainBegins(t *testing.T) {
 	waitStopped(t, stopped, 5*time.Second)
 }
 
-// RUN-05: a second SIGTERM during the drain changes nothing: Run returns
-// once, after one shutdown event.
 func TestASecondSignalDuringTheDrainIsAbsorbed(t *testing.T) {
 	entered, release := make(chan struct{}, 1), make(chan struct{})
 	srv := runServer(t, 10*time.Second, slowRoute(entered, release))

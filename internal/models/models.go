@@ -1,19 +1,3 @@
-// Package models keeps each Provider's model list (ADR-0003, spec "Models
-// and metadata"). An entry has three independent flags: discovered (some
-// Endpoint's or key's list names it, discovery.go), added and hidden (the
-// Owner's, audited as resource "model", routes.go). An entry is deleted only
-// when no flag keeps it.
-//
-// The list shapes routing in three ways, all applied by Prepare before
-// planning: a hidden model is refused, a strict Provider refuses models its
-// list lacks, and under per-key discovery the keys whose own list names a
-// model are marked as its carriers (planner.Key.Carries) so they are tried
-// first. A list never excludes a key, and an unlisted model on a Provider
-// that is not strict is forwarded.
-//
-// Ticket 11 adds metadata to the same entries (reported holds what discovery
-// last received for each model); ticket 20 calls Store.Refresh from the
-// daily job.
 package models
 
 import (
@@ -38,18 +22,16 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Options are the Store's dependencies.
 type Options struct {
 	DB         *store.DB
 	Log        *slog.Logger
-	HTTPClient *http.Client // discovery requests; redirects are never followed
+	HTTPClient *http.Client
 	Providers  *providers.Store
-	Keys       *gatewaykeys.Store // authenticates Callers of /providers/{handle}/v1/models
-	ModelsDev  *modelmeta.Source  // model metadata (ticket 11); nil: never read
-	Pools      *pools.Store       // the Pools GET /v1/models lists; nil: none
+	Keys       *gatewaykeys.Store
+	ModelsDev  *modelmeta.Source
+	Pools      *pools.Store
 }
 
-// Store keeps model lists.
 type Store struct {
 	db        *store.DB
 	log       *slog.Logger
@@ -61,34 +43,23 @@ type Store struct {
 	pools     *pools.Store
 }
 
-// New returns a Store.
 func New(o Options) *Store {
 	hc := *o.HTTPClient
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Store{db: o.DB, log: o.Log, clock: o.DB.Clock(), http: &hc, providers: o.Providers, keys: o.Keys, meta: o.ModelsDev, pools: o.Pools}
 }
 
-// entryID is the record ID of a Provider's entry for model: derived from
-// both, so an entry dropped by discovery and found again keeps its ID.
 func entryID(providerID, model string) string {
 	sum := sha256.Sum256([]byte(providerID + "\x00" + model))
 	return "pm_" + hex.EncodeToString(sum[:10])
 }
 
-// errNotOffered is the uniform refusal of a hidden model, or of a model a
-// strict Provider's list lacks.
 func errNotOffered(handle, model string) *api.Error {
 	return api.Errorf(http.StatusNotFound, "model_not_found",
 		"Use a model the Provider offers: GET /providers/"+handle+"/v1/models lists them.",
 		"Provider %s does not offer the model %q.", handle, model).WithDetails(map[string]string{"provider": handle, "model": model})
 }
 
-// Prepare checks, before any Attempt, that model may be asked of Provider
-// p: a hidden model is refused, and so is a model missing from a strict
-// Provider's list (unless an Endpoint renames it, which names it on
-// purpose). Both answer 404 model_not_found. It then marks each key whose
-// own discovered list names the wire model of an Endpoint as a carrier, so
-// planning tries it first.
 func (s *Store) Prepare(ctx context.Context, p *planner.Provider, model string) error {
 	var strict, added, hidden, discovered bool
 	err := s.db.QueryRowContext(ctx, `SELECT pr.strict, coalesce(m.added, 0), coalesce(m.hidden, 0),
@@ -116,7 +87,6 @@ func renamed(p *planner.Provider, model string) bool {
 	return false
 }
 
-// markCarriers sets Key.Carries for the wire models model becomes.
 func (s *Store) markCarriers(ctx context.Context, p *planner.Provider, model string) error {
 	wire := []any{p.ID, model}
 	for i := range p.Endpoints {
@@ -153,27 +123,23 @@ func (s *Store) markCarriers(ctx context.Context, p *planner.Provider, model str
 	return nil
 }
 
-// Model is one entry of a Provider's model list as the admin API shows it.
 type Model struct {
-	ID           string     `json:"id"`
-	Model        string     `json:"model" doc:"The model ID as the Provider names it."`
-	Visible      bool       `json:"visible" doc:"true: listed to Callers (discovered or added, and not hidden)."`
-	Discovered   bool       `json:"discovered" doc:"true: an Endpoint's or key's discovered list names it."`
-	Added        bool       `json:"added" doc:"true: the Owner added it; discovery never removes it."`
-	Hidden       bool       `json:"hidden" doc:"true: the Owner hid it; Callers asking for it are refused (404 model_not_found)."`
-	Endpoints    []string   `json:"endpoints" doc:"Names of the Endpoints whose discovered list names it."`
-	UpstreamKeys []string   `json:"upstream_keys" doc:"Under per-key discovery: names of the keys whose own list names it; they are tried first for it."`
-	ModelGaps    []string   `json:"model_gaps" doc:"Names of the keys with a live Model Gap for it (the Provider refused them the model)."`
-	DiscoveredAt *time.Time `json:"discovered_at,omitempty" doc:"The last refresh whose lists named it."`
-	// Metadata (ticket 11).
-	Metadata  modelmeta.Facts `json:"metadata" doc:"What Callers' model lists say of it: each field from overrides, else reported, else models_dev; chat ok unless known not to chat."`
-	Overrides modelmeta.Facts `json:"overrides" doc:"The Owner's metadata overrides; set them with POST /api/providers/{provider}/models {\"model\": ..., \"metadata\": {...}}."`
-	Reported  modelmeta.Facts `json:"reported" doc:"What the Provider's own model list said of it at the last refresh."`
-	ModelsDev modelmeta.Facts `json:"models_dev" doc:"What models.dev said of it at the last lookup, under the Provider's models_dev_brand."`
+	ID           string          `json:"id"`
+	Model        string          `json:"model" doc:"The model ID as the Provider names it."`
+	Visible      bool            `json:"visible" doc:"true: listed to Callers (discovered or added, and not hidden)."`
+	Discovered   bool            `json:"discovered" doc:"true: an Endpoint's or key's discovered list names it."`
+	Added        bool            `json:"added" doc:"true: the Owner added it; discovery never removes it."`
+	Hidden       bool            `json:"hidden" doc:"true: the Owner hid it; Callers asking for it are refused (404 model_not_found)."`
+	Endpoints    []string        `json:"endpoints" doc:"Names of the Endpoints whose discovered list names it."`
+	UpstreamKeys []string        `json:"upstream_keys" doc:"Under per-key discovery: names of the keys whose own list names it; they are tried first for it."`
+	ModelGaps    []string        `json:"model_gaps" doc:"Names of the keys with a live Model Gap for it (the Provider refused them the model)."`
+	DiscoveredAt *time.Time      `json:"discovered_at,omitempty" doc:"The last refresh whose lists named it."`
+	Metadata     modelmeta.Facts `json:"metadata" doc:"What Callers' model lists say of it: each field from overrides, else reported, else models_dev; chat ok unless known not to chat."`
+	Overrides    modelmeta.Facts `json:"overrides" doc:"The Owner's metadata overrides; set them with POST /api/providers/{provider}/models {\"model\": ..., \"metadata\": {...}}."`
+	Reported     modelmeta.Facts `json:"reported" doc:"What the Provider's own model list said of it at the last refresh."`
+	ModelsDev    modelmeta.Facts `json:"models_dev" doc:"What models.dev said of it at the last lookup, under the Provider's models_dev_brand."`
 }
 
-// readEntries reads every entry of a Provider that some flag keeps, with
-// its sources and live gaps, sorted by model.
 func readEntries(ctx context.Context, q querier, providerID string, now time.Time) ([]Model, error) {
 	byModel := map[string]*Model{}
 	var out []*Model
@@ -254,7 +220,7 @@ func readEntries(ctx context.Context, q querier, providerID string, now time.Tim
 	list := make([]Model, 0, len(out))
 	for _, m := range out {
 		if !m.Discovered && !m.Added && !m.Hidden && !overridden[m.Model] {
-			continue // its lists are gone (Endpoint or key deleted); the next refresh deletes it
+			continue
 		}
 		m.Visible = (m.Discovered || m.Added) && !m.Hidden
 		list = append(list, *m)
@@ -263,7 +229,6 @@ func readEntries(ctx context.Context, q querier, providerID string, now time.Tim
 	return list, nil
 }
 
-// readEntry reads one entry of a Provider; ok is false when no flag keeps it.
 func readEntry(ctx context.Context, q querier, providerID, model string, now time.Time) (Model, bool, error) {
 	list, err := readEntries(ctx, q, providerID, now)
 	if err != nil {
@@ -279,8 +244,6 @@ func readEntry(ctx context.Context, q querier, providerID, model string, now tim
 	return out, false, nil
 }
 
-// Visible lists the models Callers of a Provider see: discovered or added,
-// and not hidden, sorted.
 func (s *Store) Visible(ctx context.Context, providerID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT m.model FROM provider_models m WHERE m.provider_id = ? AND m.hidden = 0
 		AND (m.added = 1 OR EXISTS (SELECT 1 FROM provider_model_sources src WHERE src.provider_id = m.provider_id AND src.model = m.model))
@@ -300,7 +263,6 @@ func (s *Store) Visible(ctx context.Context, providerID string) ([]string, error
 	return out, rows.Err()
 }
 
-// hiddenSet lists a Provider's hidden models.
 func (s *Store) hiddenSet(ctx context.Context, providerID string) (map[string]bool, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT model FROM provider_models WHERE provider_id = ? AND hidden = 1`, providerID)
 	if err != nil {
@@ -318,15 +280,12 @@ func (s *Store) hiddenSet(ctx context.Context, providerID string) (map[string]bo
 	return out, rows.Err()
 }
 
-// querier is what reads need from *sql.Tx or *store.DB.
 type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-// pruneEntries deletes a Provider's entries that no flag (nor an Owner
-// override) keeps.
 func pruneEntries(ctx context.Context, q querier, providerID string) error {
 	_, err := q.ExecContext(ctx, `DELETE FROM provider_models WHERE provider_id = ? AND added = 0 AND hidden = 0 AND overrides = ''
 		AND NOT EXISTS (SELECT 1 FROM provider_model_sources src WHERE src.provider_id = provider_models.provider_id AND src.model = provider_models.model)`, providerID)

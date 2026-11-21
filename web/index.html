@@ -4,13 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <!-- The phone's browser bar takes the page background (--bg); theme.tsx keeps it on the chosen theme. -->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0e10" />
     <link rel="icon" type="image/png" href="/brand/iroha-avatar.png" />
     <title>Iroha</title>
     <script>
-      // Apply the theme before the first paint (see src/app/theme.tsx).
       (function () {
         var pref = "system";
         try { pref = localStorage.getItem("iroha.theme") || "system"; } catch (e) {}

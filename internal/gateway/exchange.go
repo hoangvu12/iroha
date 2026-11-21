@@ -3,85 +3,48 @@ package gateway
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/gatewaykeys"
 	"github.com/hoangvu12/iroha/internal/ids"
 	"github.com/hoangvu12/iroha/internal/logs"
+	"github.com/hoangvu12/iroha/internal/planner"
 	"github.com/hoangvu12/iroha/internal/pools"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// exchange is one Request in flight: what the Caller sent, what it has been
-// answered, and the record being built.
 type exchange struct {
-	g     *Gateway
-	w     http.ResponseWriter
-	r     *http.Request
-	ctx   context.Context
-	start time.Time
-	rec   requests.Request
-	begun bool // the Request is recorded (the Caller is known)
-	// capture collects the prompt and response when the Gateway Key has
-	// capture on; it wraps r.Body and w, so nothing else needs to know.
-	capture *requests.Capture
-	// pool is the Model Pool the Caller named, if any: its budget override
-	// applies across its members (budget.go).
-	pool *pools.Routing
-	// idempotencyKey is minted per Request when the Caller sent no
-	// Idempotency-Key, and sent on every Attempt (attempt), so a Provider
-	// that honours it never bills a replayed Attempt twice. Empty when the
-	// Caller's own value is forwarded.
+	g        *Gateway
+	out      *callerOutput
+	r        *http.Request
+	ctx      context.Context
+	start    time.Time
+	rec      requests.Request
+	recorded bool
+	capture  *requests.Capture
+	pool     *pools.Routing
+	// A Provider honouring Idempotency-Key processes a repeated request once.
 	idempotencyKey string
-	// test is set on a test send (testrun.go): its recorded Caller and pins.
-	test *testRun
-	// conv is the conversation the Request belongs to (affinity.go), known
-	// once the route is resolved.
-	conv conversation
-	// model is the model asked of a single Provider (route.model), for the
-	// derived prompt_cache_key (caching.go).
-	model string
-	// added names the top-level fields the last prepared Attempt got for the
-	// prompt cache (translated, or passthrough when addedPass); plain holds
-	// Endpoints that refused such an addition in this Request and get none
-	// (caching.go).
-	added     []string
-	addedPass bool
-	plain     map[string]bool
-
-	// mu guards what follows and every write to w, since a stream's keeper
-	// (stream.go) writes alongside the relay.
-	mu        sync.Mutex
-	wrote     bool // the status line went to the Caller
-	streaming bool // what the Caller gets is an event stream
-	committed bool // Iroha sent 200 before the answer: stream headers (stream.go) or JSON (pad.go)
-	ended     bool // the answer is complete; nothing more is written
-	lastWrite time.Time
-	// A non-stream Request's padder (pad.go): answering while an upstream
-	// 2xx answer is being read, padded once Iroha committed 200 + JSON.
-	answering bool
-	padded    bool
-	pad       *padder
+	test           *testRun
+	conv           conversation
+	planned        planner.Request
 }
 
 func (g *Gateway) newExchange(w http.ResponseWriter, r *http.Request, sh shape.Shape) *exchange {
 	now := g.clock.Now()
-	x := &exchange{g: g, w: w, r: r, ctx: r.Context(), start: now,
+	x := &exchange{g: g, r: r, ctx: r.Context(), start: now,
 		rec: requests.Request{ID: ids.New("req"), StartedAt: now.UTC(), Route: r.URL.Path, ShapeIn: sh}}
-	if r.Header.Get(idempotencyHeader) == "" {
+	x.out = newCallerOutput(w, g.clock, sh, x.rec.ID)
+	x.idempotencyKey = r.Header.Get(idempotencyHeader)
+	if x.idempotencyKey == "" {
 		x.idempotencyKey = ids.UUID()
 	}
 	w.Header().Set("X-Request-Id", x.rec.ID)
 	return x
 }
 
-// begin records the Request once the Caller is known, and starts capturing
-// it when the Caller's Gateway Key asks for that. Test sends are always
-// captured (the chat's tool check reads the answer; the Owner's own tests
-// carry nobody else's conversation).
 func (x *exchange) begin(c gatewaykeys.Caller) {
 	x.rec.Caller = requests.Caller{Kind: requests.CallerGatewayKey, GatewayKeyID: c.KeyID, Name: c.Name}
 	capture := c.Capture
@@ -89,30 +52,31 @@ func (x *exchange) begin(c gatewaykeys.Caller) {
 		x.rec.Caller, capture = x.test.caller, true
 	}
 	if capture {
-		x.capture = requests.NewCapture(x.start)
-		x.r.Body = x.capture.Body(x.r)
-		x.w = x.capture.Writer(x.w)
+		x.out.wrap(func(w http.ResponseWriter) http.ResponseWriter {
+			var teed http.ResponseWriter
+			x.capture, x.r.Body, teed = requests.NewCapture(w, x.r, x.start)
+			return teed
+		})
 	}
 	if err := x.g.rec.Begin(x.ctx, &x.rec); err != nil {
 		x.g.log.Error("recording a Request failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
 		return
 	}
-	x.begun = true
+	x.recorded = true
 }
 
-// finish completes the record and logs the Request.
 func (x *exchange) finish() {
 	now := x.g.clock.Now()
 	at := now.UTC()
 	x.rec.FinishedAt = &at
 	x.rec.DurationMs = ms(now.Sub(x.start))
-	if x.rec.Status == 0 && x.isCommitted() {
+	if x.rec.Status == 0 && x.out.isCommitted() {
 		x.rec.Status = http.StatusOK
 	}
 	if x.rec.Status == 0 {
 		x.rec.Status = http.StatusOK
 	}
-	if x.begun {
+	if x.recorded {
 		if err := x.g.rec.Finish(x.ctx, &x.rec); err != nil {
 			x.g.log.Error("recording a Request failed", logs.Kind(logs.KindGeneric), logs.Request(x.rec.ID), "err", err.Error())
 		}
@@ -133,52 +97,17 @@ func (x *exchange) finish() {
 	x.g.log.Info("request finished", attrs...)
 }
 
-// fail answers the Caller with e in its Shape and records why. On a stream
-// already under way the status stays what the Caller got and e goes out as
-// the stream's last event.
 func (x *exchange) fail(e *api.Error) {
 	x.rec.Error = &requests.Failure{Code: e.Code, Message: e.Message}
-	if status := x.writeError(e); status != 0 {
-		x.rec.Status = status
+	if x.out.writeError(e) {
+		x.rec.Status = e.Status
 	} else if x.rec.Status == 0 {
-		x.rec.Status = http.StatusOK // committed by Iroha
+		x.rec.Status = http.StatusOK
 	}
 }
 
-// refuseUnrecorded answers a Caller that could not be identified; there is
-// no Caller to attribute a Request to, so nothing is recorded.
 func (x *exchange) refuseUnrecorded(e *api.Error) {
-	x.writeError(e)
-}
-
-// writeError writes e in the Caller's Shape (errorEnvelope), extended with
-// Iroha's hint and the Request ID; on a stream under way, the Shape's error
-// event (stream.go); after a non-stream commit (pad.go), the envelope as
-// the body. It returns the HTTP status sent, 0 when the status
-// line had already gone out.
-func (x *exchange) writeError(e *api.Error) int {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if x.ended {
-		return 0
-	}
-	x.ended = true
-	if x.streaming {
-		_ = x.sendLocked(specOf(x.rec.ShapeIn).stream.errorEvent(e, x.rec.ID))
-		return 0
-	}
-	if x.padded { // committed 200 + JSON: the error is the body
-		_, _ = x.w.Write(append(compactJSON(errorEnvelope(x.rec.ShapeIn, e, x.rec.ID)), '\n'))
-		return 0
-	}
-	if x.wrote {
-		return 0
-	}
-	x.wrote = true
-	x.w.Header().Set("Content-Type", "application/json")
-	x.w.WriteHeader(e.Status)
-	_, _ = x.w.Write(append(compactJSON(errorEnvelope(x.rec.ShapeIn, e, x.rec.ID)), '\n'))
-	return e.Status
+	x.out.writeError(e)
 }
 
 func errorType(status int) string {

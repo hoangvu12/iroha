@@ -8,9 +8,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// UI ticket 30: one call edits many Gateway Keys by name or ID; fields left
-// out stay as each key has them, one Audit Entry reverts the lot, and a
-// revoked or missing key fails alone.
 func TestManyGatewayKeysAreEditedInOneRevertibleCall(t *testing.T) {
 	srv := testkit.Start(t)
 	all := map[string]any{"all": true}
@@ -49,7 +46,6 @@ func TestManyGatewayKeysAreEditedInOneRevertibleCall(t *testing.T) {
 	if k.Capture {
 		t.Fatalf("after revert a = %+v", k)
 	}
-	// Names are not bulk-edited, nor scopes (one key at a time: PATCH).
 	srv.Admin.Post("/api/gateway-keys/bulk/update", map[string]any{"items": []any{map[string]any{"key": "a", "name": "z"}}}).Expect(400)
 	srv.Admin.Post("/api/gateway-keys/bulk/update", map[string]any{"items": []any{map[string]any{"key": "a", "scope": all}}}).Expect(400)
 }

@@ -148,7 +148,6 @@ func ParseLevel(s string) (slog.Level, error) {
 
 const maxLimit = 1000
 
-// Routes returns the logs API routes.
 func Routes(l *Log) []api.Route {
 	return []api.Route{{
 		Method: http.MethodGet, Path: "/api/logs", Tag: "Logs",

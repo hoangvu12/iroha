@@ -29,7 +29,6 @@ const primary: Partial<Record<Tab, string>> = {
   rules: "Add rule",
 };
 
-/** A Provider: header, underline tabs, one primary action per tab (C01, C07-C09, C14). */
 export function ProviderPage() {
   const { handle = "", tab: raw } = useParams();
   const tab = TABS.find((t) => t === raw);
@@ -38,7 +37,6 @@ export function ProviderPage() {
   const phone = useIsPhone();
   const [adding, setAdding] = useState(false);
   const refreshList = useChange(() => calls.refreshModels(handle));
-  // The outcome shows beside Refresh list, which stays on the page.
   const refreshing = useSave();
 
   if (!tab) return <Navigate to={`/providers/${seg(handle)}/keys`} replace />;
@@ -85,7 +83,7 @@ export function ProviderPage() {
     <>
       <PageHeader
         back={{ to: "/providers", label: "Providers" }}
-        icon={<ProviderTile handle={handle} version={p?.logo_domain} size={phone ? 40 : 60} />}
+        icon={<ProviderTile handle={handle} cacheKey={p?.logo_domain} size={phone ? 40 : 60} />}
         title={
           <span className="flex min-w-0 items-center gap-3">
             <span className="truncate">{handle}</span>

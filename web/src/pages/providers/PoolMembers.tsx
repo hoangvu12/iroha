@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { rec, RecordLink } from "@/sheets/RecordLink";
 import { ArrowDown, ArrowUp, ExternalLink, Layers, MessageCircle, Trash2 } from "lucide-react";
@@ -27,24 +27,22 @@ import { MembersBulkEdit } from "./BulkEdits";
 
 const inputs = (ms: Member[]): MemberInput[] => ms.map(({ provider, model, enabled }) => ({ provider, model, enabled }));
 
-/**
- * Saves a Pool's members in a new order or state. The list stays where it
- * was changed, so the result (with Undo) shows beside the Members heading;
- * a failure there too, and the list goes back to what was saved.
- */
 function useSaveMembers(pool: Pool | undefined, restore: (members: Member[]) => void): [Save, (members: Member[], what: string) => void] {
   const refresh = useRefresh();
   const saving = useSave({ refresh, describe: errorText });
-  const save = (members: Member[], what: string) => {
-    if (!pool) return;
-    void saving.run(() => calls.updatePool(pool.name, { members: inputs(members) }), { message: what }).then((ok) => {
-      if (!ok) restore(pool.members);
-    });
-  };
+  const { run } = saving;
+  const save = useCallback(
+    (members: Member[], what: string) => {
+      if (!pool) return;
+      void run(() => calls.updatePool(pool.name, { members: inputs(members) }), { message: what }).then((ok) => {
+        if (!ok) restore(pool.members);
+      });
+    },
+    [pool, run, restore],
+  );
   return [saving, save];
 }
 
-/** Members (C06): who serves the Pool, in order; drag a handle (or Space and the arrows on it) or use Move up/down to reorder, switch members on or off. */
 export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Pool; onAdd: () => void }) {
   const overview = useOverview();
   const gks = useGatewayKeys();
@@ -67,7 +65,6 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
   const movedOn = first && stats ? stats.requests - (served.get(first.provider)?.requests ?? 0) - (served.get("")?.requests ?? 0) : undefined;
 
   const byKey = new Map(order.map((m) => [memberKey(m), m]));
-  // A new order of keys (a drop, a menu's Move, an agent's move): shown at once, then saved.
   const reorder = (keys: string[], held?: string) => {
     const next = keys.map((k) => byKey.get(k)).filter((m): m is Member => !!m);
     const moved = held ?? movedKey(order.map(memberKey), keys);
@@ -82,13 +79,15 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
     keys.splice(to, 0, k);
     reorder(keys, k);
   };
-  const flip = (m: Member, on: boolean) => {
-    const next = order.map((x) => (x === m ? { ...x, enabled: on } : x));
-    setOrder(next);
-    saveMembers(next, `${m.provider} switched ${on ? "on" : "off"}`);
-  };
+  const flip = useCallback(
+    (m: Member, on: boolean) => {
+      const next = order.map((x) => (x === m ? { ...x, enabled: on } : x));
+      setOrder(next);
+      saveMembers(next, `${m.provider} switched ${on ? "on" : "off"}`);
+    },
+    [order, saveMembers],
+  );
 
-  // Asks first, naming the member; the row is gone afterwards, so the result (with Undo) toasts.
   const askRemove = (m: Member) =>
     confirm.ask({
       title: `Remove ${memberName(m)} from ${name}?`,
@@ -99,7 +98,6 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
         const next = order.filter((x) => x !== m);
         const res = await calls.updatePool(pool.name, { members: inputs(next) });
         refresh();
-        // Toast: the confirm dialog has closed and the row is gone; Undo after a removal.
         notifyChange(`${m.provider} removed from ${name}`, res, { onUndone: refresh });
       },
     });
@@ -125,7 +123,6 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
     </RowMenu>
   );
 
-  // The table's rows in the order shown (a dragged row's draft order while it moves), with today's numbers.
   const rowsIn = (keysShown: string[]): MemberRow[] =>
     keysShown.flatMap((k, index) => {
       const m = byKey.get(k);
@@ -133,13 +130,11 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
       const s = served.get(m.provider);
       return [{ ...m, member: m, key: k, index, activeKeys: keys.get(m.provider)?.active, requests: s?.requests ?? 0, success: s ? successRate({ succeeded: s.succeeded, failed: s.requests - s.succeeded }) : undefined }];
     });
-  const columns = useMemo(() => memberColumns({ pending: saving.pending, flip }), [saving.pending, order]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Waits for the overview too, so Active keys and Requests today arrive filled in.
+  const columns = useMemo(() => memberColumns({ pending: saving.pending, flip }), [saving.pending, flip]);
   const ready = !!pool && !overview.isPending;
 
   return (
     <section aria-label="Members">
-      {/* The numbers come from the overview: measured from the grid itself until it lands (labels stay). */}
       <Skeleton data={overview.data} sample={SAMPLE_OVERVIEW} label="Loading today's numbers">
         {() => (
           <div className="mb-9 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-4">
@@ -171,7 +166,6 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
             getRowId={(r) => r.key}
             rowName={memberName}
             rowActions={menu}
-            // On for several members at once, mixed shown (UI ticket 30).
             bulk={({ rows }) => (
               <>
                 <MembersBulkEdit pool={name} rows={rows} at={barSave} size={phone ? "sm" : "md"} />
@@ -180,7 +174,6 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
             )}
             phoneRow={(r) => <MemberLine r={r} />}
             phoneActions={(r) => <Switch checked={r.enabled} label={`${r.provider} on`} pending={saving.pending} onChange={(on) => flip(r.member, on)} />}
-            // The order is the point: every member on one page, so a drag reaches any place.
             paging={{ mode: "none" }}
             empty={
               <EmptyState
@@ -225,7 +218,6 @@ export function PoolMembersTab({ name, pool, onAdd }: { name: string; pool?: Poo
 const memberKey = (m: Pick<Member, "provider" | "model">) => `${m.provider}/${m.model}`;
 const memberName = (m: Pick<Member, "provider" | "model">) => `${m.provider} (${m.model})`;
 
-/** The one key that moved between two orders of the same keys; none when it can't be told (a swap of two neighbours). */
 function movedKey(before: string[], after: string[]): string | undefined {
   const moved = after.filter((k) => {
     const a = before.filter((x) => x !== k);
@@ -235,12 +227,10 @@ function movedKey(before: string[], after: string[]): string | undefined {
   return moved.length === 1 ? moved[0] : undefined;
 }
 
-/** A member as the table shows it: its place in the order shown and today's numbers. */
 type MemberRow = Member & { member: Member; key: string; index: number; activeKeys?: number; requests: number; success?: number };
 
 const SAMPLE_MEMBER_ROWS: MemberRow[] = SAMPLE_POOL.members.map((m, index) => ({ ...m, member: m, key: memberKey(m), index, activeKeys: 4, requests: 420, success: 0.99 }));
 
-// The order is what counts (Iroha tries members top to bottom), so no column sorts.
 const col = columnsFor<MemberRow>();
 function memberColumns({ pending, flip }: { pending: boolean; flip: (m: Member, on: boolean) => void }) {
   return col.columns([
@@ -279,7 +269,6 @@ function memberColumns({ pending, flip }: { pending: boolean; flip: (m: Member, 
   ]);
 }
 
-/** Phones (C31): a member in two lines; Move up/down are in its menu. */
 function MemberLine({ r }: { r: MemberRow }) {
   return (
     <span className={cn("flex min-w-0 flex-1 items-center gap-3", !r.enabled && "opacity-60")}>
@@ -318,10 +307,12 @@ export function AddMemberDialog({ pool, open, onOpenChange }: { pool: Pool; open
   const ids = useModelIds(provider || undefined);
   const choices = (providers.data ?? []).filter((p) => !p.archived).sort((a, b) => natural(a.handle, b.handle));
 
+  const fillBlanks = useEffectEvent(() => {
+    if (!provider && choices.length) setProvider(choices[0].handle);
+    if (!model) setModel(pool.name);
+  });
   useEffect(() => {
-    if (open && !provider && choices.length) setProvider(choices[0].handle);
-    if (open && !model) setModel(pool.name);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (open) fillBlanks();
   }, [open, choices.length]);
 
   const close = (o: boolean) => {
@@ -339,7 +330,6 @@ export function AddMemberDialog({ pool, open, onOpenChange }: { pool: Pool; open
     try {
       const res = await calls.updatePool(pool.name, { members: [...inputs(pool.members), { provider, model: model.trim(), enabled: true }] });
       refresh();
-      // Toast: the Add member dialog closes on success.
       notifyChange(`${provider} added to ${pool.name}`, res, { onUndone: refresh });
       close(false);
     } catch (e) {

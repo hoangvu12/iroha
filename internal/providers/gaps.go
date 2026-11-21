@@ -10,13 +10,11 @@ import (
 	"github.com/hoangvu12/iroha/internal/keystate"
 )
 
-// GapEntry is one live Model Gap of a Provider's key.
 type GapEntry struct {
 	UpstreamKey string `json:"upstream_key" doc:"Name of the key."`
 	keystate.ModelGap
 }
 
-// GapList is the response of GET /api/providers/{provider}/model-gaps.
 type GapList struct {
 	ModelGaps []GapEntry `json:"model_gaps"`
 }
@@ -142,7 +140,6 @@ func (h handlers) gapRoutes() []api.Route {
 	}
 }
 
-// clearKeyGaps clears key id's Model Gaps (only model's when set) by hand.
 func (h handlers) clearKeyGaps(m *audit.Mutation, p ref, id, model string, sl *stateLogs) (UpstreamKey, error) {
 	k, err := readKey(m.Ctx, m.Tx, id, m.Now)
 	if err != nil {
@@ -154,9 +151,6 @@ func (h handlers) clearKeyGaps(m *audit.Mutation, p ref, id, model string, sl *s
 	return readKey(m.Ctx, m.Tx, id, m.Now)
 }
 
-// clearGaps deletes a key's Model Gaps inside an audited mutation, tracking
-// each live one so the Audit Entry can put it back. The events are logged
-// with the mutation's other state logs once it commits.
 func clearGaps(m *audit.Mutation, p ref, id, name, model, why string, sl *stateLogs) error {
 	evs, err := keystate.ClearGaps(m.Ctx, m.Tx, keystate.Key{ID: id, Name: name, Provider: p.handle}, model, why, m.Now,
 		func(gid string) error { return m.Track(keystate.GapResource, gid) })

@@ -1,7 +1,6 @@
 package gateway_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// liveStream is a streaming Request read as it arrives.
 type liveStream struct {
 	t     *testing.T
 	resp  *http.Response
@@ -20,8 +18,6 @@ type liveStream struct {
 	seen  []string
 }
 
-// openStream sends a streaming Chat Completions Request. The response
-// arrives on the returned channel once its headers do.
 func openStream(t *testing.T, caller *testkit.Client) <-chan *liveStream {
 	t.Helper()
 	body := chat("gpt-x")
@@ -41,7 +37,6 @@ func openStream(t *testing.T, caller *testkit.Client) <-chan *liveStream {
 	return ch
 }
 
-// headers waits for the response headers.
 func headers(t *testing.T, ch <-chan *liveStream) *liveStream {
 	t.Helper()
 	select {
@@ -54,7 +49,6 @@ func headers(t *testing.T, ch <-chan *liveStream) *liveStream {
 	}
 }
 
-// noHeadersYet checks that nothing reached the Caller.
 func noHeadersYet(t *testing.T, ch <-chan *liveStream) {
 	t.Helper()
 	select {
@@ -64,7 +58,6 @@ func noHeadersYet(t *testing.T, ch <-chan *liveStream) {
 	}
 }
 
-// next returns the next non-empty line, waiting up to 10 s real time.
 func (s *liveStream) next() string {
 	s.t.Helper()
 	deadline := time.After(10 * time.Second)
@@ -84,7 +77,6 @@ func (s *liveStream) next() string {
 	}
 }
 
-// expect reads the next non-empty line and checks it contains want.
 func (s *liveStream) expect(want string) {
 	s.t.Helper()
 	if l := s.next(); !strings.Contains(l, want) {
@@ -92,7 +84,6 @@ func (s *liveStream) expect(want string) {
 	}
 }
 
-// rest reads to the end of the stream and returns its events.
 func (s *liveStream) rest() []testkit.Event {
 	s.t.Helper()
 	deadline := time.After(10 * time.Second)
@@ -109,7 +100,6 @@ func (s *liveStream) rest() []testkit.Event {
 	}
 }
 
-// streamError decodes the error event a stream ended with.
 func streamError(t *testing.T, events []testkit.Event) callerError {
 	t.Helper()
 	if len(events) == 0 {
@@ -153,12 +143,9 @@ func TestAStreamWaitingForItsFirstByteIsCommittedAndKeptAlive(t *testing.T) {
 	ch := openStream(t, caller)
 	up.Await(1)
 
-	// Silence just short of the commit wait: still nothing sent, so a
-	// failure now could still get its own HTTP status.
 	srv.Clock.Advance(gateway.StreamCommitAfter - time.Second)
 	noHeadersYet(t, ch)
 
-	// Then Iroha commits: 200, stream headers and a keep-alive.
 	srv.Clock.Advance(time.Second)
 	s := headers(t, ch)
 	if s.resp.StatusCode != 200 || !strings.HasPrefix(s.resp.Header.Get("Content-Type"), "text/event-stream") || s.resp.Header.Get("X-Request-Id") == "" {
@@ -168,7 +155,6 @@ func TestAStreamWaitingForItsFirstByteIsCommittedAndKeptAlive(t *testing.T) {
 	srv.Clock.Advance(gateway.KeepAliveEvery)
 	s.expect(": keep-alive")
 
-	// The upstream answers at last: its stream follows in the same response.
 	close(release)
 	events := s.rest()
 	if got := text(t, events); got != "Hello" || events[len(events)-1].Data != "[DONE]" {
@@ -196,7 +182,7 @@ func TestAStreamWhoseUpstreamStaysSilentEndsWithAnErrorEvent(t *testing.T) {
 		srv.Clock.Advance(gateway.KeepAliveEvery)
 		s.expect(": keep-alive")
 	}
-	srv.Clock.Set(testkit.Epoch.Add(60 * time.Second)) // the first-byte budget runs out
+	srv.Clock.Set(testkit.Epoch.Add(60 * time.Second))
 
 	e := streamError(t, s.rest())
 	if e.Error.Code != "upstream_timeout" || e.Error.Hint == "" || e.Error.RequestID == "" || len(e.Error.Details.Attempts) != 1 ||
@@ -218,7 +204,6 @@ func TestFailuresAfterCommitmentMoveOnThenArriveAsAnErrorEvent(t *testing.T) {
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// key-1 fails after the commit; key-2 serves the stream.
 	hold := make(chan struct{})
 	up.Enqueue(up.Error(500, "boom").HoldUntil(hold), up.Stream("Hi"))
 	ch := openStream(t, caller)
@@ -236,9 +221,7 @@ func TestFailuresAfterCommitmentMoveOnThenArriveAsAnErrorEvent(t *testing.T) {
 		t.Fatalf("request = %+v", r)
 	}
 
-	// Every Attempt fails after the commit: the error event carries what
-	// the HTTP error would have, the Attempts and the summary.
-	srv.SkipShortWaits(time.Second) // the pause before the replay
+	srv.SkipShortWaits(time.Second)
 	hold = make(chan struct{})
 	up.Enqueue(up.Error(503, "overloaded").HoldUntil(hold))
 	up.Default(up.Error(503, "overloaded"))
@@ -266,7 +249,7 @@ func TestStreamFailuresBeforeCommitmentKeepTheirHTTPStatus(t *testing.T) {
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	srv.SkipShortWaits(time.Second) // the pause before the replay
+	srv.SkipShortWaits(time.Second)
 	up.Default(up.Error(503, "overloaded"))
 	body := chat("gpt-x")
 	body["stream"] = true
@@ -292,7 +275,7 @@ func TestAStreamBrokenMidwayEndsWithAnErrorEvent(t *testing.T) {
 	stream := up.Stream("Hel", "lo")
 	up.Enqueue(func(r *testkit.Received) testkit.Reply {
 		rep := stream(r)
-		rep.Chunks = rep.Chunks[:2] // role and "Hel", then the connection drops
+		rep.Chunks = rep.Chunks[:2]
 		rep.Disconnect = true
 		return rep
 	})
@@ -333,7 +316,6 @@ func TestAThreeMinuteStreamWithLongPausesCompletes(t *testing.T) {
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// "one " arrives at once; each later piece after a minute of silence.
 	pieces := []string{"one ", "two ", "three ", "four"}
 	gates := make([]chan struct{}, len(pieces))
 	stream := up.Stream(pieces...)
@@ -341,36 +323,16 @@ func TestAThreeMinuteStreamWithLongPausesCompletes(t *testing.T) {
 		rep := stream(r)
 		for i := 1; i < len(pieces); i++ {
 			gates[i] = make(chan struct{})
-			rep.Chunks[1+i].Wait = gates[i] // chunk 0 is the role
+			rep.Chunks[1+i].Wait = gates[i]
 		}
 		return rep
 	})
 	s := headers(t, openStream(t, caller))
 	s.expect(`"role":"assistant"`)
 	s.expect(`"one "`)
-	// The keeper's timer is still the commit timer, due StreamCommitAfter
-	// after arrival; firing it only re-arms it for KeepAliveEvery after the
-	// last write. One Advance past both races the keeper (it may read the
-	// clock before or after the Advance ends and re-arm for a time already
-	// passed), so fire the commit timer alone and wait for the re-arm. From
-	// then on each keep-alive re-arms the timer before it is written, so
-	// once the Caller has it the next one is already set.
-	start := srv.Clock.Now()
-	srv.Clock.Advance(gateway.StreamCommitAfter)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Clock.BlockUntilDue(ctx, start.Add(gateway.KeepAliveEvery)); err != nil {
-		t.Fatalf("the keeper did not re-arm its timer: %v", err)
-	}
-	srv.Clock.Advance(gateway.KeepAliveEvery - gateway.StreamCommitAfter)
-	s.expect(": keep-alive")
-	keepAlives := 1
+	keepAlives := 0
 	for i := 1; i < len(pieces); i++ {
-		n := time.Minute / gateway.KeepAliveEvery
-		if i == 1 {
-			n-- // the gap's first keep-alive went out above
-		}
-		for range n {
+		for range time.Minute / gateway.KeepAliveEvery {
 			srv.Clock.Advance(gateway.KeepAliveEvery)
 			s.expect(": keep-alive")
 			keepAlives++

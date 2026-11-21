@@ -4,12 +4,7 @@ import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { RowHandle, RowOrder } from "./RowOrder";
 
-// Motion of a reorder (UI ticket 17): while a pointer drags a row it follows
-// the pointer 1:1 and the rows it passes slide out of its way (WAAPI on
-// transform, --duration-move, --ease-in-out); on drop it settles into its
-// slot. The keyboard and code move rows at once.
-
-const H = 40; // every row is 40 px tall in this fake layout
+const H = 40;
 
 function List({ onChange = () => {} }: { onChange?: (keys: string[]) => void }) {
   const [value, setValue] = useState(["a", "b", "c"]);
@@ -41,7 +36,6 @@ const row = (k: string) => rows().find((r) => r.dataset.rowId === k)!;
 const handle = (k: string) => screen.getByRole("button", { name: `Reorder ${k}` });
 const shown = () => rows().map((r) => r.dataset.rowId);
 
-// jsdom lays nothing out: each row sits at its index times H, its handle with it.
 const indexOf = (el: Element) => {
   const li = el.closest("li");
   return li ? [...li.parentElement!.children].indexOf(li) : 0;
@@ -71,7 +65,6 @@ afterEach(() => {
 
 const glidesOf = (k: string) => animate.mock.contexts.flatMap((el, i) => (el === row(k) ? [animate.mock.calls[i]] : []));
 
-// A mouse on a handle; UI SDK reads moves once a frame.
 const frame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
 const mouse = { pointerId: 1, clientX: 10, isPrimary: true, pointerType: "mouse" };
 const press = (el: Element, y: number) => fireEvent.pointerDown(el, { ...mouse, button: 0, buttons: 1, clientY: y });
@@ -91,22 +84,19 @@ test("a dragged row follows the pointer; the row it passes slides into its new p
   const a = handle("a");
   press(a, 20);
   await move(a, 30);
-  // Past the drag threshold the row is up and under the pointer.
   expect(row("a").style.transform).toBe("translateY(10px)");
   expect(animate).not.toHaveBeenCalled();
 
-  // Past b's middle (60): b slides up from where it was (40 px below), a stays under the pointer.
   await move(a, 70);
   expect(shown()).toEqual(["b", "a", "c"]);
-  expect(row("a").style.transform).toBe("translateY(10px)"); // 50 px down the pointer, 40 px down the list
+  expect(row("a").style.transform).toBe("translateY(10px)");
   expect(glidesOf("b")).toEqual([[[{ transform: "translateY(40px)" }, { transform: "none" }], GLIDE]]);
   expect(glidesOf("c")).toEqual([]);
 
   await release(a, 70);
   expect(saved).toHaveBeenCalledWith(["b", "a", "c"]);
   expect(shown()).toEqual(["b", "a", "c"]);
-  expect(glidesOf("b")).toHaveLength(1); // the drop doesn't send b back and forth
-  // The dropped row settles from where the pointer left it into its slot.
+  expect(glidesOf("b")).toHaveLength(1);
   expect(row("a").style.transform).toBe("");
   expect(glidesOf("a")).toEqual([[[{ transform: "translateY(10px)" }, { transform: "none" }], GLIDE]]);
 });

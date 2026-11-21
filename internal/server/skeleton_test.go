@@ -36,7 +36,7 @@ func TestFirstStartPrintsBootstrapAdminTokenOnce(t *testing.T) {
 	if strings.Contains(srv.Console(), srv.AdminToken) || srv.App.BootstrapToken().Secret != "" {
 		t.Fatalf("second start printed or created a token again; console:\n%s", srv.Console())
 	}
-	srv.Admin.Get("/api/whoami").Expect(200) // the old token still works
+	srv.Admin.Get("/api/whoami").Expect(200)
 	if n := len(srv.Logs("kind=admin_token.bootstrap")); n != 1 {
 		t.Fatalf("bootstrap events = %d, want 1", n)
 	}
@@ -120,12 +120,10 @@ func TestAdminRoutesRefuseMissingUnknownAndRevokedTokens(t *testing.T) {
 			}
 		})
 	}
-	// Public routes need no token.
 	srv.Anon.Get("/skill.md").Expect(200)
 	srv.Anon.Get("/api/openapi.json").Expect(200)
 }
 
-// KEY-23: a Gateway Key is no admin credential, in any header it is sent in.
 func TestGatewayKeysCannotCallTheAdminAPI(t *testing.T) {
 	srv := testkit.Start(t)
 	var key struct {
@@ -147,8 +145,6 @@ func TestGatewayKeysCannotCallTheAdminAPI(t *testing.T) {
 	srv.Admin.Get("/api/gateway-keys/mine").Expect(404)
 }
 
-// RED-04, RUN-03: when the database stops answering, /readyz says 503
-// not_ready without naming files or paths; the cause goes to the log.
 func TestReadinessFailsWithoutDetailsWhenTheDatabaseIsGone(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Anon.Get("/readyz").Expect(200)
@@ -164,11 +160,9 @@ func TestReadinessFailsWithoutDetailsWhenTheDatabaseIsGone(t *testing.T) {
 			t.Fatalf("readyz body names %q: %s", leak, r.Body)
 		}
 	}
-	srv.Anon.Get("/healthz").Expect(200) // the process is alive
+	srv.Anon.Get("/healthz").Expect(200)
 }
 
-// RUN-05: Shutdown is safe to call again; the second call does nothing and
-// only one shutdown event is logged.
 func TestShuttingDownTwiceIsHarmless(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Stop()
@@ -240,7 +234,6 @@ func TestDocumentsDescribeEveryRegisteredRoute(t *testing.T) {
 	if admin < 3 {
 		t.Fatalf("only %d admin routes registered", admin)
 	}
-	// Nothing documented that is not served.
 	var documented int
 	for _, ops := range doc.Paths {
 		documented += len(ops)
@@ -248,7 +241,6 @@ func TestDocumentsDescribeEveryRegisteredRoute(t *testing.T) {
 	if visible := len(slices.DeleteFunc(slices.Clone(routes), func(r api.Route) bool { return r.Hidden })); documented != visible {
 		t.Fatalf("openapi documents %d operations, router serves %d", documented, visible)
 	}
-	// The served schema of a response is reflected from the Go type.
 	var full map[string]any
 	srv.Anon.Get("/api/openapi.json").JSON(&full)
 	schemas := full["components"].(map[string]any)["schemas"].(map[string]any)
@@ -257,7 +249,6 @@ func TestDocumentsDescribeEveryRegisteredRoute(t *testing.T) {
 			t.Errorf("components lack schema %s; have %v", name, keys(schemas))
 		}
 	}
-	// Every registered log kind is listed in the skill.
 	for _, k := range logs.Kinds() {
 		if !strings.Contains(skill, "`"+k.Name+"`") {
 			t.Errorf("skill lacks log kind %s", k.Name)
@@ -278,7 +269,7 @@ func TestStartupAndShutdownAreLoggedAndFilterable(t *testing.T) {
 	srv := testkit.Start(t)
 	firstStart := srv.Clock.Now()
 	srv.Clock.Advance(2 * time.Hour)
-	srv.Restart() // logs shutdown at +2h, startup at +2h
+	srv.Restart()
 
 	events := srv.Logs("kind=startup,shutdown")
 	var kinds []string
@@ -297,7 +288,6 @@ func TestStartupAndShutdownAreLoggedAndFilterable(t *testing.T) {
 		t.Fatalf("startup event = %+v", st)
 	}
 
-	// Time filters: since/until as RFC 3339 or a duration back from now.
 	if got := srv.Logs("kind=startup&since=1h"); len(got) != 1 {
 		t.Fatalf("since=1h: %d startups, want 1", len(got))
 	}
@@ -305,7 +295,6 @@ func TestStartupAndShutdownAreLoggedAndFilterable(t *testing.T) {
 	if got := srv.Logs("kind=startup&until=" + until); len(got) != 1 || !got[0].Time.Equal(firstStart) {
 		t.Fatalf("until=%s: %+v", until, got)
 	}
-	// Level filter is a minimum.
 	srv.App.Logger().Warn("disk nearly full", "kind", "log")
 	srv.App.Logger().Error("something broke")
 	warn := srv.Logs("level=warn")
@@ -315,7 +304,6 @@ func TestStartupAndShutdownAreLoggedAndFilterable(t *testing.T) {
 	if got := srv.Logs("level=error"); len(got) != 1 || got[0].Message != "something broke" || got[0].Kind != "log" {
 		t.Fatalf("level=error: %+v", got)
 	}
-	// Prefix kinds, request and provider links, paging.
 	srv.App.Logger().Info("attempt", logs.Request("req_1"), logs.Provider("acme"), "kind", "test.attempt", "status", 429)
 	got := srv.Logs("kind=test.*&request_id=req_1&provider=acme")
 	if len(got) != 1 || got[0].Attrs["status"] != float64(429) || got[0].RequestID != "req_1" || got[0].Provider != "acme" {
@@ -348,7 +336,7 @@ func TestConsoleLogsAreJSONLines(t *testing.T) {
 	var sawStartup bool
 	for _, line := range testkit.Lines(srv.Console()) {
 		if !strings.HasPrefix(line, "{") {
-			continue // the bootstrap notice is plain text
+			continue
 		}
 		var m map[string]any
 		if err := json.Unmarshal([]byte(line), &m); err != nil {

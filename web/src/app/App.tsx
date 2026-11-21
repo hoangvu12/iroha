@@ -9,9 +9,6 @@ import { Shell } from "./Shell";
 import { SkeletonRoot } from "./skeletons";
 import { ThemeProvider } from "./theme";
 
-// One line per page. Each page folder under src/pages owns everything below
-// its path ("providers/*" lets ticket 22 add /providers/:handle/keys inside
-// src/pages/providers without editing this file).
 const ProvidersPage = lazy(() => import("@/pages/providers"));
 const GatewayKeysPage = lazy(() => import("@/pages/gateway-keys"));
 const RequestsPage = lazy(() => import("@/pages/requests"));
@@ -23,8 +20,7 @@ const NotFoundPage = lazy(() => import("@/pages/not-found"));
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Retry only when Iroha did not answer or failed (5xx); a 4xx will not change.
-      retry: (n, e) => n < 2 && isApiError(e) && (e.status === 0 || e.status >= 500),
+      retry: (n, e) => n < 2 && isApiError(e) && (e.status === null || e.status >= 500),
       staleTime: 10_000,
       refetchOnWindowFocus: true,
     },
@@ -34,7 +30,6 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <ThemeProvider>
-      {/* Skeletons follow Iroha's theme, so their provider sits inside it. */}
       <SkeletonRoot>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>

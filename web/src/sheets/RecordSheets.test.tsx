@@ -27,7 +27,6 @@ test("Request → Provider → Upstream Key opens three sheets; closing returns 
   await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1&sheet=provider:acme&sheet=key:acme/team-5"));
   expect(request.getAttribute("data-depth")).toBe("2");
 
-  // Closing the key returns to the Provider, then to the Request.
   await user.click(within(key).getByRole("button", { name: "Close (Esc)" }));
   await waitFor(() => expect(sheets()).toHaveLength(2));
   expect(provider.hasAttribute("data-top")).toBe(true);
@@ -90,7 +89,6 @@ test("the Upstream Key sheet copies the key's name and its key, as the Keys tab 
   await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("team-6"));
   await user.click(within(key).getByRole("button", { name: "Copy the key" }));
   await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("sk-abcdefteam-6"));
-  // The key itself stays masked on screen.
   expect(key.textContent).not.toContain("sk-abcdefteam-6");
 });
 

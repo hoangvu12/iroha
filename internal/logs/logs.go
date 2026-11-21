@@ -15,7 +15,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Options configures a Log.
 type Options struct {
 	DB      *store.DB // nil: console only
 	Clock   clock.Clock
@@ -164,7 +163,6 @@ func (l *Log) write(batch []item) {
 			return nil
 		})
 		if err != nil {
-			// The store is failing; the console is the only place left to say so.
 			fmt.Fprintf(os.Stderr, "iroha: storing %d log events failed: %v\n", len(rows), err)
 		}
 	}
@@ -182,8 +180,6 @@ func nullable(s string) any {
 	return s
 }
 
-// handler implements slog.Handler, teeing to the console handler and the
-// store queue. The record time always comes from the injected clock.
 type handler struct {
 	log     *Log
 	console slog.Handler
@@ -193,9 +189,9 @@ type handler struct {
 }
 
 type field struct {
-	key string
-	val slog.Value
-	top bool // added outside any group
+	key       string
+	val       slog.Value
+	ungrouped bool
 }
 
 func (h *handler) Enabled(_ context.Context, lvl slog.Level) bool {
@@ -208,7 +204,7 @@ func (h *handler) Handle(ctx context.Context, r slog.Record) error {
 
 	rw := &row{at: r.Time, level: r.Level, message: r.Message, kind: DefaultKind, attrs: map[string]any{}}
 	put := func(f field) {
-		if f.top {
+		if f.ungrouped {
 			switch f.key {
 			case KindKey:
 				rw.kind = f.val.String()
@@ -272,7 +268,7 @@ func flatten(prefix string, a slog.Attr) []field {
 	if a.Key == "" {
 		return nil
 	}
-	return []field{{key: prefix + a.Key, val: v, top: prefix == ""}}
+	return []field{{key: prefix + a.Key, val: v, ungrouped: prefix == ""}}
 }
 
 func jsonValue(v slog.Value) any {

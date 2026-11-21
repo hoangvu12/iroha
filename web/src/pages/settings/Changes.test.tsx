@@ -4,8 +4,6 @@ import { expect, test } from "vitest";
 import type { AuditEntry } from "@/api/types";
 import { EntryChanges } from "./Changes";
 
-// UI ticket 23: an Audit Entry's JSON values are highlighted like every code block.
-
 const entry = {
   id: "ae_1",
   changes: [

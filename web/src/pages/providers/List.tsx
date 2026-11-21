@@ -5,7 +5,7 @@ import { Button as SdkButton } from "@ui-sdk/react/button";
 import { ChevronRight, Layers, MessageCircle, Plus, Server } from "lucide-react";
 import { useChatActions } from "@/app/chat-panel";
 import { PageHeader } from "@/app/PageHeader";
-import { api, isApiError, seg } from "@/api/client";
+import { seg } from "@/api/client";
 import { formatNumber, formatPercent, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { useUrlParams } from "@/lib/url-state";
@@ -17,12 +17,11 @@ import { Field, Input, ToolbarSearch } from "@/ui/Input";
 import { EmptyState, ErrorState } from "@/ui/States";
 import { notifyChange } from "@/ui/toast";
 import type { Pool, PoolOverview, Provider, ProviderOverview, Shape } from "./api";
-import { calls, errorText, natural, SHAPES, successRate, useOverview, usePools, useProviders, useRefresh } from "./api";
+import { calls, errorText, nameTaken, natural, SHAPES, successRate, useOverview, usePools, useProviders, useRefresh } from "./api";
 import { Reveal } from "@/ui/Reveal";
 import { Pill, PoolTile, ProviderTile, ringRoom, Select, Switch } from "./controls";
 import { SAMPLE_POOLS, SAMPLE_PROVIDERS } from "./samples";
 
-/** /providers: every Provider, then every Model Pool (C05; phones C30). */
 export function ProvidersList() {
   const providers = useProviders();
   const pools = usePools();
@@ -39,9 +38,7 @@ export function ProvidersList() {
 
   const stats = new Map(overview.data?.providers.map((p) => [p.provider, p]));
   const poolStats = new Map(overview.data?.pools.map((p) => [p.pool, p]));
-  // Archived last, then the busiest today, then by name: the order until a column is sorted.
   const list = [...(providers.data ?? [])].sort((a, b) => Number(a.archived) - Number(b.archived) || (stats.get(b.handle)?.requests ?? 0) - (stats.get(a.handle)?.requests ?? 0) || natural(a.handle, b.handle));
-  // Waits for the overview too, so the counts arrive filled in; its 15 s refetch keeps what is shown.
   const providerRows: ProviderRow[] | undefined = providers.data && !overview.isPending ? list.map((p) => ({ ...p, stats: stats.get(p.handle) })) : undefined;
   const poolRows: PoolRow[] | undefined = pools.data && !overview.isPending ? pools.data.map((p) => ({ ...p, stats: poolStats.get(p.name) })) : undefined;
   const openProvider = (p: Provider) => navigate(providerPath(p.handle));
@@ -154,8 +151,8 @@ export function ProvidersList() {
         </>
       )}
 
-      <AddProviderDialog open={adding} onOpenChange={setAdding} existing={list} />
-      <NewPoolDialog open={pooling} onOpenChange={setPooling} providers={list.filter((p) => !p.archived)} pools={pools.data ?? []} />
+      <AddProviderDialog open={adding} onOpenChange={setAdding} />
+      <NewPoolDialog open={pooling} onOpenChange={setPooling} providers={list.filter((p) => !p.archived)} />
     </>
   );
 }
@@ -168,7 +165,7 @@ function Rate({ t }: { t?: { succeeded: number; failed: number } }) {
 function ProviderName({ p }: { p: Provider }) {
   return (
     <span className="flex min-w-0 items-center gap-3">
-      <ProviderTile handle={p.handle} version={p.logo_domain} size={28} />
+      <ProviderTile handle={p.handle} cacheKey={p.logo_domain} size={28} />
       <span className="truncate text-[15px] font-medium">{p.handle}</span>
       {p.name && p.name !== p.handle && <span className="hidden truncate text-[14px] text-fg-muted lg:inline">{p.name}</span>}
       {p.archived ? <Pill>Archived</Pill> : !p.enabled ? <Pill>Off</Pill> : null}
@@ -176,9 +173,7 @@ function ProviderName({ p }: { p: Provider }) {
   );
 }
 
-/** A Provider with its numbers of today (`undefined` when the overview doesn't name it). */
 type ProviderRow = Provider & { stats?: ProviderOverview };
-/** A Model Pool with its numbers of today. */
 type PoolRow = Pool & { stats?: PoolOverview };
 
 const providerPath = (handle: string) => `/providers/${seg(handle)}/keys`;
@@ -189,7 +184,6 @@ const SAMPLE_POOL_ROWS: PoolRow[] = SAMPLE_POOLS;
 
 const searchProviders = (p: ProviderRow, needle: string) => !needle || p.handle.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle);
 
-/** The page's own link around a name: a real link (new tab works), named "Open <name>" for the keyboard and agents. */
 function OpenLink({ to, name, children }: { to: string; name: string; children: ReactNode }) {
   return (
     <SdkButton render={<Link to={to} />} aria-label={`Open ${name}`} className="flex min-w-0 rounded outline-none focus-visible:underline">
@@ -198,7 +192,6 @@ function OpenLink({ to, name, children }: { to: string; name: string; children: 
   );
 }
 
-// Numbers sort smallest first on the first press; a missing number counts as less than none.
 const num = (n: number | undefined) => n ?? -1;
 const byHandle = (a: ProviderRow, b: ProviderRow) => natural(a.handle, b.handle);
 
@@ -231,20 +224,18 @@ const providerColumns = pcol.columns([
   pcol.accessor((p) => p.stats?.last_request_at ?? "", {
     id: "last",
     header: "Last request",
-    // Most recent first, then by name.
     sortFn: (a, b) => (b.original.stats?.last_request_at ?? "").localeCompare(a.original.stats?.last_request_at ?? "") || byHandle(a.original, b.original),
     meta: { className: "whitespace-nowrap pl-6", width: "pl-6" },
     cell: ({ row }) => (row.original.stats?.last_request_at ? timeAgo(row.original.stats.last_request_at) : <span className="text-fg-subtle">–</span>),
   }),
 ]);
 
-/** Phones (C30): a Provider in two lines. */
 function ProviderLine({ p }: { p: ProviderRow }) {
   const s = p.stats;
   const r = successRate(s);
   return (
     <span className={cn("flex min-w-0 flex-1 items-center gap-3", p.archived && "opacity-60")}>
-      <ProviderTile handle={p.handle} version={p.logo_domain} size={40} />
+      <ProviderTile handle={p.handle} cacheKey={p.logo_domain} size={40} />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="truncate text-[16px] font-medium">{p.handle}</span>
@@ -261,7 +252,6 @@ function ProviderLine({ p }: { p: ProviderRow }) {
   );
 }
 
-/** The distinct Providers a Pool's switched-on members use, in member order. */
 export function servingProviders(pool: Pool): string[] {
   return [...new Set(pool.members.filter((m) => m.enabled).map((m) => m.provider))];
 }
@@ -298,12 +288,11 @@ const poolColumns = qcol.columns([
   qcol.accessor("name", {
     header: "Name",
     sortFn: (a, b) => byName(a.original, b.original),
-    // The Providers table above has its own "Sort by Name": these names tell them apart.
     meta: { label: "Pool name" },
     cell: ({ row }) => (
       <OpenLink to={poolPath(row.original.name)} name={row.original.name}>
         <span className="flex min-w-0 items-center gap-3">
-          <PoolTile name={row.original.name} version={row.original.maker} size={28} />
+          <PoolTile name={row.original.name} cacheKey={row.original.maker} size={28} />
           <span className="truncate text-[15px] font-medium">{row.original.name}</span>
         </span>
       </OpenLink>
@@ -332,12 +321,11 @@ const poolColumns = qcol.columns([
   }),
 ]);
 
-/** Phones (C30): a Pool in two lines. */
 function PoolLine({ p }: { p: PoolRow }) {
   const handles = servingProviders(p);
   return (
     <span className="flex min-w-0 flex-1 items-center gap-3">
-      <PoolTile name={p.name} version={p.maker} size={40} />
+      <PoolTile name={p.name} cacheKey={p.maker} size={40} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[16px] font-medium">{p.name}</span>
         <span className="flex items-center gap-2 text-[14px] text-fg-muted">
@@ -351,7 +339,7 @@ function PoolLine({ p }: { p: PoolRow }) {
   );
 }
 
-function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; onOpenChange: (o: boolean) => void; existing: Provider[] }) {
+function AddProviderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const navigate = useNavigate();
   const refresh = useRefresh();
   const [handle, setHandle] = useState("");
@@ -376,19 +364,6 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
     const h = handle.trim();
     const u = url.trim();
     if (!h) return setError({ handle: "Give it a handle: Callers use it in model names like dashscope/qwen3-max." });
-    // POST /api/providers updates a Provider that has the handle, so a taken handle is refused here.
-    let taken = existing.find((p) => p.handle.toLowerCase() === h.toLowerCase());
-    if (!taken) {
-      try {
-        taken = await api.get<Provider>(`/api/providers/${seg(h)}`);
-      } catch (e) {
-        if (!(isApiError(e) && e.status === 404)) return setError({ handle: errorText(e) });
-      }
-    }
-    if (taken)
-      return setError({
-        handle: `${taken.handle} already exists${taken.archived ? " (archived)" : ""}. Pick another handle, or open ${taken.handle} to change it.`,
-      });
     if (u && !/^https?:\/\//.test(u)) return setError({ url: "Start the URL with https:// (or http://)." });
     setPending(true);
     setError({});
@@ -397,12 +372,9 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
       let added: string | undefined;
       if (u) {
         try {
-          // Auth style none on a Provider with no keys also adds its keyless key.
           const ep = await calls.createEndpoint(h, keyless ? { url: u, shape, auth_style: "none" } : { url: u, shape });
           added = ep.keyless_key?.name;
         } catch (e) {
-          // Toast: the Provider exists now, so the dialog closes and the page moves to its Endpoints;
-          // the refused Endpoint's reason goes with it (the dialog that could show it is gone).
           notifyChange(`Provider ${h} added without its Endpoint: ${errorText(e)}`, res, { onUndone: refresh });
           refresh();
           navigate(`/providers/${seg(h)}/endpoints`);
@@ -410,13 +382,12 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
           return;
         }
       }
-      // Toast: the dialog closes and the page moves to the new Provider.
       notifyChange(added ? `Provider ${h} added, with a keyless key` : `Provider ${h} added`, res, { undoneMessage: `${h} removed`, onUndone: refresh });
       refresh();
       close(false);
       navigate(`/providers/${seg(h)}/keys`);
     } catch (e) {
-      setError({ handle: errorText(e) });
+      setError({ handle: nameTaken(e) ? `${h} already exists. Pick another handle, or open ${h} to change it.` : errorText(e) });
     } finally {
       setPending(false);
     }
@@ -452,7 +423,6 @@ function AddProviderDialog({ open, onOpenChange, existing }: { open: boolean; on
             <Input {...p} mono autoFocus autoComplete="off" spellCheck={false} placeholder="dashscope" value={handle} onChange={(e) => setHandle(e.target.value)} />
           )}
         </Field>
-        {/* The URL's own settings open under it once there is a URL (collapse recipe); the gap above them is inside the panel. */}
         <div>
           <Field label="Endpoint URL" hint="Optional: the API's URL with its version path. You can add more Endpoints later." error={error.url}>
             {(p) => (
@@ -491,12 +461,10 @@ function NewPoolDialog({
   open,
   onOpenChange,
   providers,
-  pools,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   providers: Provider[];
-  pools: Pool[];
 }) {
   const navigate = useNavigate();
   const refresh = useRefresh();
@@ -514,20 +482,15 @@ function NewPoolDialog({
   const submit = async () => {
     const n = name.trim();
     if (!n) return setError("Name it the model Callers will ask for, like glm-4.6.");
-    // POST /api/pools updates a Pool of that name (and would replace its members), so a taken name is refused here.
-    if (pools.some((p) => p.name === n)) return setError(`A Model Pool is already named ${n}. Pick another name, or open ${n} to change its members.`);
     setPending(true);
     try {
-      if (await api.get<Pool>(`/api/pools/${seg(n)}`).then(() => true, (e) => (isApiError(e) && e.status === 404 ? false : Promise.reject(e))))
-        return setError(`A Model Pool is already named ${n}. Pick another name.`);
       const res = await calls.createPool({ name: n });
-      // Toast: the dialog closes and the page moves to the new Pool.
       notifyChange(`Model Pool ${n} created`, res, { undoneMessage: `${n} deleted`, onUndone: refresh });
       refresh();
       close(false);
       navigate(`/providers/pools/${seg(n)}/members?add=1`);
     } catch (e) {
-      setError(errorText(e));
+      setError(nameTaken(e) ? `A Model Pool is already named ${n}. Pick another name, or open ${n} to change its members.` : errorText(e));
     } finally {
       setPending(false);
     }

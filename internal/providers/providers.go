@@ -1,6 +1,3 @@
-// Package providers stores Providers, their Endpoints and their Upstream
-// Keys, serves their admin routes (/api/providers/...), and gives the
-// Gateway the routing view of one Provider (Store.Routing).
 package providers
 
 import (
@@ -25,7 +22,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Provider is a Provider as the API returns it.
 type Provider struct {
 	ID               string     `json:"id"`
 	Handle           string     `json:"handle" doc:"Unique, immutable name Callers use: /providers/<handle>/v1/... and <handle>/<model>."`
@@ -45,24 +41,20 @@ type Provider struct {
 	UpstreamKeyCount int        `json:"upstream_key_count"`
 }
 
-// Budget is a Provider's Request budget.
 type Budget struct {
 	MaxAttempts      int  `json:"max_attempts" doc:"Attempts per Request at most."`
 	FirstByteSeconds int  `json:"first_byte_seconds" doc:"Seconds a Request may wait for the first upstream byte, across its Attempts."`
 	Overridden       bool `json:"overridden" doc:"true when either value is this Provider's own rather than the default."`
 }
 
-// Request budget defaults and limits (spec "Request handling").
 const (
 	DefaultMaxAttempts = 3
 	MaxAttemptsLimit   = 10
 	DefaultFirstByte   = 60 * time.Second
-	// FirstByteCeiling is the hard ceiling of any Request's wait for a first
-	// byte, kept under the 100 s edge cutoff in front of Iroha.
+	// The edge proxy in front of Iroha cuts a request off at 100 s.
 	FirstByteCeiling = 95 * time.Second
 )
 
-// EffectiveBudget applies the defaults to a Provider's overrides (0 = default).
 func EffectiveBudget(maxAttempts int, firstByte time.Duration) (int, time.Duration) {
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxAttempts
@@ -73,7 +65,6 @@ func EffectiveBudget(maxAttempts int, firstByte time.Duration) (int, time.Durati
 	return maxAttempts, min(firstByte, FirstByteCeiling)
 }
 
-// Endpoint is an Endpoint as the API returns it.
 type Endpoint struct {
 	ID            string            `json:"id"`
 	Provider      string            `json:"provider" doc:"Handle of the Provider."`
@@ -90,36 +81,30 @@ type Endpoint struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
-// EndpointCaching is the effect of an Endpoint's caching settings.
 type EndpointCaching struct {
 	Markers        string `json:"markers" enum:",strip,keep,blocks,top_level,top_only" doc:"\"\": as RelayKit converts (no markers toward Anthropic; toward OpenAI Chat an Anthropic Caller's message markers but not its system prompt's); strip: none; keep: the Caller's own; blocks: the Caller's, else the last tool, system block and message; top_level: the Caller's, else Anthropic's automatic top-level marker; top_only: one top-level marker."`
 	PromptCacheKey bool   `json:"prompt_cache_key" doc:"A prompt_cache_key derived from the conversation is sent when the request has none."`
 	Summary        string `json:"summary" doc:"The same in a sentence."`
 }
 
-// endpointCaching is the effect of e's caching settings.
 func endpointCaching(e Endpoint) EndpointCaching {
 	p := caching.For(shape.Shape(e.Shape), e.URL, e.Settings)
 	return EndpointCaching{Markers: string(p.Markers), PromptCacheKey: p.PromptCacheKey, Summary: p.Describe(shape.Shape(e.Shape))}
 }
 
-// Discovery modes of a Provider.
 const (
 	DiscoveryNone     = "none"
 	DiscoveryProvider = "provider"
 	DiscoveryKey      = "key"
 )
 
-// Affinity settings of a Provider.
 const (
 	AffinityOn  = "on"
 	AffinityOff = "off"
 )
 
-// NoDiscovery is the discovery_url of an Endpoint that is never asked for models.
 const NoDiscovery = "none"
 
-// UpstreamKey is an Upstream Key as the API returns it, secret included.
 type UpstreamKey struct {
 	ID            string                     `json:"id"`
 	Provider      string                     `json:"provider" doc:"Handle of the Provider."`
@@ -136,14 +121,12 @@ type UpstreamKey struct {
 	LastUsedAt    *time.Time                 `json:"last_used_at,omitempty" doc:"Last Attempt with this key, to the minute; absent when never used."`
 }
 
-// HandleMaxLen is the longest handle.
 const HandleMaxLen = 63
 
 var handlePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 const handleHint = "Use 1 to 63 lowercase letters, digits and single hyphens, e.g. \"openrouter\" or \"zai-coding\". The handle is part of Callers' URLs and model names and never changes."
 
-// CheckHandle validates a Provider handle exactly as given (never normalised).
 func CheckHandle(h string) error {
 	switch {
 	case h == "":
@@ -160,7 +143,6 @@ func CheckHandle(h string) error {
 	return nil
 }
 
-// checkDisplayName validates a Provider display name.
 func checkDisplayName(s string) error {
 	hint := "Use 1 to 128 printable characters, e.g. \"Z.ai coding plan\"."
 	if strings.TrimSpace(s) == "" {
@@ -177,13 +159,11 @@ func checkDisplayName(s string) error {
 	return nil
 }
 
-// queryer is what reads need from *sql.Tx or *store.DB.
 type queryer interface {
 	audit.Querier
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// readProvider reads one Provider with its Endpoints; sql.ErrNoRows when absent.
 func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	var p Provider
 	var created int64
@@ -205,11 +185,8 @@ func readProvider(ctx context.Context, q queryer, id string) (Provider, error) {
 	return p, err
 }
 
-// NoLogo is the logo_domain of a Provider shown with its first letter only.
 const NoLogo = "none"
 
-// effectiveLogo is the logo domain shown for a Provider: the Owner's, else
-// the site of its first Endpoint.
 func effectiveLogo(owner string, eps []Endpoint) (string, bool) {
 	switch owner {
 	case NoLogo:
@@ -225,8 +202,6 @@ func effectiveLogo(owner string, eps []Endpoint) (string, bool) {
 	return owner, false
 }
 
-// LogoDomain is the logo domain of the Provider addressed by handle or ID
-// (with the uniform 404 when there is none); "" when it has none.
 func LogoDomain(ctx context.Context, db *store.DB, ref string) (string, error) {
 	id, err := Resource.Resolve(ctx, db, ref)
 	if err != nil {
@@ -257,7 +232,6 @@ func scanEndpoint(row interface{ Scan(...any) error }) (Endpoint, error) {
 	return e, nil
 }
 
-// decodeMap reads a stored JSON object of strings; never nil.
 func decodeMap(s string) (map[string]string, error) {
 	m := map[string]string{}
 	if s == "" {
@@ -272,7 +246,6 @@ func decodeMap(s string) (map[string]string, error) {
 	return m, nil
 }
 
-// encodeMap is the stored form of a map of strings ("{}" when empty).
 func encodeMap(m map[string]string) string {
 	if len(m) == 0 {
 		return "{}"
@@ -305,7 +278,6 @@ func readEndpoint(ctx context.Context, q queryer, id string) (Endpoint, error) {
 
 const keyColumns = `k.id, p.handle, k.name, k.secret, k.created_at, k.last_used_at, k.disabled, k.disabled_by, k.disabled_at`
 
-// scanKey reads a key row; its Key State is filled in by withState.
 func scanKey(row interface{ Scan(...any) error }) (UpstreamKey, *keystate.OwnerDisabled, error) {
 	var k UpstreamKey
 	var created int64
@@ -325,7 +297,6 @@ func scanKey(row interface{ Scan(...any) error }) (UpstreamKey, *keystate.OwnerD
 	return k, nil, err
 }
 
-// withState sets the visible Key State of k from its record at now.
 func withState(k UpstreamKey, d *keystate.OwnerDisabled, rec keystate.Record, now time.Time) UpstreamKey {
 	k.State, k.CoolingModels = keystate.View(d, rec, now)
 	k.ModelGaps = rec.LiveGaps(now)
@@ -354,7 +325,6 @@ func readKey(ctx context.Context, q queryer, id string, at time.Time) (UpstreamK
 	return withState(k, d, rec, at), nil
 }
 
-// listKeys reads every key of a Provider with its Key State.
 func listKeys(ctx context.Context, q queryer, providerID string, at time.Time) ([]UpstreamKey, error) {
 	rows, err := q.QueryContext(ctx, `SELECT `+keyColumns+` FROM upstream_keys k JOIN providers p ON p.id = k.provider_id
 		WHERE k.provider_id = ? ORDER BY k.created_at, k.rowid`, providerID)
@@ -397,10 +367,8 @@ func listKeys(ctx context.Context, q queryer, providerID string, at time.Time) (
 	return out, nil
 }
 
-// ref is a resolved Provider: its ID and handle.
 type ref struct{ id, handle string }
 
-// resolveProvider resolves a Provider by handle or ID.
 func resolveProvider(ctx context.Context, q queryer, s string) (ref, error) {
 	id, err := Resource.Resolve(ctx, q, s)
 	if err != nil {
@@ -411,13 +379,9 @@ func resolveProvider(ctx context.Context, q queryer, s string) (ref, error) {
 	return ref{id: id, handle: h}, err
 }
 
-// resolveChild finds a record of table (endpoints or upstream_keys) of
-// Provider p by its name or ID.
 func resolveChild(ctx context.Context, q queryer, table, label, list string, p ref, s string) (string, error) {
-	var id string
-	err := q.QueryRowContext(ctx, `SELECT id FROM `+table+` WHERE provider_id = ? AND (id = ? OR name = ?) ORDER BY id = ? DESC LIMIT 1`,
-		p.id, s, s, s).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
+	id, err := findChild(ctx, q, table, p, s)
+	if err == nil && id == "" {
 		return "", api.NotFound(fmt.Sprintf("List them with GET /api/providers/%s/%s; address one by its name or ID.", p.handle, list),
 			"Provider %s has no %s named %q or with that ID.", p.handle, label, s).
 			WithDetails(map[string]string{"provider": p.handle, "ref": s})
@@ -425,30 +389,41 @@ func resolveChild(ctx context.Context, q queryer, table, label, list string, p r
 	return id, err
 }
 
-// Store gives the Gateway what it needs of Providers.
+func findChild(ctx context.Context, q queryer, table string, p ref, s string) (string, error) {
+	var id string
+	err := q.QueryRowContext(ctx, `SELECT id FROM `+table+` WHERE provider_id = ? AND (id = ? OR name = ?) ORDER BY id = ? DESC LIMIT 1`,
+		p.id, s, s, s).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
+func childName(ctx context.Context, q queryer, table, id string) (string, error) {
+	if id == "" {
+		return "", nil
+	}
+	var name string
+	err := q.QueryRowContext(ctx, `SELECT name FROM `+table+` WHERE id = ?`, id).Scan(&name)
+	return name, err
+}
+
 type Store struct {
 	db    *store.DB
 	clock clock.Clock
 }
 
-// New returns a Store.
 func New(db *store.DB) *Store { return &Store{db: db, clock: db.Clock()} }
 
-// Routing is the routing view of one Provider.
 type Routing struct {
 	planner.Provider
-	Enabled  bool
-	Archived bool
-	// Model list configuration (ticket 10): Strict refuses unlisted models,
-	// Discovery is the mode, DiscoveryURLs maps Endpoint IDs to their
-	// discovery_url as configured ("" default, NoDiscovery, or a URL).
+	Enabled       bool
+	Archived      bool
 	Strict        bool
 	Discovery     string
 	DiscoveryURLs map[string]string
 }
 
-// Routing reads the Provider with this handle for planning. ok is false
-// when no Provider has the handle (or the handle is not valid).
 func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool, err error) {
 	if CheckHandle(handle) != nil {
 		return r, false, nil
@@ -542,8 +517,6 @@ func (s *Store) Routing(ctx context.Context, handle string) (r Routing, ok bool,
 	return r, true, nil
 }
 
-// ResolveRouting reads the routing view of the Provider addressed by handle
-// or ID, with the uniform 404 when there is none.
 func (s *Store) ResolveRouting(ctx context.Context, ref string) (Routing, error) {
 	p, err := resolveProvider(ctx, s.db, ref)
 	if err != nil {
@@ -553,8 +526,6 @@ func (s *Store) ResolveRouting(ctx context.Context, ref string) (Routing, error)
 	return r, err
 }
 
-// ResolveKey finds the Upstream Key addressed by name or ID in a routing
-// view, with the uniform 404 when there is none.
 func (s *Store) ResolveKey(ctx context.Context, r *Routing, keyRef string) (*planner.Key, error) {
 	id, err := resolveChild(ctx, s.db, "upstream_keys", "Upstream Key", "keys", ref{id: r.ID, handle: r.Handle}, keyRef)
 	if err != nil {
@@ -568,19 +539,15 @@ func (s *Store) ResolveKey(ctx context.Context, r *Routing, keyRef string) (*pla
 	return nil, fmt.Errorf("upstream key %s vanished while it was read", id)
 }
 
-// KeyState is the visible Key State of key id now.
 func (s *Store) KeyState(ctx context.Context, id string) (keystate.State, error) {
 	k, err := readKey(ctx, s.db, id, s.clock.Now())
 	return k.State, err
 }
 
-// MarkKeyUsed records that an Attempt used Upstream Key id (at most once a
-// minute per key).
 func (s *Store) MarkKeyUsed(ctx context.Context, id string) error {
 	return s.db.Touch(ctx, "upstream_keys", "last_used_at", id, nil, s.clock.Now(), store.TouchEvery)
 }
 
-// Handles maps Provider IDs to handles (IDs without a Provider are left out).
 func Handles(ctx context.Context, q queryer, ids []string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, id := range ids {
@@ -597,8 +564,6 @@ func Handles(ctx context.Context, q queryer, ids []string) (map[string]string, e
 	return out, nil
 }
 
-// ResolveID returns the ID of the Provider addressed by handle or ID, with
-// the uniform 404 when there is none.
 func ResolveID(ctx context.Context, q audit.Querier, s string) (string, error) {
 	return Resource.Resolve(ctx, q, s)
 }

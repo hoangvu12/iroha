@@ -25,24 +25,20 @@ const SecretPrefix = "sk-iroha"
 
 // GatewayKey is a Gateway Key as the API returns it.
 type GatewayKey struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name" doc:"Who the key was issued to; Requests are attributed to it."`
-	Secret     string     `json:"secret" doc:"The key itself. Callers send it as \"Authorization: Bearer <secret>\", \"x-api-key\", \"api-key\", \"x-goog-api-key\" or Gemini's ?key= parameter."`
-	Scope      Scope      `json:"scope"`
-	Capture    bool       `json:"capture" doc:"true: the full prompt and response of every Request made with this key are stored (GET /api/requests/{request}/capture), for retention.captures_days. false: neither is stored."`
-	Revoked    bool       `json:"revoked"`
-	CreatedAt  time.Time  `json:"created_at"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty" doc:"Last authenticated use, to the minute; absent when never used."`
-	// Ticket 24: activity for the Gateway Keys list.
-	RecentRequests int `json:"recent_requests" doc:"Requests made with this key in the last 24 hours (test Requests sent as it from the chat are not counted). GET /api/requests?caller=<name or ID> lists them."`
+	ID             string     `json:"id"`
+	Name           string     `json:"name" doc:"Who the key was issued to; Requests are attributed to it."`
+	Secret         string     `json:"secret" doc:"The key itself. Callers send it as \"Authorization: Bearer <secret>\", \"x-api-key\", \"api-key\", \"x-goog-api-key\" or Gemini's ?key= parameter."`
+	Scope          Scope      `json:"scope"`
+	Capture        bool       `json:"capture" doc:"true: the full prompt and response of every Request made with this key are stored (GET /api/requests/{request}/capture), for retention.captures_days. false: neither is stored."`
+	Revoked        bool       `json:"revoked"`
+	CreatedAt      time.Time  `json:"created_at"`
+	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt     *time.Time `json:"last_used_at,omitempty" doc:"Last authenticated use, to the minute; absent when never used."`
+	RecentRequests int        `json:"recent_requests" doc:"Requests made with this key in the last 24 hours (test Requests sent as it from the chat are not counted). GET /api/requests?caller=<name or ID> lists them."`
 }
 
-// recentWindow is the period recent_requests counts.
 const recentWindow = 24 * time.Hour
 
-// countRecent counts the key's own Requests (not test Requests sent as it)
-// started since now - recentWindow, over the requests_gateway_key index.
 func countRecent(ctx context.Context, q queryer, id string, now time.Time) (int, error) {
 	var n int
 	err := q.QueryRowContext(ctx, `SELECT count(*) FROM requests WHERE gateway_key_id = ? AND started_at >= ? AND caller_kind = 'gateway_key'`,
@@ -63,12 +59,10 @@ type ScopeProvider struct {
 	Models   []string `json:"models,omitempty" doc:"Only these models, exactly as Callers name them; omit for every model of the Provider."`
 }
 
-// stored is a Scope as stored: Provider IDs, so a scope survives anything
-// that happens to handles.
 type stored struct {
 	All       bool             `json:"all"`
 	Providers []storedProvider `json:"providers,omitempty"`
-	Pools     []string         `json:"pools,omitempty"` // Pool IDs
+	PoolIDs   []string         `json:"pools,omitempty"`
 }
 
 type storedProvider struct {
@@ -94,7 +88,6 @@ type queryer interface {
 
 const scopeHint = `Send {"all": true} for everything, or {"all": false, "providers": [{"provider": "<handle>"}, {"provider": "<handle>", "models": ["<model>"]}], "pools": ["<pool>"]}.`
 
-// normalize validates a Scope from a request and returns its stored form.
 func normalize(ctx context.Context, q queryer, in Scope) (stored, error) {
 	if in.All {
 		if len(in.Providers) > 0 || len(in.Pools) > 0 {
@@ -108,8 +101,8 @@ func normalize(ctx context.Context, q queryer, in Scope) (stored, error) {
 		if err != nil {
 			return stored{}, err
 		}
-		if !slices.Contains(out.Pools, id) {
-			out.Pools = append(out.Pools, id)
+		if !slices.Contains(out.PoolIDs, id) {
+			out.PoolIDs = append(out.PoolIDs, id)
 		}
 	}
 	at := map[string]int{}
@@ -122,7 +115,7 @@ func normalize(ctx context.Context, q queryer, in Scope) (stored, error) {
 		if err != nil {
 			return stored{}, err
 		}
-		if i, ok := at[id]; ok { // the same Provider twice: the wider grant wins
+		if i, ok := at[id]; ok {
 			if out.Providers[i].Models == nil || models == nil {
 				out.Providers[i].Models = nil
 			} else {
@@ -167,7 +160,6 @@ func dedupe(in []string) []string {
 	return out
 }
 
-// view turns a stored scope into its API form, with handles.
 func view(ctx context.Context, q queryer, s stored) (Scope, error) {
 	out := Scope{All: s.All}
 	if s.All {
@@ -189,12 +181,12 @@ func view(ctx context.Context, q queryer, s stored) (Scope, error) {
 		}
 		out.Providers = append(out.Providers, ScopeProvider{Provider: h, Models: p.Models})
 	}
-	names, err := pools.Names(ctx, q, s.Pools)
+	names, err := pools.Names(ctx, q, s.PoolIDs)
 	if err != nil {
 		return out, err
 	}
-	for _, id := range s.Pools {
-		if n, ok := names[id]; ok { // a deleted Pool drops out
+	for _, id := range s.PoolIDs {
+		if n, ok := names[id]; ok {
 			out.Pools = append(out.Pools, n)
 		}
 	}
@@ -232,8 +224,6 @@ func scan(r interface{ Scan(...any) error }) (row, error) {
 	return k, nil
 }
 
-// byID reads one Gateway Key with its scope view and its Requests of the
-// 24 hours before now; sql.ErrNoRows when absent.
 func byID(ctx context.Context, q queryer, id string, now time.Time) (GatewayKey, error) {
 	r, err := scan(q.QueryRowContext(ctx, `SELECT `+keyColumns+` FROM gateway_keys WHERE id = ?`, id))
 	if err != nil {
@@ -279,7 +269,7 @@ func (c Caller) AllowsModel(providerID, model string) bool {
 // AllowsPool reports whether the Caller may name the Pool on the global
 // routes.
 func (c Caller) AllowsPool(poolID string) bool {
-	return c.scope.All || slices.Contains(c.scope.Pools, poolID)
+	return c.scope.All || slices.Contains(c.scope.PoolIDs, poolID)
 }
 
 // Unrestricted is a Caller whose scope is everything: the Owner, for
@@ -334,7 +324,6 @@ type Store struct {
 	clock clock.Clock
 }
 
-// New returns a Store.
 func New(db *store.DB) *Store { return &Store{db: db, clock: db.Clock()} }
 
 // Credential returns the Gateway Key a request presents: "Authorization:

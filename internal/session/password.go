@@ -14,7 +14,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 )
 
-// Password limits.
 const (
 	MinPasswordLength = 8
 	MaxPasswordLength = 1024
@@ -38,7 +37,6 @@ func checkPassword(field, p string) error {
 	return nil
 }
 
-// hashPassword returns "pbkdf2-sha256$<iterations>$<salt>$<key>".
 func hashPassword(p string) (string, error) {
 	salt := make([]byte, 16)
 	_, _ = rand.Read(salt)
@@ -50,7 +48,6 @@ func hashPassword(p string) (string, error) {
 	return fmt.Sprintf("%s$%d$%s$%s", hashScheme, pbkdf2Iterations, enc.EncodeToString(salt), enc.EncodeToString(key)), nil
 }
 
-// verifyPassword reports whether p matches a hash made by hashPassword.
 func verifyPassword(hash, p string) (bool, error) {
 	parts := strings.Split(hash, "$")
 	if len(parts) != 4 || parts[0] != hashScheme {
@@ -73,7 +70,6 @@ func verifyPassword(hash, p string) (bool, error) {
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
-// secretHash is how session secrets are stored and looked up.
 func secretHash(secret string) string {
 	sum := sha256.Sum256([]byte(secret))
 	return base64.RawURLEncoding.EncodeToString(sum[:])

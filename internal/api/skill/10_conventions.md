@@ -20,13 +20,19 @@ A mutation answers with the record plus:
 - `changes`: every record changed, each with `resource`, `id`, `name`, `op` (`create`, `update`, `delete`), the `fields` an update changed, and the record's `before` and `after` (null when it did not exist). Secrets are masked to their last four characters here; read the record itself for the whole secret.
 - `audit_entry`: the ID of the Audit Entry written, absent on a dry run or when nothing changed.
 
-### Create-or-update by name
+### Create, create-or-update, edit
 
-`POST /api/<resource>` with the name of an existing record updates that record instead of making a duplicate. Fields you leave out keep their current values. Repeating the same call is safe: the second answers `"outcome": "unchanged"` and writes no Audit Entry. So re-run your work freely.
+Three methods change a record, and they differ only in what they do when it already exists:
+
+- `POST /api/<resource>` creates. A name in use answers 409 `name_taken` and writes nothing; its hint names the `PUT` that would update that record. The same goes for an Endpoint whose URL and Shape another Endpoint of the Provider has (409 `endpoint_duplicate`) and an Upstream Key whose secret the Provider already holds (409 `upstream_key_duplicate`; the secret is never echoed).
+- `PUT /api/<resource>/{name}` creates or updates: when no record has that name (or ID) it creates one named by the path (201, `"outcome": "created"`); otherwise it applies the fields you send to that record, and fields you leave out keep their current values (200, `updated` or `unchanged`). The body's name may be left out; one that differs from the path is refused (rename with `PATCH`). Repeating the same `PUT` is safe: the second answers `unchanged` and writes no Audit Entry. Use it for scripts and setup you may re-run.
+- `PATCH /api/<resource>/{name}` edits an existing record (404 when there is none), renames included.
+
+Nested records work the same way: `PUT /api/providers/acme/endpoints/eu`, `PUT /api/providers/acme/keys/team-1`.
 
 ### Bulk
 
-`POST /api/<resource>/bulk` creates or updates many records, and `POST /api/<resource>/bulk/<action>` (such as `/bulk/revoke`) applies one action to many, each item by name or ID. The body is `{"items": [...]}` (at most 1000). Each item succeeds or fails on its own: a failed item is rolled back and reported, the rest still apply. The answer is 200 even when items fail, so always read it:
+`POST /api/<resource>/bulk` creates many records (each like `POST`), `PUT /api/<resource>/bulk` creates or updates many (each like `PUT` with the item's own name), and `POST /api/<resource>/bulk/<action>` (such as `/bulk/revoke`) applies one action to many, each item by name or ID. The body is `{"items": [...]}` (at most 1000). Each item succeeds or fails on its own: a failed item (a taken name on `POST`, say) is rolled back and reported, the rest still apply. The answer is 200 even when items fail, so always read it:
 
 ```json
 {"dry_run": false, "audit_entry": "ae_...", "succeeded": 39, "failed": 1,
@@ -40,7 +46,7 @@ One Audit Entry covers every applied item of a bulk call, so one revert undoes a
 
 ### Audit Entries and revert
 
-Every change to Iroha's configuration writes an Audit Entry naming who made it (`actor`: your Admin Token's name, or `Owner` for the Owner's browser session), with each record's before and after. Read them with `GET /api/audit-entries` (filter by `actor`, `resource`, `record`, `action`, `q`, `since`).
+Every change to Iroha's configuration writes an Audit Entry naming who made it (`actor`: your Admin Token's name, or `Owner` for the Owner's browser session), with each record's before and after. Read them with `GET /api/audit-entries` (filter by `actor`, `resource`, `record`, `action`, `q`, `since`). A `PUT` is recorded as `<resource>.create` when it created the record and `<resource>.update` when it changed one (a bulk `PUT` that did both is `<resource>.update`).
 
 `POST /api/audit-entries/{entry}/revert` restores the before-state of every record the entry changed. The revert is itself an Audit Entry (`revert_of` names the original, which gets `reverted_by`), so reverting the revert redoes the change. A revert is refused with:
 
@@ -52,4 +58,4 @@ Accepts `?dry_run=true` like every change.
 
 ### Errors
 
-Every error has the form `{"error": {"code", "message", "hint", "details"}}`. The `hint` names the next action; follow it. Common codes: `invalid_request` (400: fix the body or query), `not_found` (404), `name_taken` (409: pick another name), `audit_conflict`, `audit_irreversible`, `audit_already_reverted`, `builtin_rule` (409), `admin_token_missing`, `admin_token_invalid`, `admin_token_revoked` (401), `internal` (500: retry once, then read `GET /api/logs?level=error&since=5m`).
+Every error has the form `{"error": {"code", "message", "hint", "details"}}`. The `hint` names the next action; follow it. Common codes: `invalid_request` (400: fix the body or query), `not_found` (404), `name_taken` (409: a create found the name in use; pick another name, or `PUT` to that name to update the record), `endpoint_duplicate`, `upstream_key_duplicate` (409: the Provider already has that URL and Shape, or that secret; the hint names the record that has it), `audit_conflict`, `audit_irreversible`, `audit_already_reverted`, `builtin_rule` (409), `admin_token_missing`, `admin_token_invalid`, `admin_token_revoked` (401), `internal` (500: retry once, then read `GET /api/logs?level=error&since=5m`).

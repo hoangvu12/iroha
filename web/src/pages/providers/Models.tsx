@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eraser, Eye, EyeOff, ListPlus, ListX, MessageCircle, MoreHorizontal, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { useChatActions } from "@/app/chat-panel";
 import { formatNumber, timeAgo } from "@/lib/format";
@@ -20,7 +20,6 @@ import { Pill, Segmented, Select } from "./controls";
 import { SAMPLE_MODEL_LIST } from "./samples";
 import { ModelsBulkEdit } from "./BulkEdits";
 import { rec } from "@/sheets/RecordLink";
-import { startEditing } from "@/sheets/records/editing";
 import { useMaybeSheets } from "@/sheets/stack";
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
@@ -36,7 +35,6 @@ const filterLabel: Record<ModelFilter, string> = {
 };
 const filterChip: Record<ModelFilter, string> = { ...filterLabel, all: "All models", visible: "Listed to Callers" };
 
-/** The text typed, once typing has paused for `ms`: what the server is asked for. */
 function useDebounced(value: string, ms = 250) {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -46,12 +44,6 @@ function useDebounced(value: string, ms = 250) {
   return v;
 }
 
-/**
- * The Models tab (C08): what Callers see, Model Gaps, and the Owner's additions,
- * hides and overrides. The server searches, filters and pages the list
- * (thousands of models cost one page): `?q=` searches, `?filter=` filters;
- * selected models are hidden or shown together through the bulk API.
- */
 export function ModelsTab({ handle }: { handle: string }) {
   const { params, setParam, setParams } = useUrlParams();
   const q = params.get("q") ?? "";
@@ -64,15 +56,13 @@ export function ModelsTab({ handle }: { handle: string }) {
   const phone = useIsPhone();
   const [adding, setAdding] = useState(false);
   const sheets = useMaybeSheets();
-  // A model opens in its sheet (UI ticket 33); Details… opens it on its fields.
   const open = (m: Model, edit = false) => {
     const r = rec.model(handle, m.model);
-    if (edit) startEditing(r);
-    sheets?.open(r);
+    if (edit) sheets?.openEditing(r);
+    else sheets?.open(r);
   };
   const confirm = useConfirm();
   const chat = useChatActions();
-  // `refresh`: its Undo shows the models as they were back at once.
   const barSave = useSave({ refresh, describe: errorText });
   const [busy, setBusy] = useState<"hide" | "show">();
 
@@ -80,36 +70,31 @@ export function ModelsTab({ handle }: { handle: string }) {
 
   const totalKeys = keys.data?.length ?? 0;
   const data = models.data;
-  // The server pages the list, so a selection can span pages: remember every
-  // model shown, for the bulk edit's mixed values (UI ticket 30).
   const seen = useRef(new Map<string, Model>());
   for (const m of data?.models ?? []) seen.current.set(m.model, m);
 
-  // These run from the row's menu, which has closed, and the row may leave the filter.
   const change = async (m: Model, body: { hidden?: boolean; added?: boolean }, what: string) => {
     try {
       const res = await calls.saveModel(handle, { model: m.model, ...body });
       refresh();
-      // Toast: the row's menu has closed (and the row may leave the filter).
       notifyChange(what, res, { onUndone: refresh });
     } catch (e) {
-      // Toast: an error with nowhere else to go (the row's menu has closed).
       notify.failure(`Couldn't change ${m.model}`, e);
     }
   };
-  const clearGaps = async (m: Model) => {
-    try {
-      const res = await calls.bulkKeys(handle, "clear-model-gaps", m.model_gaps, m.model);
-      refresh();
-      // Toast: the row's menu has closed, or the row leaves "With Model Gaps".
-      notifyChange(gapsCleared(m, res.succeeded), res, { onUndone: refresh });
-    } catch (e) {
-      // Toast: an error with nowhere else to go (the menu has closed, or the row is leaving).
-      notify.failure("Couldn't clear the Model Gaps", e);
-    }
-  };
+  const clearGaps = useCallback(
+    async (m: Model) => {
+      try {
+        const res = await calls.bulkKeys(handle, "clear-model-gaps", m.model_gaps, m.model);
+        refresh();
+        notifyChange(gapsCleared(m, res.succeeded), res, { onUndone: refresh });
+      } catch (e) {
+        notify.failure("Couldn't clear the Model Gaps", e);
+      }
+    },
+    [handle, refresh],
+  );
 
-  // Hides or shows the selected models (on every page: the selection holds model IDs); the result shows in the bar.
   const hideAll = (names: string[], hidden: boolean) => {
     setBusy(hidden ? "hide" : "show");
     void barSave
@@ -163,7 +148,6 @@ export function ModelsTab({ handle }: { handle: string }) {
               onConfirm: async () => {
                 const res = await calls.saveModel(handle, { model: m.model, added: false });
                 refresh();
-                // Toast: the menu and the confirm have closed, and the row leaves the list.
                 notifyChange(`${m.model} removed`, res, { onUndone: refresh });
               },
             })
@@ -187,12 +171,10 @@ export function ModelsTab({ handle }: { handle: string }) {
     </RowMenu>
   );
 
-  // With "With Model Gaps" shown, a cleared row leaves the list: then the menu's toast is the only place left.
   const columns = useMemo(
     () => modelColumns({ handle, totalKeys, onLeaves: filter === "gaps" ? (m) => void clearGaps(m) : undefined }),
-    [handle, totalKeys, filter], // eslint-disable-line react-hooks/exhaustive-deps
+    [handle, totalKeys, filter, clearGaps],
   );
-  // The filter is the server's; as a column filter it sends the table back to page 1 when it changes.
   const columnFilters = useMemo<ColumnFiltersState>(() => (filter === "all" ? [] : [{ id: "model", value: filter }]), [filter]);
   const chips = [
     ...(query ? [{ label: `Search: ${query}`, onRemove: () => setParam("q") }] : []),
@@ -203,7 +185,6 @@ export function ModelsTab({ handle }: { handle: string }) {
 
   const toolbar = (
     <>
-      {/* Phones: search and filter have the first line to themselves (C31); the rest wraps under them. */}
       <div className={phone ? "flex w-full items-center gap-2" : "contents"}>
       <ToolbarSearch
         placeholder={data ? `Search ${formatNumber(data.counts.all)} models` : "Search models"}
@@ -212,7 +193,6 @@ export function ModelsTab({ handle }: { handle: string }) {
         onChange={(e) => setParam("q", e.target.value)}
       />
       {phone && (
-        // The Select is w-full: its box sets the width.
         <div className="w-32 shrink-0">
           <Select<ModelFilter> aria-label="Show models" value={filter} onValueChange={setFilter} items={MODEL_FILTERS.map((f) => ({ value: f, label: f === "gaps" ? "Gaps" : filterLabel[f] }))} />
         </div>
@@ -253,7 +233,6 @@ export function ModelsTab({ handle }: { handle: string }) {
       onConfirm: async () => {
         const r = await calls.resetModels(handle);
         refresh();
-        // Toast: the confirm dialog has closed.
         notify.success(`${r.removed.length} discovered model${r.removed.length === 1 ? "" : "s"} forgotten; ${r.kept} kept`);
       },
     });
@@ -264,7 +243,6 @@ export function ModelsTab({ handle }: { handle: string }) {
         id="provider-models"
         label="Models"
         columns={columns}
-        // Waits for the keys too, so "Keys with access" arrives filled in. A new page or filter keeps the rows (dimmed).
         data={keys.isPending ? undefined : data?.models}
         sample={SAMPLE_MODEL_LIST.models}
         getRowId={(m) => m.model}
@@ -297,7 +275,6 @@ export function ModelsTab({ handle }: { handle: string }) {
         rowActions={menu}
         onRowClick={(m) => open(m)}
         phoneRow={(m) => <ModelLine m={m} />}
-        // On phones the row keeps its ⋯ (Clear Model Gaps and the rest, without opening the sheet).
         phoneActions={menu}
         empty={
           <EmptyState
@@ -348,7 +325,6 @@ const tags = (m: Model) => (
   </>
 );
 
-// The server sorts the list by model ID and cuts it into pages, so no column sorts here.
 const col = columnsFor<Model>();
 function modelColumns({ handle, totalKeys, onLeaves }: { handle: string; totalKeys: number; onLeaves?: (m: Model) => void }) {
   return col.columns([
@@ -385,7 +361,6 @@ function modelColumns({ handle, totalKeys, onLeaves }: { handle: string; totalKe
   ]);
 }
 
-/** Phones (C31): a model in two lines. */
 function ModelLine({ m }: { m: Model }) {
   return (
     <span className="min-w-0 flex-1">
@@ -402,7 +377,6 @@ function ModelLine({ m }: { m: Model }) {
 
 const gapsCleared = (m: Model, n: number) => `Model Gaps for ${m.model} cleared on ${n} key${n === 1 ? "" : "s"}`;
 
-/** A model's Model Gaps, with Clear: the result (and Undo) shows in the cell, a failure under it. */
 function GapsCell({ handle, m, onLeaves }: { handle: string; m: Model; onLeaves?: () => void }) {
   const refresh = useRefresh();
   const saving = useSave({ refresh, describe: errorText });
@@ -442,7 +416,6 @@ function AddModelDialog({ handle, open, onOpenChange }: { handle: string; open: 
     try {
       const res = await calls.saveModel(handle, { model: m, added: true });
       refresh();
-      // Toast: the Add model dialog closes on success.
       notifyChange(`${m} added`, res, { onUndone: refresh });
       close(false);
     } catch (e) {
@@ -481,18 +454,13 @@ function AddModelDialog({ handle, open, onOpenChange }: { handle: string; open: 
   );
 }
 
-// A model's details are edited in its sheet (UI ticket 33: it was a dialog);
-// the fields live here, beside the table, as the Endpoint's do.
-
 const tri = (b?: boolean) => (b === undefined ? "" : b ? "yes" : "no");
 const num = (s: string) => (s.trim() ? Number(s.replace(/[_,\s]/g, "")) : undefined);
 
-/** "128K", "–": a token count as the table shows it. */
 export const tokens = ctx;
 
 export type ModelForm = { context_length: string; max_output_tokens: string; reasoning: string; chat: string };
 
-/** The form, started from the model's overrides (empty fields use the Provider's list, then models.dev). */
 export function modelForm(m: Model): ModelForm {
   const o = m.overrides;
   return {
@@ -503,7 +471,6 @@ export function modelForm(m: Model): ModelForm {
   };
 }
 
-/** The overrides the form says (the model's others kept), or what's wrong with it. */
 export function modelMetadata(m: Model, f: ModelForm): { metadata: Facts } | { error: string } {
   const metadata: Facts = { ...m.overrides };
   const cl = num(f.context_length);
@@ -520,12 +487,10 @@ export function modelMetadata(m: Model, f: ModelForm): { metadata: Facts } | { e
   return { metadata };
 }
 
-/** Where a fact of the model comes from: "you", "acme's list", "models.dev", or "" when nothing says. */
 export function factSource(m: Model, handle: string, k: keyof Facts): string {
   return m.overrides[k] !== undefined ? "you" : m.reported[k] !== undefined ? `${handle}'s list` : m.models_dev[k] !== undefined ? "models.dev" : "";
 }
 
-/** The fields of a model's details: what Callers' model lists say of it. */
 export function ModelFields({ m, handle, f, setF }: { m: Model; handle: string; f: ModelForm; setF: (u: (f: ModelForm) => ModelForm) => void }) {
   const from = (k: keyof Facts) => factSource(m, handle, k);
   const shown = (k: "context_length" | "max_output_tokens") => m.reported[k] ?? m.models_dev[k];

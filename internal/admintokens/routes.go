@@ -14,8 +14,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// snapshot is what an Audit Entry records of an Admin Token: its
-// configuration, not last_used_at.
 type snapshot struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
@@ -25,7 +23,6 @@ type snapshot struct {
 	RevokedAt *time.Time `json:"revoked_at"`
 }
 
-// Resource is the Admin Token resource of the audit machinery.
 var Resource = audit.Register(&audit.Resource[snapshot]{
 	Name: "admin_token", Label: "Admin Token", Plural: "Admin Tokens", Path: "/api/admin-tokens",
 	Table: "admin_tokens", Secrets: []string{"secret"},
@@ -59,7 +56,6 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 	},
 })
 
-// nameFree refuses a name used by another token than id.
 func nameFree(ctx context.Context, q audit.Querier, name, id string) error {
 	var other string
 	err := q.QueryRowContext(ctx, `SELECT id FROM admin_tokens WHERE name = ? AND id != ?`, name, id).Scan(&other)
@@ -73,11 +69,11 @@ func nameFree(ctx context.Context, q audit.Querier, name, id string) error {
 		"Another Admin Token (%s) is already named %q.", other, name)
 }
 
-// CreateAdminToken is the body of POST /api/admin-tokens and each item of
-// POST /api/admin-tokens/bulk.
+// CreateAdminToken is the body of POST and PUT /api/admin-tokens and each
+// item of their bulk.
 type CreateAdminToken struct {
-	Name string  `json:"name" doc:"Unique name, usually the agent that will hold the token. Repeating a create with an existing name updates that token."`
-	Note *string `json:"note,omitempty" doc:"Who holds the token or what it is for. Omit to keep the current note of an existing token."`
+	Name string  `json:"name" doc:"Unique name, usually the agent that will hold the token. On PUT the path names the token: leave it out or send the same name."`
+	Note *string `json:"note,omitempty" doc:"Who holds the token or what it is for. On PUT, omit to keep the current note of an existing token."`
 }
 
 // UpdateAdminToken is the body of PATCH /api/admin-tokens/{token}.
@@ -99,7 +95,6 @@ type TokenList struct {
 
 const revokedForever = "Revoked Admin Tokens never work again; create a new token instead."
 
-// Routes returns the Admin Token routes.
 func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 	h := handlers{tr: tr, db: db}
 	const tag = "Admin Tokens"
@@ -127,8 +122,8 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/admin-tokens", Tag: tag,
-			Summary:     "Create an Admin Token, or update the one with that name",
-			Description: "Answers 201 with the new token (secret included) or 200 when a token of that name exists (outcome updated or unchanged). A revoked name cannot be reused.",
+			Summary:     "Create an Admin Token",
+			Description: "Answers 201 with the new token, secret included. A name in use answers 409 name_taken (PUT /api/admin-tokens/{token} updates that token); a revoked token's name cannot be reused (409 admin_token_revoked).",
 			Query:       []api.Param{audit.DryRun},
 			Request:     CreateAdminToken{}, Response: TokenResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -139,7 +134,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 				var out Token
 				res, err := h.tr.Mutate(c, "admin_token.create", "Created", func(m *audit.Mutation) error {
 					var err error
-					out, err = h.upsert(m, in)
+					out, err = h.create(m, in)
 					return err
 				})
 				return TokenResult{Result: res, AdminToken: out}, err
@@ -147,8 +142,8 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/admin-tokens/bulk", Tag: tag,
-			Summary:     "Create or update many Admin Tokens, each by name",
-			Description: "Each item is applied or refused on its own; read failed and each item's error.",
+			Summary:     "Create many Admin Tokens",
+			Description: "Each item is created or refused on its own (a name in use: 409 name_taken); read failed and each item's error.",
 			Query:       []api.Param{audit.DryRun},
 			Request:     audit.BulkRequest[CreateAdminToken]{}, Response: audit.BulkResult[Token]{},
 			Handle: func(c *api.Call) (any, error) {
@@ -156,7 +151,43 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 				if err := c.Decode(&in); err != nil {
 					return nil, err
 				}
-				return audit.Bulk(h.tr, c, "admin_token.create", "Created", in.Items, h.upsert)
+				return audit.Bulk(h.tr, c, "admin_token.create", "Created", in.Items, h.create)
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/admin-tokens/{token}", Tag: tag,
+			Summary:     "Create or update the Admin Token of that name",
+			Description: "Answers 201 with a new token named as the path (secret included), or 200 when the token exists (outcome updated or unchanged): fields sent are applied, the others kept. A revoked token cannot be updated.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     CreateAdminToken{}, Response: TokenResult{},
+			Handle: func(c *api.Call) (any, error) {
+				var in CreateAdminToken
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				var out Token
+				res, err := h.tr.Mutate(c, "admin_token.update", "Saved", func(m *audit.Mutation) error {
+					var err error
+					out, err = h.put(m, c.Path("token"), in)
+					return err
+				})
+				return TokenResult{Result: res, AdminToken: out}, err
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/admin-tokens/bulk", Tag: tag,
+			Summary:     "Create or update many Admin Tokens, each by name",
+			Description: "Each item is PUT /api/admin-tokens/{token} with the item's name, applied or refused on its own; read failed and each item's error.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     audit.BulkRequest[CreateAdminToken]{}, Response: audit.BulkResult[Token]{},
+			Handle: func(c *api.Call) (any, error) {
+				var in audit.BulkRequest[CreateAdminToken]
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				return audit.Bulk(h.tr, c, "admin_token.update", "Saved", in.Items, func(m *audit.Mutation, in CreateAdminToken) (Token, error) {
+					return h.put(m, in.Name, in)
+				})
 			},
 		},
 		{
@@ -246,8 +277,12 @@ func (h handlers) list(c *api.Call) (any, error) {
 	return out, rows.Err()
 }
 
-// upsert creates the token named in.Name, or updates the existing one.
-func (h handlers) upsert(m *audit.Mutation, in CreateAdminToken) (Token, error) {
+func revokedName(name string) *api.Error {
+	return api.Conflict("admin_token_revoked", "Pick another name for the new token; revoked tokens and their names stay as a record.",
+		"The Admin Token %q was revoked; it cannot be created again.", name)
+}
+
+func (h handlers) create(m *audit.Mutation, in CreateAdminToken) (Token, error) {
 	if err := api.CheckName("name", in.Name); err != nil {
 		return Token{}, err
 	}
@@ -256,13 +291,12 @@ func (h handlers) upsert(m *audit.Mutation, in CreateAdminToken) (Token, error) 
 	if err == nil {
 		t, err := byID(m.Ctx, m.Tx, id)
 		if err != nil {
-			return t, err
+			return Token{}, err
 		}
 		if t.Revoked {
-			return t, api.Conflict("admin_token_revoked", "Pick another name for the new token; revoked tokens and their names stay as a record.",
-				"The Admin Token %q was revoked; it cannot be created again.", in.Name)
+			return Token{}, revokedName(in.Name)
 		}
-		return h.update(m, id, UpdateAdminToken{Note: in.Note})
+		return Token{}, Resource.Taken(id, in.Name, "/api/admin-tokens/"+in.Name)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Token{}, err
@@ -280,6 +314,33 @@ func (h handlers) upsert(m *audit.Mutation, in CreateAdminToken) (Token, error) 
 		return Token{}, err
 	}
 	return byID(m.Ctx, m.Tx, id)
+}
+
+func (h handlers) put(m *audit.Mutation, ref string, in CreateAdminToken) (Token, error) {
+	id, err := Resource.Find(m.Ctx, m.Tx, ref)
+	if err != nil {
+		return Token{}, err
+	}
+	if id == "" {
+		if err := audit.CheckPutName("name", ref, in.Name, ""); err != nil {
+			return Token{}, err
+		}
+		m.Act("admin_token.create", "Created")
+		in.Name = ref
+		return h.create(m, in)
+	}
+	t, err := byID(m.Ctx, m.Tx, id)
+	if err != nil {
+		return t, err
+	}
+	if err := audit.CheckPutName("name", ref, in.Name, t.Name); err != nil {
+		return Token{}, err
+	}
+	if t.Revoked {
+		return t, revokedName(t.Name)
+	}
+	m.Act("admin_token.update", "Edited")
+	return h.update(m, id, UpdateAdminToken{Note: in.Note})
 }
 
 func (h handlers) update(m *audit.Mutation, id string, in UpdateAdminToken) (Token, error) {
@@ -314,9 +375,6 @@ func (h handlers) revoke(m *audit.Mutation, ref string) (Token, error) {
 	if err != nil || t.Revoked {
 		return t, err
 	}
-	// Without an Owner password the last active token is the only way in;
-	// revoking it would lock everyone out. Once a password is set the Owner
-	// can sign in and create a new token, so the last one may go.
 	var others int
 	if err := m.Tx.QueryRowContext(m.Ctx, `SELECT count(*) FROM admin_tokens WHERE revoked_at IS NULL AND id != ?`, id).Scan(&others); err != nil {
 		return t, err

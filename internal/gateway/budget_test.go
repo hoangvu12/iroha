@@ -24,7 +24,6 @@ func readKey(t *testing.T, srv *testkit.Server, name string) providers.UpstreamK
 	return k
 }
 
-// callerError is Iroha's error envelope as a Caller sees it.
 type callerError struct {
 	Error struct {
 		Code, Message, Hint string
@@ -43,8 +42,6 @@ type callerError struct {
 	}
 }
 
-// bearers lists the keys of the Attempts the fake received from the
-// from-th request on (model list reads of the daily refresh left out).
 func bearers(up *testkit.Upstream, from int) string {
 	var out []string
 	for _, r := range up.Requests()[from:] {
@@ -60,7 +57,7 @@ func TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b", "sk-test-c")
-	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
+	roundRobin(t, srv, "acme")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
 	up.Enqueue(up.Error(500, "boom").Header("X-Upstream-Trace", "t-1"),
@@ -92,7 +89,6 @@ func TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself(t *testing.T) {
 		}
 	}
 
-	// key-2 cools for gpt-x only; its Key State stays active.
 	k2 := readKey(t, srv, "key-2")
 	if k2.State.State != "active" || len(k2.CoolingModels) != 1 || k2.CoolingModels[0].Model != "gpt-x" ||
 		!k2.CoolingModels[0].Until.Equal(testkit.Epoch.Add(30*time.Second)) || !strings.Contains(k2.CoolingModels[0].Reason, "Slow down") {
@@ -109,7 +105,6 @@ func TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself(t *testing.T) {
 		t.Fatalf("key.state events = %+v", ev)
 	}
 
-	// While it cools, gpt-x never reaches key-2, but other models do.
 	n := up.Count()
 	for range 3 {
 		caller.Post(chatPath, chat("gpt-x")).Expect(200)
@@ -125,8 +120,6 @@ func TestFailedAttemptsMoveOnToOtherKeysAndEachExplainsItself(t *testing.T) {
 		t.Fatalf("a key cooling for one model stopped serving others: %s", got)
 	}
 
-	// After the reset time the key serves gpt-x again, after the keys with no
-	// recent refusal (FAIL-104), and success clears it.
 	srv.Clock.Advance(31 * time.Second)
 	n = up.Count()
 	up.Enqueue(up.Error(500, "boom"), up.Error(500, "boom"))
@@ -161,13 +154,11 @@ func TestWhenEveryAttemptFailsTheCallerGetsEachAttempt(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
-	roundRobin(t, srv, "acme")    // the assertions follow round-robin key order
-	srv.NoConversationIDs("acme") // the 400 below is judged by the rules alone
+	roundRobin(t, srv, "acme")
+	srv.NoConversationIDs("acme")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// Two keys failing with 5xx: each is tried, then one replay, then the
-	// budget of 3 Attempts is spent.
-	srv.SkipShortWaits(time.Second) // the pause before the replay
+	srv.SkipShortWaits(time.Second)
 	up.Default(up.Error(503, "overloaded"))
 	var e callerError
 	resp := caller.Post(chatPath, chat("gpt-x")).Expect(502).JSON(&e)
@@ -183,8 +174,6 @@ func TestWhenEveryAttemptFailsTheCallerGetsEachAttempt(t *testing.T) {
 		t.Fatalf("request = %+v", r)
 	}
 
-	// A request the Provider rejects is not sent to other keys: the Caller
-	// gets the Provider's status and message.
 	n := up.Count()
 	up.Enqueue(up.ErrorCode(400, "invalid_value", "temperature must be at most 2"))
 	resp = caller.Post(chatPath, chat("gpt-x")).Expect(400).JSON(&e)
@@ -201,7 +190,7 @@ func TestInvalidKeysStayOutUntilATestPassesOrTheSecretChanges(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
-	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
+	roundRobin(t, srv, "acme")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
 	up.Enqueue(up.ErrorCode(401, "invalid_api_key", "Incorrect API key provided"))
@@ -212,7 +201,6 @@ func TestInvalidKeysStayOutUntilATestPassesOrTheSecretChanges(t *testing.T) {
 		t.Fatalf("key-1 = %+v", k1.State)
 	}
 
-	// Hours later it is still out.
 	srv.Clock.Advance(5 * time.Hour)
 	n := up.Count()
 	for range 4 {
@@ -222,7 +210,6 @@ func TestInvalidKeysStayOutUntilATestPassesOrTheSecretChanges(t *testing.T) {
 		t.Fatalf("keys used = %s", got)
 	}
 
-	// A new secret clears it.
 	srv.Admin.Patch("/api/providers/acme/keys/key-1", map[string]any{"secret": "sk-test-a2"}).Expect(200)
 	if k := readKey(t, srv, "key-1"); k.State.State != "active" || !strings.Contains(k.State.Reason, "secret") {
 		t.Fatalf("after a new secret = %+v", k.State)
@@ -231,14 +218,13 @@ func TestInvalidKeysStayOutUntilATestPassesOrTheSecretChanges(t *testing.T) {
 		t.Fatalf("key.state events = %+v", ev)
 	}
 
-	// Invalid again; a passing test clears it.
 	up.Enqueue(up.Error(401, "no"))
 	srv.Admin.Post("/api/providers/acme/keys/key-1/test?model=gpt-x", nil).Expect(200)
 	if k := readKey(t, srv, "key-1"); k.State.State != "invalid" {
 		t.Fatalf("a failing test did not mark the key: %+v", k.State)
 	}
 	var res gateway.KeyTestResult
-	srv.Admin.Post("/api/providers/acme/keys/key-1/test", nil).Expect(200).JSON(&res) // model from history
+	srv.Admin.Post("/api/providers/acme/keys/key-1/test", nil).Expect(200).JSON(&res)
 	if !res.Passed || res.Status != 200 || res.Model != "gpt-x" || res.State.State != "active" || !strings.Contains(res.State.Reason, "test passed") {
 		t.Fatalf("test = %+v", res)
 	}
@@ -273,7 +259,6 @@ func TestCoolingDoublesFromAMinuteAndHonoursResetTimes(t *testing.T) {
 	if d := until(); d != time.Minute {
 		t.Fatalf("first cooling = %v", d)
 	}
-	// Nothing to try: refused at once, saying until when.
 	n := up.Count()
 	var e callerError
 	resp := caller.Post(chatPath, chat("gpt-x")).Expect(503).JSON(&e)
@@ -282,7 +267,6 @@ func TestCoolingDoublesFromAMinuteAndHonoursResetTimes(t *testing.T) {
 		t.Fatalf("cooling refusal = %s (Retry-After %q)", resp.Body, resp.Header.Get("Retry-After"))
 	}
 
-	// Refused again right after it ends: the cooling doubles, and keeps doubling up to an hour.
 	want := []time.Duration{2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 16 * time.Minute, 32 * time.Minute, time.Hour, time.Hour}
 	for _, w := range want {
 		srv.Clock.Advance(until() + time.Second)
@@ -293,7 +277,6 @@ func TestCoolingDoublesFromAMinuteAndHonoursResetTimes(t *testing.T) {
 		}
 	}
 
-	// A reset time the Provider gives wins.
 	srv.Clock.Advance(until() + time.Second)
 	up.Enqueue(up.Error(429, "slow").Header("Retry-After", "300"))
 	caller.Post(chatPath, chat("gpt-x")).Expect(503)
@@ -301,7 +284,6 @@ func TestCoolingDoublesFromAMinuteAndHonoursResetTimes(t *testing.T) {
 		t.Fatalf("Retry-After cooling = %v", d)
 	}
 
-	// A success clears it, so the next refusal starts at a minute again.
 	srv.Clock.Advance(6 * time.Minute)
 	caller.Post(chatPath, chat("gpt-x")).Expect(200)
 	if k := readKey(t, srv, "key-1"); len(k.CoolingModels) != 0 {
@@ -314,7 +296,6 @@ func TestCoolingDoublesFromAMinuteAndHonoursResetTimes(t *testing.T) {
 		t.Fatalf("cooling after recovery = %v", d)
 	}
 
-	// A key-wide refusal (402) cools the whole key.
 	srv.Clock.Advance(2 * time.Hour)
 	up.Enqueue(up.Error(402, "Insufficient credits"))
 	caller.Post(chatPath, chat("gpt-y")).Expect(503)
@@ -350,7 +331,6 @@ func TestCoolingForThreeModelsWithinFiveMinutesCoolsTheWholeKey(t *testing.T) {
 		t.Fatalf("a key-wide cooling let m-4 through: %+v", e.Error)
 	}
 
-	// Refusals spread wider than five minutes do not escalate.
 	srv2 := testkit.Start(t)
 	addProvider(t, srv2, "acme", up.URL(), "sk-test-z")
 	caller2 := srv2.Client(issue(t, srv2, "pi", all))
@@ -396,8 +376,6 @@ func TestTheTimeBudgetEndsASilentAttemptWithoutReplayingIt(t *testing.T) {
 		t.Fatalf("a timeout changed the key: %+v", k)
 	}
 
-	// A per-Provider override moves the deadline; the budget is the
-	// Request's, so the silent key is not replayed and nothing else is tried.
 	srv.Admin.Patch("/api/providers/acme", map[string]any{"first_byte_seconds": 20}).Expect(200)
 	var p providers.Provider
 	srv.Admin.Get("/api/providers/acme").Expect(200).JSON(&p)
@@ -472,7 +450,6 @@ func TestKeysAreEnabledDisabledAndSummarisedThroughTheAPI(t *testing.T) {
 	caller := srv.Client(issue(t, srv, "pi", all))
 	agent := srv.NewAdminToken("agent-1")
 
-	// Disable one key; it gets no traffic and says who disabled it.
 	var res providers.UpstreamKeyResult
 	agent.Post("/api/providers/acme/keys/key-1/disable", nil).Expect(200).JSON(&res)
 	if res.UpstreamKey.Enabled || res.UpstreamKey.State.State != "disabled" || res.UpstreamKey.State.Reason != "Disabled by agent-1." || res.AuditEntry == "" {
@@ -487,13 +464,11 @@ func TestKeysAreEnabledDisabledAndSummarisedThroughTheAPI(t *testing.T) {
 	if ev := srv.Logs("kind=key.state&provider=acme"); len(ev) != 1 || ev[0].Attrs["state"] != "disabled" || ev[0].Attrs["upstream_key"] != "key-1" {
 		t.Fatalf("key.state = %+v", ev)
 	}
-	// Revert enables it again.
 	srv.Admin.Post("/api/audit-entries/"+res.AuditEntry+"/revert", nil).Expect(200)
 	if k := readKey(t, srv, "key-1"); !k.Enabled || k.State.State != "active" {
 		t.Fatalf("after revert = %+v", k)
 	}
 
-	// Bulk, with a dry run first and a bad item.
 	var bulk audit.BulkResult[providers.UpstreamKey]
 	srv.Admin.Post("/api/providers/acme/keys/bulk/disable?dry_run=true", map[string]any{"items": []string{"key-2", "key-3"}}).Expect(200).JSON(&bulk)
 	if !bulk.DryRun || bulk.Succeeded != 2 || readKey(t, srv, "key-2").State.State != "active" {
@@ -504,7 +479,6 @@ func TestKeysAreEnabledDisabledAndSummarisedThroughTheAPI(t *testing.T) {
 		t.Fatalf("bulk disable = %+v", bulk)
 	}
 
-	// key-4 cools for one model; key-1 is made invalid.
 	up.Enqueue(up.Error(401, "bad key"))
 	srv.Admin.Post("/api/providers/acme/keys/key-1/test?model=gpt-x", nil).Expect(200)
 	up.Enqueue(up.Error(429, "slow").Header("Retry-After", "90"))
@@ -522,7 +496,6 @@ func TestKeysAreEnabledDisabledAndSummarisedThroughTheAPI(t *testing.T) {
 	if sum.RecentAttempts.Attempts != 4 || sum.RecentAttempts.Failed != 1 || sum.Budget.MaxAttempts != 3 {
 		t.Fatalf("recent = %+v", sum.RecentAttempts)
 	}
-	// Cooling the whole key leaves nothing active: the summary says when one is back.
 	up.Enqueue(up.Error(402, "pay up"))
 	caller.Post(chatPath, chat("gpt-y")).Expect(503)
 	srv.Admin.Get("/api/providers/acme/summary").Expect(200).JSON(&sum)
@@ -531,8 +504,6 @@ func TestKeysAreEnabledDisabledAndSummarisedThroughTheAPI(t *testing.T) {
 	}
 }
 
-// idempotencyKeys lists the Idempotency-Key of each Attempt the fake
-// received from the from-th request on.
 func idempotencyKeys(up *testkit.Upstream, from int) []string {
 	var out []string
 	for _, r := range up.Requests()[from:] {
@@ -543,8 +514,6 @@ func idempotencyKeys(up *testkit.Upstream, from int) []string {
 	return out
 }
 
-// REQ-18, FAIL-94: every Attempt of a Request carries one Idempotency-Key,
-// the Caller's when it sent one, else one Iroha minted for the Request.
 func TestEveryAttemptOfARequestCarriesTheSameIdempotencyKey(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -558,14 +527,12 @@ func TestEveryAttemptOfARequestCarriesTheSameIdempotencyKey(t *testing.T) {
 		t.Fatalf("Idempotency-Keys = %q", first)
 	}
 
-	// Another Request gets its own.
 	n := up.Count()
 	caller.Post(chatPath, chat("gpt-x")).Expect(200)
 	if got := idempotencyKeys(up, n); len(got) != 1 || got[0] == "" || got[0] == first[0] {
 		t.Fatalf("second Request's Idempotency-Key = %q (first %q)", got, first[0])
 	}
 
-	// A Caller's own value goes to every Attempt unchanged.
 	n = up.Count()
 	up.Enqueue(up.Error(500, "boom"), up.Text("hello"))
 	caller.WithHeader("Idempotency-Key", "caller-key-1").Post(chatPath, chat("gpt-x")).Expect(200)
@@ -574,9 +541,6 @@ func TestEveryAttemptOfARequestCarriesTheSameIdempotencyKey(t *testing.T) {
 	}
 }
 
-// waitForReplay runs the Request on the caller in the background and waits
-// until its replay pause is armed: a timer due within max. It returns the
-// Request's answer channel and the time the pause was armed.
 func waitForReplay(t *testing.T, srv *testkit.Server, up *testkit.Upstream, send func() *testkit.Response, max time.Duration) (<-chan *testkit.Response, time.Time) {
 	t.Helper()
 	done := make(chan *testkit.Response, 1)
@@ -591,8 +555,6 @@ func waitForReplay(t *testing.T, srv *testkit.Server, up *testkit.Upstream, send
 	return done, now
 }
 
-// notYet fails the test when the Request answered or the fake got another
-// Attempt.
 func notYet(t *testing.T, done <-chan *testkit.Response, up *testkit.Upstream, attempts int) {
 	t.Helper()
 	select {
@@ -605,8 +567,6 @@ func notYet(t *testing.T, done <-chan *testkit.Response, up *testkit.Upstream, a
 	}
 }
 
-// FAIL-83, TIME-09: a 5xx key is replayed after a pause on the clock: 250 ms
-// with jitter (125-375 ms), or the answer's Retry-After when it asks longer.
 func TestAReplayOnTheSameKeyWaitsFirst(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -627,7 +587,6 @@ func TestAReplayOnTheSameKeyWaitsFirst(t *testing.T) {
 		t.Fatalf("the replay sent another Idempotency-Key: %q", keys)
 	}
 
-	// A Retry-After asking longer wins.
 	up.Enqueue(up.Error(503, "overloaded").Header("Retry-After", "3"), up.Text("hello"))
 	n := up.Count()
 	done, _ = waitForReplay(t, srv, up, send, 3*time.Second)
@@ -636,8 +595,6 @@ func TestAReplayOnTheSameKeyWaitsFirst(t *testing.T) {
 	srv.Clock.Advance(100 * time.Millisecond)
 	(<-done).Expect(200)
 
-	// A Retry-After past the first-byte deadline leaves no time for the
-	// replay: the Caller is answered at once.
 	up.Enqueue(up.Error(503, "overloaded").Header("Retry-After", "120"))
 	n = up.Count()
 	var e callerError
@@ -647,7 +604,6 @@ func TestAReplayOnTheSameKeyWaitsFirst(t *testing.T) {
 	}
 }
 
-// TIME-09: a Caller that leaves during the pause ends it; nothing is replayed.
 func TestACallerLeavingDuringTheReplayPauseEndsTheRequest(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -683,11 +639,9 @@ func TestKeyTestsRunSinglyAndInBulk(t *testing.T) {
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b", "sk-test-c")
 
-	// No history and no model: the test says what to pass.
 	if e := srv.Admin.Post("/api/providers/acme/keys/key-1/test", nil).Expect(400).Err(); e.Code != "model_required" || e.Hint == "" {
 		t.Fatalf("no model: %+v", e)
 	}
-	// A dry run sends nothing.
 	var res gateway.KeyTestResult
 	srv.Admin.Post("/api/providers/acme/keys/key-1/test?model=gpt-x&dry_run=true", nil).Expect(200).JSON(&res)
 	if !res.DryRun || res.Passed || up.Count() != 0 || res.Endpoint != "default" || res.Model != "gpt-x" {

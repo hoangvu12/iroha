@@ -15,25 +15,14 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Model Gaps (ADR-0003): a key refused one model keeps its Key State and
-// serves its other models; the refused model is not sent to it until the
-// gap expires (GapLifetime after it was recorded) or is cleared by a passing
-// key test, an edit of the key, the Owner (by hand, audited and revertible),
-// or the key's discovered model list naming the model (ticket 10). Expired
-// gaps stop counting at once; their rows are deleted, and logged as expired,
-// the next time a Request plans over the Provider (ExpireGaps).
-
-// GapLifetime is how long a Model Gap lasts.
 const GapLifetime = 24 * time.Hour
 
-// Model Gap log operations (attribute op of logs.KindModelGap).
 const (
 	GapCreated = "created"
 	GapCleared = "cleared"
 	GapExpired = "expired"
 )
 
-// ModelGap is one Model Gap of an Upstream Key.
 type ModelGap struct {
 	ID        string    `json:"-"`
 	Model     string    `json:"model" doc:"The model as sent upstream."`
@@ -44,7 +33,6 @@ type ModelGap struct {
 	ExpiresAt time.Time `json:"expires_at" doc:"When the model is sent to this key again by itself (created_at + 24 h)."`
 }
 
-// LiveGaps lists the key's Model Gaps that have not expired at now.
 func (r Record) LiveGaps(now time.Time) []ModelGap {
 	out := []ModelGap{}
 	for _, g := range r.Gaps {
@@ -55,8 +43,7 @@ func (r Record) LiveGaps(now time.Time) []ModelGap {
 	return out
 }
 
-// GapsByModel maps each model of the key's stored Model Gaps to its expiry,
-// which may be past; nil when there are none.
+// GapsByModel includes expired gaps.
 func (r Record) GapsByModel() map[string]time.Time {
 	var out map[string]time.Time
 	for _, g := range r.Gaps {
@@ -90,7 +77,6 @@ func readGaps(ctx context.Context, q Querier, keysQuery, arg string, out map[str
 	return rows.Err()
 }
 
-// putGap records (or renews) the Model Gap of key for model.
 func putGap(ctx context.Context, tx *sql.Tx, keyID, model, reason, rule, requestID string, now time.Time) (time.Time, error) {
 	expires := now.Add(GapLifetime).UTC()
 	_, err := tx.ExecContext(ctx, `INSERT INTO model_gaps (id, key_id, model, reason, rule, request_id, created_at, expires_at)
@@ -100,17 +86,16 @@ func putGap(ctx context.Context, tx *sql.Tx, keyID, model, reason, rule, request
 	return expires, err
 }
 
-// GapEvent is one Model Gap change, logged as model_gap once it committed.
 type GapEvent struct {
 	Op        string // GapCreated, GapCleared or GapExpired
 	Key       Key
 	Model     string
-	Reason    string    // why it was created or cleared
-	Until     time.Time // when the gap expires (or expired)
+	Reason    string
+	Until     time.Time
 	RequestID string
 }
 
-// LogGaps logs Model Gap changes after they committed.
+// Call LogGaps only after the changes committed.
 func LogGaps(log *slog.Logger, events []GapEvent) {
 	for _, e := range events {
 		attrs := []any{logs.Kind(logs.KindModelGap), logs.Provider(e.Key.Provider), "op", e.Op,
@@ -126,11 +111,10 @@ func LogGaps(log *slog.Logger, events []GapEvent) {
 	}
 }
 
-// ClearGaps deletes the Model Gaps of key k inside tx: every gap, or only
-// model's when model is not empty. Gaps still live at now are passed to
-// track before they are deleted (nil: not tracked) and come back as cleared
-// events with reason why; gaps already expired are deleted as expired. The
-// caller logs the events after commit (LogGaps).
+// ClearGaps deletes every gap of k, or only model's when model is not
+// empty. Gaps still live at now are passed to track (nil: not tracked)
+// before they are deleted and come back as cleared events with reason why;
+// expired ones come back as expired. Log the events after commit (LogGaps).
 func ClearGaps(ctx context.Context, tx *sql.Tx, k Key, model, why string, now time.Time, track func(id string) error) ([]GapEvent, error) {
 	recs := map[string]Record{}
 	if err := readGaps(ctx, tx, `SELECT ?`, k.ID, recs); err != nil {
@@ -157,9 +141,6 @@ func ClearGaps(ctx context.Context, tx *sql.Tx, k Key, model, why string, now ti
 	return events, nil
 }
 
-// ExpireGaps deletes the expired Model Gaps of every key of a Provider and
-// logs each as expired. The Gateway calls it when the routing view it
-// planned over held an expired gap.
 func (s *Store) ExpireGaps(ctx context.Context, providerID, handle string) error {
 	ctx = context.WithoutCancel(ctx)
 	now := s.db.Clock().Now().UTC()
@@ -202,8 +183,6 @@ func (s *Store) ExpireGaps(ctx context.Context, providerID, handle string) error
 	return nil
 }
 
-// gapSnapshot is what an Audit Entry records of a Model Gap the Owner
-// cleared, so a revert can put it back.
 type gapSnapshot struct {
 	ID          string    `json:"id"`
 	KeyID       string    `json:"key_id"`
@@ -217,9 +196,6 @@ type gapSnapshot struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 }
 
-// GapResource is the Model Gap resource of the audit machinery. Gaps are
-// learned at runtime without Audit Entries; only clearing them through the
-// admin API is audited, so the Owner can undo it.
 var GapResource = audit.Register(&audit.Resource[gapSnapshot]{
 	Name: "model_gap", Label: "Model Gap", Plural: "Model Gaps", Path: "/api/providers/{provider}/model-gaps",
 	Table: "model_gaps", NameColumn: "model",
@@ -250,7 +226,6 @@ var GapResource = audit.Register(&audit.Resource[gapSnapshot]{
 		if err != nil {
 			return err
 		}
-		// A gap learned since for the same model gives way to the restored one.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM model_gaps WHERE key_id = ? AND model = ? AND id != ?`, s.KeyID, s.Model, id); err != nil {
 			return err
 		}

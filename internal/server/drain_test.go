@@ -15,18 +15,12 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 	"github.com/hoangvu12/iroha/internal/config"
 	"github.com/hoangvu12/iroha/internal/gateway"
+	"github.com/hoangvu12/iroha/internal/jobs"
 	"github.com/hoangvu12/iroha/internal/requests"
 	"github.com/hoangvu12/iroha/internal/server"
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// These tests drive server.Run, the path a SIGTERM takes in production:
-// main cancels Run's context on SIGTERM, and Run drains for at most
-// --drain-timeout. The systemd unit's TimeoutStopSec is checked against that
-// limit in deploy/unit_test.go.
-
-// slowRoute answers "first" at once, then "done" when release is closed.
-// It reports each arrival on entered.
 func slowRoute(entered chan<- struct{}, release <-chan struct{}) api.Route {
 	return api.Route{
 		Method: http.MethodGet, Path: "/test/slow", Auth: api.AuthPublic, Hidden: true,
@@ -48,8 +42,8 @@ type running struct {
 	t       *testing.T
 	url     string
 	console *lockedBuffer
-	stop    context.CancelFunc // what SIGTERM does
-	done    chan error         // Run's result
+	stop    context.CancelFunc
+	done    chan error
 }
 
 func runServer(t *testing.T, drain time.Duration, routes ...api.Route) *running {
@@ -91,7 +85,6 @@ func runServer(t *testing.T, drain time.Duration, routes ...api.Route) *running 
 	return nil
 }
 
-// event is the last console log line of the given kind.
 func (r *running) event(kind string) map[string]any {
 	var last map[string]any
 	for _, line := range strings.Split(r.console.String(), "\n") {
@@ -107,7 +100,7 @@ func (r *running) waitDone(within time.Duration) error {
 	r.t.Helper()
 	select {
 	case err := <-r.done:
-		r.done <- err // keep it for Cleanup
+		r.done <- err
 		return err
 	case <-time.After(within):
 		r.t.Fatalf("Run did not return within %v", within)
@@ -115,8 +108,6 @@ func (r *running) waitDone(within time.Duration) error {
 	}
 }
 
-// startSlow sends GET /test/slow on its own connection and returns its
-// body reader once the handler is running.
 func (r *running) startSlow(entered <-chan struct{}) (*http.Response, *bufio.Reader) {
 	r.t.Helper()
 	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
@@ -142,9 +133,8 @@ func TestShutdownLetsInFlightRequestsFinishWithinTheDrainLimit(t *testing.T) {
 	srv := runServer(t, 10*time.Second, slowRoute(entered, release))
 	resp, body := srv.startSlow(entered)
 
-	srv.stop() // SIGTERM
+	srv.stop()
 
-	// New connections are refused while the in-flight request drains.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		r, err := http.Get(srv.url + "/readyz")
@@ -179,12 +169,12 @@ func TestShutdownLetsInFlightRequestsFinishWithinTheDrainLimit(t *testing.T) {
 
 func TestShutdownCutsRequestsThatOutliveTheDrainLimit(t *testing.T) {
 	const drain = 400 * time.Millisecond
-	entered, release := make(chan struct{}, 1), make(chan struct{}) // never released
+	entered, release := make(chan struct{}, 1), make(chan struct{})
 	srv := runServer(t, drain, slowRoute(entered, release))
 	_, body := srv.startSlow(entered)
 
 	begin := time.Now()
-	srv.stop() // SIGTERM
+	srv.stop()
 	if err := srv.waitDone(10 * time.Second); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -201,9 +191,6 @@ func TestShutdownCutsRequestsThatOutliveTheDrainLimit(t *testing.T) {
 	}
 }
 
-// gatewayStream sets up a Provider on a fake upstream whose stream sends
-// "Hel", then waits for gate before "lo". It opens the stream and returns
-// it once "Hel" arrived.
 func gatewayStream(t *testing.T, srv *testkit.Server, gate <-chan struct{}) (*http.Response, *bufio.Reader) {
 	t.Helper()
 	up := testkit.NewOpenAIChat(t)
@@ -218,7 +205,7 @@ func gatewayStream(t *testing.T, srv *testkit.Server, gate <-chan struct{}) (*ht
 	stream := up.Stream("Hel", "lo")
 	up.Enqueue(func(r *testkit.Received) testkit.Reply {
 		rep := stream(r)
-		rep.Chunks[2].Wait = gate // chunk 0 is the role, 1 is "Hel"
+		rep.Chunks[2].Wait = gate
 		return rep
 	})
 	resp := srv.Client(key.GatewayKey.Secret).Open(http.MethodPost, "/providers/acme/v1/chat/completions",
@@ -229,7 +216,6 @@ func gatewayStream(t *testing.T, srv *testkit.Server, gate <-chan struct{}) (*ht
 	return resp, body
 }
 
-// readUntil reads lines until one contains want.
 func readUntil(t *testing.T, body *bufio.Reader, want string) {
 	t.Helper()
 	got := make(chan error, 1)
@@ -256,8 +242,6 @@ func readUntil(t *testing.T, body *bufio.Reader, want string) {
 	}
 }
 
-// stopInBackground starts a shutdown draining for at most limit, as a
-// SIGTERM does, and returns a channel closed when it has finished.
 func stopInBackground(srv *testkit.Server, limit time.Duration) <-chan struct{} {
 	stopped := make(chan struct{})
 	go func() { srv.StopWithin(limit); close(stopped) }()
@@ -285,7 +269,6 @@ func TestShutdownKeepsInFlightStreamsAliveUntilTheyFinish(t *testing.T) {
 		t.Fatal("shutdown finished while a stream was in flight")
 	case <-time.After(200 * time.Millisecond):
 	}
-	// The model pauses during the drain: the stream is kept alive.
 	srv.Clock.Advance(gateway.KeepAliveEvery)
 	readUntil(t, body, ": keep-alive")
 
@@ -310,7 +293,7 @@ func TestShutdownKeepsInFlightStreamsAliveUntilTheyFinish(t *testing.T) {
 func TestStreamsOutlivingTheDrainLimitEndWithAnErrorEvent(t *testing.T) {
 	const limit = 300 * time.Millisecond
 	srv := testkit.Start(t)
-	resp, body := gatewayStream(t, srv, make(chan struct{})) // never finishes
+	resp, body := gatewayStream(t, srv, make(chan struct{}))
 	id := resp.Header.Get("X-Request-Id")
 
 	begin := time.Now()
@@ -328,7 +311,6 @@ func TestStreamsOutlivingTheDrainLimitEndWithAnErrorEvent(t *testing.T) {
 		t.Fatalf("shutdown took %v with a drain limit of %v", took, limit)
 	}
 
-	// The Request is recorded as ended by the shutdown, not left interrupted.
 	srv.Restart()
 	var r requests.Request
 	srv.Admin.Get("/api/requests/" + id).Expect(200).JSON(&r)
@@ -338,6 +320,44 @@ func TestStreamsOutlivingTheDrainLimitEndWithAnErrorEvent(t *testing.T) {
 	if ev := srv.Logs("kind=shutdown"); len(ev) != 1 || ev[0].Attrs["drained"] != false || ev[0].Attrs["requests_ended"] != float64(1) {
 		t.Fatalf("shutdown events = %+v", ev)
 	}
+}
+
+func TestShutdownLetsAJobRunByHandFinishBeforeStoppingJobs(t *testing.T) {
+	started, gate := make(chan struct{}, 1), make(chan struct{})
+	probe := jobs.Job{
+		Name: "probe", Description: "A test job.", Schedule: jobs.Every(time.Hour),
+		Run: func(ctx context.Context, dry bool) (jobs.Outcome, error) {
+			started <- struct{}{}
+			select {
+			case <-gate:
+				return jobs.Outcome{Summary: "Probed."}, nil
+			case <-ctx.Done():
+				return jobs.Outcome{}, ctx.Err()
+			}
+		},
+	}
+	srv := testkit.Start(t, testkit.Options{Jobs: []jobs.Job{probe}})
+	answered := make(chan jobs.Run, 1)
+	go func() {
+		resp := srv.Admin.Open(http.MethodPost, "/api/jobs/probe/run", nil)
+		defer resp.Body.Close()
+		var run jobs.Run
+		_ = json.NewDecoder(resp.Body).Decode(&run)
+		answered <- run
+	}()
+	<-started
+
+	stopped := stopInBackground(srv, 10*time.Second)
+	select {
+	case run := <-answered:
+		t.Fatalf("the manual run ended as soon as shutdown began: %+v", run)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(gate)
+	if run := <-answered; run.Outcome != "ok" {
+		t.Fatalf("manual run = %+v, want it to finish during the drain", run)
+	}
+	waitStopped(t, stopped, 5*time.Second)
 }
 
 type lockedBuffer struct {

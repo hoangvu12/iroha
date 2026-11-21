@@ -12,13 +12,11 @@ import { calls, errorText, useRefresh } from "./api";
 import { SettingsCard, SettingsRow, Switch } from "./controls";
 import { LogoInput } from "./LogoField";
 
-/** The Settings tab (C14): name, logo, on/off, the Provider route, and archiving. */
 export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
   const refresh = useRefresh();
   const [name, setName] = useState(p.name);
   const [logo, setLogo] = useState(p.logo_domain_guessed ? "" : p.logo_domain);
   const [archiving, setArchiving] = useState(false);
-  // Each setting shows its result where it was changed: beside its field or switch, a failure under the row.
   const naming = useSave({ refresh, describe: errorText });
   const logoSave = useSave({ refresh, describe: errorText });
   const enabling = useSave({ refresh, describe: errorText });
@@ -33,7 +31,6 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
   const update = (body: Parameters<typeof calls.updateProvider>[1]) => () => calls.updateProvider(p.handle, body);
   const restore = async () => {
     let res: ProviderResult | undefined;
-    // Toast: the Restore row is replaced by Archive once it works, so its place is gone.
     if (await restoring.run(async () => (res = await update({ archived: false })()), { quiet: true }) && res)
       notifyChange(`${p.handle} restored`, res, { onUndone: refresh });
   };
@@ -51,7 +48,6 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
               if (name.trim() && name.trim() !== p.name) void naming.run(update({ name: name.trim() }), { message: `Renamed to ${name.trim()}` });
             }}
           >
-            {/* The field keeps its width; a long result wraps under it. */}
             <Input aria-label="Name" className="min-w-48 flex-1" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!naming.error} />
             {name.trim() !== p.name ? (
               <Button type="submit" variant="primary" loading={naming.pending}>
@@ -168,7 +164,6 @@ export function ProviderSettingsTab({ provider: p }: { provider: Provider }) {
         onConfirm={async () => {
           const res = await calls.updateProvider(p.handle, { archived: true });
           refresh();
-          // Toast: the confirm dialog has closed (the page shows Restore now); Undo is offered there.
           notifyChange(`${p.handle} archived`, res, { onUndone: refresh });
         }}
       />

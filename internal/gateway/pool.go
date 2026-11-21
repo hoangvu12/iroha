@@ -11,32 +11,20 @@ import (
 	"github.com/hoangvu12/iroha/internal/pools"
 )
 
-// Model Pools (ticket 18): a name without a slash on a global route names a
-// Pool. Each switched-on member whose Provider is enabled and offers the
-// member's model becomes one Provider of the route, in member order, so the
-// planner lists the first member's candidates first and the budget loop
-// fails over down the list. Members that cannot be planned are noted for the
-// route preview (preview.go) and left out.
-
-// Why a member is not planned.
 const (
-	memberOff         = "off"                  // switched off by the Owner
-	memberUnavailable = "provider_unavailable" // its Provider is disabled, archived or gone
-	memberNotOffered  = "model_not_offered"    // its model is hidden, or unlisted on a strict Provider
+	memberOff         = "off"
+	memberUnavailable = "provider_unavailable"
+	memberNotOffered  = "model_not_offered"
 )
 
-// memberNote is one Pool member as routing found it.
 type memberNote struct {
-	member  pools.RoutingMember
-	planned int    // index in route.providers; -1 when not planned
-	reason  string // why not planned: memberOff, memberUnavailable, memberNotOffered
-	detail  string // the reason in a sentence
+	member        pools.RoutingMember
+	planned       bool
+	providerIndex int
+	reason        string
+	detail        string
 }
 
-// poolRoute resolves a Pool name. An unknown Pool and one outside the
-// Caller's scope are refused alike (errNotQualified). A Pool's members are
-// usable whatever Providers the Gateway Key's scope names: the Pool is the
-// grant.
 func (x *exchange) poolRoute(caller gatewaykeys.Caller, name string) (route, *api.Error) {
 	pl, ok, err := x.g.pools.Lookup(x.ctx, name)
 	if err != nil {
@@ -48,7 +36,7 @@ func (x *exchange) poolRoute(caller gatewaykeys.Caller, name string) (route, *ap
 	x.pool, x.rec.Pool = &pl, pl.Name
 	rt := route{pool: &pl}
 	for _, m := range pl.Members {
-		note := memberNote{member: m, planned: -1}
+		note := memberNote{member: m}
 		switch r, found, err := x.g.providers.Routing(x.ctx, m.Handle); {
 		case err != nil:
 			return rt, api.AsError(err)
@@ -73,7 +61,7 @@ func (x *exchange) poolRoute(caller gatewaykeys.Caller, name string) (route, *ap
 				note.reason, note.detail = memberNotOffered, ae.Message
 				break
 			}
-			note.planned = len(rt.providers)
+			note.planned, note.providerIndex = true, len(rt.providers)
 			rt.providers = append(rt.providers, p)
 		}
 		rt.members = append(rt.members, note)
@@ -84,7 +72,6 @@ func (x *exchange) poolRoute(caller gatewaykeys.Caller, name string) (route, *ap
 	return rt, nil
 }
 
-// errNoMember refuses a Pool none of whose members can be planned.
 func errNoMember(pl pools.Routing, notes []memberNote) *api.Error {
 	why := "it has no members"
 	if len(notes) > 0 {

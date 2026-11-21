@@ -14,13 +14,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// The route preview (ticket 18): where a Request for a Pool or a
-// <provider>/<model> would go right now. It resolves the model with the
-// global route's resolver and plans with planner.Plan, as live traffic
-// does, peeking at the live rotation without moving it; nothing is sent and
-// nothing is written.
-
-// RoutePreview is the response of GET /api/route-preview.
 type RoutePreview struct {
 	Model    string          `json:"model" doc:"The model as asked: a Pool name or <provider>/<model>."`
 	Pool     string          `json:"pool,omitempty" doc:"The Pool's name, when model names one."`
@@ -34,13 +27,11 @@ type RoutePreview struct {
 	Outcome  *PreviewOutcome `json:"outcome,omitempty" doc:"Set when a Caller would be refused before any Attempt: the error it would get."`
 }
 
-// PreviewBudget is the budget of a previewed Request.
 type PreviewBudget struct {
 	MaxAttempts      int `json:"max_attempts,omitempty"`
 	FirstByteSeconds int `json:"first_byte_seconds,omitempty"`
 }
 
-// PreviewMember is one Pool member (or the one Provider) in a route preview.
 type PreviewMember struct {
 	Position   int                `json:"position" doc:"1 for the first member tried."`
 	Provider   string             `json:"provider" doc:"Provider handle."`
@@ -57,7 +48,6 @@ type PreviewMember struct {
 	Empty      *PreviewEmpty      `json:"empty,omitempty" doc:"Set when a planned member has no candidate: why."`
 }
 
-// PreviewCandidate is one Attempt Iroha would make.
 type PreviewCandidate struct {
 	Endpoint    string      `json:"endpoint" doc:"Endpoint name."`
 	Shape       shape.Shape `json:"shape" doc:"The Endpoint's Shape."`
@@ -67,7 +57,6 @@ type PreviewCandidate struct {
 	Carrier     bool        `json:"carrier" doc:"true when the key's own discovered model list names the wire model (tried first)."`
 }
 
-// PreviewSkip is a key left out of the plan.
 type PreviewSkip struct {
 	UpstreamKey string             `json:"upstream_key"`
 	Reason      planner.SkipReason `json:"reason" enum:"disabled,invalid,cooling,cooling_model,model_gap,restricted,endpoint_gap" doc:"cooling: the whole key; cooling_model: the key for this model; model_gap: the Provider refused this key the model; restricted: the key may not use the Endpoints that serve; endpoint_gap: the Provider refused this key on endpoint after it worked on another (the key may still serve on other Endpoints)."`
@@ -77,14 +66,12 @@ type PreviewSkip struct {
 	SecondsLeft int                `json:"seconds_left,omitempty" doc:"Whole seconds until then."`
 }
 
-// PreviewEmpty explains a planned member with no candidate.
 type PreviewEmpty struct {
 	Code    planner.EmptyCode `json:"code" enum:"no_endpoint,no_upstream_key,no_usable_key,cooling,model_gap"`
 	Message string            `json:"message"`
 	Until   *time.Time        `json:"until,omitempty"`
 }
 
-// PreviewOutcome is the error a Caller would get before any Attempt.
 type PreviewOutcome struct {
 	Status  int    `json:"status"`
 	Code    string `json:"code"`
@@ -92,7 +79,6 @@ type PreviewOutcome struct {
 	Hint    string `json:"hint"`
 }
 
-// PreviewRoutes are the route preview's admin routes.
 func (g *Gateway) PreviewRoutes() []api.Route {
 	return []api.Route{{
 		Method: http.MethodGet, Path: "/api/route-preview", Tag: "Model Pools",
@@ -139,7 +125,6 @@ func (g *Gateway) preview(ctx context.Context, model, sh, as, session string) (R
 		out.As = caller.Name
 	}
 
-	// The live resolver on an exchange that answers no one.
 	x := &exchange{g: g, ctx: ctx, start: now}
 	rt, aerr := x.global(caller, model)
 	if rt.pool != nil {
@@ -160,19 +145,18 @@ func (g *Gateway) preview(ctx context.Context, model, sh, as, session string) (R
 	rot := g.rotation.Peek()
 	plan := planner.Plan(req, rt.providers, rot)
 
-	// One entry per member: a Pool's notes, or the one Provider.
 	notes := rt.members
 	if rt.pool == nil {
-		notes = []memberNote{{planned: 0}}
+		notes = []memberNote{{planned: true, providerIndex: 0}}
 	}
 	for i, n := range notes {
 		m := PreviewMember{Position: i + 1, Provider: n.member.Handle, Model: n.member.Model, Enabled: n.member.Enabled || rt.pool == nil,
 			NotPlanned: n.reason, Reason: n.detail, Candidates: []PreviewCandidate{}, Skipped: []PreviewSkip{}}
-		if n.planned < 0 {
+		if !n.planned {
 			out.Members = append(out.Members, m)
 			continue
 		}
-		p := &rt.providers[n.planned]
+		p := &rt.providers[n.providerIndex]
 		m.Provider, m.Model, m.Planned, m.Keys = p.Handle, p.ModelFor(req), true, len(p.Keys)
 		m.KeyOrder = "round_robin"
 		if p.AffinityKey(req) != "" {
@@ -203,7 +187,6 @@ func (g *Gateway) preview(ctx context.Context, model, sh, as, session string) (R
 			m.Skipped = append(m.Skipped, ps)
 		}
 		if len(m.Candidates) == 0 {
-			// The member alone, planned the same way, says why it has none.
 			if e := planner.Plan(req, []planner.Provider{*p}, rot).Empty; e != nil {
 				m.Empty = &PreviewEmpty{Code: e.Code, Message: e.Message}
 				if !e.Until.IsZero() {

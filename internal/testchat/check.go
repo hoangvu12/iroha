@@ -11,22 +11,15 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// ToolCheck is the verdict of the tool-call check on one answer.
 type ToolCheck struct {
-	Passed bool   `json:"passed"`
-	Reason string `json:"reason" doc:"Why it passed or failed, in a sentence."`
-	// Call is the first tool call of the answer, as the model wrote it.
+	Passed    bool   `json:"passed"`
+	Reason    string `json:"reason" doc:"Why it passed or failed, in a sentence."`
 	Name      string `json:"name,omitempty" doc:"The tool the model called (the first call when it made several)."`
 	Arguments string `json:"arguments,omitempty" doc:"The arguments exactly as the model wrote them."`
 	ID        string `json:"id,omitempty" doc:"The call's ID, to send back in messages[].tool_calls[].id."`
 	Calls     int    `json:"calls,omitempty" doc:"How many tool calls the answer made; each is checked, the first failing one is reported."`
 }
 
-// CheckTool judges the whole answer (a stream reassembled into one answer)
-// of a send in Shape sh that offered the tools named: it passes when the
-// model called at least one tool and every call names an offered tool with
-// arguments valid against its schema (a JSON object, required properties
-// present, each property of its type).
 func CheckTool(sh shape.Shape, status int, answer []byte, offered []string) ToolCheck {
 	if status < 200 || status > 299 {
 		return ToolCheck{Reason: "The Request failed, so the model never answered."}
@@ -65,7 +58,6 @@ func CheckTool(sh shape.Shape, status int, answer []byte, offered []string) Tool
 	return out
 }
 
-// checkCall says what is wrong with one call, "" when nothing is.
 func checkCall(c ToolCall, offered []string) string {
 	t := toolNamed(c.Name)
 	if t == nil || !slices.Contains(offered, c.Name) {
@@ -83,9 +75,6 @@ func checkCall(c ToolCall, offered []string) string {
 	return ""
 }
 
-// validate checks arguments against a test tool's schema (the subset the
-// test tools use: required properties and their types); it says what is
-// wrong, "" when nothing is.
 func validate(schema obj, a map[string]any) string {
 	props, _ := schema.get("properties").(obj)
 	required, _ := schema.get("required").([]any)
@@ -157,8 +146,6 @@ func article(t string) string {
 	return "a " + t
 }
 
-// toolCalls reads the tool calls of a whole answer in Shape sh; arguments
-// as the model wrote them (a JSON text).
 func toolCalls(sh shape.Shape, answer []byte) []ToolCall {
 	var out []ToolCall
 	switch sh {

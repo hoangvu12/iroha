@@ -10,20 +10,16 @@ import (
 	"slices"
 )
 
-// client calls the running Iroha over HTTP, as an agent would.
 type client struct {
 	base  string
 	token string
 	http  *http.Client
 }
 
-// as returns a client sending token instead.
 func (c *client) as(token string) *client {
 	return &client{base: c.base, token: token, http: c.http}
 }
 
-// do sends body as JSON and decodes the answer into out (when not nil). A
-// status that is not 2xx is an error quoting the answer.
 func (c *client) do(ctx context.Context, method, path string, body, out any) error {
 	_, err := c.send(ctx, method, path, body, out, 200, 201)
 	return err

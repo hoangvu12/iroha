@@ -94,7 +94,6 @@ test("a long model list scrolls in the shared Scroll Area and draws the rows scr
   const dialog = await screen.findByRole("dialog", { name: "Models of zai" });
   await user.click(within(dialog).getByRole("radio", { name: "Only these" }));
   await within(dialog).findByRole("checkbox", { name: "glm-000" });
-  // The list is the Scroll Area's viewport (its own thin bar), not a native scroller.
   const list = within(dialog).getByRole("region", { name: "Models of zai" });
   expect(list.getAttribute("data-slot")).toBe("scroll-area-viewport");
   expect(within(dialog).queryByRole("checkbox", { name: "glm-099" })).toBeNull();

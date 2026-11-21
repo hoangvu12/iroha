@@ -3,7 +3,6 @@ import { ChevronRight } from "lucide-react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
 import { cn } from "./cn";
 
-// A summary line that shows more under it when pressed.
 export function Disclosure({ summary, children, className, triggerClassName }: { summary: ReactNode; children: ReactNode; className?: string; triggerClassName?: string }) {
   return (
     <Collapsible className={className}>

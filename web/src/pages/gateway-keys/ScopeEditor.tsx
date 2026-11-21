@@ -15,13 +15,8 @@ import { ModelPicker } from "./ModelPicker";
 import { SAMPLE_SCOPE_ROWS } from "./samples";
 import { type Draft, modelsLabel } from "./scope";
 
-// Access, as in C02: Everything, or Only some, a checklist of Providers
-// (each narrowable to models) and Model Pools. Used by the create dialog and
-// by Edit access on the key page.
-
 type SetDraft = Dispatch<SetStateAction<Draft>>;
 
-/** `heading={false}` where the place already says Access (the Gateway Key sheet's section, UI ticket 33). */
 export function ScopeEditor({ draft, onChange, heading = true }: { draft: Draft; onChange: SetDraft; heading?: boolean }) {
   return (
     <div>
@@ -36,7 +31,6 @@ export function ScopeEditor({ draft, onChange, heading = true }: { draft: Draft;
           { value: "some", title: "Only some", description: "Pick the Providers and Model Pools this key can use" },
         ]}
       />
-      {/* Grows open under the choice and folds back (collapse recipe); open when the editor opens, it is just there. */}
       <Reveal open={!draft.all} label="Providers and Pools to allow">
         <div className="pt-4">
           <Checklist draft={draft} onChange={onChange} />
@@ -55,8 +49,6 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
   const needle = q.trim().toLowerCase();
   const match = (s: string) => !needle || s.toLowerCase().includes(needle);
 
-  // Handles the scope names that no longer exist (a deleted Provider) stay
-  // listed so saving never drops them silently.
   const handles = useMemo(() => {
     const known = new Set((providers.data ?? []).map((p) => p.handle));
     const gone = [...draft.providers.keys()].filter((h) => !known.has(h));
@@ -105,7 +97,6 @@ function Checklist({ draft, onChange }: { draft: Draft; onChange: SetDraft }) {
           className="[&_input]:border-transparent [&_input]:bg-transparent [&_input]:focus:ring-0"
         />
       </div>
-      {/* A picker list under its search field: keeps its own scroll while the dialog scrolls as a page (UI ticket 28). */}
       <ScrollArea label="Providers and Pools" viewportClassName="max-h-[min(380px,45dvh)]">
         {failed ? (
           <p className="p-4 text-sm text-danger-text">Couldn't load the Providers and Pools. Close this and try again.</p>

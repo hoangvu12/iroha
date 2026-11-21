@@ -21,7 +21,6 @@ func manyKeys(n int) []planner.Key {
 	return keys(names...)
 }
 
-// keyOrder is the plan's keys in order, each once.
 func keyOrder(r planner.Result) []string {
 	var out []string
 	for _, c := range r.Candidates {
@@ -40,8 +39,6 @@ func one(ks []planner.Key) []planner.Provider {
 	return []planner.Provider{{ID: "p", Handle: "p", Endpoints: []planner.Endpoint{chatEP}, Keys: ks}}
 }
 
-// A conversation gets the same order on every Request, whatever the
-// round-robin counter says; other conversations get other first keys.
 func TestAConversationKeepsItsKeyOrder(t *testing.T) {
 	ks := manyKeys(8)
 	base := keyOrder(planFor("conv-1", one(ks), planner.Fixed(0)))
@@ -60,15 +57,11 @@ func TestAConversationKeepsItsKeyOrder(t *testing.T) {
 	if len(firsts) < 5 {
 		t.Fatalf("40 conversations used only %d first keys", len(firsts))
 	}
-	// Without a conversation, round-robin as before.
 	if got := order(planFor("", one(keys("k1", "k2", "k3")), planner.Fixed(1))); got != "k2@a:glm k3@a:glm k1@a:glm" {
 		t.Fatalf("round-robin = %q", got)
 	}
 }
 
-// A key that drops out (cooling, invalid, disabled, removed) moves only its
-// own conversations, each to its own second key, and they return when it is
-// usable again.
 func TestAKeyDroppingOutMovesOnlyItsConversationsToTheirSecondKey(t *testing.T) {
 	ks := manyKeys(6)
 	drops := map[string]func(*planner.Key){
@@ -92,12 +85,10 @@ func TestAKeyDroppingOutMovesOnlyItsConversationsToTheirSecondKey(t *testing.T) 
 				if !slices.Equal(after, want) {
 					t.Fatalf("%s: %v became %v, want %v", conv, before, after, want)
 				}
-				// Removed altogether: the same.
 				removed := slices.Delete(slices.Clone(ks), victim, victim+1)
 				if got := keyOrder(planFor(conv, one(removed), planner.Fixed(0))); !slices.Equal(got, want) {
 					t.Fatalf("%s removed: %v, want %v", conv, got, want)
 				}
-				// Back: the order it had.
 				if got := keyOrder(planFor(conv, one(ks), planner.Fixed(3))); !slices.Equal(got, before) {
 					t.Fatalf("%s did not return: %v", conv, got)
 				}
@@ -106,9 +97,6 @@ func TestAKeyDroppingOutMovesOnlyItsConversationsToTheirSecondKey(t *testing.T) 
 	}
 }
 
-// Affinity orders keys within the groups planTier already forms: healthy
-// before back-from-cooling, carriers before the others; inside each group
-// the keys keep the conversation's order.
 func TestAffinityOrdersWithinHealthAndCarrierGroups(t *testing.T) {
 	ks := manyKeys(10)
 	for i := range 30 {
@@ -145,9 +133,6 @@ func TestAffinityOrdersWithinHealthAndCarrierGroups(t *testing.T) {
 	}
 }
 
-// Every key goes on every Endpoint of the tier it may use, Endpoints in
-// configured order; the Caller's Shape stays the first tier; exclusions
-// and skips are as without affinity.
 func TestAffinityKeepsEndpointsTiersAndExclusions(t *testing.T) {
 	b := planner.Endpoint{ID: "ep_b", Name: "b", Shape: shape.OpenAIChat, Renames: map[string]string{"glm": "glm-b"}}
 	m := planner.Endpoint{ID: "ep_m", Name: "m", Shape: shape.AnthropicMessages}
@@ -165,8 +150,6 @@ func TestAffinityKeepsEndpointsTiersAndExclusions(t *testing.T) {
 	}
 }
 
-// Pools keep member order; each member ranks its own keys, and a Provider
-// with affinity off keeps round-robin.
 func TestPoolsKeepMemberOrderAndEachMemberItsOwnSwitch(t *testing.T) {
 	ps := []planner.Provider{
 		{ID: "p", Handle: "p", Model: "glm-4.6", Endpoints: []planner.Endpoint{chatEP}, Keys: keys("p1", "p2", "p3")},
@@ -187,8 +170,6 @@ func TestPoolsKeepMemberOrderAndEachMemberItsOwnSwitch(t *testing.T) {
 	}
 }
 
-// With many conversations, first choices spread over the keys about as
-// evenly as round-robin does.
 func TestLoadStillSpreadsAcrossKeysWithManyConversations(t *testing.T) {
 	const n, convs = 12, 24000
 	ks := manyKeys(n)

@@ -9,9 +9,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Shape-aware Responders. Each writes the realistic body of the fake's
-// Shape, echoing the model the request named (or SetServedModel's).
-
 // Text replies with a complete answer. If the request asked for a stream,
 // the text is streamed in that Shape's stream format (one chunk per word).
 func (u *Upstream) Text(text string) Responder { return u.text(text) }
@@ -22,7 +19,6 @@ func (u *Upstream) Stream(pieces ...string) Responder {
 	return func(r *Received) Reply { return u.streamReply(r, pieces) }
 }
 
-// Error replies with status and the Shape's error envelope.
 func (u *Upstream) Error(status int, message string) Responder {
 	return u.errorReply(status, "", message)
 }
@@ -83,7 +79,7 @@ func (u *Upstream) completeReply(r *Received, text string) Reply {
 	case shape.Gemini:
 		body = geminiChunk(model, text, "STOP", &us)
 	}
-	return Reply{Status: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: []byte(compactJSON(body))}
+	return Reply{Status: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: []byte(marshalUnescaped(body))}
 }
 
 func responsesObject(id, model, status, text string, us Usage) map[string]any {
@@ -112,10 +108,6 @@ func geminiChunk(model, text, finish string, us *Usage) map[string]any {
 	}
 	return out
 }
-
-// Usage objects per Shape. Input counts every prompt token, cached ones
-// included; cache fields appear only when CacheRead is set, so replies
-// without cache reads look as they always did.
 
 func chatUsage(us Usage) map[string]any {
 	m := map[string]any{"prompt_tokens": us.Input, "completion_tokens": us.Output, "total_tokens": us.Input + us.Output}
@@ -159,7 +151,7 @@ func sse(event string, data any) string {
 	if s, ok := data.(string); ok {
 		b.WriteString("data: " + s + "\n\n")
 	} else {
-		b.WriteString("data: " + compactJSON(data) + "\n\n")
+		b.WriteString("data: " + marshalUnescaped(data) + "\n\n")
 	}
 	return b.String()
 }
@@ -198,7 +190,6 @@ func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
 			seq++
 			return sse(typ, fields)
 		}
-		// The event sequence OpenAI sends for one message.
 		full := strings.Join(pieces, "")
 		item := func(status string, content []any) map[string]any {
 			return map[string]any{"type": "message", "id": "msg_" + id, "role": "assistant", "status": status, "content": content}
@@ -247,7 +238,7 @@ func (u *Upstream) streamReply(r *Received, pieces []string) Reply {
 			if sseMode {
 				parts = append(parts, sse("", c))
 			} else {
-				parts = append(parts, compactJSON(c))
+				parts = append(parts, marshalUnescaped(c))
 			}
 		}
 		if sseMode {
@@ -294,7 +285,7 @@ func (u *Upstream) errorReply(status int, code, message string) Responder {
 			}
 			body = map[string]any{"error": map[string]any{"message": message, "type": openAIErrorType(status), "param": nil, "code": c}}
 		}
-		return Reply{Status: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: []byte(compactJSON(body))}
+		return Reply{Status: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: []byte(marshalUnescaped(body))}
 	}
 }
 
@@ -321,7 +312,7 @@ func (u *Upstream) modelList(ids []string) Responder {
 			}
 			body = map[string]any{"object": "list", "data": data}
 		}
-		return Reply{Status: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: []byte(compactJSON(body))}
+		return Reply{Status: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: []byte(marshalUnescaped(body))}
 	}
 }
 

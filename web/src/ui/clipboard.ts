@@ -1,8 +1,3 @@
-/**
- * Write text to the clipboard. Uses the Clipboard API, and falls back to a
- * hidden textarea and execCommand where it is missing (plain HTTP) or refuses.
- * Rejects when neither works.
- */
 export async function writeClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     try {

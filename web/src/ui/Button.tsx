@@ -12,26 +12,18 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   size?: Size;
   icon?: ComponentType<{ size?: number; className?: string }>;
   loading?: boolean;
-  // Keeps a disabled button focusable, so a tooltip can say why.
   focusableWhenDisabled?: boolean;
-  /**
-   * The danger tone: this button deletes, removes, revokes or clears something (UI ticket 21).
-   * `"hover"`: neutral at rest, red on hover and focus, for an action repeated on every row of a list.
-   */
   danger?: boolean | "hover";
   children?: ReactNode;
 };
 
 const variants: Record<Variant, string> = {
-  // Each page has one primary button (near-black; light in dark mode).
   primary: "bg-primary text-primary-fg hover:bg-primary-hover",
   secondary: "bg-bg text-fg border border-border-strong hover:bg-muted",
   ghost: "text-fg hover:bg-muted",
-  // Solid red: only the button in a confirmation that does it.
   danger: "bg-danger text-white hover:bg-danger-hover",
 };
 
-// The danger tone of each variant: red text (and border), a red tint on hover.
 const dangerTones: Record<Variant, string> = {
   primary: variants.danger,
   secondary: "bg-bg text-danger-text border border-danger hover:bg-danger-tint",
@@ -45,18 +37,12 @@ const sizes: Record<Size, string> = {
   lg: "h-11 px-4 text-[15px] gap-2",
 };
 
-// The press (`@utility press` in styles/index.css): every button and icon
-// button scales down while held by a pointer and snaps back when let go; it
-// also carries the hover colours, so add no transition classes beside it.
 const press = "press";
 
-// disabled: for other elements styled with buttonClass; data-disabled for UI
-// SDK's Button, which also marks a focusable disabled button that way.
 const base =
   `inline-flex select-none items-center justify-center whitespace-nowrap rounded-lg font-medium ${press} ` +
   "disabled:opacity-50 data-disabled:opacity-50 data-pending:cursor-progress";
 
-/** Button looks for a <Link> or <a> (never nest a button in a link). */
 const dangerOnHover =
   "hover:bg-danger-tint hover:text-danger-text hover:border-danger focus-visible:text-danger-text focus-visible:border-danger";
 
@@ -65,8 +51,6 @@ export function buttonClass(variant: Variant = "secondary", size: Size = "md", c
   return cn(base, tone, sizes[size], className);
 }
 
-// `loading` is for a request the page tracks; an onClick that returns a
-// Promise keeps UI SDK's Button pending by itself until the Promise settles.
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = "secondary", size = "md", icon: Icon, loading, disabled, danger, className, children, type = "button", onClick, ...rest },
   ref,
@@ -89,19 +73,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 });
 
 export type TextButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  /** `link` (default): blue, underlined on hover, for an action inside a sentence or a card ("Clear", "Make one"). `quiet`: grey, darker on hover. */
   tone?: "link" | "quiet";
 };
 
 const textTones = { link: "text-info hover:underline", quiet: "text-fg-muted hover:text-fg" };
 
-/**
- * A button that reads as a link in running text: UI SDK's Button (so agents
- * see it and an async `onClick` makes it pending) with no box, padding or press.
- * `className` sets its size and spacing. Give each one a name of its own: when
- * the words alone repeat on a page ("Clear" on every row), add an `aria-label`
- * that starts with them ("Clear the Model Gap for gpt-4o").
- */
 export const TextButton = forwardRef<HTMLButtonElement, TextButtonProps>(function TextButton(
   { tone = "link", className, type = "button", onClick, ...rest },
   ref,
@@ -119,16 +95,13 @@ export const TextButton = forwardRef<HTMLButtonElement, TextButtonProps>(functio
 
 export type IconButtonProps =ButtonHTMLAttributes<HTMLButtonElement> & {
   icon: ComponentType<{ size?: number; className?: string }>;
-  label: string; // accessible name and tooltip
+  label: string;
   size?: "xs" | "sm" | "md";
   bordered?: boolean;
-  /** The danger tone (UI ticket 21): grey at rest like every icon button, red on hover and focus. */
   danger?: boolean;
-  // A disabled icon button stays focusable, so its tooltip can still be reached.
   focusableWhenDisabled?: boolean;
 };
 
-// xs: the × inside a chip.
 const iconSizes = { xs: "size-5 rounded", sm: "size-7 rounded-lg", md: "size-9 rounded-lg" };
 const iconPx = { xs: 13, sm: 15, md: 17 };
 
@@ -145,7 +118,6 @@ export function iconButtonClass(size: "xs" | "sm" | "md" = "md", bordered?: bool
   );
 }
 
-// The label is the button's name and its tooltip.
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
   { icon: Icon, label, size = "md", bordered, danger, className, type = "button", onClick, ...rest },
   ref,

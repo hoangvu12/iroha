@@ -14,10 +14,6 @@ import { useProviderModels } from "./api";
 import { Skeleton } from "@/ui/Skeleton";
 import { SAMPLE_MODEL_IDS } from "./samples";
 
-// The model picker behind a checked Provider's "All models" (C02): every
-// model, or only some. Search runs on the server and the list draws only
-// the rows in view, so a Provider with thousands of models stays instant.
-
 const ROW = 36;
 const VIEW = 300;
 const OVERSCAN = 8;
@@ -48,7 +44,6 @@ export function ModelPicker({
   const [text, setText] = useState("");
   const q = useDebounced(text.trim(), 200);
 
-  // Reset to the Provider's current choice each time the picker opens.
   useEffect(() => {
     if (!provider) return;
     setOnly(!!value);
@@ -91,16 +86,13 @@ export function ModelPicker({
           { value: "only", title: "Only these", description: "The models you tick below, exactly as Callers name them" },
         ]}
       />
-      {/* Grows open under the choice and folds back (collapse recipe). */}
       <Reveal open={only} label="Models to allow">
         <div className="pt-4">
           {picked.length > 0 && (
-            // At most CHIPS chips, so they flow in the dialog, which scrolls as a page (UI ticket 28).
             <div className="mb-3 flex flex-wrap gap-1.5">
               {picked.slice(0, CHIPS).map((m) => (
                 <span key={m} className="inline-flex h-7 max-w-full items-center gap-1 rounded-md bg-muted pl-2 pr-1 font-mono text-[12.5px] text-fg">
                   <span className="truncate">{m}</span>
-                  {/* A draft until Save: removing a chip loses nothing, so it doesn't ask. */}
                   <IconButton icon={X} size="xs" danger label={`Remove ${m}`} onClick={() => setPicked((p) => p.filter((x) => x !== m))} />
                 </span>
               ))}
@@ -137,15 +129,10 @@ function ModelList({
   const rows = useMemo(() => models.data?.pages.flatMap((p) => p.models.map((m) => m.model)) ?? [], [models.data]);
   const total = models.data?.pages[0]?.total ?? 0;
   const pickedSet = useMemo(() => new Set(picked), [picked]);
-  // A typed ID the list does not have can still be allowed (a model the
-  // Provider serves but does not list): offered after the last match.
   const settled = q === typed && !models.isPlaceholderData && !models.isPending && !models.hasNextPage;
   const extra = typed && settled && !rows.includes(typed) ? typed : undefined;
   const items = extra ? [...rows, extra] : rows;
 
-  // The list scrolls in the shared Scroll Area (its viewport is `box`); a new search goes back to its top.
-  // It keeps its own scroll while the dialog scrolls as a page (UI ticket 28): it is virtualised, so it
-  // draws only the rows in its own view of a Provider's thousands of models, under its search field.
   const box = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
   useEffect(() => {
@@ -156,7 +143,6 @@ function ModelList({
   const first = Math.max(0, Math.floor(top / ROW) - OVERSCAN);
   const last = Math.min(items.length, Math.ceil((top + VIEW) / ROW) + OVERSCAN);
 
-  // Read the next page when the view nears the end of what is loaded.
   useEffect(() => {
     if (last >= items.length - 20 && models.hasNextPage && !models.isFetchingNextPage) void models.fetchNextPage();
   }, [last, items.length, models]);
@@ -178,7 +164,6 @@ function ModelList({
       {models.isError ? (
         <p className="p-4 text-sm text-danger-text">Couldn't load the models of {provider}. Type a model ID to allow it anyway.</p>
       ) : (
-      // A new search keeps the rows shown (dimmed) until its page lands.
       <Skeleton data={models.isPending ? undefined : items} sample={SAMPLE_MODEL_IDS} label={`Loading the models of ${provider}`}>
       {(items) => items.length === 0 ? (
         <p className="p-4 text-sm text-fg-muted">
@@ -193,7 +178,6 @@ function ModelList({
           style={{ height: Math.min(VIEW, items.length * ROW) }}
         >
           <div style={{ height: items.length * ROW }} className="relative">
-            {/* `last` of these items: the sample has its own length. */}
             {items.slice(first, Math.min(items.length, Math.ceil((top + VIEW) / ROW) + OVERSCAN)).map((m, i) => {
               const at = first + i;
               const isExtra = extra !== undefined && at === items.length - 1;

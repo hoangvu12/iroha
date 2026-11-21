@@ -4,7 +4,6 @@ import { Radio, RadioGroup, RadioIndicator } from "@ui-sdk/react/radio";
 
 export type RadioCardOption<T extends string = string> = { value: T; title: string; description: ReactNode };
 
-// Options with a title and one line under it; the whole option is pressable.
 export function RadioCards<T extends string>({
   label,
   value,

@@ -93,7 +93,7 @@ func TestWithTimeoutUsesTheClock(t *testing.T) {
 
 func TestBlockUntilDueWaitsForATimerAtOrBeforeTheTime(t *testing.T) {
 	c := clock.NewFake(t0)
-	c.NewTimer(time.Hour) // a later timer does not count
+	c.NewTimer(time.Hour)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if err := c.BlockUntilDue(ctx, t0.Add(time.Minute)); !errors.Is(err, context.DeadlineExceeded) {
@@ -102,7 +102,7 @@ func TestBlockUntilDueWaitsForATimerAtOrBeforeTheTime(t *testing.T) {
 	re := c.NewTimer(time.Second)
 	go func() {
 		<-re.C()
-		re.Reset(time.Minute) // the code under test re-arms after the fire
+		re.Reset(time.Minute)
 	}()
 	c.Advance(time.Second)
 	if err := c.BlockUntilDue(context.Background(), t0.Add(time.Second+time.Minute)); err != nil {
@@ -126,5 +126,51 @@ func TestSleepWakesOnAdvance(t *testing.T) {
 	c.Advance(time.Minute)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFakeAfterFuncRunsDuringAdvance(t *testing.T) {
+	c := clock.NewFake(t0)
+	ran := 0
+	tm := c.AfterFunc(time.Minute, func() { ran++ })
+	c.Advance(59 * time.Second)
+	if ran != 0 {
+		t.Fatal("ran early")
+	}
+	c.Advance(time.Second)
+	if ran != 1 {
+		t.Fatalf("ran %d times by the time Advance returned, want 1", ran)
+	}
+	if tm.Stop() {
+		t.Fatal("Stop after firing reported the func as pending")
+	}
+	stopped := c.AfterFunc(time.Minute, func() { ran++ })
+	if !stopped.Stop() {
+		t.Fatal("Stop of a pending func returned false")
+	}
+	c.Advance(time.Hour)
+	if ran != 1 {
+		t.Fatal("a stopped func ran")
+	}
+}
+
+func TestBlockUntilDueWithinWakesWhenTheTimeMoves(t *testing.T) {
+	c := clock.NewFake(t0)
+	c.NewTimer(time.Hour)
+	woke := make(chan error, 1)
+	go func() { woke <- c.BlockUntilDueWithin(context.Background(), time.Minute) }()
+	select {
+	case err := <-woke:
+		t.Fatalf("returned with only a timer an hour away: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	c.Advance(59*time.Minute + 30*time.Second)
+	select {
+	case err := <-woke:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("moving the clock to within a minute of the timer woke no one")
 	}
 }

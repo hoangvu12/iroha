@@ -1,7 +1,3 @@
-// Package server assembles Iroha: it opens the store, starts logging,
-// builds the route table from every module and runs the HTTP server with a
-// graceful drain. Keep it thin: features live in their own packages and
-// only get one line in routes.go.
 package server
 
 import (
@@ -36,25 +32,16 @@ import (
 	"github.com/hoangvu12/iroha/internal/webui"
 )
 
-// Options are everything the server takes from outside. Tests replace the
-// clock, console and HTTP client.
 type Options struct {
-	Config  config.Config
-	Version string
-	Clock   clock.Clock // default clock.Real{}
-	Console io.Writer   // logs and the bootstrap token; default os.Stdout
-	// HTTPClient makes every outbound call (Attempts, discovery, tests).
-	// Default: a client with no overall timeout; budgets use contexts.
+	Config     config.Config
+	Version    string
+	Clock      clock.Clock
+	Console    io.Writer
 	HTTPClient *http.Client
-	// Routes are added after the built-in route table. Tests use it for
-	// routes production has no need of, such as a deliberately slow one.
-	Routes []api.Route
-	// Jobs are added after the built-in background jobs. Tests use it for
-	// jobs production has no need of, such as one that fails.
-	Jobs []jobs.Job
+	Routes     []api.Route
+	Jobs       []jobs.Job
 }
 
-// Server is one running Iroha.
 type Server struct {
 	opts    Options
 	clock   clock.Clock
@@ -71,11 +58,13 @@ type Server struct {
 	rules   *failurerules.Store
 	started time.Time
 
-	modelStore *models.Store // model lists (ticket 10), built by models()
+	recorder *requests.Recorder
+
+	modelStore *models.Store
 	refresh    *modelrefresh.Scheduler
 
 	migrations store.MigrationResult
-	bootstrap  admintokens.Token // set only on the first start
+	bootstrap  admintokens.Token
 
 	httpSrv   *http.Server
 	ready     atomic.Bool
@@ -83,8 +72,6 @@ type Server struct {
 	closeErr  error
 }
 
-// New opens the data directory, migrates the database, issues the
-// bootstrap Admin Token on first start and builds the route table.
 func New(ctx context.Context, o Options) (*Server, error) {
 	if o.Clock == nil {
 		o.Clock = clock.Real{}
@@ -122,11 +109,9 @@ func New(ctx context.Context, o Options) (*Server, error) {
 	}
 	s.migrations = mig
 
-	// Nothing is in flight before Serve, so a Request still in progress was
-	// left by a run of Iroha that stopped without finishing it.
-	if _, err := requests.Recover(ctx, db, s.log); err != nil {
+	if s.recorder, err = requests.OpenRecorder(ctx, db, s.log); err != nil {
 		s.closeStores()
-		return nil, fmt.Errorf("closing interrupted Requests: %w", err)
+		return nil, err
 	}
 
 	s.tokens = admintokens.New(db)
@@ -159,28 +144,18 @@ func New(ctx context.Context, o Options) (*Server, error) {
 	return s, nil
 }
 
-// Handler is the HTTP handler of the whole server.
 func (s *Server) Handler() http.Handler { return s.router }
 
-// Routes is the route table, as served and documented.
 func (s *Server) Routes() []api.Route { return s.router.Routes() }
 
-// DB is the open store (tests use it only where no API exists yet).
 func (s *Server) DB() *store.DB { return s.db }
 
-// Logger is the server's logger.
 func (s *Server) Logger() *slog.Logger { return s.log }
 
-// BootstrapToken is the Admin Token created by this start, or the zero
-// Token when this was not the first start.
 func (s *Server) BootstrapToken() admintokens.Token { return s.bootstrap }
 
-// abortGrace is how long, once the drain limit ran out, in-flight Requests
-// get to send their shutting_down answer and be recorded before their
-// connections are closed. The systemd unit's stop timeout leaves room for it.
 const abortGrace = 2 * time.Second
 
-// Serve answers HTTP on ln until Shutdown. It returns nil after a Shutdown.
 func (s *Server) Serve(ln net.Listener) error {
 	s.httpSrv = s.newHTTPServer()
 	s.started = s.clock.Now()
@@ -198,10 +173,6 @@ func (s *Server) Serve(ln net.Listener) error {
 	return err
 }
 
-// newHTTPServer is the HTTP server: only the request headers have a time
-// limit. No ReadTimeout, WriteTimeout or IdleTimeout: a server-wide limit
-// would cut long streams (the Gateway keeps them alive and bounds the wait
-// for the first byte itself).
 func (s *Server) newHTTPServer() *http.Server {
 	return &http.Server{
 		Handler:           s.router,
@@ -210,29 +181,12 @@ func (s *Server) newHTTPServer() *http.Server {
 	}
 }
 
-// Shutdown stops accepting requests, waits for in-flight ones until ctx
-// ends, logs the shutdown and closes the store. Safe to call more than once.
 func (s *Server) Shutdown(ctx context.Context, reason string) error {
 	s.closeOnce.Do(func() {
 		s.ready.Store(false)
 		begin := s.clock.Now()
-		var drainErr error
-		ended := 0
-		if s.httpSrv != nil {
-			drainErr = s.httpSrv.Shutdown(ctx)
-			if drainErr != nil {
-				// The drain limit ran out: in-flight Requests get an answer
-				// saying so (an error event on streams) and are recorded,
-				// then the remaining connections are closed.
-				if s.gw != nil {
-					actx, cancel := clock.WithTimeout(context.Background(), s.clock, abortGrace)
-					ended = s.gw.Abort(actx)
-					cancel()
-				}
-				_ = s.httpSrv.Close()
-			}
-		}
-		s.jobs.Stop() // after the drain: a job run by hand through the API has finished
+		drainErr, ended := s.drainHTTP(ctx)
+		s.jobs.Stop()
 		attrs := []any{logs.Kind(logs.KindShutdown), "reason", reason,
 			"drain_ms", s.clock.Now().Sub(begin).Milliseconds(), "drained", drainErr == nil}
 		if ended > 0 {
@@ -251,13 +205,27 @@ func (s *Server) Shutdown(ctx context.Context, reason string) error {
 	return s.closeErr
 }
 
+func (s *Server) drainHTTP(ctx context.Context) (drainErr error, requestsEnded int) {
+	if s.httpSrv == nil {
+		return nil, 0
+	}
+	if drainErr = s.httpSrv.Shutdown(ctx); drainErr == nil {
+		return nil, 0
+	}
+	if s.gw != nil {
+		actx, cancel := clock.WithTimeout(context.Background(), s.clock, abortGrace)
+		requestsEnded = s.gw.Abort(actx)
+		cancel()
+	}
+	_ = s.httpSrv.Close()
+	return drainErr, requestsEnded
+}
+
 func (s *Server) closeStores() error {
 	s.logs.Close()
 	return s.db.Close()
 }
 
-// Run listens on the configured address and serves until ctx is done, then
-// drains for at most the configured drain timeout.
 func Run(ctx context.Context, o Options) error {
 	s, err := New(ctx, o)
 	if err != nil {

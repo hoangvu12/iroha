@@ -21,8 +21,6 @@ func hdr(kv ...string) http.Header {
 
 const chatBody = `{"model":"m","messages":[{"role":"system","content":"You are terse."},{"role":"user","content":"Fix the bug"}]}`
 
-// Each source is found, in the order the ticket lists, and two sources with
-// the same session value name the same conversation.
 func TestEachSourceIsFoundInOrder(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -30,7 +28,7 @@ func TestEachSourceIsFoundInOrder(t *testing.T) {
 		body   string
 		sh     shape.Shape
 		source affinity.Source
-		same   string // a session value this case must equal, when it carries one
+		same   string
 	}{
 		{"Iroha-Session wins over everything", hdr("Iroha-Session", "s-1", "X-Claude-Code-Session-Id", "cc-1"), chatBody, shape.OpenAIChat, affinity.Header, "s-1"},
 		{"Claude Code header", hdr("X-Claude-Code-Session-Id", "cc-1", "Session_id", "codex-1"), chatBody, shape.AnthropicMessages, affinity.ClaudeCode, "cc-1"},
@@ -75,9 +73,6 @@ func TestEachSourceIsFoundInOrder(t *testing.T) {
 	}
 }
 
-// The prefix is the system prompt, the tool names and the first user
-// message, in every Shape: a later turn of the conversation keeps it, a
-// different first message changes it.
 func TestThePrefixIsStableAcrossTurnsInEveryShape(t *testing.T) {
 	cases := []struct {
 		sh                  shape.Shape
@@ -118,8 +113,6 @@ func TestThePrefixIsStableAcrossTurnsInEveryShape(t *testing.T) {
 	}
 }
 
-// Only the first few KB count, so a huge first message costs little and a
-// change past them does not split the conversation.
 func TestThePrefixReadsOnlyTheStart(t *testing.T) {
 	long := strings.Repeat("a", 64<<10)
 	one := `{"model":"m","messages":[{"role":"user","content":"` + long + `x"}]}`
@@ -129,8 +122,6 @@ func TestThePrefixReadsOnlyTheStart(t *testing.T) {
 	}
 }
 
-// The same session from two Gateway Keys is two conversations: a Caller
-// cannot steer another's traffic by sending its session ID.
 func TestCallersCannotSteerEachOther(t *testing.T) {
 	c := affinity.Identify(hdr("Iroha-Session", "shared"), nil)
 	a, b := c.For("gk_a"), c.For("gk_b")
@@ -151,7 +142,6 @@ func TestCallersCannotSteerEachOther(t *testing.T) {
 	}
 }
 
-// Half the conversations fall in the experiment's round-robin half.
 func TestTheExperimentSplitsConversationsInHalves(t *testing.T) {
 	control := 0
 	for i := range 2000 {
@@ -165,8 +155,6 @@ func TestTheExperimentSplitsConversationsInHalves(t *testing.T) {
 	}
 }
 
-// A metadata.user_id is either Claude Code's (a session, in its JSON or
-// legacy form) or a plain user; translation sends only the plain one on.
 func TestMetadataUserIDTellsAUserFromClaudeCodesSession(t *testing.T) {
 	for _, tc := range []struct{ raw, user, session string }{
 		{`"user-7"`, "user-7", ""},

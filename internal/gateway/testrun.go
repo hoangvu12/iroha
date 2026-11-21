@@ -19,31 +19,16 @@ import (
 	"github.com/hoangvu12/iroha/internal/testchat"
 )
 
-// Test sends (ticket 23): POST /api/test runs the request a Caller of the
-// chosen Shape would send (testchat.Build) through run, the same path as
-// Gateway Key traffic, with three differences held in exchange.test: the
-// Request is recorded as the Test caller ("Test", or "Test (as <key>)"
-// with the key's scope), it is always captured, and pins narrow the plan
-// to one Upstream Key and/or Endpoint.
-
-// ToolCheckHeader carries the tool check of a non-streamed test answer.
 const ToolCheckHeader = "Iroha-Tool-Check"
 
-// toolCheckComment starts the SSE comment that ends a streamed test answer
-// with its tool check.
 const toolCheckComment = ": iroha-tool-check "
 
-// testRun is what a test send changes in its exchange.
 type testRun struct {
 	caller   requests.Caller
-	keyID    string // pinned Upstream Key, "" for any
-	endpoint string // pinned Endpoint ID, "" for any
+	keyID    string
+	endpoint string
 }
 
-// pin narrows rt to the pinned key and Endpoint. The pinned key is planned
-// whatever its Key State, as key tests do: disabled and invalid are ignored,
-// its coolings are treated as just ended (so a success clears them) and its
-// Model Gaps and Endpoint Gaps are left out. Failures still go through the Failure Rules.
 func (t *testRun) pin(rt *route, now time.Time) *api.Error {
 	if t.keyID == "" && t.endpoint == "" {
 		return nil
@@ -54,23 +39,24 @@ func (t *testRun) pin(rt *route, now time.Time) *api.Error {
 	}
 	if t.keyID != "" {
 		p.Keys = slicesFilter(p.Keys, func(k planner.Key) bool { return k.ID == t.keyID })
-		past := now.Add(-time.Millisecond)
 		for i := range p.Keys {
-			k := &p.Keys[i]
-			// Gaps are left out; WorkedOn is forgotten so a success writes,
-			// clearing the Endpoint Gap it disproves.
-			k.Disabled, k.Invalid, k.ModelGaps, k.EndpointGaps, k.WorkedOn = false, false, nil, nil, nil
-			if k.CoolingUntil.After(past) {
-				k.CoolingUntil = past
-			}
-			for m, u := range k.ModelCooling {
-				if u.After(past) {
-					k.ModelCooling[m] = past
-				}
-			}
+			plannedWhateverItsState(&p.Keys[i], now)
 		}
 	}
 	return nil
+}
+
+func plannedWhateverItsState(k *planner.Key, now time.Time) {
+	coolingsJustEnded := now.Add(-time.Millisecond)
+	k.Disabled, k.Invalid, k.ModelGaps, k.EndpointGaps, k.WorkedOn = false, false, nil, nil, nil
+	if k.CoolingUntil.After(coolingsJustEnded) {
+		k.CoolingUntil = coolingsJustEnded
+	}
+	for m, u := range k.ModelCooling {
+		if u.After(coolingsJustEnded) {
+			k.ModelCooling[m] = coolingsJustEnded
+		}
+	}
 }
 
 func slicesFilter[T any](in []T, keep func(T) bool) []T {
@@ -83,7 +69,6 @@ func slicesFilter[T any](in []T, keep func(T) bool) []T {
 	return out
 }
 
-// TestDryRun is the answer of POST /api/test?dry_run=true.
 type TestDryRun struct {
 	DryRun      bool            `json:"dry_run"`
 	Caller      string          `json:"caller" doc:"The Caller the Request would be recorded as."`
@@ -106,7 +91,6 @@ const testDescription = "Runs a chat turn through the Gateway exactly as a Calle
 	"To continue after a tool call, send the assistant turn back with tool_calls: Iroha answers each with that tool's result. " +
 	"Errors before anything is sent (bad body, unknown pin or Gateway Key) use the admin error envelope. dry_run=true sends nothing and shows the request."
 
-// TestRoutes are the test chat's send route.
 func (g *Gateway) TestRoutes() []api.Route {
 	return []api.Route{{
 		Method: http.MethodPost, Path: "/api/test", Tag: "Test",
@@ -163,17 +147,10 @@ func (g *Gateway) serveTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The request a Caller would send, with no header of the admin call
-	// (its cookie and Admin Token must never reach a Provider).
-	ir, err := http.NewRequestWithContext(ctx, http.MethodPost, b.Path, bytes.NewReader(b.Body))
+	ir, err := callerRequestWithoutAdminHeaders(r, b)
 	if err != nil {
 		api.WriteError(w, api.AsError(err))
 		return
-	}
-	ir.Header.Set("Content-Type", "application/json")
-	ir.RemoteAddr = r.RemoteAddr
-	if b.Shape == shape.Gemini {
-		ir.SetPathValue("model", strings.TrimPrefix(b.Path, "/v1beta/models/"))
 	}
 	out := w
 	var buf *bufferedWriter
@@ -201,10 +178,7 @@ func (g *Gateway) serveTest(w http.ResponseWriter, r *http.Request) {
 		buf.flushTo(w)
 		return
 	}
-	x.mu.Lock()
-	streaming := x.streaming
-	x.mu.Unlock()
-	if streaming {
+	if x.out.isStreaming() {
 		_, _ = io.WriteString(w, toolCheckComment+string(verdict)+"\n\n")
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -212,8 +186,19 @@ func (g *Gateway) serveTest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// resolvePins checks the pins against the model's Provider before anything
-// is recorded, so a typo is a plain admin error.
+func callerRequestWithoutAdminHeaders(admin *http.Request, b testchat.Built) (*http.Request, error) {
+	r, err := http.NewRequestWithContext(admin.Context(), http.MethodPost, b.Path, bytes.NewReader(b.Body))
+	if err != nil {
+		return nil, err
+	}
+	r.Header.Set("Content-Type", "application/json")
+	r.RemoteAddr = admin.RemoteAddr
+	if b.Shape == shape.Gemini {
+		r.SetPathValue("model", strings.TrimPrefix(b.Path, "/v1beta/models/"))
+	}
+	return r, nil
+}
+
 func (g *Gateway) resolvePins(r *http.Request, s testchat.Send, run *testRun) (keyName, endpointName string, _ *api.Error) {
 	if s.UpstreamKey == "" && s.Endpoint == "" {
 		return "", "", nil
@@ -248,7 +233,6 @@ func (g *Gateway) resolvePins(r *http.Request, s testchat.Send, run *testRun) (k
 	return keyName, endpointName, nil
 }
 
-// bufferedWriter holds a whole JSON answer so a header can be added after it.
 type bufferedWriter struct {
 	header http.Header
 	status int

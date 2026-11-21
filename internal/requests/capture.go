@@ -18,14 +18,8 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// maxCaptured caps each captured body; the rest is dropped and the capture
-// marked truncated.
 const maxCaptured = 16 << 20
 
-// Capture collects one Request's prompt and response exactly as the Caller
-// sent and received them, for Gateway Keys with capture on. Wrap the
-// Caller's body with Body and the response writer with Writer before
-// anything reads or writes them; then SaveCapture.
 type Capture struct {
 	mu        sync.Mutex
 	reqType   string
@@ -49,13 +43,9 @@ func (l *limited) write(p []byte) {
 	l.buf.Write(p)
 }
 
-// NewCapture starts a capture of a Request that started at start.
-func NewCapture(start time.Time) *Capture { return &Capture{createdAt: start} }
-
-// Body tees the Caller's request body into the capture.
-func (c *Capture) Body(r *http.Request) io.ReadCloser {
-	c.reqType = r.Header.Get("Content-Type")
-	return &teeBody{c: c, rc: r.Body}
+func NewCapture(w http.ResponseWriter, r *http.Request, start time.Time) (c *Capture, body io.ReadCloser, writer http.ResponseWriter) {
+	c = &Capture{createdAt: start, reqType: r.Header.Get("Content-Type")}
+	return c, &teeBody{c: c, rc: r.Body}, &teeWriter{c: c, w: w}
 }
 
 type teeBody struct {
@@ -74,9 +64,6 @@ func (t *teeBody) Read(p []byte) (int, error) {
 }
 
 func (t *teeBody) Close() error { return t.rc.Close() }
-
-// Writer tees everything written to the Caller into the capture.
-func (c *Capture) Writer(w http.ResponseWriter) http.ResponseWriter { return &teeWriter{c: c, w: w} }
 
 type teeWriter struct {
 	c *Capture
@@ -113,8 +100,6 @@ func (t *teeWriter) Flush() {
 // Unwrap lets http.ResponseController reach the connection.
 func (t *teeWriter) Unwrap() http.ResponseWriter { return t.w }
 
-// SaveCapture stores the capture of Request id, whose Caller spoke sh.
-// Streams are stored as sent and reassembled into one answer.
 func (rc *Recorder) SaveCapture(ctx context.Context, id string, sh shape.Shape, c *Capture) error {
 	ctx = context.WithoutCancel(ctx)
 	c.mu.Lock()
@@ -134,8 +119,6 @@ func (rc *Recorder) SaveCapture(ctx context.Context, id string, sh shape.Shape, 
 	})
 }
 
-// Answer is the response captured so far: its status and body, a stream
-// reassembled into one answer of Shape sh (as SaveCapture stores it).
 func (c *Capture) Answer(sh shape.Shape) (int, []byte) {
 	c.mu.Lock()
 	body, status, respType := bytes.Clone(c.resp.buf.Bytes()), c.status, c.respType
@@ -146,25 +129,18 @@ func (c *Capture) Answer(sh shape.Shape) (int, []byte) {
 	return status, body
 }
 
-// IsEventStream reports whether contentType is a server-sent event stream
-// (parameters such as charset allowed). The Gateway uses it too.
 func IsEventStream(contentType string) bool {
 	mt, _, err := mime.ParseMediaType(contentType)
 	return err == nil && mt == "text/event-stream"
 }
 
-// reassemblers turn the event payloads of a stream in one Shape into the
-// whole answer that Shape would have given; ok is false when the stream
-// does not parse.
 var reassemblers = map[shape.Shape]func(payloads [][]byte) (b []byte, ok bool){
 	shape.OpenAIChat:        reassembleChat,
 	shape.AnthropicMessages: reassembleAnthropic,
-	shape.OpenAIResponses:   reassembleResponses, // capture_responses.go
-	shape.Gemini:            reassembleGemini,    // capture_gemini.go
+	shape.OpenAIResponses:   reassembleResponses,
+	shape.Gemini:            reassembleGemini,
 }
 
-// reassemble turns a streamed answer into one answer in the Shape's own
-// form, otherwise the list of event payloads.
 func reassemble(sh shape.Shape, stream []byte) []byte {
 	payloads := eventPayloads(stream)
 	if f := reassemblers[sh]; f != nil {
@@ -185,8 +161,6 @@ func reassemble(sh shape.Shape, stream []byte) []byte {
 	return b
 }
 
-// eventPayloads returns the data of every server-sent event, multi-line
-// data joined with newlines, without the [DONE] terminator.
 func eventPayloads(stream []byte) [][]byte {
 	var out [][]byte
 	var cur []byte
@@ -217,9 +191,6 @@ func eventPayloads(stream []byte) [][]byte {
 	return out
 }
 
-// reassembleChat merges chat.completion.chunk payloads into one
-// chat.completion: text fields of each choice's delta concatenated, tool
-// calls merged by index, the last finish_reason and usage kept.
 func reassembleChat(payloads [][]byte) ([]byte, bool) {
 	out := map[string]any{}
 	type choice struct {
@@ -297,14 +268,10 @@ func reassembleChat(payloads [][]byte) ([]byte, bool) {
 	return b, err == nil
 }
 
-// reassembleAnthropic merges Anthropic Messages events into one message:
-// message_start's message, each content block with its deltas applied
-// (text, thinking and signature continued, tool input parsed from its JSON
-// fragments), message_delta's stop reason and usage.
 func reassembleAnthropic(payloads [][]byte) ([]byte, bool) {
 	var msg map[string]any
 	var blocks []map[string]any
-	partial := map[int]string{} // tool input JSON per block
+	partial := map[int]string{}
 	for _, p := range payloads {
 		var ev struct {
 			Type         string          `json:"type"`
@@ -377,7 +344,7 @@ func reassembleAnthropic(payloads [][]byte) ([]byte, bool) {
 			if js == "" {
 				input = map[string]any{}
 			} else if json.Unmarshal([]byte(js), &input) != nil {
-				input = js // cut off mid-JSON: keep what came
+				input = js
 			}
 			b["input"] = input
 		}
@@ -393,11 +360,8 @@ func str(v any) string {
 	return s
 }
 
-// firstWins are identifying fields that repeat across chunks rather than continue.
 var firstWins = map[string]bool{"role": true, "id": true, "type": true, "name": true}
 
-// mergeField folds one delta field into m: text continues, identifiers keep
-// their first value, anything else takes the latest value.
 func mergeField(m map[string]any, k string, v any) {
 	if v == nil {
 		return
@@ -446,22 +410,18 @@ func mergeToolCall(calls []map[string]any, delta map[string]any) []map[string]an
 	return append(calls, c)
 }
 
-// CapturedBody is a captured request or response body. Body is the JSON
-// itself when the body was JSON, else a JSON string of the text.
 type CapturedBody struct {
 	ContentType string          `json:"content_type,omitempty"`
 	Body        json.RawMessage `json:"body" doc:"The body: the JSON value itself when it was JSON (whitespace not kept), otherwise a string."`
 	Truncated   bool            `json:"truncated,omitempty" doc:"true when the body passed 16 MiB and only its start was kept."`
 }
 
-// CapturedResponse is what the Caller received.
 type CapturedResponse struct {
 	Status int `json:"status"`
 	CapturedBody
 	Stream string `json:"stream,omitempty" doc:"For streamed answers: the server-sent events exactly as sent. body then holds them reassembled into one answer."`
 }
 
-// CaptureView is the response of GET /api/requests/{request}/capture.
 type CaptureView struct {
 	RequestID  string           `json:"request_id"`
 	CapturedAt time.Time        `json:"captured_at"`

@@ -2,7 +2,6 @@ import { render } from "@testing-library/react";
 import { expect, test } from "vitest";
 import { Code, HIGHLIGHT_LIMIT, langOf, tokens } from "./highlight";
 
-/** The coloured tokens only, as "kind text". */
 const coloured = (text: string, lang: Parameters<typeof tokens>[1]) =>
   tokens(text, lang)
     .filter((t) => t.kind)

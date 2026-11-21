@@ -13,7 +13,6 @@ import (
 )
 
 func TestTargetsAreTheShapesWithCodecs(t *testing.T) {
-	// Every Shape has a codec: each translates to every other, in shape.All order.
 	for _, sh := range shape.All {
 		want := slices.DeleteFunc(slices.Clone(shape.All), func(to shape.Shape) bool { return to == sh })
 		if got := translate.Targets(sh); !slices.Equal(got, want) {
@@ -104,7 +103,6 @@ func TestAStreamCutBeforeItsEndInventsNoEnding(t *testing.T) {
 }
 
 func TestSanitisedToolNamesNeverCollideWithTheCallersOwn(t *testing.T) {
-	// "fs.read" would become fs_read, which the Caller also defines.
 	req := `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"tools":[
 		{"type":"function","function":{"name":"fs.read","parameters":{"type":"object"}}},
 		{"type":"function","function":{"name":"fs_read","parameters":{"type":"object"}}},
@@ -125,7 +123,6 @@ func TestSanitisedToolNamesNeverCollideWithTheCallersOwn(t *testing.T) {
 	if len(names) != 3 || names[0] != "fs_read_2" || names[1] != "fs_read" || len(names[2]) != 64 || strings.ContainsAny(names[2], ".") {
 		t.Fatalf("tools sent = %q", names)
 	}
-	// The answer calls the sanitised names; the Caller gets its own back.
 	ans := `{"id":"msg_1","type":"message","role":"assistant","model":"m","stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1},
 		"content":[{"type":"tool_use","id":"t1","name":"fs_read_2","input":{}},{"type":"tool_use","id":"t2","name":"fs_read","input":{}}]}`
 	b, err := tr.Response(context.Background(), []byte(ans))

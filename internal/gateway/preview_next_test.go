@@ -9,14 +9,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// The UI's Model Pool Route tab (ticket 22) draws GET /api/route-preview
-// and says "where a Request would go right now". This holds it to that:
-// with the same fixtures, the next real Request makes its Attempts in
-// exactly the order the preview listed, round after round, while keys
-// cool, get Model Gaps and are disabled. Requests with no conversation get
-// round-robin (the start moves every Request); a conversation's Requests
-// get its own order, which the preview shows with ?affinity= (prompt
-// caching 02).
 func TestTheRoutePreviewMatchesWhatTheNextRequestDoes(t *testing.T) {
 	t.Run("round-robin", func(t *testing.T) { previewMatchesNextRequest(t, "") })
 	t.Run("a conversation", func(t *testing.T) { previewMatchesNextRequest(t, "sess-7") })
@@ -48,14 +40,12 @@ func previewMatchesNextRequest(t *testing.T, session string) {
 		}
 		return out
 	}
-	// send makes a Request whose first `fail` Attempts are refused with the
-	// given reply, and returns the Attempts it made.
 	send := func(model string, want []hop, fail int, refuse func(u *testkit.Upstream) testkit.Responder) []hop {
 		t.Helper()
 		for i := 0; i < fail && i < len(want); i++ {
 			ups[want[i].provider].Enqueue(refuse(ups[want[i].provider]))
 		}
-		body := map[string]any{"model": model, "messages": []any{}} // no conversation
+		body := map[string]any{"model": model, "messages": []any{}}
 		c := caller
 		if session != "" {
 			body, c = chatBody(model), caller.WithHeader("Iroha-Session", session)
@@ -83,13 +73,9 @@ func previewMatchesNextRequest(t *testing.T, session string) {
 	retry := func(u *testkit.Upstream) testkit.Responder { return u.Error(500, "boom") }
 	for round := 1; round <= 6; round++ {
 		plan := preview("glm-4.6")
-		// Round-robin moves the start every Request; the preview follows it.
-		// A conversation keeps its order; the preview shows it.
 		check(fmt.Sprintf("round %d", round), plan, send("glm-4.6", plan, round%3, retry))
 	}
 
-	// A key cooling for the model and one with a Model Gap are left out of
-	// both; the next key in the preview is the one used.
 	plan := preview("glm-4.6")
 	cool := func(u *testkit.Upstream) testkit.Responder {
 		return u.Error(429, "slow down").Header("Retry-After", "60")
@@ -102,7 +88,6 @@ func previewMatchesNextRequest(t *testing.T, session string) {
 	check("model gap", plan, send("glm-4.6", plan, 1, gap))
 	srv.Admin.Post("/api/providers/zai/keys/"+plan[0].key+"/disable", nil).OK()
 
-	// zai has one key left (one cooling, one with a gap, one disabled).
 	for round := 1; round <= 3; round++ {
 		plan = preview("glm-4.6")
 		if len(plan) != 3 || plan[0].provider != "zai" {
@@ -111,13 +96,11 @@ func previewMatchesNextRequest(t *testing.T, session string) {
 		check(fmt.Sprintf("after disable %d", round), plan, send("glm-4.6", plan, 1, retry))
 	}
 
-	// The same holds for a provider/model on the global route.
 	for round := 1; round <= 3; round++ {
 		plan = preview("chutes/zai-org/GLM-4.6")
 		check(fmt.Sprintf("provider route %d", round), plan, send("chutes/zai-org/GLM-4.6", plan, 1, retry))
 	}
 
-	// Cooling ends: the key is back in the preview and in traffic.
 	srv.Clock.Advance(2 * time.Minute)
 	plan = preview("glm-4.6")
 	check("after cooling", plan, send("glm-4.6", plan, 0, retry))

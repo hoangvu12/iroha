@@ -3,10 +3,6 @@ import { api, seg } from "@/api/client";
 import type { OwnerSession } from "@/api/session";
 import type { AuditEntryPage, AuditResult, BulkResult } from "@/api/types";
 
-// Types and hooks of the Settings page: Admin Tokens, Audit Entries, and the
-// Owner's password and sessions. They mirror the Go types in
-// internal/admintokens, internal/audit and internal/session.
-
 export type AdminToken = {
   id: string;
   name: string;
@@ -40,7 +36,6 @@ export const keys = {
   sessions: ["owner-sessions"] as const,
 };
 
-/** Active Admin Tokens, oldest first. */
 export function useAdminTokens() {
   return useQuery({
     queryKey: keys.tokens,
@@ -49,7 +44,6 @@ export function useAdminTokens() {
   });
 }
 
-/** Every write here also writes an Audit Entry, and a revert can touch any list, so all of them refetch. */
 export function useInvalidateAll() {
   const qc = useQueryClient();
   return () =>
@@ -78,11 +72,6 @@ export function useRevokeAdminToken() {
 
 export type EntryFilter = { q: string; actor: string; resource: string };
 
-/**
- * Audit Entries newest first, `limit` at a time: each page of the table is one
- * page of the API, read with the cursor of the page before (`next_before`), so
- * page N is read once pages 1 to N-1 are.
- */
 export function useAuditEntries(f: EntryFilter, limit: number) {
   return useInfiniteQuery({
     queryKey: [...keys.entries, "list", f, limit],
@@ -93,7 +82,6 @@ export function useAuditEntries(f: EntryFilter, limit: number) {
         query: { q: f.q, actor: f.actor, resource: f.resource, before: pageParam, limit },
       }),
     getNextPageParam: (last) => last.next_before ?? undefined,
-    // A filter change is a new query: keep the shown entries until the new ones land, so no skeleton flashes.
     placeholderData: keepPreviousData,
   });
 }
@@ -105,7 +93,6 @@ export function useAuditFilters() {
   });
 }
 
-/** Active Owner sessions, newest first. */
 export function useOwnerSessions() {
   return useQuery({
     queryKey: keys.sessions,

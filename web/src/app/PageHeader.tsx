@@ -5,11 +5,6 @@ import { useIsPhone } from "@/lib/media";
 import { Avatar } from "./brand";
 import { useHealth } from "./health";
 
-/**
- * The top of every page: title, one line under it, and the page's buttons
- * (one primary at most). On phones the Iroha avatar sits top right and
- * opens Settings (C30), carrying the health dot.
- */
 export function PageHeader({
   title,
   description,
@@ -37,7 +32,6 @@ export function PageHeader({
         {icon}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[30px] font-semibold leading-tight tracking-tight md:text-[26px]">{title}</h1>
-          {/* A div, so a description can be a skeleton while its data loads. */}
           {description && <div className="mt-1 text-[15px] text-fg-muted">{description}</div>}
         </div>
         {(actions || phone) && (

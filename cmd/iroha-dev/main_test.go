@@ -17,8 +17,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/clock"
 )
 
-// launch runs the launcher in-process and returns its JSON and a stop
-// function that waits for it to exit.
 func launch(t *testing.T, args ...string) (Output, func() string) {
 	t.Helper()
 	o, err := parse(args, io.Discard)
@@ -103,7 +101,6 @@ func TestTheDemoLaunchSeedsEveryKeyStateAndCleansUp(t *testing.T) {
 		t.Fatalf("stats %d %v: want a failed Request and cache reads", code, stats)
 	}
 
-	// A Caller request reaches the fake, and the fake's control makes the next one fail.
 	chat := out.Fakes["openai-chat"].Control
 	if code, _ := call(t, "POST", chat+"/next?reply=429", "", nil); code != 200 {
 		t.Fatalf("queue a 429: %d", code)
@@ -118,7 +115,6 @@ func TestTheDemoLaunchSeedsEveryKeyStateAndCleansUp(t *testing.T) {
 		t.Fatalf("fake requests after the seed reset: %v", got)
 	}
 
-	// Outbound calls to anything but localhost are refused.
 	if _, err := localOnly().Get("http://example.com/"); err == nil || !strings.Contains(err.Error(), "only the localhost fakes") {
 		t.Fatalf("outbound call to example.com: %v", err)
 	}

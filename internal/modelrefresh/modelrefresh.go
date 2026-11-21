@@ -1,25 +1,3 @@
-// Package modelrefresh schedules the daily model refresh: every enabled
-// Provider's model list is refreshed (models.Store.Refresh) once a day, each
-// Provider at its own time of day so the refreshes are spread across the
-// day. It only decides when; discovery itself belongs to internal/models.
-//
-// The schedule:
-//
-//   - Each Provider has a daily time (DailyAt), derived from its ID: stable
-//     across restarts and renames, and spread across the day.
-//   - A Provider is due at the first occurrence of its daily time at least
-//     12 h after its last refresh (scheduled or by hand), so a scheduled
-//     refresh recurs every 24 h and one made by hand counts as the day's.
-//   - A Provider never refreshed is due soon: at its creation, or at this
-//     start of Iroha if later, plus its daily time's minutes within an hour
-//     (DailyAt mod 1 h). A refresh that fell due while Iroha was down is
-//     due at that same point after the start. So the first hour after a start spreads the catch-up
-//     across the hour instead of a burst, and a new Provider's models are
-//     discovered within the hour.
-//   - Disabled, archived and discovery none Providers are not scheduled.
-//
-// The job runs every Tick and refreshes the Providers that are due, one at
-// a time. Nothing in it touches Upstream Keys or their Key States.
 package modelrefresh
 
 import (
@@ -39,74 +17,65 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// JobName is the name of the daily model refresh job.
 const JobName = "model_refresh"
 
 const (
-	// Tick is how often the job looks for Providers that are due; a
-	// Provider is refreshed at most this long after its time.
-	Tick = 15 * time.Minute
-	// minGap is the least time between a refresh and the next scheduled one.
-	minGap = 12 * time.Hour
-	// firstWithin is the window over which first refreshes (and refreshes
-	// missed while Iroha was down) are spread after a start or a creation.
+	Tick        = 15 * time.Minute
+	minGap      = 12 * time.Hour
 	firstWithin = time.Hour
 	day         = 24 * time.Hour
 )
 
-// DailyAt is the time of day (UTC, whole minutes) at which the Provider
-// with this ID refreshes: a hash of the ID, so it never changes and
-// Providers spread evenly across the day.
 func DailyAt(providerID string) time.Duration {
 	sum := sha256.Sum256([]byte(providerID))
 	minutes := binary.BigEndian.Uint64(sum[:8]) % uint64(day/time.Minute)
 	return time.Duration(minutes) * time.Minute
 }
 
-// nextRefresh is when a Provider is next due. start is when this run of
-// Iroha started, created when the Provider was created, last its latest
-// refresh (nil: never).
 func nextRefresh(providerID string, created time.Time, last *models.LastRefresh, start time.Time) time.Time {
 	at := DailyAt(providerID)
+	if last == nil {
+		return spreadAfterStart(at, created, start)
+	}
+	scheduled := dailyAfterGap(at, last.At)
+	if missedWhileDown := scheduled.Before(start); missedWhileDown {
+		return spreadAfterStart(at, created, start)
+	}
+	return scheduled
+}
+
+func spreadAfterStart(dailyAt time.Duration, created, start time.Time) time.Time {
 	anchor := start
 	if created.After(anchor) {
 		anchor = created
 	}
-	soon := anchor.Add(at % firstWithin)
-	if last == nil {
-		return soon
-	}
-	from := last.At.Add(minGap)
-	next := from.Truncate(day).Add(at) // Truncate works in UTC
+	return anchor.Add(dailyAt % firstWithin)
+}
+
+func dailyAfterGap(dailyAt time.Duration, last time.Time) time.Time {
+	from := last.Add(minGap)
+	next := from.Truncate(day).Add(dailyAt) // Truncate works in UTC
 	if next.Before(from) {
 		next = next.Add(day)
-	}
-	if next.Before(start) {
-		return soon // missed while Iroha was down: spread like a first refresh
 	}
 	return next
 }
 
-// Scheduler decides which Providers are due and refreshes them.
 type Scheduler struct {
 	db     *store.DB
 	models *models.Store
 	start  time.Time
 }
 
-// New returns the Scheduler of this run of Iroha; it takes the clock's now
-// as the start that spreads first and missed refreshes.
 func New(db *store.DB, m *models.Store) *Scheduler {
 	return &Scheduler{db: db, models: m, start: db.Clock().Now()}
 }
 
-// Not-scheduled reasons.
 const (
 	ReasonDisabled    = "disabled"
 	ReasonNoDiscovery = "discovery_none"
 )
 
-// Entry is one Provider's place in the daily schedule.
 type Entry struct {
 	Provider      string              `json:"provider"`
 	DailyAt       string              `json:"daily_at" doc:"The Provider's time of day for its refresh, HH:MM UTC; fixed for the Provider."`
@@ -118,7 +87,6 @@ type Entry struct {
 	id string
 }
 
-// Schedule is the response of GET /api/model-refreshes.
 type Schedule struct {
 	Providers []Entry `json:"providers" doc:"Every Provider that is not archived, by handle."`
 }
@@ -168,7 +136,6 @@ func (s *Scheduler) schedule(ctx context.Context) ([]Entry, error) {
 	return out, nil
 }
 
-// Job is the daily model refresh job.
 func (s *Scheduler) Job() jobs.Job {
 	return jobs.Job{
 		Name: JobName,
@@ -235,7 +202,7 @@ func (s *Scheduler) run(ctx context.Context, dry bool) (jobs.Outcome, error) {
 		res, err := s.models.Refresh(ctx, e.id, false)
 		var ae *api.Error
 		if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
-			continue // deleted since the schedule was read
+			continue
 		}
 		if err != nil {
 			errs = append(errs, e.Provider+": "+err.Error())
@@ -274,7 +241,6 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// Routes returns GET /api/model-refreshes.
 func Routes(s *Scheduler) []api.Route {
 	return []api.Route{{
 		Method: http.MethodGet, Path: "/api/model-refreshes", Tag: "Jobs",

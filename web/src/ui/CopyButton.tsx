@@ -7,21 +7,11 @@ import { writeClipboard } from "./clipboard";
 import { cn } from "./cn";
 import { durationOf, easingOf } from "./motion";
 
-// Copying shows its result on the button that copied (spec: "Results show
-// where they happened"): the icon and label turn into "Copied" for a moment,
-// and a screen reader hears "<what> copied". No toast.
-
-/** How long "Copied" stays on the button. */
 export const COPIED_MS = 1500;
 const FAILED_MS = 4000;
 
 export type CopyState = "copied" | "failed" | undefined;
 
-/**
- * Copy with feedback: `state` is "copied" (or "failed") for a moment after
- * `copy`, and the result is announced. For controls other than CopyButton,
- * such as a menu trigger whose menu item copied.
- */
 export function useCopy() {
   const [state, setState] = useState<CopyState>();
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -49,14 +39,12 @@ export function useCopy() {
 
 type Icon = ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
 
-/** The icon of a control showing a copy's result, crossfaded in. */
 export function copyIcon(state: CopyState, idle: Icon): Icon {
   if (state === "copied") return CopiedIcon;
   if (state === "failed") return FailedIcon;
   return idle;
 }
 
-// A short crossfade on the motion tokens; a plain fade under reduced motion (the scale token is 1 there).
 const swapIn = "transition-[scale,opacity] duration-fade ease-out starting:scale-(--motion-scale-popup) starting:opacity-0";
 
 function CopiedIcon({ size, className }: { size?: number; className?: string }) {
@@ -67,12 +55,6 @@ function FailedIcon({ size, className }: { size?: number; className?: string }) 
   return <CircleAlert size={size} aria-hidden className={cn("text-danger-text", swapIn, className)} />;
 }
 
-/**
- * The one copy button. `what` names the value ("Gateway Key", "Base URL"):
- * the default label is "Copy the <what>" and the announcement "<what> copied".
- * `icon` makes it an icon button named by its tooltip, which says "Copied"
- * after a copy. A press never reaches a clickable row around it.
- */
 export function CopyButton({
   value,
   what,
@@ -90,7 +72,6 @@ export function CopyButton({
   what: string;
   label?: string;
   icon?: boolean;
-  /** The icon shown before a copy (Copy by default). */
   glyph?: Icon;
   children?: string;
   size?: "sm" | "md";
@@ -117,7 +98,6 @@ export function CopyButton({
         bordered={bordered}
         disabled={disabled}
         data-copy={state}
-        // A button shown on row hover stays visible while it shows the result.
         className={cn("data-[copy]:opacity-100", className)}
         onClick={press}
       />
@@ -137,7 +117,6 @@ export function CopyButton({
         press(e);
       }}
     >
-      {/* The outer span's width slides between the two words; the inner one is measured. */}
       <span ref={slide.outer} className="inline-block overflow-hidden">
         <span ref={slide.inner} className="inline-block">
           {text}
@@ -147,13 +126,6 @@ export function CopyButton({
   );
 }
 
-/**
- * A label that fits its words at rest and slides its width when they change
- * ("Copy" -> "Copied"), so the button neither leaves a gap nor jumps. The
- * width moves like a tab indicator's (`--duration-indicator`, `--ease-out`)
- * and changes at once under reduced motion. `remember` measures the label
- * just before a change (fonts may have loaded since the last one).
- */
 function useSlidingLabel(text: string) {
   const outer = useRef<HTMLSpanElement>(null);
   const inner = useRef<HTMLSpanElement>(null);
@@ -168,14 +140,12 @@ function useSlidingLabel(text: string) {
     remember();
     const to = last.current;
     if (!el || typeof el.animate !== "function") return;
-    // Interrupted mid-slide: start from where it is now.
     const running = el.getAnimations();
     if (running.length) {
       from = el.getBoundingClientRect().width;
       running.forEach((a) => a.cancel());
     }
     if (!from || !to || from === to || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    // 0 when reduced motion zeroes the token: the width changes at once.
     const duration = durationOf("--duration-indicator");
     if (duration) el.animate([{ width: `${from}px` }, { width: `${to}px` }], { duration, easing: easingOf("--ease-out") });
   }, [text, remember]);

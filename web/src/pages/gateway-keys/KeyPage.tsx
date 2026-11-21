@@ -27,10 +27,6 @@ import { PoolTile, ProviderTile } from "@/ui/LogoTile";
 import { type Draft, modelsLabel, sameScope, scopeSummary, toDraft, toScope } from "./scope";
 import { ScopeEditor } from "./ScopeEditor";
 
-// A Gateway Key's page: its settings in cards (name, key, access, prompt
-// capture), a Test button that opens the chat sending as this key, and the
-// danger zone (revoke, delete). Laid out like Provider Settings (C14).
-
 export function KeyPage() {
   const { key = "" } = useParams();
   const k = useGatewayKey(key);
@@ -63,7 +59,6 @@ export function KeyPage() {
     );
   }
 
-  // Opened from the list, the list's row seeds it and no skeleton shows; from a link, the page is measured from a sample.
   return (
     <Skeleton data={k.data} sample={SAMPLE_GATEWAY_KEY} id="gateway-key-page" label="Loading the Gateway Key">
       {(g) => (
@@ -86,7 +81,6 @@ export function KeyPage() {
               : "Never used"
         }
         actions={
-          // The chat sends as this key (its scope applies) and records "Test (as <name>)".
           <Tip label={g.revoked ? "A revoked key can't send Requests" : `Chat as ${g.name}`} type="description">
             <Button
               icon={MessageCircle}
@@ -153,11 +147,6 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/**
- * One setting across the page's wide frame, as Provider Settings' `SettingsRow`:
- * label and a line kept readable on the left, its control on the right in a
- * column of at most 420 px (stacked on phones); `below` (an error) under the control.
- */
 function Row({
   title,
   description,
@@ -203,8 +192,6 @@ function General({ k }: { k: GatewayKey }) {
   const invalidate = useInvalidateKeys();
   const [name, setName] = useState(k.name);
   useEffect(() => setName(k.name), [k.name]);
-  // Saved on blur: the result (or the failure) shows under the field, which
-  // has room for it at any width.
   const saving = useSave({ refresh: invalidate });
 
   const save = () => {
@@ -285,7 +272,6 @@ function Access({ k }: { k: GatewayKey }) {
             <span className="flex min-w-0">
               <RecordLink record={rec.provider(p.provider)}>{p.provider}</RecordLink>
             </span>
-            {/* The models it's narrowed to, each opening its sheet (UI ticket 33). */}
             {p.models?.length ? <ScopeModels provider={p.provider} models={p.models} max={8} className="mt-0.5" /> : null}
           </span>
           <span className="shrink-0 text-sm text-fg-muted" title={p.models?.join(", ")}>
@@ -328,7 +314,6 @@ function AccessDialog({ k, open, onClose }: { k: GatewayKey; open: boolean; onCl
       { id: k.id, scope },
       {
         onSuccess: (res) => {
-          // Toast: the Access dialog closes on Save, so its place is gone.
           notifyChange(`Access of ${k.name} changed`, res, { undoneMessage: `${k.name}'s access is as before`, onUndone: invalidate });
           onClose();
         },
@@ -372,7 +357,6 @@ function Capture({ k }: { k: GatewayKey }) {
   const update = useUpdateKey();
   const invalidate = useInvalidateKeys();
   const days = useCaptureDays();
-  // The switch shows its new state while it saves; a failure puts it back and shows under it.
   const saving = useSave({ refresh: invalidate });
   const set = (on: boolean) => void saving.run(() => update.mutateAsync({ id: k.id, capture: on }), { message: on ? "Capture on" : "Capture off", undoable: false });
   const kept = days.data ? `for ${days.data} day${days.data === 1 ? "" : "s"}` : "for a while";

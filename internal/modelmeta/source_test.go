@@ -13,12 +13,11 @@ import (
 	"github.com/hoangvu12/iroha/internal/modelmeta"
 )
 
-// fakeSite serves api.json and models.json, or fails with status.
 type fakeSite struct {
 	*httptest.Server
-	status atomic.Int32 // 0: serve
+	status atomic.Int32
 	hits   atomic.Int32
-	hold   chan struct{} // when set, answers wait for it
+	hold   chan struct{}
 	mu     sync.Mutex
 	paths  []string
 	inm    []string
@@ -87,7 +86,7 @@ func TestSourceCachesSharesOneReadAndFallsBackToTheMirror(t *testing.T) {
 	site.hold = nil
 	site.mu.Unlock()
 	wg.Wait()
-	if site.hits.Load() != 2 { // api.json and models.json, once each, from the mirror
+	if site.hits.Load() != 2 {
 		t.Fatalf("site hits = %d, want 2", site.hits.Load())
 	}
 	for _, c := range cats {
@@ -99,13 +98,11 @@ func TestSourceCachesSharesOneReadAndFallsBackToTheMirror(t *testing.T) {
 		t.Fatal("catalog from the mirror lacks api.json")
 	}
 
-	// Within the cache time: no read.
 	clk.Advance(modelmeta.CacheTTL - time.Second)
 	if c, err := src.Catalog(context.Background()); err != nil || c != cats[0] || site.hits.Load() != 2 {
 		t.Fatalf("cached read: %v, hits %d", err, site.hits.Load())
 	}
 
-	// After it: read again with If-None-Match; 304 keeps the catalog.
 	clk.Advance(2 * time.Second)
 	if c, err := src.Catalog(context.Background()); err != nil || c.Size() != cats[0].Size() || site.hits.Load() != 4 {
 		t.Fatalf("revalidation: %v, hits %d", err, site.hits.Load())
@@ -123,12 +120,10 @@ func TestSourceOutageKeepsThePreviousCatalogAndWaitsBeforeRetrying(t *testing.T)
 	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	src := modelmeta.NewSource(modelmeta.SourceOptions{Bases: []string{site.URL}, Clock: clk})
 
-	// Never read and down: nothing, with an error.
 	site.status.Store(503)
 	if c, err := src.Catalog(context.Background()); c != nil || err == nil {
 		t.Fatalf("outage before any read = %v, %v", c, err)
 	}
-	// Not retried within RetryAfter.
 	hits := site.hits.Load()
 	if _, err := src.Catalog(context.Background()); err == nil || site.hits.Load() != hits {
 		t.Fatalf("retried at once: hits %d -> %d", hits, site.hits.Load())
@@ -140,7 +135,6 @@ func TestSourceOutageKeepsThePreviousCatalogAndWaitsBeforeRetrying(t *testing.T)
 		t.Fatalf("read after the outage: %v", err)
 	}
 
-	// Down again once the cache is old: the previous catalog stays in use.
 	clk.Advance(modelmeta.CacheTTL)
 	site.status.Store(500)
 	if c, err := src.Catalog(context.Background()); c != first || err == nil {

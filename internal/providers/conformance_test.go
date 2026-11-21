@@ -9,8 +9,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// PRV-23: a Provider's display name is 1 to 128 printable characters; blank,
-// too long and control characters are refused with a hint.
 func TestProviderDisplayNamesAreOneTo128PrintableCharacters(t *testing.T) {
 	srv := testkit.Start(t)
 	for _, bad := range []string{"", "   ", strings.Repeat("n", 129), "Z.ai\x07plan", "line\nbreak"} {
@@ -30,8 +28,6 @@ func TestProviderDisplayNamesAreOneTo128PrintableCharacters(t *testing.T) {
 	srv.Admin.Patch("/api/providers/acme", map[string]any{"name": "Acme relay"}).Expect(200)
 }
 
-// PRV-10, RED-02: the same secret is accepted on a second Provider but
-// refused twice within one, and the 409 never echoes the secret.
 func TestTheSameSecretIsAcceptedOnAnotherProviderButRefusedTwiceWithinOne(t *testing.T) {
 	const secret = "sk-test-shared-5555"
 	srv := testkit.Start(t)
@@ -45,7 +41,6 @@ func TestTheSameSecretIsAcceptedOnAnotherProviderButRefusedTwiceWithinOne(t *tes
 		t.Fatalf("second Provider's key = %+v", k.UpstreamKey)
 	}
 
-	// Within acme: a new name with the same secret, and a key changed to it.
 	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": "sk-test-mine-6666"}).Expect(201)
 	for _, r := range []*testkit.Response{
 		srv.Admin.Post("/api/providers/acme/keys", map[string]any{"name": "again", "secret": secret}).Expect(409),
@@ -71,11 +66,6 @@ func TestTheSameSecretIsAcceptedOnAnotherProviderButRefusedTwiceWithinOne(t *tes
 	}
 }
 
-// SCR-11: one URL and Shape is one Endpoint per Provider. Without a name a
-// create matches the Endpoint by URL and Shape (as keys match by secret), so
-// re-running a script updates it; under another name, in bulk, by PATCH or by
-// reverting a delete the duplicate is refused with 409 endpoint_duplicate
-// naming the Endpoint that has it. The same URL in another Shape is fine.
 func TestAnEndpointURLAndShapeIsHeldOnceWithinAProvider(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
@@ -84,24 +74,15 @@ func TestAnEndpointURLAndShapeIsHeldOnceWithinAProvider(t *testing.T) {
 	srv.Admin.Post(base, map[string]any{"url": a, "shape": "openai-chat"}).Expect(201)
 	srv.Admin.Post(base, map[string]any{"name": "eu", "url": b, "shape": "openai-chat"}).Expect(201)
 
-	// No name: matched by URL and Shape, not moved onto "default".
-	var again providers.EndpointResult
-	srv.Admin.Post(base, map[string]any{"url": b + "/", "shape": "openai-chat"}).Expect(200).JSON(&again)
-	if again.Outcome != "unchanged" || again.Endpoint.Name != "eu" {
-		t.Fatalf("repeat without a name = %+v", again)
-	}
-	var renamed providers.EndpointResult
-	srv.Admin.Post(base, map[string]any{"url": "HTTPS://EU.example.com/v1", "shape": "openai-chat", "renames": map[string]string{"glm": "glm-fp8"}}).Expect(200).JSON(&renamed)
-	if renamed.Outcome != "updated" || renamed.Endpoint.Name != "eu" || renamed.Endpoint.Renames["glm"] != "glm-fp8" {
-		t.Fatalf("update by URL and Shape = %+v", renamed)
-	}
-
 	duplicate := func(r *testkit.Response, holder string) {
 		t.Helper()
 		if e := r.Expect(409).Err(); e.Code != "endpoint_duplicate" || !strings.Contains(e.Hint, holder) {
 			t.Fatalf("duplicate = %+v", e)
 		}
 	}
+	duplicate(srv.Admin.Post(base, map[string]any{"url": b + "/", "shape": "openai-chat"}), "eu")
+	duplicate(srv.Admin.Post(base, map[string]any{"url": "HTTPS://EU.example.com/v1", "shape": "openai-chat", "renames": map[string]string{"glm": "glm-fp8"}}), "eu")
+	duplicate(srv.Admin.Put(base+"/other", map[string]any{"url": b, "shape": "openai-chat"}), "eu")
 	duplicate(srv.Admin.Post(base, map[string]any{"name": "again", "url": "https://API.example.com/v1/", "shape": "openai-chat"}), "default")
 	duplicate(srv.Admin.Patch(base+"/eu", map[string]any{"url": a}), "default")
 	srv.Admin.Post(base, map[string]any{"name": "messages", "url": a, "shape": "anthropic-messages"}).Expect(201)
@@ -114,12 +95,11 @@ func TestAnEndpointURLAndShapeIsHeldOnceWithinAProvider(t *testing.T) {
 		map[string]any{"name": "us-2", "url": "https://us.example.com/v1", "shape": "openai-chat"},
 		map[string]any{"url": a, "shape": "openai-chat"},
 	}}).Expect(200).JSON(&bulk)
-	if bulk.Failed != 2 || bulk.Items[0].Error.Code != "endpoint_duplicate" || bulk.Items[2].Error.Code != "endpoint_duplicate" ||
-		bulk.Items[1].Outcome != "created" || bulk.Items[3].Outcome != "unchanged" {
+	if bulk.Failed != 3 || bulk.Items[0].Error.Code != "endpoint_duplicate" || bulk.Items[2].Error.Code != "endpoint_duplicate" ||
+		bulk.Items[1].Outcome != "created" || bulk.Items[3].Error.Code != "endpoint_duplicate" {
 		t.Fatalf("bulk = %+v", bulk)
 	}
 
-	// A delete cannot be reverted onto a URL another Endpoint took since.
 	var deleted providers.EndpointResult
 	srv.Admin.Delete(base + "/us").Expect(200).JSON(&deleted)
 	srv.Admin.Post(base, map[string]any{"name": "us-new", "url": "https://us.example.com/v1", "shape": "openai-chat"}).Expect(201)
@@ -127,13 +107,11 @@ func TestAnEndpointURLAndShapeIsHeldOnceWithinAProvider(t *testing.T) {
 
 	var list providers.EndpointList
 	srv.Admin.Get(base).Expect(200).JSON(&list)
-	if len(list.Endpoints) != 4 { // default, eu, messages, us-new
+	if len(list.Endpoints) != 4 {
 		t.Fatalf("endpoints = %+v", list.Endpoints)
 	}
 }
 
-// MOD-13: renames {} clears an Endpoint's renames, so the Caller's model
-// name goes upstream unchanged again.
 func TestEmptyRenamesClearTheSetSoTheCallersNameIsSent(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)

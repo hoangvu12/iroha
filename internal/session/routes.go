@@ -16,7 +16,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// passwordSnapshot is what an Audit Entry records of the Owner password.
 type passwordSnapshot struct {
 	ID    string    `json:"id"`
 	Name  string    `json:"name"`
@@ -47,7 +46,6 @@ var PasswordResource = audit.Register(&audit.Resource[passwordSnapshot]{
 	},
 })
 
-// sessionSnapshot is what an Audit Entry records of an Owner session.
 type sessionSnapshot struct {
 	ID        string     `json:"id"`
 	UserAgent string     `json:"user_agent"`
@@ -120,7 +118,6 @@ type OwnerSessionResult struct {
 	OwnerSession OwnerSession `json:"owner_session"`
 }
 
-// Routes returns the Owner login routes.
 func Routes(s *Store, tr *audit.Trail) []api.Route {
 	h := handlers{s: s, tr: tr}
 	const tag = "Owner login"
@@ -223,7 +220,6 @@ func (h handlers) status(c *api.Call) (any, error) {
 	return out, nil
 }
 
-// maxUserAgent caps the stored User-Agent.
 const maxUserAgent = 300
 
 func (h handlers) login(c *api.Call) (any, error) {
@@ -343,13 +339,11 @@ func (h handlers) setPassword(c *api.Call) (any, error) {
 			ON CONFLICT (id) DO UPDATE SET hash = excluded.hash, set_at = excluded.set_at`, newHash, store.Millis(m.Now)); err != nil {
 			return err
 		}
-		// Everyone signs in again with the new password, except the session
-		// that changed it.
-		keep := ""
+		callerSessionID := ""
 		if m.Actor.Kind == api.ActorOwnerSession {
-			keep = m.Actor.ID
+			callerSessionID = m.Actor.ID
 		}
-		others, err := activeSessionIDs(m.Ctx, m.Tx, m.Now, keep)
+		others, err := activeSessionIDs(m.Ctx, m.Tx, m.Now, callerSessionID)
 		if err != nil {
 			return err
 		}

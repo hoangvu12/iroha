@@ -21,7 +21,6 @@ afterEach(() => {
 const setup = () => userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 const answer = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-/** Text on the page, not in UI SDK's announcer regions. */
 const onPage = { ignore: "script, style, [data-ui-sdk-announcer]" };
 
 async function announced() {
@@ -29,7 +28,6 @@ async function announced() {
   return [...document.querySelectorAll("[data-ui-sdk-announcer]")].map((r) => r.textContent).filter(Boolean);
 }
 
-/** A name field saved inline, the way settings rows save. */
 function NameField({ call, refresh }: { call: (name: string) => Promise<{ audit_entry?: string }>; refresh?: () => void }) {
   const [name, setName] = useState("team-5");
   const save = useSave({ refresh });
@@ -92,7 +90,6 @@ test("Undo reverts the change's Audit Entry and says so in the same place", asyn
   expect(fetch.mock.calls[0][1]?.method).toBe("POST");
   expect(await screen.findByText("Change reverted", onPage)).toBeTruthy();
   expect(refresh).toHaveBeenCalledTimes(2);
-  // Reverting the revert redoes the change.
   expect(screen.getByRole("button", { name: "Undo: Change reverted" })).toBeTruthy();
 });
 
@@ -110,7 +107,6 @@ test("a failed save shows its error under the field until the next try", async (
   expect(screen.getByRole("alert")).toBe(alert);
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(screen.queryByRole("alert")).toBeNull();
-  // Nothing to undo: the result goes sooner.
   expect(await screen.findByText("Renamed to team-5", onPage)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Undo/ })).toBeNull();
   act(() => void vi.advanceTimersByTime(DONE_MS));
@@ -158,7 +154,6 @@ test("a switch saving on toggle shows its new state at once, is busy, and goes b
   await user.click(sw);
   expect(sw.getAttribute("aria-checked")).toBe("true");
   expect(sw.getAttribute("aria-busy")).toBe("true");
-  // A second press while saving is ignored.
   await user.click(sw);
   expect(sw.getAttribute("aria-checked")).toBe("true");
   await act(async () => fail(new Error("Iroha is restarting.")));

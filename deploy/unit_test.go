@@ -1,7 +1,3 @@
-// Package deploy holds the deploy script, the server half it runs over SSH
-// and the systemd unit. Its tests check the unit against Iroha's startup
-// configuration; deploy/test/e2e.sh exercises the scripts against a local
-// container.
 package deploy_test
 
 import (
@@ -16,8 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/config"
 )
 
-// unit reads iroha.service with example values for its placeholders and
-// returns each [Service] key's values in order.
 func unit(t *testing.T) map[string][]string {
 	t.Helper()
 	raw, err := os.ReadFile("iroha.service")
@@ -59,8 +53,6 @@ func one(t *testing.T, u map[string][]string, key string) string {
 	return u[key][0]
 }
 
-// The drain limit Iroha actually uses under this unit: ExecStart's flags and
-// Environment= variables read by the real config parser.
 func drainUnderUnit(t *testing.T, u map[string][]string) time.Duration {
 	t.Helper()
 	env := map[string]string{}
@@ -89,9 +81,7 @@ func TestUnitStopTimeoutCoversTheDrainLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TimeoutStopSec: %v (write it with a unit, e.g. 40s)", err)
 	}
-	// systemd SIGKILLs after TimeoutStopSec; the drain plus closing the
-	// database must fit inside it, and the margin should stay small so a
-	// stuck process does not hold a deploy for long.
+	// systemd SIGKILLs after TimeoutStopSec, so the drain and closing the database must fit inside it.
 	if stop < drain+5*time.Second || stop > drain+30*time.Second {
 		t.Fatalf("TimeoutStopSec %v does not match the drain limit %v (want drain + 5s..30s)", stop, drain)
 	}
@@ -104,7 +94,6 @@ func TestUnitStopTimeoutCoversTheDrainLimit(t *testing.T) {
 	}
 }
 
-// The runbook in the served skill must describe this script and unit.
 func TestRunbookMatchesScriptAndUnit(t *testing.T) {
 	runbook, err := os.ReadFile("../internal/api/skill/50_deploy.md")
 	if err != nil {
@@ -116,7 +105,7 @@ func TestRunbookMatchesScriptAndUnit(t *testing.T) {
 	}
 	for _, line := range strings.Split(string(runbook), "\n") {
 		if !strings.Contains(line, "deploy.sh") {
-			continue // other commands' flags, e.g. useradd's
+			continue
 		}
 		for _, opt := range regexp.MustCompile(`(?:^|[\s(\x60])(--[a-z][a-z-]+)`).FindAllStringSubmatch(line, -1) {
 			listed := regexp.MustCompile(`(?m)^\s+(?:-\w, )?` + regexp.QuoteMeta(opt[1]) + `\b`)

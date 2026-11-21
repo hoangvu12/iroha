@@ -30,10 +30,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/webui"
 )
 
-// routes is the route table: one line per module. Each module package
-// exports a Routes(...) []api.Route taking exactly the dependencies it
-// needs (store, logger, clock, HTTP client). /skill.md and
-// /api/openapi.json are added by the router itself.
 func (s *Server) routes() []api.Route {
 	return slices.Concat(
 		s.coreRoutes(),
@@ -64,14 +60,11 @@ func (s *Server) routes() []api.Route {
 	)
 }
 
-// logos builds the logo service (ticket 22): fetched through Iroha, cached
-// in memory and under <data-dir>/logos.
 func (s *Server) logos() *logos.Service {
 	return logos.New(logos.Options{FaviconURL: s.opts.Config.LogoFavicons, MakerURL: s.opts.Config.LogoMakers,
 		HTTPClient: s.httpc, Clock: s.clock, Log: s.log, Dir: filepath.Join(s.opts.Config.DataDir, "logos")})
 }
 
-// Health is the body of /healthz and /readyz.
 type Health struct {
 	Status  string `json:"status" enum:"ok,ready"`
 	Version string `json:"version"`
@@ -117,17 +110,14 @@ func (s *Server) coreRoutes() []api.Route {
 	}
 }
 
-// gateway builds the Gateway once; its inference and admin routes share it.
 func (s *Server) gateway() *gateway.Gateway {
 	if s.gw == nil {
 		s.gw = gateway.New(gateway.Options{Clock: s.clock, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db),
-			Keys: gatewaykeys.New(s.db), Recorder: requests.NewRecorder(s.db), KeyStates: keystate.New(s.db, s.log), Models: s.models(), Pools: pools.New(s.db), Rules: s.rules.Set, DB: s.db})
+			Keys: gatewaykeys.New(s.db), Recorder: s.recorder, KeyStates: keystate.New(s.db, s.log), Models: s.models(), Pools: pools.New(s.db), Rules: s.rules.Set, DB: s.db})
 	}
 	return s.gw
 }
 
-// models builds the model list store once (routes, Gateway, the daily
-// refresh job).
 func (s *Server) models() *models.Store {
 	if s.modelStore == nil {
 		s.modelStore = models.New(models.Options{DB: s.db, Log: s.log, HTTPClient: s.httpc, Providers: providers.New(s.db), Keys: gatewaykeys.New(s.db), Pools: pools.New(s.db),

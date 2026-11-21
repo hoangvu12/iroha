@@ -1,8 +1,3 @@
-# A stand-in for the real server, for deploy/test/e2e.sh only: Debian with
-# systemd as PID 1, sshd, and the one-time setup from the runbook (user
-# iroha owning /opt/iroha, the sudoers rule, journal access). Password login
-# is deliberately left ON in sshd, with a password set, so the test shows the
-# deploy script refuses passwords on its own. Never expose this container.
 FROM debian:bookworm-slim
 
 ENV container=docker DEBIAN_FRONTEND=noninteractive
@@ -21,7 +16,7 @@ RUN useradd --create-home --shell /bin/bash iroha \
  && install -d -m 700 /root/.ssh \
  && printf '%s\n' 'iroha ALL=(root) NOPASSWD: /usr/bin/systemctl start iroha, /usr/bin/systemctl stop iroha, /usr/bin/systemctl restart iroha' > /etc/sudoers.d/iroha-deploy \
  && chmod 440 /etc/sudoers.d/iroha-deploy \
- && printf 'PasswordAuthentication yes\nKbdInteractiveAuthentication yes\nPermitRootLogin prohibit-password\n' > /etc/ssh/sshd_config.d/e2e.conf
+ && printf 'PasswordAuthentication yes\nKbdInteractiveAuthentication yes\nPermitRootLogin prohibit-password\n' > /etc/ssh/sshd_config.d/e2e-password-login-on-purpose-never-expose.conf
 
 STOPSIGNAL SIGRTMIN+3
 CMD ["/lib/systemd/systemd"]

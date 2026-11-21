@@ -1,10 +1,6 @@
 import { plural } from "@/lib/format";
 import type { Scope } from "./api";
 
-// The scope being edited in the create dialog and on the key page, and the
-// one-fact summaries the list shows of a scope.
-
-/** Providers by handle: null allows every model, a list narrows to those. */
 export type Draft = { all: boolean; providers: Map<string, string[] | null>; pools: Set<string> };
 
 export function emptyDraft(): Draft {
@@ -27,7 +23,6 @@ export function toScope(d: Draft): Scope {
 }
 
 
-/** "Everything", "3 Providers, 1 Pool", "Nothing" (C12's Access column). */
 export function scopeSummary(s: Scope): string {
   if (s.all) return "Everything";
   const p = s.providers?.length ?? 0;
@@ -36,14 +31,12 @@ export function scopeSummary(s: Scope): string {
   return [p && plural(p, "Provider"), q && plural(q, "Pool")].filter(Boolean).join(", ");
 }
 
-/** Every name a scope grants, for a tooltip: "dashscope (2 models), z-ai, glm-4.6". */
 export function scopeDetail(s: Scope): string {
   if (s.all) return "Every Provider and Model Pool, including ones added later";
   const parts = (s.providers ?? []).map((p) => (p.models?.length ? `${p.provider} (${plural(p.models.length, "model")})` : p.provider));
   return [...parts, ...(s.pools ?? [])].join(", ") || "No Provider or Pool: every Request is refused";
 }
 
-/** "All models" or "2 models" on a checked Provider (C02). */
 export function modelsLabel(models: string[] | null): string {
   return models ? plural(models.length, "model") : "All models";
 }

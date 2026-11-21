@@ -29,7 +29,6 @@ const pool: Pool = {
 };
 
 let fetch: ReturnType<typeof vi.fn<typeof globalThis.fetch>>;
-/** The Pool as the server has it now (a test may change it after the tab loaded). */
 let current: Pool;
 beforeEach(() => {
   localStorage.clear();
@@ -49,7 +48,6 @@ afterEach(() => {
   openChat.mockClear();
 });
 
-/** Renders the tab and waits for the members, shown once the overview has loaded too (UI ticket 02). */
 async function renderTab() {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -68,7 +66,6 @@ const order = () =>
   within(screen.getByRole("table", { name: "Members of fast" }))
     .getAllByRole("row")
     .slice(1)
-    // Cells: select box (UI ticket 30), order, handle, Provider.
     .map((r) => within(r).getAllByRole("cell")[3].textContent);
 
 test("members sit in their order, numbered; the headers don't sort, since the order is what counts", async () => {
@@ -84,7 +81,7 @@ test("a member's handle reorders with the keyboard: Space picks it up, arrows mo
   await user.keyboard(" ");
   await user.keyboard("{ArrowDown}");
   expect(order()).toEqual(["zeta", "acme", "kappa"]);
-  expect(saved()).toEqual([]); // nothing saved while it is held
+  expect(saved()).toEqual([]);
   await user.keyboard(" ");
   await waitFor(() => expect(saved()).toEqual([["zeta", "acme", "kappa"]]));
   expect(await screen.findByText("acme moved to position 2", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
@@ -144,7 +141,6 @@ test("Edit… reads the Pool again before saving, so a member changed or added e
   await renderTab();
   await user.click(screen.getByRole("checkbox", { name: "Select acme (m-1)" }));
   await user.click(screen.getByRole("checkbox", { name: "Select kappa (m-3)" }));
-  // Someone switches zeta off and adds omega after the tab loaded.
   current = {
     ...pool,
     members: [
@@ -175,7 +171,6 @@ test("an agent finds the members' controls, tests one, and moves one to the top"
   const entries = agent.snapshot().filter((e) => !e.offPage && e.component !== "more");
   for (const e of entries) expect(e.label, `${e.component} ${e.ref} has no name`).toBeTruthy();
   const labels = entries.map((e) => e.label);
-  // The handles are parts of "Order of fast's members": an agent moves a member with its `move`.
   for (const l of ["Order of fast's members", "More for acme (m-1)", "acme on"]) expect(labels, `${l} is missing`).toContain(l);
   expect(agent.snapshot().find((e) => e.label === "Order of fast's members")?.actions).toContain("move");
 

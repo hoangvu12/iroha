@@ -1,5 +1,5 @@
 // Package settings is Iroha's runtime configuration that is not a record of
-// its own: retention periods today, more later. Each setting is declared in
+// its own. Each setting is declared in
 // the package that reads it, has a built-in default, and is changed through
 // /api/settings with the audit conventions (dry run, Audit Entries, revert).
 //
@@ -45,7 +45,6 @@ type Choice struct {
 	Default     string
 }
 
-// def is one registered setting, of either kind.
 type def struct {
 	name, description, unit string
 	integer                 *Int
@@ -109,15 +108,7 @@ func all() []*def {
 
 // Get returns the setting's current value: the Owner's, else the default.
 func (s *Choice) Get(ctx context.Context, q audit.Querier) (string, error) {
-	raw, err := stored(ctx, q, s.Name)
-	if err != nil || raw == nil {
-		return s.Default, err
-	}
-	var v string
-	if json.Unmarshal(raw, &v) != nil || !slices.Contains(s.Choices, v) {
-		return s.Default, nil // a value this version cannot read: fall back
-	}
-	return v, nil
+	return decodeOrDefault(ctx, q, s.Name, s.Default, func(v string) bool { return slices.Contains(s.Choices, v) })
 }
 
 func (d *def) defaultValue() json.RawMessage {
@@ -128,7 +119,6 @@ func (d *def) defaultValue() json.RawMessage {
 	return d.integer.encode(d.integer.Default)
 }
 
-// parse validates a value sent by an agent and returns it in stored form.
 func (d *def) parse(raw json.RawMessage) (json.RawMessage, error) {
 	if d.integer != nil {
 		return d.integer.parse(raw)
@@ -149,13 +139,17 @@ func (d *def) parse(raw json.RawMessage) (json.RawMessage, error) {
 
 // Get returns the setting's current value: the Owner's, else the default.
 func (s *Int) Get(ctx context.Context, q audit.Querier) (int64, error) {
-	raw, err := stored(ctx, q, s.Name)
+	return decodeOrDefault(ctx, q, s.Name, s.Default, func(int64) bool { return true })
+}
+
+func decodeOrDefault[T any](ctx context.Context, q audit.Querier, name string, def T, valid func(T) bool) (T, error) {
+	raw, err := stored(ctx, q, name)
 	if err != nil || raw == nil {
-		return s.Default, err
+		return def, err
 	}
-	var v int64
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return s.Default, nil // a value this version cannot read: fall back
+	var v T
+	if json.Unmarshal(raw, &v) != nil || !valid(v) {
+		return def, nil
 	}
 	return v, nil
 }
@@ -165,7 +159,6 @@ func (s *Int) encode(v int64) json.RawMessage {
 	return b
 }
 
-// parse validates a value sent by an agent and returns it in stored form.
 func (s *Int) parse(raw json.RawMessage) (json.RawMessage, error) {
 	hint := fmt.Sprintf(`Send {"value": <integer from %d to %d>}.`, s.Min, s.Max)
 	var v int64
@@ -185,7 +178,6 @@ func unitSuffix(u string) string {
 	return " (" + u + ")"
 }
 
-// stored reads the Owner's value of name; nil when the default applies.
 func stored(ctx context.Context, q audit.Querier, name string) (json.RawMessage, error) {
 	var value string
 	err := q.QueryRowContext(ctx, `SELECT value FROM settings WHERE name = ?`, name).Scan(&value)
@@ -198,7 +190,6 @@ func stored(ctx context.Context, q audit.Querier, name string) (json.RawMessage,
 	return json.RawMessage(value), nil
 }
 
-// snapshot is what an Audit Entry records of a setting: its value.
 type snapshot struct {
 	Name  string          `json:"name"`
 	Value json.RawMessage `json:"value"`
@@ -229,13 +220,11 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 		if s != nil {
 			value = s.Value
 		}
-		return write(ctx, tx, name, value)
+		return writeOrClear(ctx, tx, name, value)
 	},
 })
 
-// write stores value for name, or deletes the row when value is nil or the
-// default, so an untouched setting follows its built-in default.
-func write(ctx context.Context, tx *sql.Tx, name string, value json.RawMessage) error {
+func writeOrClear(ctx context.Context, tx *sql.Tx, name string, value json.RawMessage) error {
 	if def, ok := lookup(name); ok && value != nil && string(value) == string(def.defaultValue()) {
 		value = nil
 	}
@@ -306,7 +295,6 @@ func notFound(name string) *api.Error {
 		WithDetails(map[string]string{"resource": "setting", "ref": name})
 }
 
-// Routes returns the settings routes.
 func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 	const tag = "Settings"
 	set := func(m *audit.Mutation, in NamedValue) (Setting, error) {
@@ -321,7 +309,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		if err := m.Track(Resource, def.name); err != nil {
 			return Setting{}, err
 		}
-		if err := write(m.Ctx, m.Tx, def.name, value); err != nil {
+		if err := writeOrClear(m.Ctx, m.Tx, def.name, value); err != nil {
 			return Setting{}, err
 		}
 		return view(m.Ctx, m.Tx, def)

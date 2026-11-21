@@ -11,15 +11,12 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Overview is every Provider and Model Pool at a glance (the UI's Providers
-// page): keys by Key State, models, and traffic since a time.
 type Overview struct {
 	Since     time.Time          `json:"since" doc:"Start of the window traffic is counted over."`
 	Providers []ProviderOverview `json:"providers" doc:"Every Provider, by handle."`
 	Pools     []PoolOverview     `json:"pools" doc:"Every Model Pool, by name."`
 }
 
-// Traffic counts Requests in the window.
 type Traffic struct {
 	Requests      int        `json:"requests" doc:"Requests in the window, in progress included."`
 	Succeeded     int        `json:"succeeded" doc:"Finished with a status below 400."`
@@ -27,7 +24,6 @@ type Traffic struct {
 	LastRequestAt *time.Time `json:"last_request_at,omitempty" doc:"Start of the latest Request in the window."`
 }
 
-// ProviderOverview is one Provider at a glance.
 type ProviderOverview struct {
 	Provider string    `json:"provider" doc:"Handle."`
 	Keys     KeyCounts `json:"keys" doc:"Upstream Keys in each Key State."`
@@ -35,14 +31,12 @@ type ProviderOverview struct {
 	Traffic
 }
 
-// PoolOverview is one Model Pool at a glance.
 type PoolOverview struct {
 	Pool string `json:"pool" doc:"Name."`
 	Traffic
 	ServedBy []ServedBy `json:"served_by" doc:"Requests for the Pool by the Provider that served them (the last one tried), most first."`
 }
 
-// ServedBy counts a Pool's Requests one Provider served.
 type ServedBy struct {
 	Provider  string `json:"provider" doc:"Handle; empty for Requests no Provider was tried for."`
 	Requests  int    `json:"requests"`
@@ -52,7 +46,6 @@ type ServedBy struct {
 const succeeded = "state = 'completed' AND status >= 100 AND status < 400"
 const failed = "state != 'in_progress' AND (status >= 400 OR status < 100)"
 
-// OverviewRoutes serves GET /api/overview.
 func OverviewRoutes(db *store.DB) []api.Route {
 	return []api.Route{{
 		Method: http.MethodGet, Path: "/api/overview", Tag: "Providers",

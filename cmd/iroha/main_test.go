@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-// Builds the real binary and starts it with nothing but a data directory.
 func TestBinaryStartsWithOnlyADataDir(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds the binary")
@@ -94,9 +93,6 @@ func TestBinaryStartsWithOnlyADataDir(t *testing.T) {
 	}
 }
 
-// RUN-01, CFG-03: bad startup values make the binary exit 2 before touching
-// the data directory, naming every bad value at once; an unusable data
-// directory exits 1.
 func TestBinaryRefusesBadStartupValuesWithExitCodes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds the binary")

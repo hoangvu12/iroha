@@ -5,11 +5,6 @@ import (
 	"testing"
 )
 
-// CacheMarkers lists the cache_control markers of an Anthropic Messages
-// request body in prompt order, each as "<where>=<ttl>" ("5m" when it names
-// none): "tool:<name>", "system:<text>", "<role>:<text or block type>", and
-// the top-level one last as "top". Tests of prompt caching (gateway and
-// translate) assert on it.
 func CacheMarkers(t testing.TB, body []byte) []string {
 	t.Helper()
 	var req map[string]any

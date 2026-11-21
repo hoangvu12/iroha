@@ -30,7 +30,7 @@ func TestBuiltinRulesClassifyTheGenericFailures(t *testing.T) {
 		rule    string
 		outcome rules.Outcome
 		reason  string
-		reset   time.Duration // 0: none
+		reset   time.Duration
 	}{
 		{"401", rules.Failure{Status: 401, Body: openAIError("invalid_api_key", "Incorrect API key provided")},
 			"unauthorized", rules.Invalid, "401 invalid_api_key: Incorrect API key provided", 0},
@@ -40,7 +40,6 @@ func TestBuiltinRulesClassifyTheGenericFailures(t *testing.T) {
 			"forbidden-model", rules.ModelGap, "", 0},
 		{"403 plain text", rules.Failure{Status: 403, Body: []byte("Forbidden")},
 			"forbidden", rules.CoolingKeyModel, "403: Forbidden", 0},
-		// FAIL-49: a JSON body is read by its error fields, never by fields it echoes.
 		{"403 account echoing the model field", rules.Failure{Status: 403, Body: []byte(`{"error":{"message":"Your account is suspended"},"model":"gpt-x"}`)},
 			"forbidden-account", rules.Invalid, "403: Your account is suspended", 0},
 		{"403 with a quota field and a plain message", rules.Failure{Status: 403, Body: []byte(`{"error":{"message":"Forbidden","param":null},"quota":{"used":3},"model":"gpt-x"}`)},
@@ -55,12 +54,13 @@ func TestBuiltinRulesClassifyTheGenericFailures(t *testing.T) {
 			"model-not-found", rules.ModelGap, "", 0},
 		{"404 other", rules.Failure{Status: 404, Body: []byte("not here")},
 			"bad-request", rules.FailRequest, "404: not here", 0},
-		// Ticket 42: refusals of one Endpoint, not of the request.
 		{"404 page not found", rules.Failure{Status: 404, Body: []byte("404 page not found\n")},
 			"endpoint-path-not-found", rules.RetryElsewhere, "404: 404 page not found", 0},
 		{"404 nginx page", rules.Failure{Status: 404, Body: []byte("<html>\r\n<head><title>404 Not Found</title></head>\r\n<body><center><h1>404 Not Found</h1></center></body></html>")},
 			"endpoint-path-not-found", rules.RetryElsewhere, "", 0},
 		{"404 text naming a model", rules.Failure{Status: 404, Body: []byte("404 page not found: no such model")},
+			"model-not-found", rules.ModelGap, "", 0},
+		{"404 HTML page naming a model", rules.Failure{Status: 404, Body: []byte("<html><head><title>404 Not Found</title></head><body>The model gpt-x does not exist.</body></html>")},
 			"model-not-found", rules.ModelGap, "", 0},
 		{"404 page not found in a JSON message", rules.Failure{Status: 404, Body: []byte(`{"error":{"message":"404 page not found"}}`)},
 			"endpoint-path-not-found", rules.RetryElsewhere, "", 0},
@@ -223,8 +223,8 @@ func TestResetTimesAreReadInEveryCommonForm(t *testing.T) {
 		now.Add(5 * time.Minute).Format("2006-01-02 15:04:05"): 5 * time.Minute,
 		"6m0s":                                   6 * time.Minute,
 		"0":                                      0,
-		now.Add(-time.Hour).Format(time.RFC3339): 0,              // past: now
-		"99999999":                               rules.MaxReset, // capped
+		now.Add(-time.Hour).Format(time.RFC3339): 0,
+		"99999999":                               rules.MaxReset,
 	}
 	for in, want := range cases {
 		got, ok := rules.ParseReset(in, now)

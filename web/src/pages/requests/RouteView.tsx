@@ -27,12 +27,6 @@ import { CapturedView } from "./Captured";
 import { RequestDetails } from "./Details";
 import { SAMPLE_REQUEST } from "./samples";
 
-// A Request's Route view (C18, C22): full page, tabs Route / Details /
-// Captured. Route draws the Request as a top-to-bottom chain of cards on a
-// dotted canvas (Start, each Attempt, End), each line labelled with why
-// Iroha moved on, and the selected card's details on the right. It reads
-// the same GET /api/requests/{id} as the drawer and as agents do.
-
 type Tab = "route" | "details" | "captured";
 type Node = { kind: "start" } | { kind: "attempt"; seq: number } | { kind: "end" };
 
@@ -199,17 +193,12 @@ function RouteCanvas({ r, phone }: { r: RequestRecord; phone: boolean }) {
   );
 }
 
-// The selected step's panel comes in from the edge it sits on when it appears (after Close, or
-// with the page): shift + fade on the list tokens, a plain fade under reduced motion. Choosing
-// another card swaps its content at once; Close takes it away at once (UI ticket 18).
 const panelFade = "transition-[opacity,translate] duration-list-in ease-out starting:translate-x-(--motion-shift) starting:opacity-0";
 
-/** A step on the canvas: the whole card is the button that selects it; a record's name on it is a link of its own, above it. */
 function Card({ selected, onSelect, children, label }: { selected: boolean; onSelect: () => void; children: ReactNode; label: string }) {
   return (
     <div
       className={cn(
-        // Border and ring change together: a press's feedback, on the hover tokens.
         "relative flex w-[min(360px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-[border-color,box-shadow] duration-hover ease-[ease]",
         selected ? "border-info ring-2 ring-info/30" : "border-border hover:border-border-strong",
       )}

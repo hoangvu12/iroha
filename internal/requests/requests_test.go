@@ -58,7 +58,7 @@ func TestCaptureStoresPromptAndResponseOnlyForKeysWithCaptureOn(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, up.URL())
-	srv.NoConversationIDs("acme") // the 400 below fails its Request
+	srv.NoConversationIDs("acme")
 	debug := issue(t, srv, map[string]any{"name": "debug", "capture": true})
 	friend := issue(t, srv, map[string]any{"name": "friend"})
 
@@ -75,12 +75,10 @@ func TestCaptureStoresPromptAndResponseOnlyForKeysWithCaptureOn(t *testing.T) {
 	if c.RequestID != id || !sameJSON(c.Request.Body, []byte(prompt)) || c.Request.Truncated || !c.CapturedAt.Equal(testkit.Epoch) {
 		t.Fatalf("captured request = %+v (body %s)", c.Request, c.Request.Body)
 	}
-	// The response is what the Caller received: model echoed as asked.
 	if c.Response.Status != 200 || !sameJSON(c.Response.Body, resp.Body) || c.Response.Stream != "" || !strings.Contains(string(c.Response.Body), `"model":"gpt-x"`) {
 		t.Fatalf("captured response = %+v (body %s, caller got %s)", c.Response, c.Response.Body, resp.Body)
 	}
 
-	// Failures are captured too, as the Caller saw them.
 	up.Enqueue(up.Error(400, "bad messages"))
 	failed := debug.Post(chatPath, prompt).Expect(400)
 	if c := capture(t, srv, failed.Header.Get("X-Request-Id")); c.Response.Status != 400 || !sameJSON(c.Response.Body, failed.Body) {
@@ -91,7 +89,6 @@ func TestCaptureStoresPromptAndResponseOnlyForKeysWithCaptureOn(t *testing.T) {
 		t.Fatalf("captured refusal = %+v", c.Response)
 	}
 
-	// Capture off stores nothing.
 	other := friend.Post(chatPath, prompt).Expect(200).Header.Get("X-Request-Id")
 	if r := request(t, srv, other); r.Captured {
 		t.Fatalf("a key with capture off was captured: %+v", r)
@@ -107,7 +104,6 @@ func TestCaptureStoresPromptAndResponseOnlyForKeysWithCaptureOn(t *testing.T) {
 		t.Fatalf("list = %+v", list.Requests)
 	}
 
-	// Turning capture on is an audited, revertible change.
 	var res gatewaykeys.GatewayKeyResult
 	srv.Admin.Patch("/api/gateway-keys/friend", map[string]any{"capture": true}).Expect(200).JSON(&res)
 	if !res.GatewayKey.Capture || len(res.Changes) != 1 || !slices.Equal(res.Changes[0].Fields, []string{"capture"}) {
@@ -123,10 +119,9 @@ func TestCaptureStoresPromptAndResponseOnlyForKeysWithCaptureOn(t *testing.T) {
 	}
 	again := friend.Post(chatPath, prompt).Expect(200).Header.Get("X-Request-Id")
 	srv.Admin.Get("/api/requests/" + again + "/capture").Expect(404)
-	// Create-or-update by name keeps capture unless sent.
-	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "debug"}).Expect(200).JSON(&res)
+	srv.Admin.Put("/api/gateway-keys/debug", map[string]any{}).Expect(200).JSON(&res)
 	if !res.GatewayKey.Capture || res.Outcome != "unchanged" {
-		t.Fatalf("repeat create = %+v", res)
+		t.Fatalf("repeat PUT = %+v", res)
 	}
 }
 
@@ -162,7 +157,6 @@ func TestCapturedStreamsAreKeptAsSentAndReassembled(t *testing.T) {
 		t.Fatalf("reassembled = %s", c.Response.Body)
 	}
 
-	// Tool calls arrive in pieces and are put back together by index.
 	chunk := func(delta string, finish string) string {
 		f := "null"
 		if finish != "" {
@@ -226,9 +220,6 @@ func TestRequestsLeftInProgressByAStoppedRunAreMarkedInterrupted(t *testing.T) {
 	}
 	id := page.Requests[0].ID
 
-	// The process that held the Request is gone as far as a new start can
-	// tell (a crash leaves exactly this): a new run of Iroha opens the same
-	// data and closes the Request as interrupted.
 	second := testkit.Start(t, testkit.Options{DataDir: first.DataDir, Clock: first.Clock})
 	second.Admin.Token = first.AdminToken
 	var r requests.Request
@@ -245,9 +236,6 @@ func TestRequestsLeftInProgressByAStoppedRunAreMarkedInterrupted(t *testing.T) {
 	}
 }
 
-// LOG-08: a Request keeps the names it was served under. Renaming the
-// Gateway Key or the Upstream Key later changes neither the old Request nor
-// its Attempts, and the caller=<key ID> filter still finds it.
 func TestRenamedKeysLeaveTheNamesInHistoryAlone(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)

@@ -15,10 +15,6 @@ import { CodeBlock, longShape } from "./bits";
 import { type Block, parseRequest, parseResponse } from "./messages";
 import { SAMPLE_CAPTURE } from "./samples";
 
-// The Captured tab (C26): what the Caller sent and what it received, each
-// message in order, with Raw JSON, Copy as cURL and Replay in Chat. Iroha
-// captures the Caller's side only (the body sent upstream is not stored).
-
 type Side = "sent" | "response";
 
 export function CapturedView({ r, onReplay }: { r: RequestRecord; onReplay: () => void }) {

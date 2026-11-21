@@ -89,12 +89,6 @@ export default function GatewayKeySheet({ record }: SheetBodyProps<"gateway-key"
   );
 }
 
-/**
- * The key's access, edited in place (UI ticket 33): Edit access swaps the
- * list for the scope editor the key's page uses in its dialog, and the result
- * shows here with Undo. The key's own page keeps its dialog: a sheet of the
- * key opened over its own page would be odd.
- */
 function Access({ k }: { k: GatewayKey }) {
   const scope = k.scope;
   const update = useUpdateKey();

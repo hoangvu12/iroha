@@ -20,7 +20,6 @@ routes["GET /api/requests"] = { requests: [req1, req2], cursor: 1 };
 routes["GET /api/requests/stats"] = { requests: 2, in_progress: 0, succeeded: 2, failed: 0, retried: 0, tokens: { input: 0, output: 0, cache_read: 0, reasoning: 0, total: 0 } };
 routes["GET /api/requests/filters"] = { callers: [], providers: [], pools: [], models: [] };
 
-/** A feed row (DataTable): the row holding the "Open Request <id>" button. */
 const feedRow = async (id: string) => (await screen.findByRole("button", { name: `Open Request ${id}` })).closest("tr")!;
 
 test("a feed row opens the Request sheet first; ↓ steps to the next row in place; a row click replaces the stack", async () => {
@@ -33,7 +32,6 @@ test("a feed row opens the Request sheet first; ↓ steps to the next row in pla
 
   await user.keyboard("{ArrowDown}");
   await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_2"));
-  // ↑/↓ swaps the content in the same sheet: nothing slides (a key, many a day).
   expect(await screen.findByRole("dialog", { name: "Request slow" })).toBe(sheet);
   expect((await feedRow("req_2")).getAttribute("aria-current")).toBe("true");
 
@@ -42,7 +40,6 @@ test("a feed row opens the Request sheet first; ↓ steps to the next row in pla
   await user.click(await feedRow("req_1"));
   await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1"));
   await waitFor(() => expect(sheets()).toHaveLength(1));
-  // A row clicked while a Request is open shows it in that sheet: no slide out and in again.
   expect(screen.getByRole("dialog", { name: "Request fast" })).toBe(sheet);
 });
 
@@ -60,11 +57,9 @@ test("a feed row's Caller, Pool, Provider and key are links to their sheets, not
   renderWithSheets(<RequestsFeed />, "/requests");
   const row = within(await feedRow("req_1"));
   expect(hrefOf(row.getByRole("link", { name: "zeron" }))).toBe("/requests?sheet=gateway-key:gk_1");
-  // A Pool's name is the model the Caller asked for.
   expect(hrefOf(row.getByRole("link", { name: "fast" }))).toBe("/requests?sheet=pool:fast");
   expect(hrefOf(row.getByRole("link", { name: "acme" }))).toBe("/requests?sheet=provider:acme");
   expect(hrefOf(row.getByRole("link", { name: "team-5" }))).toBe("/requests?sheet=key:acme/team-5");
-  // A model that names no Pool is no record: plain text.
   expect(within(await feedRow("req_2")).queryByRole("link", { name: "slow" })).toBeNull();
 
   await user.click(row.getByRole("link", { name: "team-5" }));
@@ -121,7 +116,6 @@ test("an agent finds every sheet control by name and follows a link to the next 
   await screen.findByRole("dialog", { name: "Upstream Key team-5" });
   await waitFor(() => expect(where()).toBe("/requests?sheet=request:req_1&sheet=key:acme/team-5"));
 
-  // Closing a sheet is the dialog's own action: the top one goes, back to the Request.
   const closed = await agent.act({ steps: [{ ref: "Upstream Key team-5", action: "close" }] });
   expect(closed.ok, closed.error?.message).toBe(true);
   await waitFor(() => expect(sheets()).toHaveLength(1));

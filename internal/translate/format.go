@@ -13,39 +13,32 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 )
 
-// Structured output (ticket 30). RelayKit carries a JSON schema between
-// OpenAI Chat and Responses, and from either to Gemini, but drops it to and
-// from Anthropic and from Gemini. So each codec reads the format its Caller
-// asked for (readFormat) and writes it in its own terms as the Endpoint
-// (writeFormat). Chat, Responses and Anthropic Endpoints always get Iroha's
-// version, with the schema's properties in the Caller's order: models fill
-// them in schema order, and RelayKit's goes through a map. A Gemini Endpoint
-// keeps RelayKit's responseSchema when it wrote one.
-//
-// Anthropic takes a subset of JSON Schema. Keywords outside it are not
-// refused: like Anthropic's own SDKs, Iroha moves them into the description
-// (anthropicSchema), with a diagnostic. JSON mode without a schema has no
-// Anthropic equivalent and is dropped with a diagnostic; OpenAI already
-// requires such a prompt to ask for JSON.
+// RelayKit drops a JSON schema to and from Anthropic and from Gemini, and
+// loses its property order through a map, while models fill properties in
+// schema order. So each codec reads and writes structured output itself.
 
-// outputFormat is the structured output a Caller asked for.
+type outputMode int
+
+const (
+	anyJSON outputMode = iota
+	matchingSchema
+)
+
 type outputFormat struct {
-	schema      json.RawMessage // nil: JSON mode, any JSON object
-	name        string          // OpenAI's name for the schema, if the Caller gave one
+	mode        outputMode
+	schema      json.RawMessage
+	name        string
 	description string
-	strict      json.RawMessage // OpenAI's strict flag, if the Caller gave one
+	strict      json.RawMessage
 }
 
-// defaultSchemaName names a schema for OpenAI, which requires a name, when
-// the Caller's Shape has none.
+// OpenAI requires a schema name.
 const defaultSchemaName = "response"
 
-// readOpenAIFormat reads an OpenAI format object: Chat's json_schema member
-// or Responses' text.format (type, name, description, schema, strict).
 func readOpenAIFormat(typ string, raw json.RawMessage) *outputFormat {
 	switch typ {
 	case "json_object":
-		return &outputFormat{}
+		return &outputFormat{mode: anyJSON}
 	case "json_schema":
 	default:
 		return nil
@@ -57,9 +50,9 @@ func readOpenAIFormat(typ string, raw json.RawMessage) *outputFormat {
 		Strict      json.RawMessage `json:"strict"`
 	}
 	if json.Unmarshal(raw, &m) != nil || !present(m.Schema) {
-		return &outputFormat{}
+		return &outputFormat{mode: anyJSON}
 	}
-	f := &outputFormat{schema: m.Schema, name: m.Name, description: m.Description}
+	f := &outputFormat{mode: matchingSchema, schema: m.Schema, name: m.Name, description: m.Description}
 	if present(m.Strict) {
 		f.strict = m.Strict
 	}
@@ -70,8 +63,6 @@ func present(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
 }
 
-// openAIFormat is the format object for Responses' text.format (flat) or
-// Chat's json_schema member (without type).
 func (f *outputFormat) openAIFormat(withType bool) object {
 	var o object
 	if withType {
@@ -91,8 +82,6 @@ func (f *outputFormat) openAIFormat(withType bool) object {
 	}
 	return o
 }
-
-// Readers, by the Caller's Shape.
 
 func readChatFormat(req any) *outputFormat {
 	rf := req.(*dto.GeneralOpenAIRequest).ResponseFormat
@@ -118,8 +107,6 @@ func readResponsesFormat(req any) *outputFormat {
 	return readOpenAIFormat(typ.Type, text.Format)
 }
 
-// readAnthropicFormat reads output_config.format, or the beta's top-level
-// output_format.
 func readAnthropicFormat(req any) *outputFormat {
 	r := req.(*dto.ClaudeRequest)
 	var oc struct {
@@ -136,32 +123,28 @@ func readAnthropicFormat(req any) *outputFormat {
 	if json.Unmarshal(raw, &f) != nil || f.Type != "json_schema" || !present(f.Schema) {
 		return nil
 	}
-	return &outputFormat{schema: f.Schema}
+	return &outputFormat{mode: matchingSchema, schema: f.Schema}
 }
 
-// readGeminiFormat reads responseMimeType application/json with
-// responseJsonSchema (JSON Schema already) or responseSchema (Gemini's
-// OpenAPI subset, converted).
 func readGeminiFormat(req any) *outputFormat {
 	gc := req.(*dto.GeminiChatRequest).GenerationConfig
 	if gc.ResponseMimeType != "application/json" {
 		return nil
 	}
 	if present(gc.ResponseJsonSchema) {
-		return &outputFormat{schema: gc.ResponseJsonSchema}
+		return &outputFormat{mode: matchingSchema, schema: gc.ResponseJsonSchema}
 	}
 	if gc.ResponseSchema != nil {
 		if b, err := marshal(openAPISchema(gc.ResponseSchema)); err == nil {
-			return &outputFormat{schema: b}
+			return &outputFormat{mode: matchingSchema, schema: b}
 		}
 	}
-	return &outputFormat{}
+	return &outputFormat{mode: anyJSON}
 }
 
-// openAPISchema turns a Gemini Schema (OpenAPI 3.0 subset: upper-case
-// types, nullable, propertyOrdering) into JSON Schema. Properties follow
-// propertyOrdering; other keys are sorted (the request was decoded into a
-// map, so the Caller's own order is gone).
+// A Gemini Schema is an OpenAPI 3.0 subset (upper-case types, nullable,
+// propertyOrdering). RelayKit decoded it into a map, so keys other than
+// the ordered properties come out sorted.
 func openAPISchema(v any) any {
 	switch v := v.(type) {
 	case []any:
@@ -221,10 +204,8 @@ func orderedProperties(props map[string]any, order []any) object {
 	return o
 }
 
-// Writers, by the Endpoint's Shape. req is the converted request.
-
 func writeChatFormat(req map[string]any, f *outputFormat, _ *Translation) {
-	if f.schema == nil {
+	if f.mode == anyJSON {
 		req["response_format"] = map[string]any{"type": "json_object"}
 		return
 	}
@@ -236,7 +217,7 @@ func writeResponsesFormat(req map[string]any, f *outputFormat, _ *Translation) {
 	if text == nil {
 		text = map[string]any{}
 	}
-	if f.schema == nil {
+	if f.mode == anyJSON {
 		text["format"] = map[string]any{"type": "json_object"}
 	} else {
 		text["format"] = f.openAIFormat(true)
@@ -246,13 +227,13 @@ func writeResponsesFormat(req map[string]any, f *outputFormat, _ *Translation) {
 
 func writeAnthropicFormat(req map[string]any, f *outputFormat, t *Translation) {
 	delete(req, "output_format")
-	if f.schema == nil {
+	if f.mode == anyJSON {
 		t.Diagnostics = append(t.Diagnostics, "unsupported_response_format: Anthropic has no JSON mode without a schema; it was dropped")
 		return
 	}
 	schema, err := decodeOrdered(f.schema)
 	if err != nil {
-		return // the Caller's schema is not JSON; the Provider would refuse it anyway
+		return
 	}
 	var moved []string
 	schema = anthropicSchema(schema, &moved)
@@ -274,22 +255,18 @@ func writeGeminiFormat(req map[string]any, f *outputFormat, _ *Translation) {
 		gc = map[string]any{}
 	}
 	gc["responseMimeType"] = "application/json"
-	if f.schema != nil && gc["responseSchema"] == nil && gc["responseJsonSchema"] == nil {
+	if f.mode == matchingSchema && gc["responseSchema"] == nil && gc["responseJsonSchema"] == nil {
 		gc["responseJsonSchema"] = f.schema
 	}
 	req["generationConfig"] = gc
 }
 
-// anthropicStringFormats are the string formats Anthropic's structured
-// output accepts.
 var anthropicStringFormats = map[string]bool{"date-time": true, "time": true, "date": true, "duration": true, "email": true,
 	"hostname": true, "uri": true, "ipv4": true, "ipv6": true, "uuid": true}
 
-// anthropicSchema fits a JSON schema (ordered, from decodeOrdered) to
-// Anthropic's subset, as its SDKs do: oneOf becomes anyOf, every object
-// gets additionalProperties false, and keywords Anthropic cannot take move
-// into the description as "{keyword: value, ...}". moved collects their
-// names.
+// Anthropic takes a subset of JSON Schema. As in Anthropic's SDKs, oneOf
+// becomes anyOf, every object gets additionalProperties false, and other
+// keywords move into the description.
 func anthropicSchema(v any, moved *[]string) any {
 	o, ok := v.(object)
 	if !ok {
@@ -367,8 +344,6 @@ func anthropicSchema(v any, moved *[]string) any {
 
 func listOf(v any) []any { l, _ := v.([]any); return l }
 
-// object is a JSON object that keeps its key order; decodeOrdered reads one
-// and marshal writes it back in that order.
 type object []member
 
 type member struct {
@@ -385,7 +360,6 @@ func (o object) get(key string) (any, bool) {
 	return nil, false
 }
 
-// set replaces key's value in place, or appends it.
 func (o object) set(key string, val any) object {
 	for i, m := range o {
 		if m.key == key {
@@ -419,8 +393,6 @@ func (o object) MarshalJSON() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// decodeOrdered decodes JSON whose objects become object (key order kept)
-// and numbers json.Number.
 func decodeOrdered(raw []byte) (any, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -458,7 +430,7 @@ func decodeValue(dec *json.Decoder) (any, error) {
 			}
 			o = append(o, member{k, v})
 		}
-		_, err := dec.Token() // }
+		_, err := dec.Token()
 		return o, err
 	case '[':
 		l := []any{}
@@ -469,7 +441,7 @@ func decodeValue(dec *json.Decoder) (any, error) {
 			}
 			l = append(l, v)
 		}
-		_, err := dec.Token() // ]
+		_, err := dec.Token()
 		return l, err
 	}
 	return nil, fmt.Errorf("unexpected %v", d)

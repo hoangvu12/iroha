@@ -21,8 +21,6 @@ func keyNamed(t *testing.T, srv *testkit.Server, name string) gatewaykeys.Gatewa
 	return gatewaykeys.GatewayKey{}
 }
 
-// The Gateway Keys page shows when each key was last used and how many
-// Requests it made in the last 24 hours.
 func TestGatewayKeysShowLastUseAndRecentRequests(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -56,7 +54,6 @@ func TestGatewayKeysShowLastUseAndRecentRequests(t *testing.T) {
 		t.Fatalf("read one: recent %d", one.RecentRequests)
 	}
 
-	// A day later the window has moved past them; last use stays.
 	srv.Clock.Advance(24*time.Hour + time.Minute)
 	up.Enqueue(up.Text("three"))
 	caller.Post("/providers/acme/v1/chat/completions", chat).Expect(200)
@@ -65,8 +62,6 @@ func TestGatewayKeysShowLastUseAndRecentRequests(t *testing.T) {
 	}
 }
 
-// Delete removes a key (unlike revoke, which keeps it on record), frees its
-// name and is undone by reverting its Audit Entry, secret and scope included.
 func TestDeletingAGatewayKeyIsRevertible(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
@@ -93,7 +88,6 @@ func TestDeletingAGatewayKeyIsRevertible(t *testing.T) {
 		t.Fatalf("after revert = %+v", back)
 	}
 
-	// A revoked key can be deleted too, which frees its name.
 	srv.Admin.Post("/api/gateway-keys/friend/revoke", nil).Expect(200)
 	srv.Admin.Delete("/api/gateway-keys/friend").Expect(200)
 	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "friend", "scope": map[string]any{"all": true}}).Expect(201)

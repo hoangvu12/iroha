@@ -2,11 +2,6 @@ package requests
 
 import "encoding/json"
 
-// reassembleGemini merges Gemini stream chunks into one generateContent
-// answer: each candidate's parts in order, consecutive text parts of the
-// same kind (thought or not) joined, function calls kept whole, the last
-// finish reason; top-level fields (usageMetadata, modelVersion,
-// responseId) take their last value. An error chunk is kept as "error".
 func reassembleGemini(payloads [][]byte) ([]byte, bool) {
 	out := map[string]any{}
 	type candidate struct {
@@ -93,7 +88,6 @@ func reassembleGemini(payloads [][]byte) ([]byte, bool) {
 	return b, err == nil
 }
 
-// plainText reports whether a part is only text (a thought or not).
 func plainText(p map[string]any) bool {
 	if _, ok := p["text"].(string); !ok {
 		return false

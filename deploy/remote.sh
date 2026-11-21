@@ -1,29 +1,14 @@
 #!/usr/bin/env bash
-# The server half of deploy.sh. deploy.sh copies it to <dir>/.deploy/ with
-# the new binary and runs it over SSH:
-#
-#   remote.sh check  --dir D --service S --ready-url U [--unit FILE]
-#   remote.sh deploy --dir D --service S --ready-url U --version V
-#                    [--timeout SECONDS] [--keep N] [--unit FILE] [--allow-no-ui]
-#
-# deploy: stop the service (Iroha drains in-flight requests), back up the
-# binary and iroha.db into <dir>/backups/<UTC time>/, swap in
-# <dir>/.deploy/iroha.new, start, and wait for GET /readyz to report the new
-# version. When it does not, restore the backed-up binary and database,
-# start again and wait for the previous version.
-#
 # The last line of output is "IROHA_DEPLOY <outcome> key=value...". Exit
 # codes: 0 deployed or checked, 1 failed before anything changed, 10 rolled
 # back to the previous release, 11 rollback failed (the service may be down).
-#
-# Never prompts: sudo runs with -n, so missing sudo rights fail at once.
 set -euo pipefail
 
 DIR="" SERVICE="iroha" READY_URL="" VERSION="" TIMEOUT=60 KEEP=5 UNIT=""
 
 say() { printf '==> %s\n' "$*"; }
 result() { printf 'IROHA_DEPLOY %s\n' "$*"; }
-fail() { # fail CODE MESSAGE
+fail() {
 	printf 'error: %s\n' "$2" >&2
 	result "failed nothing_changed=yes"
 	exit "$1"
@@ -33,17 +18,15 @@ if [ "$(id -u)" = 0 ]; then SUDO=(); else SUDO=(sudo -n); fi
 as_root() { ${SUDO[@]+"${SUDO[@]}"} "$@" </dev/null; }
 ctl() { as_root systemctl "$@"; }
 
-# Files written as root must stay usable by the service user and by later
-# deploys that log in as the directory's owner.
-own() {
+chown_to_dir_owner() {
 	if [ "$(id -u)" = 0 ]; then chown "$(stat -c %u:%g "$DIR")" "$@"; fi
 }
-own_trees() {
+chown_trees_to_dir_owner() {
 	if [ "$(id -u)" = 0 ] && [ -d "$DIR" ]; then
 		chown -R "$(stat -c %u:%g "$DIR")" "$DIR/.deploy" "$DIR/backups" 2>/dev/null || true
 	fi
 }
-trap own_trees EXIT
+trap chown_trees_to_dir_owner EXIT
 
 fetch() {
 	if command -v curl >/dev/null 2>&1; then
@@ -53,17 +36,12 @@ fetch() {
 	fi
 }
 
-# wait_ready VERSION [NEED_UI]: poll GET /readyz until it reports VERSION (""
-# accepts any) or TIMEOUT seconds pass. With NEED_UI=1 a ready answer must
-# also report "ui": true, or the release is refused at once.
 wait_ready() {
 	local want=$1 need_ui=${2:-0} body got="" deadline=$((SECONDS + TIMEOUT))
 	while [ "$SECONDS" -lt "$deadline" ]; do
 		if body=$(fetch); then
 			got=$(printf '%s' "$body" | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p')
 			if printf '%s' "$body" | grep -q '"status" *: *"ready"' &&{ [ -z "$want" ] || [ "$got" = "$want" ]; }; then
-				# A release that is ready but serves no UI is refused (only the
-				# new release is checked; --allow-no-ui lifts it).
 				if [ "$need_ui" = 1 ] && ! printf '%s' "$body" | grep -q '"ui" *: *true'; then
 					say "refused: $READY_URL reports version $got without the UI (\"ui\": false); build it with npm --prefix web run build, or deploy with --no-ui on purpose"
 					return 1
@@ -122,8 +100,6 @@ install_unit() {
 	as_root systemctl enable "$SERVICE" >/dev/null 2>&1 || as_root systemctl enable "$SERVICE"
 }
 
-# backup BACKUP_DIR VERSION: copy the stopped service's binary and database
-# and check each copy byte for byte.
 backup() {
 	local bk=$1 f
 	mkdir -p "$bk" || return 1
@@ -135,19 +111,19 @@ backup() {
 	printf '%s\n' "$2" >"$bk/version"
 }
 
-# restore BACKUP_DIR: put its binary and database back in place. Returns 1
-# when the backup holds no binary (the first deploy has nothing to go back to).
-restore() {
+restore_file() {
+	cp -p "$1/$2" "$DIR/$2.restore" && mv -f "$DIR/$2.restore" "$DIR/$2" && chown_to_dir_owner "$DIR/$2"
+}
+
+restore_database() {
 	local bk=$1 f
 	rm -f "$DIR/iroha.db" "$DIR/iroha.db-wal" "$DIR/iroha.db-shm"
 	for f in iroha.db iroha.db-wal; do
-		if [ -f "$bk/$f" ]; then
-			cp -p "$bk/$f" "$DIR/$f.restore" && mv -f "$DIR/$f.restore" "$DIR/$f" && own "$DIR/$f"
-		fi
+		if [ -f "$bk/$f" ]; then restore_file "$bk" "$f" || return 1; fi
 	done
-	[ -f "$bk/iroha" ] || { rm -f "$DIR/iroha"; return 1; }
-	cp -p "$bk/iroha" "$DIR/iroha.restore" && mv -f "$DIR/iroha.restore" "$DIR/iroha" && own "$DIR/iroha"
 }
+
+holds_earlier_binary() { [ -f "$1/iroha" ]; }
 
 prune() {
 	local old
@@ -189,7 +165,7 @@ deploy() {
 
 	say "swapping binary: ${prev:-none} -> $VERSION"
 	mv -f "$new" "$DIR/iroha"
-	own "$DIR/iroha"
+	chown_to_dir_owner "$DIR/iroha"
 	started=$(date +%s)
 	say "starting $SERVICE"
 	ctl start "$SERVICE" || say "systemctl start failed"
@@ -205,16 +181,21 @@ deploy() {
 	say "rolling back to ${prev:-nothing}"
 	ctl stop "$SERVICE" || true
 	cp -p "$DIR/iroha" "$DIR/.deploy/iroha.failed" 2>/dev/null || true
-	if ! restore "$bk"; then
-		prune
-		result "rolled_back version=$VERSION restored=none backup=$bk note=first_deploy_service_left_stopped"
-		exit 10
-	fi
-	ctl start "$SERVICE" || true
-	if wait_ready "$prev"; then
-		prune
-		result "rolled_back version=$VERSION restored=$prev backup=$bk"
-		exit 10
+	if restore_database "$bk"; then
+		if ! holds_earlier_binary "$bk"; then
+			rm -f "$DIR/iroha"
+			prune
+			result "rolled_back version=$VERSION restored=none backup=$bk note=first_deploy_service_left_stopped"
+			exit 10
+		fi
+		if restore_file "$bk" iroha; then
+			ctl start "$SERVICE" || true
+			if wait_ready "$prev"; then
+				prune
+				result "rolled_back version=$VERSION restored=$prev backup=$bk"
+				exit 10
+			fi
+		fi
 	fi
 	result "rollback_failed version=$VERSION restore=$prev backup=$bk"
 	exit 11

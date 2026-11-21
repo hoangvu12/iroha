@@ -2,20 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, seg } from "@/api/client";
 
-// Types and hooks of the Requests page. They mirror the Go types in
-// internal/requests (GET /api/requests, /stats, /filters, /{id}, /{id}/capture).
-// Fields ticket 05 adds to Attempts are read in attempt-info.ts only.
-
 export type Shape = "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini";
 
-/** How the Request's conversation chose its Upstream Key (conversation affinity). */
 export type Affinity = {
   source: "header" | "claude_code" | "codex" | "session_id" | "opencode" | "prompt_cache_key" | "prefix" | "none";
   mode: "on" | "off" | "control" | "none";
   preferred_served?: boolean;
 };
 
-/** Token usage: input is every prompt token; cache_read and cache_write are parts of it (cache_write_long, of the writes). */
 export type Usage = { input: number; output: number; cache_read: number; cache_write: number; cache_write_long: number; reasoning: number };
 
 export type Attempt = {
@@ -29,7 +23,6 @@ export type Attempt = {
   upstream_key_id: string;
   upstream_key: string;
   wire_model: string;
-  /** The model the Provider's answer said served it (ticket 32); read through attempt-info.ts. */
   reported_model?: string;
   shape: Shape;
   status: number;
@@ -37,7 +30,6 @@ export type Attempt = {
   first_byte_ms?: number;
   duration_ms?: number;
   usage?: Usage;
-  // Set on failed Attempts (ticket 05); read through attempt-info.ts.
   rule?: string;
   outcome?: string;
   reason?: string;
@@ -53,7 +45,6 @@ export type RequestRecord = {
   state: "in_progress" | "completed" | "interrupted";
   status: number;
   error?: { code: string; message: string };
-  /** One line saying what happened at each Attempt, for Requests with a failed or more than one Attempt. */
   summary?: string;
   caller: { kind: "gateway_key" | "test"; gateway_key_id?: string; name: string };
   route: string;
@@ -88,14 +79,11 @@ export type Stats = {
   retried: number;
   median_duration_ms?: number;
   median_first_byte_ms?: number;
-  /** Requests that read anything from the Provider's prompt cache. */
   cache_hits: number;
   tokens: Usage & { total: number };
-  /** With group_by: one row per group. */
   groups?: StatsGroup[];
 };
 
-/** One group of GET /api/requests/stats?group_by=: only the grouped-by fields are set. */
 export type StatsGroup = {
   provider?: string;
   upstream_key_id?: string;
@@ -119,7 +107,6 @@ export type Capture = {
   response: CapturedBody & { status: number; stream?: string };
 };
 
-/** The filters of GET /api/requests and /stats, as the URL holds them. */
 export type Query = {
   q?: string;
   caller?: string;
@@ -145,12 +132,6 @@ const POLL_MS = 2000;
 const byNewest = (a: RequestRecord, b: RequestRecord) =>
   a.started_at === b.started_at ? (a.id < b.id ? 1 : -1) : a.started_at < b.started_at ? 1 : -1;
 
-/**
- * The live feed: the newest page of Requests for q, older pages on demand,
- * and, while live, everything that started or changed since, polled with
- * the page's cursor (GET /api/requests?changed_after=). Updated Requests
- * replace their rows; new ones go on top.
- */
 export function useRequestFeed(q: Query, live: boolean) {
   const pages = useInfiniteQuery({
     queryKey: keys.list(q),
@@ -159,17 +140,14 @@ export function useRequestFeed(q: Query, live: boolean) {
     getNextPageParam: (last) => last.next_before ?? undefined,
     refetchOnWindowFocus: false,
     staleTime: Infinity,
-    // A filter change is a new query: keep the old rows until the new ones land, so no skeleton flashes.
     placeholderData: keepPreviousData,
   });
   const placeholder = pages.isPlaceholderData;
 
-  // Changes seen since the first page was read, keyed by Request ID.
   const [changes, setChanges] = useState<Map<string, RequestRecord>>(new Map());
   const cursor = useRef<number | undefined>(undefined);
   const firstPage = pages.data?.pages[0];
 
-  // A new first page (filters changed, or refetched) restarts the changes.
   useEffect(() => {
     cursor.current = firstPage?.cursor;
     setChanges(new Map());
@@ -177,20 +155,17 @@ export function useRequestFeed(q: Query, live: boolean) {
 
   const qKey = JSON.stringify(q);
   useEffect(() => {
-    // The rows on screen are the previous filter's until the new page lands: nothing to poll for yet.
     if (!live || placeholder || cursor.current === undefined) return;
     let stopped = false;
     let paused = false;
     let timer: ReturnType<typeof setTimeout>;
     const ctrl = new AbortController();
     const tick = async () => {
-      // A hidden tab doesn't poll (like refetchInterval elsewhere); it catches up when shown (UI ticket 32).
       if (document.hidden) {
         paused = true;
         return;
       }
       try {
-        // Drain: a full page means more changes wait.
         for (let i = 0; i < 5 && !stopped; i++) {
           const from = cursor.current;
           if (from === undefined) return;
@@ -206,9 +181,7 @@ export function useRequestFeed(q: Query, live: boolean) {
           }
           if (p.requests.length < PAGE) break;
         }
-      } catch {
-        // A missed poll is retried on the next tick; the page keeps what it has.
-      } finally {
+      } catch {} finally {
         if (!stopped) timer = setTimeout(tick, POLL_MS);
       }
     };
@@ -225,9 +198,8 @@ export function useRequestFeed(q: Query, live: boolean) {
       document.removeEventListener("visibilitychange", onVisibility);
       ctrl.abort();
     };
-  }, [live, qKey, firstPage, placeholder]); // q is read through qKey
+  }, [live, qKey, firstPage, placeholder]);
 
-  // Rows that arrived live are in `added` (the table fades them in once).
   const { rows, added } = useMemo(() => {
     const listed = pages.data?.pages.flatMap((p) => p.requests) ?? [];
     const added = new Set<string>();
@@ -263,7 +235,6 @@ export function useFilterOptions(since?: string) {
   });
 }
 
-/** One Request with its Attempts; refetched while it is in progress. */
 export function useRequest(id: string | undefined, seed?: RequestRecord) {
   return useQuery({
     queryKey: keys.one(id ?? ""),
@@ -274,15 +245,9 @@ export function useRequest(id: string | undefined, seed?: RequestRecord) {
   });
 }
 
-/**
- * Fetches these Requests ahead (the open one's neighbours in the feed), so ↑/↓ in the Request
- * sheet lands on a Request already whole: its content swaps at once, with no skeleton fading
- * out (UI ticket 18: keyboard stepping never animates). Fresh for a minute.
- */
 export function usePrefetchRequests(rows: (Pick<RequestRecord, "id" | "captured"> | undefined)[], { captures = false } = {}) {
   const client = useQueryClient();
   const ids = rows.filter((r) => !!r).map((r) => r.id).join(" ");
-  // On the Captured tab, their captures too.
   const caps = captures ? rows.filter((r) => !!r?.captured).map((r) => r!.id).join(" ") : "";
   useEffect(() => {
     const split = (s: string) => (s ? s.split(" ") : []);
@@ -304,7 +269,6 @@ export function useCapture(id: string | undefined, captured: boolean) {
 
 type Setting = { name: string; value: number };
 
-/** retention.captures_days, for "Bodies are kept for N days." */
 export function useCaptureDays() {
   return useQuery({
     queryKey: ["settings"],

@@ -5,15 +5,6 @@ import (
 	"encoding/json"
 )
 
-// Passthrough edits a JSON object in place: only the bytes of the one
-// top-level value changed are replaced, so everything else the Caller or
-// Provider wrote (unknown fields, key order, spacing) reaches the other side
-// byte for byte.
-
-// span locates the value of a top-level key of a JSON object. ok is false
-// when obj is not a JSON object. When key is absent, found is false and
-// closing is the index of the object's closing brace; fields counts the
-// object's members.
 type span struct {
 	start, end int
 	found      bool
@@ -40,7 +31,7 @@ func locate(obj []byte, key string) (s span, ok bool) {
 		}
 		after := int(dec.InputOffset())
 		s.fields++
-		if k == key { // the last occurrence wins, as in most parsers
+		if k == key { // the last occurrence wins, as in most JSON parsers
 			i := bytes.Index(obj[before:after], raw)
 			if i < 0 {
 				return s, false
@@ -55,7 +46,6 @@ func locate(obj []byte, key string) (s span, ok bool) {
 	return s, true
 }
 
-// field returns the raw value of a top-level key.
 func field(obj []byte, key string) (json.RawMessage, bool) {
 	s, ok := locate(obj, key)
 	if !ok || !s.found {
@@ -64,9 +54,6 @@ func field(obj []byte, key string) (json.RawMessage, bool) {
 	return json.RawMessage(obj[s.start:s.end]), true
 }
 
-// setField returns obj with the top-level key set to value (raw JSON):
-// replaced where it stands, or appended when absent. ok is false when obj is
-// not a JSON object; obj is then returned unchanged.
 func setField(obj []byte, key string, value []byte) ([]byte, bool) {
 	s, ok := locate(obj, key)
 	if !ok {
@@ -92,7 +79,6 @@ func setField(obj []byte, key string, value []byte) ([]byte, bool) {
 	return b.Bytes(), true
 }
 
-// jsonString encodes s as a JSON string without HTML escaping.
 func jsonString(s string) []byte {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
@@ -101,9 +87,6 @@ func jsonString(s string) []byte {
 	return bytes.TrimRight(b.Bytes(), "\n")
 }
 
-// echoModel makes the top-level "model" of a JSON object read model, the
-// name the Caller asked for. Anything that is not an object with a string
-// model is returned unchanged.
 func echoModel(obj []byte, model string) []byte {
 	if !bytes.Contains(obj, []byte(`"model"`)) {
 		return obj

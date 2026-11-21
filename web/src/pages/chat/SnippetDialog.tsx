@@ -11,7 +11,6 @@ type Lang = "curl" | "python" | "typescript";
 const LABEL: Record<Lang, string> = { curl: "curl", python: "Python", typescript: "TypeScript" };
 const LEXER = { curl: "shell", python: "python", typescript: "typescript" } as const;
 
-/** curl, Python and TypeScript sending the current settings to the Gateway as a Caller (GET /api/test/snippets). */
 export function SnippetDialog({ open, onOpenChange, settings, prompt }: { open: boolean; onOpenChange: (o: boolean) => void; settings: Settings; prompt: string }) {
   const [lang, setLang] = useState<Lang>("curl");
   const sn = useSnippets(settings, prompt, open);
@@ -36,7 +35,6 @@ export function SnippetDialog({ open, onOpenChange, settings, prompt }: { open: 
       {sn.isError ? (
         <ErrorState title="Couldn't write the snippet" error={sn.error} onRetry={() => void sn.refetch()} />
       ) : (
-        // All of it: the dialog scrolls as a page (UI ticket 28); long lines still scroll sideways.
         <CodeBlock maxHeight={false} nowrap lang={code ? LEXER[lang] : "text"}>
           {code ?? "…"}
         </CodeBlock>

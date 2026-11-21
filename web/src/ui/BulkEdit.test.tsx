@@ -48,13 +48,11 @@ test("mixed values show as mixed: a dash, a 'Mixed' placeholder in a select and 
   expect(within(dialog).getByRole("checkbox", { name: "Enabled" }).getAttribute("aria-checked")).toBe("mixed");
   expect(dialog.textContent).toContain("Mixed: on for 2 of 3 keys");
   expect(within(dialog).getByRole("combobox", { name: "Tier" }).textContent).toContain("Mixed");
-  // A value every row shares shows as the value.
   expect((within(dialog).getByRole("textbox", { name: "Note" }) as HTMLInputElement).value).toBe("x");
   expect(within(dialog).getByRole("checkbox", { name: "eu" }).getAttribute("aria-checked")).toBe("true");
   expect(within(dialog).getByRole("checkbox", { name: "us" }).getAttribute("aria-checked")).toBe("mixed");
   expect(within(dialog).getByRole("checkbox", { name: "asia" }).getAttribute("aria-checked")).toBe("false");
   expect(dialog.textContent).toContain("1 of 3");
-  // Nothing changed yet: Apply waits.
   expect(within(dialog).getByRole("button", { name: "Apply to 3 keys" }).hasAttribute("disabled") || within(dialog).getByRole("button", { name: "Apply to 3 keys" }).getAttribute("aria-disabled") === "true").toBe(true);
 });
 
@@ -64,23 +62,19 @@ test("only changed fields are sent; Keep as is and setting a value back leave a 
   render(<Bar apply={apply} />);
   await user.click(screen.getByRole("button", { name: "Edit…" }));
   const dialog = await screen.findByRole("dialog", { name: "Edit 3 keys" });
-  // Enabled: mixed -> on for all.
   await user.click(within(dialog).getByRole("checkbox", { name: "Enabled" }));
   expect(within(dialog).getByRole("checkbox", { name: "Enabled" }).getAttribute("aria-checked")).toBe("true");
   expect(dialog.textContent).toContain("On for all 3 keys");
-  // Note: typed, then put back by Keep as is.
   const note = within(dialog).getByRole("textbox", { name: "Note" });
   await user.type(note, "y");
   await user.click(within(dialog).getByRole("button", { name: "Keep Note as each key has it" }));
   expect((within(dialog).getByRole("textbox", { name: "Note" }) as HTMLInputElement).value).toBe("x");
-  // Zones: add asia to all, take us off all, eu untouched (already on all).
   await user.click(within(dialog).getByRole("checkbox", { name: "asia" }));
-  await user.click(within(dialog).getByRole("checkbox", { name: "us" })); // mixed -> on
-  await user.click(within(dialog).getByRole("checkbox", { name: "us" })); // on -> off
+  await user.click(within(dialog).getByRole("checkbox", { name: "us" }));
+  await user.click(within(dialog).getByRole("checkbox", { name: "us" }));
   await user.click(within(dialog).getByRole("button", { name: "Apply to 3 keys" }));
   await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
   expect(apply).toHaveBeenCalledWith({ on: true, zones: { add: ["asia"], remove: ["us"] } });
-  // The dialog closes and the result (with Undo) shows where Edit was pressed.
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   const bar = screen.getByRole("group", { name: "3 selected" });
   expect(await within(bar).findByText("Done", quiet)).toBeTruthy();

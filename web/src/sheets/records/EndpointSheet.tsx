@@ -4,7 +4,7 @@ import { MessageCircle, Pencil, Trash2 } from "lucide-react";
 import { api, seg } from "@/api/client";
 import { useChatActions } from "@/app/chat-panel";
 import { formatDate } from "@/lib/format";
-import { authStyleLabel, cacheSettingLabel, calls, type Endpoint, errorText, natural, shapeLabel, useKeys, useProvider } from "@/pages/providers/api";
+import { authStyleLabel, cacheSettingLabel, calls, type Endpoint, errorText, natural, shapeLabel, useKeys } from "@/pages/providers/api";
 import { useSheetRefresh } from "./refresh";
 import { KeyStateLabel } from "@/pages/providers/controls";
 import { endpointBody, EndpointFields, endpointFields } from "@/pages/providers/Endpoints";
@@ -61,22 +61,15 @@ export default function EndpointSheet({ record, index }: SheetBodyProps<"endpoin
   return (
     <>
       <SheetBar kind="Endpoint" page={page} />
-      {/* Keyed by the Endpoint's id: a rename keeps the sheet's state, another Endpoint starts afresh. */}
       <EndpointDetails key={q.data.id} e={q.data} provider={provider} index={index} refetch={() => q.refetch()} />
     </>
   );
 }
 
-/**
- * An Endpoint's facts, and its fields in their place while it is edited (UI
- * ticket 27: it was a dialog). Save keeps the sheet open, so the result shows
- * in it, with Undo; a rename moves the sheet to the new name.
- */
 function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provider: string; index: number; refetch: () => Promise<unknown> }) {
   const sheets = useSheets();
   const qc = useQueryClient();
   const keys = useKeys(provider);
-  const providerQ = useProvider(provider);
   const chat = useChatActions();
   const confirm = useConfirm();
   const { refresh, refreshAll } = useSheetRefresh(refetch);
@@ -92,7 +85,7 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
   };
 
   const save = () => {
-    const checked = endpointBody(f, provider, providerQ.data?.endpoints ?? [], e);
+    const checked = endpointBody(f);
     if ("error" in checked) return setError(checked.error);
     setError(undefined);
     void saving
@@ -100,7 +93,6 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
         async () => {
           const res = await calls.updateEndpoint(provider, e.name, checked.body);
           if (res.endpoint.name !== e.name) {
-            // The sheet follows the Endpoint to its new name, with no reload of what it shows.
             qc.setQueryData(endpointQuery(provider, res.endpoint.name), res.endpoint);
             sheets.replace(index, rec.endpoint(provider, res.endpoint.name));
           }
@@ -111,7 +103,6 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
       .then((ok) => ok && setEditing(false));
   };
 
-  // Asks first; the Endpoint is gone afterwards, so its sheet closes and the result (with Undo) toasts.
   const askDelete = () =>
     confirm.ask({
       title: `Delete ${e.name}?`,
@@ -120,7 +111,6 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
       onConfirm: async () => {
         const res = await calls.deleteEndpoint(provider, e.name);
         void refreshAll();
-        // Toast: the Endpoint's sheet closes with it.
         notifyChange(`Endpoint ${e.name} deleted`, res, { onUndone: refreshAll });
         const at = sheets.stack.findIndex((s) => recordKey(s.record) === recordKey(rec.endpoint(provider, e.name)));
         if (at >= 0) sheets.close(at);
@@ -167,7 +157,6 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
               save();
             }}
           >
-            {/* One column: a sheet is narrower than the dialog was. */}
             <EndpointFields f={f} setF={setF} isNew={false} wide={false} />
             <SaveError save={saving} error={error} />
             <div className="flex flex-wrap justify-end gap-2">
@@ -194,7 +183,6 @@ function EndpointDetails({ e, provider, index, refetch }: { e: Endpoint; provide
             </Fact>
             <Fact label="Static headers">{Object.keys(e.static_headers ?? {}).length || none}</Fact>
             <Fact label="Model renames">{Object.keys(e.renames ?? {}).length || none}</Fact>
-            {/* Prompt caching 03; an older server sends none of it. */}
             {e.caching && (
               <>
                 <Fact label="Cache markers">{cacheSettingLabel(e.cache_markers)}</Fact>

@@ -3,12 +3,6 @@ import { ConfirmDialog, TypeToConfirmDialog } from "@/ui/Dialog";
 import { notifyChange } from "@/ui/toast";
 import { type GatewayKey, useDeleteKey, useInvalidateKeys, useRevokeKey } from "./api";
 
-// Revoke asks for the name typed (it can't be undone); delete names what
-// goes and is undone from its toast, through the Audit Entry (C25).
-// The list asks them with `useConfirm` (UI ticket 21); the key page's danger
-// zone renders them as dialogs.
-
-/** The questions Revoke… and Delete… ask, for `confirm.ask(...)`. */
 export function useKeyQuestions() {
   const revokeKey = useRevokeKey();
   const del = useDeleteKey();
@@ -21,7 +15,6 @@ export function useKeyQuestions() {
       confirmLabel: "Revoke key",
       onConfirm: async () => {
         const res = await revokeKey.mutateAsync(k.id);
-        // Toast: the confirm dialog has closed (and the row has moved to Revoked keys).
         notifyChange(`${k.name} revoked`, res, { undoable: false });
         onDone?.();
       },
@@ -34,7 +27,6 @@ export function useKeyQuestions() {
       confirmLabel: "Delete key",
       onConfirm: async () => {
         const res = await del.mutateAsync(k.id);
-        // Toast: the confirm dialog has closed and the row is gone (or the key page navigates away), with Undo after a delete.
         notifyChange(`${k.name} deleted`, res, { undoneMessage: `${k.name} is back`, onUndone: invalidate });
         onDone?.();
       },

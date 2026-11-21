@@ -8,9 +8,6 @@ import { Toaster } from "@/ui/toast";
 import { AdminTokensTab } from "./AdminTokens";
 import type { AdminToken } from "./api";
 
-// Settings → Admin Tokens on the shared DataTable (UI ticket 08): sorting,
-// pages, and Revoke… asking for the name typed.
-
 let approve = false;
 const agent = createAgent({ allow: (step) => !step.confirm || approve });
 const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -63,7 +60,7 @@ test("tokens come oldest first in numbered pages past 25, and sort by Created an
   await user.click(screen.getByRole("button", { name: "Sort by Created" }));
   expect(within(rows()[0]).getByText("script-30")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Sort by Last used" }));
-  expect(within(rows()[0]).getByText("script-1")).toBeTruthy(); // the most recent use first
+  expect(within(rows()[0]).getByText("script-1")).toBeTruthy();
   expect(screen.getByRole("navigation", { name: "Pages of Admin Tokens" })).toBeTruthy();
 });
 
@@ -78,6 +75,33 @@ test("Revoke… in a token's menu is red and asks for its name typed before it r
   await user.type(within(dialog).getByRole("textbox"), "script-2");
   await user.click(within(dialog).getByRole("button", { name: "Revoke token" }));
   await waitFor(() => expect(writes(fetch)).toEqual(["POST /api/admin-tokens/at_2/revoke"]));
+});
+
+test("New Admin Token sends the name to the server and shows its refusal of a taken name in the dialog", async () => {
+  const user = userEvent.setup();
+  const fetch = vi.fn<typeof globalThis.fetch>(async (_, init) => {
+    if ((init?.method ?? "GET") === "GET") return answer({ admin_tokens: [token(1)] });
+    const code = JSON.parse(String(init?.body)).name === "gone" ? "admin_token_revoked" : "name_taken";
+    return new Response(JSON.stringify({ error: { code, message: "Refused.", hint: "Pick another name." } }), { status: 409, headers: { "Content-Type": "application/json" } });
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter>
+        <AdminTokensTab />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await user.click(await screen.findByRole("button", { name: "New Admin Token" }));
+  const dialog = await screen.findByRole("dialog", { name: "New Admin Token" });
+  await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "script-9");
+  await user.click(within(dialog).getByRole("button", { name: "Create token" }));
+  expect(await within(dialog).findByText("An Admin Token is already named script-9. Pick another name.")).toBeTruthy();
+  await user.clear(within(dialog).getByRole("textbox", { name: "Name" }));
+  await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "gone");
+  await user.click(within(dialog).getByRole("button", { name: "Create token" }));
+  expect(await within(dialog).findByText("gone was revoked and its name stays on record. Pick another name.")).toBeTruthy();
+  expect(fetch.mock.calls.filter(([, i]) => i?.method === "POST").map(([u]) => String(u))).toEqual(["/api/admin-tokens", "/api/admin-tokens"]);
 });
 
 test("no tokens: the empty state", async () => {
@@ -104,7 +128,6 @@ test("a row's copy button, shown on hover, is always shown where nothing hovers 
   renderTab([token(1)]);
   const copy = await screen.findByRole("button", { name: "Copy script-1" });
   const c = copy.getAttribute("class")!.split(/\s+/);
-  // row-reveal (styles/index.css): hidden until the row is hovered, always shown where nothing hovers.
   expect(c).toContain("row-reveal");
 });
 

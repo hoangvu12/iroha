@@ -13,8 +13,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// Admin Tokens are the resource these tests drive the machinery through.
-
 func entries(t *testing.T, c *testkit.Client, query string) []audit.Entry {
 	t.Helper()
 	var page audit.EntryPage
@@ -55,12 +53,12 @@ func revert(t *testing.T, c *testkit.Client, entry string, status int, query ...
 
 func TestAuditEntriesNameTheActorAndCanBeFiltered(t *testing.T) {
 	srv := testkit.Start(t)
-	agent := srv.NewAdminToken("agent-1") // entry 1, by bootstrap
+	agent := srv.NewAdminToken("agent-1")
 	srv.Clock.Advance(time.Hour)
-	byAgent := create(t, agent, map[string]any{"name": "worker", "note": "made by an agent"}) // entry 2, by agent-1
+	byAgent := create(t, agent, map[string]any{"name": "worker", "note": "made by an agent"})
 	srv.Clock.Advance(time.Hour)
 	var patched admintokens.TokenResult
-	srv.Admin.Patch("/api/admin-tokens/worker", map[string]any{"note": "edited"}).Expect(200).JSON(&patched) // entry 3
+	srv.Admin.Patch("/api/admin-tokens/worker", map[string]any{"note": "edited"}).Expect(200).JSON(&patched)
 
 	all := entries(t, srv.Admin, "")
 	if len(all) != 3 || all[0].ID != patched.AuditEntry || all[1].ID != byAgent.AuditEntry {
@@ -109,7 +107,6 @@ func TestAuditEntriesNameTheActorAndCanBeFiltered(t *testing.T) {
 		}
 	}
 
-	// Secrets never appear whole in Audit Entries or in the change log events.
 	raw := srv.Admin.Get("/api/audit-entries").Text()
 	if strings.Contains(raw, byAgent.AdminToken.Secret) || strings.Contains(raw, agent.Token) {
 		t.Fatal("an Audit Entry shows a whole secret")
@@ -133,7 +130,6 @@ func TestRevertRestoresTheBeforeStateAndIsItselfAudited(t *testing.T) {
 	var edit admintokens.TokenResult
 	srv.Admin.Patch("/api/admin-tokens/worker", map[string]any{"name": "renamed", "note": "second"}).Expect(200).JSON(&edit)
 
-	// A dry run of the revert reports and writes nothing.
 	var dry audit.RevertResult
 	revert(t, agent, edit.AuditEntry, 200, "dry_run=true").JSON(&dry)
 	if !dry.DryRun || dry.AuditEntry != "" || dry.Reverted != edit.AuditEntry || len(dry.Changes) != 1 || !slices.Equal(dry.Changes[0].Fields, []string{"name", "note"}) {
@@ -143,7 +139,6 @@ func TestRevertRestoresTheBeforeStateAndIsItselfAudited(t *testing.T) {
 		t.Fatalf("dry revert changed the token: %+v", tok)
 	}
 
-	// The agent reverts the Owner's edit.
 	var undo audit.RevertResult
 	revert(t, agent, edit.AuditEntry, 200).JSON(&undo)
 	if tok := token(t, srv, created.AdminToken.ID); tok.Name != "worker" || tok.Note != "first" || tok.Secret != created.AdminToken.Secret {
@@ -163,13 +158,11 @@ func TestRevertRestoresTheBeforeStateAndIsItselfAudited(t *testing.T) {
 		t.Fatalf("second revert: %+v", e)
 	}
 
-	// Reverting the revert redoes the change.
 	revert(t, srv.Admin, undo.AuditEntry, 200)
 	if tok := token(t, srv, created.AdminToken.ID); tok.Name != "renamed" || tok.Note != "second" {
 		t.Fatalf("after redo: %+v", tok)
 	}
 
-	// The create cannot be reverted while the record differs from what it created.
 	if e := revert(t, srv.Admin, created.AuditEntry, 409).Err(); e.Code != "audit_conflict" {
 		t.Fatalf("create revert after edits must conflict (the record changed since): %+v", e)
 	}
@@ -183,21 +176,19 @@ func TestAuditEntryFiltersListTheActorsAndResourcesInUse(t *testing.T) {
 		t.Fatalf("no entries yet, filters = %+v", empty)
 	}
 
-	agent := srv.NewAdminToken("agent-1")                                                         // bootstrap: 1 entry
-	create(t, agent, map[string]any{"name": "worker"})                                            // agent-1: 1 entry
-	owner := srv.OwnerSession()                                                                   // bootstrap sets the password: 2 entries
-	srv.Clock.Advance(time.Minute)                                                                //
-	create(t, owner, map[string]any{"name": "from-ui"})                                           // Owner: 1 entry
-	owner.Patch("/api/admin-tokens/agent-1", map[string]any{"name": "agent-renamed"}).Expect(200) // Owner: 2 entries
-	create(t, agent, map[string]any{"name": "worker-2"})                                          // agent, now named agent-renamed: 2 entries
+	agent := srv.NewAdminToken("agent-1")
+	create(t, agent, map[string]any{"name": "worker"})
+	owner := srv.OwnerSession()
+	srv.Clock.Advance(time.Minute)
+	create(t, owner, map[string]any{"name": "from-ui"})
+	owner.Patch("/api/admin-tokens/agent-1", map[string]any{"name": "agent-renamed"}).Expect(200)
+	create(t, agent, map[string]any{"name": "worker-2"})
 
 	var f audit.FilterOptions
 	srv.Admin.Get("/api/audit-entries/filters").Expect(200).JSON(&f)
 	if len(f.Actors) != 3 {
 		t.Fatalf("actors = %+v", f.Actors)
 	}
-	// The Owner comes first, then Admin Tokens by most recent change; a
-	// renamed token shows its newest name and filters by ID.
 	o, a, b := f.Actors[0], f.Actors[1], f.Actors[2]
 	if o.Kind != api.ActorOwnerSession || o.Name != "Owner" || o.ID != "" || o.Filter != "Owner" || o.Entries != 2 {
 		t.Fatalf("Owner = %+v", o)
@@ -279,7 +270,6 @@ func TestRevertRefusesIrreversibleAndConflictingEntries(t *testing.T) {
 		t.Fatalf("revert of a revoke: %+v", e)
 	}
 
-	// Two edits of one record: the older cannot be reverted over the newer.
 	create(t, srv.Admin, map[string]any{"name": "pi"})
 	var e1, e2 admintokens.TokenResult
 	srv.Admin.Patch("/api/admin-tokens/pi", map[string]any{"note": "x"}).Expect(200).JSON(&e1)
@@ -299,7 +289,6 @@ func TestRevertRefusesIrreversibleAndConflictingEntries(t *testing.T) {
 	if tok := token(t, srv, "pi"); tok.Note != "y" {
 		t.Fatalf("a refused revert changed the token: %+v", tok)
 	}
-	// Newest first works.
 	revert(t, srv.Admin, e2.AuditEntry, 200)
 	revert(t, srv.Admin, e1.AuditEntry, 200)
 	if tok := token(t, srv, "pi"); tok.Note != "" {
@@ -310,7 +299,7 @@ func TestRevertRefusesIrreversibleAndConflictingEntries(t *testing.T) {
 func TestRevertingABulkEntryRestoresEveryRecord(t *testing.T) {
 	srv := testkit.Start(t)
 	var bulk audit.BulkResult[admintokens.Token]
-	srv.Admin.Post("/api/admin-tokens/bulk", map[string]any{"items": []any{
+	srv.Admin.Put("/api/admin-tokens/bulk", map[string]any{"items": []any{
 		map[string]any{"name": "a", "note": "1"}, map[string]any{"name": "b"}, map[string]any{"name": "a", "note": "2"},
 	}}).Expect(200).JSON(&bulk)
 	if bulk.Succeeded != 3 || bulk.Items[2].Outcome != "updated" {
@@ -326,7 +315,6 @@ func TestRevertingABulkEntryRestoresEveryRecord(t *testing.T) {
 	srv.Admin.Get("/api/admin-tokens/b").Expect(404)
 }
 
-// Every error the admin API returns carries a code, a message and a hint.
 func TestErrorResponsesAlwaysIncludeAHint(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.NewAdminToken("worker")
@@ -362,8 +350,6 @@ func TestErrorResponsesAlwaysIncludeAHint(t *testing.T) {
 	}
 }
 
-// The conventions are described once in the served documents, and every
-// mutating admin route takes dry_run.
 func TestDocumentsDescribeTheConventionsOnce(t *testing.T) {
 	srv := testkit.Start(t)
 	for _, r := range srv.App.Routes() {
@@ -375,7 +361,7 @@ func TestDocumentsDescribeTheConventionsOnce(t *testing.T) {
 		}
 	}
 	skill := srv.Anon.Get("/skill.md").Expect(200).Text()
-	for _, want := range []string{"## Conventions of every admin resource", "dry_run=true", "/bulk", "Create-or-update", "audit_conflict", "POST /api/audit-entries/{entry}/revert"} {
+	for _, want := range []string{"## Conventions of every admin resource", "dry_run=true", "/bulk", "PUT /api/<resource>/{name}", "409 `name_taken`", "audit_conflict", "POST /api/audit-entries/{entry}/revert"} {
 		if !strings.Contains(skill, want) {
 			t.Errorf("skill lacks %q", want)
 		}

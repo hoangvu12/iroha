@@ -11,8 +11,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// turn is turn n (from 1) of a coding-agent conversation: the same system
-// prompt, tools and first user message, then the history so far.
 func turn(convo string, n int) map[string]any {
 	msgs := []any{
 		map[string]any{"role": "system", "content": "You are a coding agent."},
@@ -42,8 +40,6 @@ func affinityOf(t *testing.T, srv *testkit.Server, resp *testkit.Response) reque
 	return *r.Affinity
 }
 
-// Every turn of a conversation goes to one key, found from the prompt's
-// start when the Caller sends no session; each conversation has its own.
 func TestTurnsOfAConversationLandOnOneKey(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -72,9 +68,6 @@ func TestTurnsOfAConversationLandOnOneKey(t *testing.T) {
 	}
 }
 
-// A key that cools moves its conversation to one second key, the same on
-// every turn; the conversation comes back once the key works again. The
-// Iroha-Session header names the conversation and is never forwarded.
 func TestACooledKeyMovesTheConversationToTheSameSecondKey(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -109,7 +102,6 @@ func TestACooledKeyMovesTheConversationToTheSameSecondKey(t *testing.T) {
 		}
 	}
 
-	// Cooling over: the key is back once it works again (here a key test).
 	srv.Clock.Advance(2 * time.Minute)
 	var keys struct {
 		Keys []struct{ Name, Secret string } `json:"upstream_keys"`
@@ -126,7 +118,6 @@ func TestACooledKeyMovesTheConversationToTheSameSecondKey(t *testing.T) {
 	}
 }
 
-// Two Callers sending the same session ID are two conversations.
 func TestCallersSendingTheSameSessionDoNotShareIt(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -148,7 +139,6 @@ func TestCallersSendingTheSameSessionDoNotShareIt(t *testing.T) {
 	}
 }
 
-// With affinity off the Provider's keys round-robin, conversation or not.
 func TestAffinityOffKeepsRoundRobin(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -173,16 +163,12 @@ func TestAffinityOffKeepsRoundRobin(t *testing.T) {
 	if a := affinityOf(t, srv, resp); a.Source != "prefix" || a.Mode != "off" || a.PreferredServed != nil {
 		t.Fatalf("affinity = %+v", a)
 	}
-	// A new Provider has it on.
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "fresh"}).Expect(201).JSON(&p)
 	if p.Provider.Affinity != "on" {
 		t.Fatalf("a new Provider has affinity %q", p.Provider.Affinity)
 	}
 }
 
-// In a Pool mixing Providers with affinity on and off, the Request records
-// the mode of the Provider whose key served it, so round-robin traffic is
-// never filed as affinity on; when nothing serves, the last Attempt's.
 func TestAPoolRecordsTheAffinityOfTheProviderThatServed(t *testing.T) {
 	srv := testkit.Start(t)
 	zai, chutes := testkit.NewOpenAIChat(t), testkit.NewOpenAIChat(t)
@@ -200,7 +186,6 @@ func TestAPoolRecordsTheAffinityOfTheProviderThatServed(t *testing.T) {
 		t.Fatalf("chutes (affinity on) served, yet affinity = %+v", a)
 	}
 
-	// Nothing serves: the last Attempt's Provider decides.
 	srv.Clock.Advance(2 * time.Minute)
 	pool(t, srv, "glm", nil, "chutes", "glm-4.6", "zai", "glm-4.6")
 	chutes.Enqueue(chutes.Error(429, "slow down"))
@@ -210,8 +195,6 @@ func TestAPoolRecordsTheAffinityOfTheProviderThatServed(t *testing.T) {
 	}
 }
 
-// preferred_served says the key affinity put first gave the Caller a
-// successful answer: a redirect it answered with is not one.
 func TestPreferredServedNeedsASuccess(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -226,9 +209,6 @@ func TestPreferredServedNeedsASuccess(t *testing.T) {
 	}
 }
 
-// With the experiment at half, about half the conversations round-robin
-// (mode control) and half keep their key (mode on); the Requests stats
-// filter tells the halves apart.
 func TestTheExperimentSplitsConversationsAndStatsFilterThem(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -255,8 +235,6 @@ func TestTheExperimentSplitsConversationsAndStatsFilterThem(t *testing.T) {
 	srv.Admin.Put("/api/settings/affinity.experiment", map[string]any{"value": "most"}).Expect(400)
 }
 
-// The route preview takes a conversation: the order it shows is the one
-// that conversation's next Request gets.
 func TestTheRoutePreviewShowsAConversationsOrder(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -283,8 +261,6 @@ func secretOf(t *testing.T, srv *testkit.Server, key string) string {
 	return k.Secret
 }
 
-// roundRobin switches affinity off on Provider handle, for tests whose
-// assertions follow the round-robin key order.
 func roundRobin(t *testing.T, srv *testkit.Server, handle string) {
 	t.Helper()
 	srv.Admin.Patch("/api/providers/"+handle, map[string]any{"affinity": "off"}).Expect(200)

@@ -7,9 +7,6 @@ import { affinityReason } from "./affinity";
 import type { RequestRecord } from "./api";
 import { Fact, failed, longShape, msOrSecs, ProviderLogo, secs, Summary } from "./bits";
 
-// The Details tab (C04): Route, Timing, Tokens. Shared by the drawer and the
-// Route view's Details tab.
-
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="border-b border-border py-6 first:pt-0 last:border-b-0">
@@ -43,7 +40,6 @@ export function RequestDetails({ r, onShowCaptured }: { r: RequestRecord; onShow
       )}
       <Section title="Route">
         <Fact label="Caller">{r.caller.name}</Fact>
-        {/* The key's name (the Caller's name when it called), linked by ID so a rename since still finds it. */}
         <Fact label="Gateway Key">
           {r.caller.gateway_key_id ? <RecordLink record={rec.gatewayKey(r.caller.gateway_key_id)}>{r.caller.name}</RecordLink> : test ? "Test" : none}
         </Fact>
@@ -97,7 +93,6 @@ export function RequestDetails({ r, onShowCaptured }: { r: RequestRecord; onShow
         <Fact label="Cache read">{r.usage ? formatNumber(r.usage.cache_read) : none}</Fact>
         <Fact label="Cache write">{r.usage ? formatNumber(r.usage.cache_write) : none}</Fact>
         <Fact label="Reasoning">{r.usage ? formatNumber(r.usage.reasoning) : none}</Fact>
-        {/* Only when the Provider split its writes by lifetime (Anthropic's 1 h, OpenAI's 12 h): they cost more. */}
         {!!r.usage?.cache_write_long && <Fact label="Long-lived cache write">{formatNumber(r.usage.cache_write_long)}</Fact>}
       </Section>
       {r.captured && onShowCaptured && (

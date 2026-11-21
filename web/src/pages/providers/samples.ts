@@ -1,8 +1,5 @@
 import type { Endpoint, GatewayKeyLite, Model, ModelList, Overview, Pool, Provider, RoutePreview, Rule, UpstreamKey } from "./api";
 
-// What the Providers pages' skeletons are measured from before any data has
-// loaded (ui/Skeleton.tsx): typical lengths, never shown as text.
-
 const at = "2026-11-19T09:41:07.000Z";
 
 export const SAMPLE_ENDPOINTS: Endpoint[] = ["main", "anthropic"].map((name, i) => ({
@@ -90,8 +87,6 @@ export const SAMPLE_MODEL_LIST: ModelList = {
   last_refresh: { at, outcome: "ok", summary: "120 models" },
 };
 
-// The built-in rules every Provider has (internal/rules/builtin.go), so the
-// first skeleton is as long as the real list.
 export const SAMPLE_RULES: Rule[] = [
   "insufficient-quota", "credit-balance-too-low", "deepai-pool-spent", "deepai-check-in-refused", "unauthorized",
   "forbidden-model", "forbidden-billing", "forbidden-account", "forbidden", "payment-required", "model-not-found",

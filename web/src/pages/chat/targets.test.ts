@@ -11,7 +11,6 @@ let asked: URL[] = [];
 beforeEach(() => {
   asked = [];
   vi.mocked(newChat).mockClear();
-  // Something used acme/z-9 lately; a Provider's default must not depend on it.
   localStorage.setItem("iroha.chat.recent-models", JSON.stringify(["acme/z-9"]));
   vi.stubGlobal(
     "fetch",

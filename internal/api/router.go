@@ -10,9 +10,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/hoangvu12/iroha/internal/logkind"
 )
 
-// Router owns the route table and the ServeMux built from it.
 type Router struct {
 	mux      *http.ServeMux
 	routes   []Route
@@ -20,17 +21,13 @@ type Router struct {
 	log      *slog.Logger
 	fallback http.Handler
 
-	mu sync.RWMutex // guards routes after startup (Add is normally startup-only)
+	mu sync.RWMutex
 }
 
-// NewRouter returns an empty Router. Authenticators are tried in order for
-// AuthAdmin routes.
 func NewRouter(log *slog.Logger, auth ...Authenticator) *Router {
 	return &Router{mux: http.NewServeMux(), auth: auth, log: log}
 }
 
-// Add registers routes. It panics on a malformed or duplicate route, which
-// surfaces as a failing test rather than a silent drift.
 func (rt *Router) Add(routes ...Route) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
@@ -69,20 +66,14 @@ func validate(r Route) error {
 	return nil
 }
 
-// Routes returns a copy of the route table in registration order.
 func (rt *Router) Routes() []Route {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	return slices.Clone(rt.routes)
 }
 
-// ServeHTTP dispatches to the matching route. Unknown /api/ paths and wrong
-// methods get JSON errors with a hint instead of the ServeMux text pages.
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/") {
-		// Admin answers hold configuration and secrets, and the UI keeps its
-		// own cache: no browser or proxy stores them. A Raw route may say
-		// otherwise (logos do).
 		w.Header().Set("Cache-Control", "no-store")
 	}
 	if _, pattern := rt.mux.Handler(r); pattern != "" {
@@ -105,14 +96,10 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	NotFoundHandler(w, r)
 }
 
-// NotFoundHandler answers the JSON 404 of an unknown route.
 func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 	WriteError(w, NotFound("GET /api/openapi.json lists every route; GET /skill.md explains them.", "No route %s %s.", r.Method, r.URL.Path))
 }
 
-// Fallback sets the handler for GET and HEAD requests outside /api/ that
-// match no route: the embedded UI. It answers unknown paths itself (with
-// NotFoundHandler when they are not UI pages).
 func (rt *Router) Fallback(h http.Handler) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
@@ -137,7 +124,7 @@ func (rt *Router) wrap(route Route) http.Handler {
 				if p == http.ErrAbortHandler {
 					panic(p)
 				}
-				rt.log.Error("handler panicked", "kind", "http.panic", "route", route.Pattern(), "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+				rt.log.Error("handler panicked", logkind.Attr(logkind.HTTPPanic), "route", route.Pattern(), "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
 				WriteError(w, AsError(fmt.Errorf("panic")))
 			}
 		}()
@@ -160,7 +147,7 @@ func (rt *Router) wrap(route Route) http.Handler {
 		if err != nil {
 			e := AsError(err)
 			if e.Status >= 500 {
-				rt.log.Error("admin route failed", "kind", "http.error", "route", route.Pattern(), "err", err.Error())
+				rt.log.Error("admin route failed", logkind.Attr(logkind.HTTPError), "route", route.Pattern(), "err", err.Error())
 			}
 			WriteError(w, e)
 			return
@@ -189,7 +176,6 @@ func (rt *Router) authenticate(r *http.Request) (*Actor, error) {
 	return nil, ErrMissingCredentials
 }
 
-// WriteJSON writes v as a JSON response.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	if status == http.StatusNoContent {
 		w.WriteHeader(status)
@@ -202,7 +188,6 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	_ = enc.Encode(v)
 }
 
-// WriteError writes e in the error envelope.
 func WriteError(w http.ResponseWriter, e *Error) {
 	WriteJSON(w, e.Status, ErrorBody{Error: e})
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Check } from "lucide-react";
-import { errorText } from "@/api/client";
+import { errorText, isApiError } from "@/api/client";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import { riseIn } from "@/ui/Reveal";
@@ -13,8 +13,13 @@ import { baseUrls, CopyBox } from "./bits";
 import { emptyDraft, toScope } from "./scope";
 import { ScopeEditor } from "./ScopeEditor";
 
-/** New Gateway Key (C02, C24), then the key and base URLs with Copy (C12). */
-export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenChange: (o: boolean) => void; existing: GatewayKey[] }) {
+function createError(e: unknown, name: string): string {
+  if (isApiError(e) && e.code === "name_taken") return `A Gateway Key is already named ${name}. Pick another name.`;
+  if (isApiError(e) && e.code === "gateway_key_revoked") return `${name} was revoked and its name stays on record. Pick another name.`;
+  return errorText(e);
+}
+
+export function CreateDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const create = useCreateKey();
   const invalidate = useInvalidateKeys();
   const [name, setName] = useState("");
@@ -40,11 +45,6 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
   const submit = () => {
     const n = name.trim();
     if (!n) return setError("Give the key a name, usually the Caller who will hold it. Requests show this name.");
-    const taken = existing.find((k) => k.name === n);
-    if (taken)
-      return setError(
-        taken.revoked ? `${n} was revoked and its name stays on record. Pick another name.` : `A Gateway Key is already named ${n}. Pick another name.`,
-      );
     setError(undefined);
     if (!draft.all && draft.providers.size === 0 && draft.pools.size === 0)
       return setScopeError("Tick at least one Provider or Model Pool, or choose Everything.");
@@ -52,9 +52,8 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
     create.mutate(
       { name: n, scope: toScope(draft) },
       {
-        // The dialog stays open on the new key, which says it was created; Undo is in its footer.
         onSuccess: (res) => setMade({ key: res.gateway_key, entry: res.audit_entry }),
-        onError: (e) => setError(errorText(e)),
+        onError: (e) => setError(createError(e, n)),
       },
     );
   };
@@ -68,7 +67,6 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
         onOpenChange={close}
         width={560}
         closeButton={false}
-        // Shown once, in place of the form: title, text and key rise into place on one frame and the badge grows in with them (UI ticket 20).
         title={
           <span className={cn("flex flex-col items-start gap-4", riseIn)}>
             <span
@@ -83,7 +81,6 @@ export function CreateDialog({ open, onOpenChange, existing }: { open: boolean; 
         description={<span className={cn("block", riseIn)}>Copy it now and give it to the Caller. You can copy it again later from the key's page.</span>}
         footer={
           <>
-            {/* Undo deletes the key again and closes the dialog; with the dialog gone, a toast says so. */}
             <UndoCreate save={undo} entry={entry} name={key.name} deleted={`Gateway Key ${key.name} deleted`} onClose={() => close(false)} />
             <Button variant="primary" onClick={() => close(false)}>
               Done

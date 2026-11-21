@@ -45,7 +45,6 @@ func TestAdminTokensCreateReadListAndRevokeByNameOrID(t *testing.T) {
 		t.Fatalf("whoami = %+v", who)
 	}
 
-	// Read by name and by ID; the secret is readable.
 	for _, ref := range []string{"agent-1", tok.ID} {
 		var got admintokens.Token
 		srv.Admin.Get("/api/admin-tokens/" + ref).Expect(200).JSON(&got)
@@ -59,7 +58,6 @@ func TestAdminTokensCreateReadListAndRevokeByNameOrID(t *testing.T) {
 		t.Fatalf("list = %v", got)
 	}
 
-	// Revoke by ID.
 	var revoked tokenResult
 	srv.Admin.Post("/api/admin-tokens/"+tok.ID+"/revoke", nil).Expect(200).JSON(&revoked)
 	if revoked.Outcome != "updated" || !revoked.AdminToken.Revoked || revoked.AdminToken.RevokedAt == nil || revoked.AuditEntry == "" {
@@ -77,7 +75,6 @@ func TestAdminTokensCreateReadListAndRevokeByNameOrID(t *testing.T) {
 		t.Fatalf("revoked=false: %v", got)
 	}
 
-	// Revoking again changes nothing and writes no Audit Entry.
 	var again tokenResult
 	srv.Admin.Post("/api/admin-tokens/agent-1/revoke", nil).Expect(200).JSON(&again)
 	if again.Outcome != "unchanged" || again.AuditEntry != "" || len(again.Changes) != 0 {
@@ -90,17 +87,20 @@ func TestAdminTokensCreateReadListAndRevokeByNameOrID(t *testing.T) {
 	}
 }
 
-func TestRepeatingACreateWithTheSameNameUpdatesInsteadOfDuplicating(t *testing.T) {
+func TestPostCreatesOnceAndPutUpdatesByName(t *testing.T) {
 	srv := testkit.Start(t)
 	var first, same, changed tokenResult
 	srv.Admin.Post("/api/admin-tokens", map[string]any{"name": "agent-1", "note": "a"}).Expect(201).JSON(&first)
+	if e := srv.Admin.Post("/api/admin-tokens", map[string]any{"name": "agent-1", "note": "b"}).Expect(409).Err(); e.Code != "name_taken" || !strings.Contains(e.Hint, "PUT /api/admin-tokens/agent-1") {
+		t.Fatalf("second create = %+v", e)
+	}
 
-	srv.Admin.Post("/api/admin-tokens", map[string]any{"name": "agent-1"}).Expect(200).JSON(&same)
+	srv.Admin.Put("/api/admin-tokens/agent-1", map[string]any{"name": "agent-1"}).Expect(200).JSON(&same)
 	if same.Outcome != "unchanged" || same.AuditEntry != "" || same.AdminToken.ID != first.AdminToken.ID ||
 		same.AdminToken.Secret != first.AdminToken.Secret || same.AdminToken.Note != "a" {
 		t.Fatalf("repeat = %+v", same)
 	}
-	srv.Admin.Post("/api/admin-tokens", map[string]any{"name": "agent-1", "note": "b"}).Expect(200).JSON(&changed)
+	srv.Admin.Put("/api/admin-tokens/agent-1", map[string]any{"note": "b"}).Expect(200).JSON(&changed)
 	if changed.Outcome != "updated" || changed.AuditEntry == "" || changed.AdminToken.ID != first.AdminToken.ID ||
 		changed.AdminToken.Note != "b" || len(changed.Changes) != 1 || !slices.Equal(changed.Changes[0].Fields, []string{"note"}) {
 		t.Fatalf("repeat with a new note = %+v", changed)
@@ -111,7 +111,6 @@ func TestRepeatingACreateWithTheSameNameUpdatesInsteadOfDuplicating(t *testing.T
 		t.Fatalf("tokens = %v", names(list))
 	}
 
-	// A revoked name is not silently brought back.
 	srv.Admin.Post("/api/admin-tokens/agent-1/revoke", nil).Expect(200)
 	if e := srv.Admin.Post("/api/admin-tokens", map[string]any{"name": "agent-1"}).Expect(409).Err(); e.Code != "admin_token_revoked" || e.Hint == "" {
 		t.Fatalf("create on a revoked name: %+v", e)
@@ -232,7 +231,6 @@ func TestTheLastActiveAdminTokenCannotBeRevoked(t *testing.T) {
 	if e.Code != "last_admin_token" || !strings.Contains(e.Hint, "POST /api/admin-tokens") {
 		t.Fatalf("revoking the last token: %+v", e)
 	}
-	// In bulk, every item but the last one applies.
 	srv.NewAdminToken("agent-1")
 	var res bulkResult
 	srv.Admin.Post("/api/admin-tokens/bulk/revoke", map[string]any{"items": []string{"agent-1", "bootstrap"}}).Expect(200).JSON(&res)
@@ -244,10 +242,9 @@ func TestTheLastActiveAdminTokenCannotBeRevoked(t *testing.T) {
 
 func TestTheLastAdminTokenCanGoOnceTheOwnerCanSignIn(t *testing.T) {
 	srv := testkit.Start(t)
-	owner := srv.OwnerSession() // sets the Owner password
+	owner := srv.OwnerSession()
 	srv.Admin.Post("/api/admin-tokens/bootstrap/revoke", nil).Expect(200)
 	srv.Admin.Get("/api/whoami").Expect(401)
-	// The Owner is not locked out: the session issues a new token.
 	var created tokenResult
 	owner.Post("/api/admin-tokens", map[string]any{"name": "agent-2"}).Expect(201).JSON(&created)
 	srv.Client(created.AdminToken.Secret).Get("/api/whoami").Expect(200)

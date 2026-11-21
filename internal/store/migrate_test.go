@@ -6,8 +6,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Guards the naming convention parallel tickets rely on: every file is
-// <ticket>_<seq>_<slug>.sql and no two share a (ticket, seq).
 func TestMigrationFilesFollowTheNamingConvention(t *testing.T) {
 	ms, err := store.Migrations()
 	if err != nil {

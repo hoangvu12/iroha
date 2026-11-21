@@ -35,7 +35,6 @@ function request(id: string, status = 200, startedAt = new Date().toISOString())
   };
 }
 
-/** A fake Iroha: `list(params)` answers GET /api/requests; stats and filters are fixed. */
 function iroha(list: (p: URLSearchParams) => unknown | Promise<Response>, stats: unknown = STATS, filters: unknown = { callers: [], providers: [], pools: [], models: [] }) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
     const url = new URL(String(input), "http://iroha.test");
@@ -100,7 +99,6 @@ test("changing a filter keeps the rows on screen until the new ones arrive, with
   const { container } = renderFeed("/requests?status=failed");
 
   await waitFor(() => expect(opener("req_failed")).toBeTruthy());
-  // Each chip's × names its own filter.
   await user.click(screen.getByRole("button", { name: "Remove filter Status is Failed" }));
   await waitFor(() => expect(release).toBeTypeOf("function"));
 
@@ -124,16 +122,13 @@ test("a Gateway Key's ID as the caller (its Requests count links so) filters by 
   expect(await screen.findByRole("button", { name: "Remove filter Caller is caller-2" })).toBeTruthy();
   expect(listCalls(fetch)[0].searchParams.get("caller")).toBe("gk_2");
 
-  // The Caller menu ticks the key by its name, with no extra entry for the ID.
   await user.click(screen.getByRole("button", { name: /Filter/ }));
   await user.click(await screen.findByRole("menuitem", { name: /Caller/ }));
   expect((await screen.findByRole("menuitemradio", { name: /caller-2/ })).getAttribute("aria-checked")).toBe("true");
   expect(screen.queryByRole("menuitemradio", { name: /gk_2/ })).toBeNull();
 });
 
-/** The stats row's Cached figure, once the real stats replaced the skeleton's sample. */
 async function cachedFigure() {
-  // The sample a skeleton is drawn from sits in an inert box.
   const term = await waitFor(() => {
     const t = screen.getByText("Cached");
     expect(t.closest("[inert]")).toBeNull();
@@ -149,7 +144,6 @@ test("the stats row shows the cached share: cache read over input", async () => 
   renderFeed();
   const figure = await cachedFigure();
   expect(figure.textContent).toBe("25.0%");
-  // The numbers behind it, for whoever hovers.
   expect(figure.getAttribute("title")).toBe("1,000 of 4,000 input tokens read from the cache; 600 written to it");
 });
 
@@ -240,8 +234,6 @@ test("numbered pages, if the Owner prefers them: a later page loads the older Re
 });
 
 test("the Owner switches the feed to numbered pages in the View menu, and this browser remembers it", async () => {
-  // 30 rows: one more page than the smallest page size (25) proves paging, and stays within the
-  // rows a reveal renders at once (UI ticket 26), so nothing waits on a deferred render.
   const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => request(`req_${String(from + i).padStart(3, "0")}`));
   iroha(
     (p) => {

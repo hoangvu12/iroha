@@ -16,22 +16,19 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Entry is one Audit Entry as the API returns it.
 type Entry struct {
-	ID         string    `json:"id"`
-	Time       time.Time `json:"time"`
-	Actor      api.Actor `json:"actor" doc:"The Admin Token or Owner session that made the change."`
-	Action     string    `json:"action" doc:"Machine name of the change, e.g. admin_token.create or audit_entry.revert."`
-	Summary    string    `json:"summary" doc:"One line for people, e.g. \"Revoked 3 Admin Tokens\"."`
-	Changes    []Change  `json:"changes"`
-	Revertible bool      `json:"revertible" doc:"Whether POST .../revert may be tried. It can still refuse with audit_conflict when a record changed since."`
-	// NotRevertible says why Revertible is false.
-	NotRevertible string `json:"not_revertible,omitempty" doc:"Why the entry cannot be reverted."`
-	RevertOf      string `json:"revert_of,omitempty" doc:"The Audit Entry this one reverted."`
-	RevertedBy    string `json:"reverted_by,omitempty" doc:"The Audit Entry that reverted this one."`
+	ID            string    `json:"id"`
+	Time          time.Time `json:"time"`
+	Actor         api.Actor `json:"actor" doc:"The Admin Token or Owner session that made the change."`
+	Action        string    `json:"action" doc:"Machine name of the change, e.g. admin_token.create or audit_entry.revert."`
+	Summary       string    `json:"summary" doc:"One line for people, e.g. \"Revoked 3 Admin Tokens\"."`
+	Changes       []Change  `json:"changes"`
+	Revertible    bool      `json:"revertible" doc:"Whether POST .../revert may be tried. It can still refuse with audit_conflict when a record changed since."`
+	NotRevertible string    `json:"not_revertible,omitempty" doc:"Why the entry cannot be reverted."`
+	RevertOf      string    `json:"revert_of,omitempty" doc:"The Audit Entry this one reverted."`
+	RevertedBy    string    `json:"reverted_by,omitempty" doc:"The Audit Entry that reverted this one."`
 }
 
-// EntryPage is a page of Audit Entries, newest first.
 type EntryPage struct {
 	Entries    []Entry `json:"entries"`
 	NextBefore string  `json:"next_before,omitempty" doc:"Pass as before= to read the next older page; absent on the last page."`
@@ -40,8 +37,8 @@ type EntryPage struct {
 // Filter selects Audit Entries. Zero fields do not filter.
 type Filter struct {
 	Since, Until time.Time
-	Actor        string   // Admin Token name or ID, or "Owner"
-	Resource     string   // resource name, e.g. admin_token
+	Actor        string // Admin Token name or ID, or "Owner"
+	Resource     string
 	Record       string   // a changed record's ID or name
 	Actions      []string // exact, or prefixes ending in "*"
 	Search       string   // substring of the summary or a changed record's name
@@ -49,7 +46,6 @@ type Filter struct {
 	Limit        int
 }
 
-// List reads Audit Entries, newest first.
 func (tr *Trail) List(ctx context.Context, f Filter) ([]Entry, error) {
 	var where []string
 	var args []any
@@ -125,14 +121,11 @@ func (tr *Trail) List(ctx context.Context, f Filter) ([]Entry, error) {
 	return out, nil
 }
 
-// FilterOptions is the response of GET /api/audit-entries/filters: who has
-// made changes and what kinds of record they changed.
 type FilterOptions struct {
 	Actors    []ActorOption    `json:"actors" doc:"The Owner first, then Admin Tokens, most recently active first."`
 	Resources []ResourceOption `json:"resources" doc:"Kinds of record changed, by label."`
 }
 
-// ActorOption is one actor that has Audit Entries.
 type ActorOption struct {
 	Kind    string    `json:"kind" enum:"admin_token,owner_session"`
 	ID      string    `json:"id,omitempty" doc:"The Admin Token's ID; absent for the Owner, whose sessions count as one actor."`
@@ -142,7 +135,6 @@ type ActorOption struct {
 	LastAt  time.Time `json:"last_at" doc:"Time of the actor's latest Audit Entry."`
 }
 
-// ResourceOption is one kind of record that appears in Audit Entries.
 type ResourceOption struct {
 	Name    string `json:"name" doc:"The value to pass as resource=, e.g. admin_token."`
 	Label   string `json:"label" doc:"e.g. Admin Token."`
@@ -150,14 +142,10 @@ type ResourceOption struct {
 	Entries int    `json:"entries" doc:"How many Audit Entries changed a record of this kind."`
 }
 
-// ownerName is the actor name of every Owner session.
 const ownerName = "Owner"
 
-// Filters lists the actors and resources that appear in Audit Entries.
 func (tr *Trail) Filters(ctx context.Context) (FilterOptions, error) {
 	out := FilterOptions{Actors: []ActorOption{}, Resources: []ResourceOption{}}
-	// Owner sessions are one actor; each Admin Token is one actor by ID,
-	// named as in its latest entry.
 	rows, err := tr.db.QueryContext(ctx, `SELECT g.kind, g.who, e.actor_name, g.n, e.created_at FROM (
 			SELECT actor_kind AS kind, CASE WHEN actor_kind = ? THEN '' ELSE actor_id END AS who, count(*) AS n, max(rowid) AS last
 			FROM audit_entries GROUP BY kind, who
@@ -207,13 +195,11 @@ func (tr *Trail) Filters(ctx context.Context) (FilterOptions, error) {
 	return out, rows.Err()
 }
 
-// queryer is what read needs from *sql.Tx or *store.DB.
 type queryer interface {
 	Querier
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// read loads one entry: its API view and its stored (unmasked) changes.
 func (tr *Trail) read(ctx context.Context, q queryer, id string) (Entry, []stored, error) {
 	var e Entry
 	var at int64
@@ -253,7 +239,7 @@ func (tr *Trail) read(ctx context.Context, q queryer, id string) (Entry, []store
 		s := stored{id: rid, name: name, before: rawOrNil(before), after: rawOrNil(after)}
 		r, ok := lookup(resource)
 		if !ok {
-			r = unknownResource(resource)
+			r = unregisteredResource(resource)
 		}
 		s.r = r
 		all = append(all, s)
@@ -269,27 +255,22 @@ func rawOrNil(s sql.NullString) json.RawMessage {
 	return json.RawMessage(s.String)
 }
 
-// unknownResource stands in for a resource no longer registered, so old
-// entries still read (without masking: no secrets are known) but cannot be
-// reverted.
-type unknownResource string
+type unregisteredResource string
 
-func (u unknownResource) resourceName() string { return string(u) }
-func (u unknownResource) secrets() []string    { return nil }
-func (u unknownResource) load(context.Context, Querier, string) (json.RawMessage, string, error) {
+func (u unregisteredResource) resourceName() string { return string(u) }
+func (u unregisteredResource) secrets() []string    { return nil }
+func (u unregisteredResource) load(context.Context, Querier, string) (json.RawMessage, string, error) {
 	return nil, "", fmt.Errorf("audit: resource %q is not registered", string(u))
 }
-func (u unknownResource) restore(context.Context, *sql.Tx, string, json.RawMessage) error {
+func (u unregisteredResource) restore(context.Context, *sql.Tx, string, json.RawMessage) error {
 	return fmt.Errorf("audit: resource %q is not registered", string(u))
 }
 
-// RevertResult is the response of a revert.
 type RevertResult struct {
 	Result
 	Reverted string `json:"reverted" doc:"The Audit Entry that was (or, on a dry run, would be) reverted."`
 }
 
-// Conflict describes one record that changed after the entry being reverted.
 type Conflict struct {
 	Resource string   `json:"resource"`
 	ID       string   `json:"id"`
@@ -297,9 +278,6 @@ type Conflict struct {
 	Later    []string `json:"later_entries" doc:"Newer Audit Entries that changed this record, newest first."`
 }
 
-// Revert restores the before-state of entry id as one new audited change.
-// It refuses irreversible and already-reverted entries, and refuses with
-// audit_conflict when any record no longer matches the entry's after-state.
 func (tr *Trail) Revert(c *api.Call, id string) (RevertResult, error) {
 	dry, err := IsDryRun(c)
 	if err != nil {
@@ -331,7 +309,7 @@ func (tr *Trail) Revert(c *api.Call, id string) (RevertResult, error) {
 			if err != nil {
 				return err
 			}
-			if matches(ch.after, current) {
+			if matchesStoredFields(ch.after, current) {
 				continue
 			}
 			later, err := laterEntries(ctx, tx, e.ID, ch.r.resourceName(), ch.id)
@@ -357,21 +335,8 @@ func (tr *Trail) Revert(c *api.Call, id string) (RevertResult, error) {
 				return err
 			}
 		}
-		// Re-create and update in the original order (parents first), then
-		// delete in reverse order (children first).
-		for _, ch := range changes {
-			if ch.before != nil {
-				if err := ch.r.restore(ctx, tx, ch.id, ch.before); err != nil {
-					return err
-				}
-			}
-		}
-		for i := len(changes) - 1; i >= 0; i-- {
-			if ch := changes[i]; ch.before == nil {
-				if err := ch.r.restore(ctx, tx, ch.id, nil); err != nil {
-					return err
-				}
-			}
+		if err := restoreInDependencyOrder(ctx, tx, changes); err != nil {
+			return err
 		}
 		done, outcome, err := m.collect()
 		if err != nil {
@@ -398,6 +363,24 @@ func (tr *Trail) Revert(c *api.Call, id string) (RevertResult, error) {
 	return res, nil
 }
 
+func restoreInDependencyOrder(ctx context.Context, tx *sql.Tx, changes []stored) error {
+	for _, ch := range changes {
+		if ch.before != nil {
+			if err := ch.r.restore(ctx, tx, ch.id, ch.before); err != nil {
+				return err
+			}
+		}
+	}
+	for i := len(changes) - 1; i >= 0; i-- {
+		if ch := changes[i]; ch.before == nil {
+			if err := ch.r.restore(ctx, tx, ch.id, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func laterEntries(ctx context.Context, q queryer, entryID, resource, recordID string) ([]string, error) {
 	rows, err := q.QueryContext(ctx, `SELECT DISTINCT e.id, e.rowid FROM audit_entries e JOIN audit_changes c ON c.entry_id = e.id
 		WHERE c.resource = ? AND c.record_id = ? AND e.rowid > (SELECT rowid FROM audit_entries WHERE id = ?)
@@ -420,7 +403,6 @@ func laterEntries(ctx context.Context, q queryer, entryID, resource, recordID st
 
 const maxLimit = 1000
 
-// Routes returns the Audit Entry routes.
 func Routes(tr *Trail) []api.Route {
 	return []api.Route{
 		{

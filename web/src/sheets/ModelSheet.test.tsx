@@ -6,10 +6,6 @@ import type { Model } from "@/pages/providers/api";
 import { ModelsTab } from "@/pages/providers/Models";
 import { loadedSheet, renderWithSheets, routes } from "./test-iroha";
 
-// UI ticket 33: a model of a Provider's list opens in its own sheet (it was
-// the Models tab's details dialog), with its Provider, the Pools using it,
-// Test in Chat and its details edited in place.
-
 const { openChat } = vi.hoisted(() => ({ openChat: vi.fn() }));
 vi.mock("@/app/chat-panel", async (real) => ({
   ...(await real<typeof import("@/app/chat-panel")>()),
@@ -58,7 +54,6 @@ afterEach(() => {
   Object.assign(routes, saved);
 });
 
-/** The model's sheet once its body shows the model. */
 async function modelSheet(name: string) {
   const sheet = await loadedSheet(`Model ${name}`);
   await within(sheet).findByRole("button", { name: `Test ${name} in Chat` });
@@ -76,14 +71,11 @@ test("a model's sheet shows what the details dialog did, its Provider, Model Gap
 
   expect(s.getByRole("link", { name: "acme" }).getAttribute("href")).toBe("/x?sheet=model%3Aacme%2Fgpt-fast&sheet=provider%3Aacme");
   expect(sheet.textContent).toContain("Listed");
-  // Each fact says where it came from.
   expect(sheet.textContent).toContain("128K");
   expect(sheet.textContent).toContain("from acme's list");
   expect(sheet.textContent).toContain("main");
-  // The keys refused it, each a link to its key.
   expect(s.getByRole("link", { name: "team-5" }).getAttribute("href")).toContain("sheet=key%3Aacme%2Fteam-5");
   expect(s.getByRole("button", { name: "Clear the Model Gaps of gpt-fast" })).toBeTruthy();
-  // Only the Pools with a member on acme's gpt-fast.
   expect(await s.findByRole("link", { name: "fast" })).toBeTruthy();
   expect(s.queryByRole("link", { name: "cheap" })).toBeNull();
   expect(s.getByRole("link", { name: "Open page" }).getAttribute("href")).toBe("/providers/acme/models?sheet=model%3Aacme%2Fgpt-fast");
@@ -122,7 +114,6 @@ test("Edit details turns the facts into fields; Save sends the overrides and say
   await waitFor(() => expect(sent(fetch, "POST")).toEqual([["/api/providers/acme/models", { model: "gpt-fast", metadata: { max_output_tokens: 16384 } }]]));
   expect(await s.findByText("gpt-fast details saved", text)).toBeTruthy();
   await waitFor(() => expect(s.queryByRole("textbox", { name: "Max output" })).toBeNull());
-  // No dialog: the form was in the sheet.
   expect(screen.queryAllByRole("dialog")).toHaveLength(1);
 });
 

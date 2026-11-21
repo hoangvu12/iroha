@@ -18,7 +18,6 @@ import { SAMPLE_POOL } from "./samples";
 
 const TABS = ["route", "members", "settings"] as const;
 
-/** A Model Pool: Route (C19), Members (C06), Settings. */
 export function PoolPage() {
   const { name = "", tab: raw } = useParams();
   const tab = TABS.find((t) => t === raw);
@@ -28,7 +27,6 @@ export function PoolPage() {
   const [params, setParams] = useSearchParams();
   const [adding, setAdding] = useState(false);
 
-  // /members?add=1 (from New Pool) opens Add member once.
   useEffect(() => {
     if (params.get("add") === "1") {
       setAdding(true);
@@ -44,7 +42,7 @@ export function PoolPage() {
     <>
       <PageHeader
         back={{ to: "/providers", label: "Providers" }}
-        icon={<PoolTile name={name} version={p?.maker} size={phone ? 40 : 60} />}
+        icon={<PoolTile name={name} cacheKey={p?.maker} size={phone ? 40 : 60} />}
         title={name}
         description="Model Pool"
         actions={

@@ -11,7 +11,6 @@ const dot: Record<Tone, string> = {
   blue: "bg-info",
 };
 
-/** Status colour comes only from dots like this one (and logos, and the art). */
 export function StatusDot({ tone, className, label }: { tone: Tone; className?: string; label?: string }) {
   return (
     <span
@@ -23,7 +22,6 @@ export function StatusDot({ tone, className, label }: { tone: Tone; className?: 
   );
 }
 
-/** "● Cooling": a status dot and its word. */
 export function Status({ tone, children }: { tone: Tone; children: ReactNode }) {
   return (
     <span className="inline-flex items-center gap-2">
@@ -33,7 +31,6 @@ export function Status({ tone, children }: { tone: Tone; children: ReactNode }) 
   );
 }
 
-/** A keyboard shortcut hint, as in the sidebar (P, G, R, C). */
 export function Kbd({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <kbd
@@ -47,7 +44,6 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
   );
 }
 
-/** Mono secret or ID text, truncated in the middle by the caller if needed. */
 export function Mono({ children, className }: { children: ReactNode; className?: string }) {
   return <span className={cn("font-mono text-[13px]", className)}>{children}</span>;
 }

@@ -17,7 +17,6 @@ func TestTheUIAndItsBrandArtAreServedByIroha(t *testing.T) {
 	if !strings.HasPrefix(root.Header.Get("Content-Type"), "text/html") || !strings.Contains(root.Text(), "<title>Iroha</title>") {
 		t.Fatalf("GET / = %s\n%.300s", root.Header.Get("Content-Type"), root.Body)
 	}
-	// The app's own pages load on reload.
 	for _, p := range []string{"/providers", "/requests/req_123", "/login", "/settings/admin-tokens"} {
 		r := page.Get(p).Expect(200)
 		if string(r.Body) != string(root.Body) {
@@ -31,7 +30,6 @@ func TestTheUIAndItsBrandArtAreServedByIroha(t *testing.T) {
 		}
 	}
 
-	// Misses that are not page loads, and anything under /api/, stay JSON.
 	for _, p := range []string{"/assets/missing.js", "/brand/missing.png"} {
 		if e := page.Get(p).Expect(404).Err(); e.Code != "not_found" {
 			t.Errorf("%s: %+v", p, e)
@@ -48,9 +46,6 @@ func TestTheUIAndItsBrandArtAreServedByIroha(t *testing.T) {
 	}
 }
 
-// RUN-07: the app page is revalidated on every load (no-cache), hashed
-// assets are cached for a year, brand art for a day; and no path, however
-// it climbs, serves a file from outside the embedded bundle.
 func TestUICachingAndPathsThatClimbOutOfTheBundle(t *testing.T) {
 	srv := testkit.Start(t)
 	page := srv.Anon.WithHeader("Accept", "text/html,application/xhtml+xml")
@@ -73,8 +68,6 @@ func TestUICachingAndPathsThatClimbOutOfTheBundle(t *testing.T) {
 		}
 	}
 
-	// UI ticket 32: every file has an ETag, so revalidating the page (each
-	// load) and brand art (daily) costs a 304, not the whole file.
 	files := []string{"/", "/providers", "/brand/iroha-avatar.png"}
 	if webui.Built() {
 		files = append(files, regexp.MustCompile(`/assets/[^"']+`).FindString(root.Text()))
@@ -94,17 +87,12 @@ func TestUICachingAndPathsThatClimbOutOfTheBundle(t *testing.T) {
 	if page.Get("/").Header.Get("ETag") != page.Get("/providers").Header.Get("ETag") {
 		t.Error("the app page has two ETags")
 	}
-	// A missing asset (an old tab asking for a chunk the last deploy removed)
-	// is never kept by a browser or Cloudflare, which would otherwise cache
-	// the 404 of a .js for minutes.
 	for _, p := range []string{"/assets/index-gone.js", "/brand/gone.png"} {
 		if cc := page.Get(p).Expect(404).Header.Get("Cache-Control"); cc != "no-store" {
 			t.Errorf("%s: Cache-Control %q, want no-store", p, cc)
 		}
 	}
 
-	// Files that exist beside the bundle: the database, this package's
-	// source, the module file.
 	outside := []string{"SQLite format", "package webui", "module github.com"}
 	for _, p := range []string{
 		"/../iroha.db", "/%2e%2e/", "/%2e%2e/iroha.db", "/brand/../../webui.go", "/brand/%2e%2e/%2e%2e/webui.go",

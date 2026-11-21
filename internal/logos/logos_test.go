@@ -28,7 +28,6 @@ func TestAProviderLogoIsFetchedThroughIrohaFromItsLogoDomain(t *testing.T) {
 	lg.SetFavicon("alibabacloud.com", testkit.SVG)
 	srv := testkit.Start(t, testkit.Options{Logos: lg})
 
-	// No logo domain set: guessed from the first Endpoint's host.
 	provider(t, srv, "dashscope", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", nil)
 	var p struct {
 		LogoDomain  string `json:"logo_domain"`
@@ -43,7 +42,6 @@ func TestAProviderLogoIsFetchedThroughIrohaFromItsLogoDomain(t *testing.T) {
 		t.Fatalf("logo: %s %q", resp.Header.Get("Content-Type"), resp.Body)
 	}
 
-	// The Owner sets one (a URL is read for its host); it is audited and revertible.
 	var upd struct {
 		AuditEntry string `json:"audit_entry"`
 		Provider   struct {
@@ -65,7 +63,6 @@ func TestAProviderLogoIsFetchedThroughIrohaFromItsLogoDomain(t *testing.T) {
 		t.Fatalf("after revert = %+v", p)
 	}
 
-	// Bad domains are refused; "none" means the lettered tile.
 	for _, bad := range []string{"localhost", "10.0.0.1", "exa mple.com", "user@example.com"} {
 		srv.Admin.Patch("/api/providers/dashscope", map[string]any{"logo_domain": bad}).Expect(400)
 	}
@@ -73,11 +70,9 @@ func TestAProviderLogoIsFetchedThroughIrohaFromItsLogoDomain(t *testing.T) {
 	if e := srv.Admin.Get("/api/providers/dashscope/logo").Expect(404).Err(); e.Code != "logo_unavailable" || e.Hint == "" {
 		t.Fatalf("no logo = %+v", e)
 	}
-	// An unknown Provider gets the uniform 404.
 	if e := srv.Admin.Get("/api/providers/nope/logo").Expect(404).Err(); e.Code != "not_found" {
 		t.Fatalf("unknown = %+v", e)
 	}
-	// Logos need the Owner or an Admin Token, like every admin route.
 	srv.Anon.Get("/api/providers/dashscope/logo").Expect(401)
 }
 
@@ -86,8 +81,6 @@ func TestLogoLookupsAreCachedAndFailuresAreAMissNotABrokenImage(t *testing.T) {
 	srv := testkit.Start(t, testkit.Options{Logos: lg})
 	provider(t, srv, "zai", "https://api.z.ai/api/paas/v4", nil)
 
-	// The source has nothing: 404 logo_unavailable, and the miss is cached
-	// for a minute.
 	srv.Admin.Get("/api/providers/zai/logo").Expect(404)
 	srv.Admin.Get("/api/providers/zai/logo").Expect(404)
 	if n := len(lg.Hits()); n != 1 {
@@ -101,7 +94,6 @@ func TestLogoLookupsAreCachedAndFailuresAreAMissNotABrokenImage(t *testing.T) {
 		t.Fatalf("source asked %d times: %v", n, lg.Hits())
 	}
 
-	// A logo found once survives a restart and an outage of the source.
 	lg.Fail(500)
 	srv.Restart()
 	srv.Admin.Get("/api/providers/zai/logo").Expect(200)
@@ -110,7 +102,6 @@ func TestLogoLookupsAreCachedAndFailuresAreAMissNotABrokenImage(t *testing.T) {
 		t.Fatalf("stale copy not served: %q", resp.Body)
 	}
 
-	// Something that is not an image is a miss.
 	lg.Fail(0)
 	lg.SetFavicon("example.com", []byte("<html>blocked</html>"))
 	srv.Admin.Get("/api/logos?domain=example.com").Expect(404)
@@ -127,18 +118,13 @@ func TestAPoolLogoIsItsMakersMarkElseTheMakersSiteElseNone(t *testing.T) {
 		srv.Admin.Post("/api/pools", map[string]any{"name": name, "members": []any{map[string]any{"provider": "zai", "model": name}}}).Expect(201)
 	}
 
-	// glm-4.6 is guessed as zhipuai, whose mark the source has.
 	if resp := srv.Admin.Get("/api/pools/glm-4.6/logo").Expect(200); !bytes.Equal(resp.Body, testkit.SVG) {
 		t.Fatalf("glm logo = %q", resp.Body)
 	}
-	// moonshotai answers the source's generic mark, so the favicon of the
-	// maker's site stands in.
 	if resp := srv.Admin.Get("/api/pools/kimi-k2/logo").Expect(200); !bytes.Equal(resp.Body, testkit.PNG) {
 		t.Fatalf("kimi logo = %q", resp.Body)
 	}
-	// No maker guessed: no logo.
 	srv.Admin.Get("/api/pools/house-mix/logo").Expect(404)
-	// The Owner names the maker.
 	srv.Admin.Patch("/api/pools/house-mix", map[string]any{"maker": "zhipuai"}).OK()
 	srv.Admin.Get("/api/pools/house-mix/logo").Expect(200)
 	srv.Admin.Get("/api/logos?maker=zhipuai").Expect(200)
@@ -161,7 +147,6 @@ func TestAPoolLogoIsAMakerOrAWebsite(t *testing.T) {
 	}
 	var res struct{ Pool pool }
 
-	// A value with a dot is a website, looked up like a Provider's logo domain.
 	srv.Admin.Patch("/api/pools/gpt-6.1-sol", map[string]any{"maker": "chatgpt.com"}).Expect(200).JSON(&res)
 	if res.Pool.Maker != "chatgpt.com" || res.Pool.MakerGuessed {
 		t.Fatalf("pool = %+v", res.Pool)
@@ -169,14 +154,12 @@ func TestAPoolLogoIsAMakerOrAWebsite(t *testing.T) {
 	if resp := srv.Admin.Get("/api/pools/gpt-6.1-sol/logo").Expect(200); !bytes.Equal(resp.Body, testkit.PNG) {
 		t.Fatalf("website logo = %q", resp.Body)
 	}
-	// A URL is read for its host; case is ignored.
 	srv.Admin.Patch("/api/pools/gpt-6.1-sol", map[string]any{"maker": " https://ChatGPT.com/c/123 "}).Expect(200).JSON(&res)
 	if res.Pool.Maker != "chatgpt.com" {
 		t.Fatalf("pool = %+v", res.Pool)
 	}
 	srv.Admin.Get("/api/pools/gpt-6.1-sol/logo").Expect(200)
 
-	// A maker still names the maker's mark, whatever its case.
 	srv.Admin.Patch("/api/pools/house-mix", map[string]any{"maker": "OpenAI"}).Expect(200).JSON(&res)
 	if res.Pool.Maker != "openai" {
 		t.Fatalf("pool = %+v", res.Pool)
@@ -185,18 +168,15 @@ func TestAPoolLogoIsAMakerOrAWebsite(t *testing.T) {
 		t.Fatalf("maker logo = %q", resp.Body)
 	}
 
-	// Empty still guesses (gpt -> openai).
 	srv.Admin.Patch("/api/pools/gpt-6.1-sol", map[string]any{"maker": ""}).Expect(200).JSON(&res)
 	if res.Pool.Maker != "openai" || !res.Pool.MakerGuessed {
 		t.Fatalf("pool = %+v", res.Pool)
 	}
 
-	// Websites that are not domains are refused, as for Providers.
 	for _, bad := range []string{"10.0.0.1", "localhost:8080", "user@example.com", "exa mple.com", "https://"} {
 		srv.Admin.Patch("/api/pools/house-mix", map[string]any{"maker": bad}).Expect(400)
 	}
 
-	// The preview takes what the field takes.
 	srv.Admin.Get("/api/logos?maker=chatgpt.com").Expect(200)
 	srv.Admin.Get("/api/logos?maker=https://chatgpt.com/").Expect(200)
 	srv.Admin.Get("/api/logos?maker=OpenAI").Expect(200)

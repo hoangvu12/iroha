@@ -1,26 +1,16 @@
-// Reads a captured body as the messages a person would read (C26): System,
-// Tools, then User / Assistant / Tool result in order. Tolerant of every
-// Shape and of streamed answers stored as a list of events; anything it does
-// not understand is left to the Raw JSON view.
+import { asList as arr, asObject as obj, asString as s, type JsonObject as J } from "./json";
 
 export type Block = {
   role: "System" | "User" | "Assistant" | "Tool result" | "Reasoning";
-  /** Text, or code for tool calls and tool results. */
   text: string;
   code?: boolean;
-  /** Small grey note on the right ("tool call"). */
   note?: string;
 };
 
 export type Parsed = { blocks: Block[]; tools: string[] };
 
-type J = Record<string, unknown>;
-const obj = (v: unknown): J | undefined => (v && typeof v === "object" && !Array.isArray(v) ? (v as J) : undefined);
-const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
-const s = (v: unknown): string => (typeof v === "string" ? v : "");
 const json = (v: unknown): string => (typeof v === "string" ? v : JSON.stringify(v, null, 2) ?? "");
 
-/** fn({"a": 1}) with the arguments on one line when short. */
 function call(name: string, args: unknown): string {
   let a = args;
   if (typeof a === "string") {
@@ -34,7 +24,6 @@ function call(name: string, args: unknown): string {
   return one.length <= 80 ? `${name}(${one.replace(/":/g, '": ').replace(/,"/g, ', "')})` : `${name}(${JSON.stringify(a, null, 2)})`;
 }
 
-/** Text out of the many content forms: a string, or parts of text/images. */
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;
   return arr(content)
@@ -59,8 +48,7 @@ function push(out: Block[], b: Block) {
 const role = (r: string): Block["role"] =>
   r === "system" || r === "developer" ? "System" : r === "assistant" || r === "model" ? "Assistant" : r === "tool" || r === "function" ? "Tool result" : "User";
 
-// OpenAI Chat Completions.
-function chatMessage(m: J, out: Block[]) {
+function openAIChatMessage(m: J, out: Block[]) {
   const r = role(s(m.role));
   if (m.reasoning_content) push(out, { role: "Reasoning", text: s(m.reasoning_content) });
   push(out, { role: r, text: textOf(m.content), code: r === "Tool result" });
@@ -70,7 +58,6 @@ function chatMessage(m: J, out: Block[]) {
   }
 }
 
-// Anthropic Messages content blocks.
 function anthropicBlocks(r: Block["role"], content: unknown, out: Block[]) {
   if (typeof content === "string") return push(out, { role: r, text: content });
   for (const b of arr(content)) {
@@ -96,7 +83,6 @@ function anthropicBlocks(r: Block["role"], content: unknown, out: Block[]) {
   }
 }
 
-// OpenAI Responses input/output items.
 function responsesItems(items: unknown, out: Block[]) {
   if (typeof items === "string") return push(out, { role: "User", text: items });
   for (const it of arr(items)) {
@@ -110,7 +96,6 @@ function responsesItems(items: unknown, out: Block[]) {
   }
 }
 
-// Gemini contents and parts.
 function geminiParts(r: Block["role"], parts: unknown, out: Block[]) {
   for (const p of arr(parts)) {
     const o = obj(p);
@@ -130,7 +115,7 @@ export function parseRequest(shape: string, body: unknown): Parsed | undefined {
   switch (shape) {
     case "openai-chat":
       tools = arr(b.tools).map((t) => s(obj(obj(t)?.function)?.name) || s(obj(t)?.name));
-      for (const m of arr(b.messages)) if (obj(m)) chatMessage(obj(m)!, out);
+      for (const m of arr(b.messages)) if (obj(m)) openAIChatMessage(obj(m)!, out);
       break;
     case "anthropic-messages":
       tools = arr(b.tools).map((t) => s(obj(t)?.name));
@@ -162,7 +147,6 @@ export function parseRequest(shape: string, body: unknown): Parsed | undefined {
   return { blocks: out, tools: tools.filter(Boolean) };
 }
 
-/** Streamed answers of Shapes other than OpenAI Chat are stored as their list of events; put them back together. */
 function joinEvents(shape: string, events: unknown[]): unknown {
   if (shape === "openai-responses") {
     for (const e of events) {
@@ -216,7 +200,7 @@ export function parseResponse(shape: string, body: unknown): Parsed | undefined 
   switch (shape) {
     case "openai-chat": {
       const m = obj(obj(arr(o.choices)[0])?.message);
-      if (m) chatMessage({ ...m, role: "assistant" }, out);
+      if (m) openAIChatMessage({ ...m, role: "assistant" }, out);
       break;
     }
     case "anthropic-messages":

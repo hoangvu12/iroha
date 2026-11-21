@@ -12,9 +12,7 @@ import { SAMPLE_ATTEMPTS } from "./samples";
 import { attemptFailed, explain, servedModel, thenText } from "./attempt-info";
 import { Badge, CodeBlock, longShape, pretty, ProviderLogo, Row, secs, statusBadgeTone, statusText, Summary } from "./bits";
 
-/** The drawer's Attempts tab: the Request's summary, then each Attempt and what Iroha made of it. */
 export function AttemptList({ r, loading, onOpenRoute }: { r: RequestRecord; loading: boolean; onOpenRoute: () => void }) {
-  // A row from the feed carries no Attempts: they are measured from a sample until the Request's own answer lands.
   return (
     <Skeleton data={r.attempts ?? (loading ? undefined : [])} sample={SAMPLE_ATTEMPTS} label="Loading Attempts">
       {(attempts) => <Attempts r={r} attempts={attempts} onOpenRoute={onOpenRoute} />}
@@ -39,7 +37,6 @@ function Attempts({ r, attempts, onOpenRoute }: { r: RequestRecord; attempts: At
           Route view
         </Button>
       </div>
-      {/* Keyed by Request: ↑/↓ in the sheet swaps the cards at once, each with its own default. */}
       <ol key={r.id} className="flex flex-col gap-3">
         {attempts.map((a, i) => (
           <AttemptCard key={a.seq} a={a} next={attempts[i + 1]} defaultOpen={attemptFailed(a) && i === 0} />
@@ -54,14 +51,11 @@ function attemptsLine(attempts: Attempt[]): string {
   return n === 1 ? "One Attempt." : `${n} Attempts.`;
 }
 
-/** One Attempt: the header opens and closes its facts on the collapse recipe (UI ticket 18). */
 function AttemptCard({ a, next, defaultOpen }: { a: Attempt; next?: Attempt; defaultOpen: boolean }) {
   const e = explain(a);
   return (
     <li className="rounded-xl border border-border">
-      {/* Open on first paint when it failed first: UI SDK doesn't animate that. */}
       <Collapsible defaultOpen={defaultOpen} className="group/attempt">
-        {/* The whole header toggles the Attempt; the key's name above it is a link of its own. */}
         <div className="relative flex w-full items-center gap-3 px-4 py-3 text-left">
           <CollapsibleTrigger aria-label={`Attempt ${a.seq}`} className="absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-info/30" />
           <ProviderLogo handle={a.provider} size={32} />
@@ -94,7 +88,6 @@ function AttemptCard({ a, next, defaultOpen }: { a: Attempt; next?: Attempt; def
   );
 }
 
-/** What happened at one Attempt, as label/value rows (drawer and Route view). */
 export function AttemptFacts({ a, next, withSentTo = true }: { a: Attempt; next?: Attempt; withSentTo?: boolean }) {
   const e = explain(a);
   const served = servedModel(a);
@@ -138,7 +131,6 @@ export function AttemptFacts({ a, next, withSentTo = true }: { a: Attempt; next?
   );
 }
 
-/** Where an Attempt went (Provider, Endpoint, Upstream Key), each a link to its sheet (drawer and Route view). */
 export function AttemptTarget({ a }: { a: Attempt }) {
   return (
     <>
@@ -161,7 +153,6 @@ export const keyStateClass: Record<string, string> = {
   gray: "text-fg",
 };
 
-/** "Response headers (n)", folded (the shared Disclosure: collapse recipe). */
 export function Headers({ headers }: { headers: Record<string, string> }) {
   const names = Object.keys(headers).sort();
   return (

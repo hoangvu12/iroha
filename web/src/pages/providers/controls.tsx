@@ -10,14 +10,11 @@ import type { KeyState, PreviewSkip } from "./api";
 
 export { PoolTile, ProviderTile } from "@/ui/LogoTile";
 
-// Small controls of the Providers page live in src/ui; the Key State label
-// and settings cards are here.
 export { Checkbox } from "@/ui/Checkbox";
 export { Segmented } from "@/ui/Segmented";
 export { Select } from "@/ui/Select";
 export { Switch } from "@/ui/Switch";
 
-/** Seconds left until a time, ticking every second. */
 export function useSecondsLeft(until?: string): number | undefined {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -29,7 +26,6 @@ export function useSecondsLeft(until?: string): number | undefined {
   return Math.max(0, Math.ceil((new Date(until).getTime() - now) / 1000));
 }
 
-/** "40 s", "12 min", "3 hr". */
 export function shortWait(s: number): string {
   if (s < 90) return `${s} s`;
   const m = Math.round(s / 60);
@@ -47,7 +43,6 @@ export const toneText: Record<Tone, string> = {
   blue: "text-info",
 };
 
-/** "● Cooling, 40 s left", with the reason on hover. */
 export function KeyStateLabel({ state, className, plain }: { state: KeyState; className?: string; plain?: boolean }) {
   const left = useSecondsLeft(state.state === "cooling" ? state.until : undefined);
   const tone = stateTone[state.state];
@@ -80,7 +75,6 @@ export const skipText = (s: PreviewSkip): { text: string; tone: Tone } => {
   }
 };
 
-/** A Provider's logo and handle, linking to its keys. */
 export function ProviderLink({ handle, className }: { handle: string; className?: string }) {
   return (
     <Link to={`/providers/${seg(handle)}/keys`} className={cn("inline-flex min-w-0 items-center gap-2.5 hover:underline", className)}>
@@ -90,7 +84,6 @@ export function ProviderLink({ handle, className }: { handle: string; className?
   );
 }
 
-/** A titled group of settings rows (C14). */
 export function SettingsCard({ title, children, danger }: { title: string; children: ReactNode; danger?: boolean }) {
   return (
     <section className="mb-9">
@@ -100,11 +93,6 @@ export function SettingsCard({ title, children, danger }: { title: string; child
   );
 }
 
-/**
- * One setting across the page's wide frame: its title and hint on the left (the
- * hint kept to a readable line), its control on the right in a column of at
- * most 420 px, so a field never runs the frame wide. Stacked on phones.
- */
 export function SettingsRow({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children?: ReactNode }) {
   return (
     <div className="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:gap-6 md:px-6">
@@ -117,13 +105,8 @@ export function SettingsRow({ title, hint, children }: { title: ReactNode; hint?
   );
 }
 
-/**
- * On a `Reveal` panel holding inputs: room for their 2 px focus ring, which the
- * panel's `overflow-hidden` would clip at its sides and bottom.
- */
 export const ringRoom = "-mx-1 px-1 -mb-1 pb-1";
 
-/** A small grey label pill: "Built-in", "Custom", "Hidden". */
 export function Pill({ children, tone = "gray" }: { children: ReactNode; tone?: "gray" | "blue" | "amber" | "green" | "red" }) {
   const tones = {
     gray: "bg-muted text-fg-muted",

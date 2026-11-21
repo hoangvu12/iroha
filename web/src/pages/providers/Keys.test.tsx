@@ -128,7 +128,7 @@ test("the state filter and search narrow the keys and live in the URL; sorting b
   await user.clear(screen.getByRole("searchbox", { name: "Search keys by name or secret" }));
   await user.click(screen.getByRole("button", { name: "Sort by State" }));
   expect(where()).toContain("sort=state");
-  expect(within(rows()[0]).getByText("team-3")).toBeTruthy(); // invalid first
+  expect(within(rows()[0]).getByText("team-3")).toBeTruthy();
 });
 
 test("Cached, 24 h: each key's cached share from the Requests of the last day, test Requests left out", async () => {
@@ -146,7 +146,7 @@ test("Cached, 24 h: each key's cached share from the Requests of the last day, t
   const cell = (i: number) => within(rows()[i]).getAllByRole("cell")[at];
   await waitFor(() => expect(cell(0)?.textContent).toBe("25.0%"));
   expect(cell(0)?.querySelector("[title]")?.getAttribute("title")).toBe("1,000 of 4,000 input tokens read from the cache, 12 Requests");
-  expect(cell(1)?.textContent).toBe("–"); // no Requests in the last day
+  expect(cell(1)?.textContent).toBe("–");
   expect(cell(2)?.textContent).toBe("0.0%");
   const asked = fetch.mock.calls.map(([u]) => new URL(String(u), "http://iroha.test")).find((u) => u.pathname === "/api/requests/stats")!;
   expect(Object.fromEntries(asked.searchParams)).toEqual({ provider: "acme", group_by: "upstream_key", since: "24h", exclude_tests: "true" });
@@ -202,10 +202,8 @@ test("Edit… shows mixed values for the selected keys and sends one bulk update
   await user.click(within(bar).getByRole("button", { name: "Edit…" }));
   const dialog = await screen.findByRole("dialog", { name: "Edit 3 keys" });
   expect(within(dialog).getByRole("checkbox", { name: "Enabled" }).getAttribute("aria-checked")).toBe("mixed");
-  // team-2 and team-3 may use every Endpoint, team-1 only eu.
   expect(within(dialog).getByRole("checkbox", { name: "eu" }).getAttribute("aria-checked")).toBe("true");
   expect(within(dialog).getByRole("checkbox", { name: "us" }).getAttribute("aria-checked")).toBe("mixed");
-  // Take asia off every key; leave Enabled alone.
   await user.click(within(dialog).getByRole("checkbox", { name: "asia" }));
   await user.click(within(dialog).getByRole("checkbox", { name: "asia" }));
   await user.click(within(dialog).getByRole("button", { name: "Apply to 3 keys" }));
@@ -223,13 +221,12 @@ test("Edit… shows mixed values for the selected keys and sends one bulk update
 
 test("ticking an Endpoint sends it to add, never a list built from the loaded rows, so a key's list changed since keeps that change", async () => {
   const user = userEvent.setup();
-  // As loaded: team-1 on eu alone, team-2 on eu and asia. Either may have changed since.
   const fetch = renderTab([key(1, { endpoints: ["eu"] }), key(2, { endpoints: ["eu", "asia"] })], undefined, { provider: acme });
   await user.click(await screen.findByRole("checkbox", { name: "Select all rows on this page" }));
   const bar = screen.getByRole("group", { name: "2 selected" });
   await user.click(within(bar).getByRole("button", { name: "Edit…" }));
   const dialog = await screen.findByRole("dialog", { name: "Edit 2 keys" });
-  await user.click(within(dialog).getByRole("checkbox", { name: "us" })); // off on both -> on
+  await user.click(within(dialog).getByRole("checkbox", { name: "us" }));
   await user.click(within(dialog).getByRole("button", { name: "Apply to 2 keys" }));
   await waitFor(() =>
     expect(posts(fetch)).toEqual([["/api/providers/acme/keys/bulk/update", { items: [{ key: "key_1", endpoints_add: ["us"] }, { key: "key_2", endpoints_add: ["us"] }] }]]),
@@ -243,7 +240,7 @@ test("a bulk edit that fails on some keys names them in the bar, with Undo for t
   const bar = screen.getByRole("group", { name: "3 selected" });
   await user.click(within(bar).getByRole("button", { name: "Edit…" }));
   const dialog = await screen.findByRole("dialog", { name: "Edit 3 keys" });
-  await user.click(within(dialog).getByRole("checkbox", { name: "Enabled" })); // all on -> off
+  await user.click(within(dialog).getByRole("checkbox", { name: "Enabled" }));
   await user.click(within(dialog).getByRole("button", { name: "Apply to 3 keys" }));
   expect(await within(bar).findByText("2 keys changed; not changed: team-2 (no longer exists)", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeTruthy();
   expect(within(bar).getByRole("button", { name: /^Undo/ })).toBeTruthy();
@@ -290,7 +287,6 @@ test("clicking a row, or its name with the keyboard, opens the key's sheet", asy
   await waitFor(() => expect(decodeURIComponent(where())).toBe("?sheet=key:acme/team-2"));
   await user.click(screen.getByRole("button", { name: "Open team-1" }));
   await waitFor(() => expect(decodeURIComponent(where())).toBe("?sheet=key:acme/team-1"));
-  // No key dialog any more (UI ticket 27).
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
@@ -347,4 +343,40 @@ test("an agent filters, selects and tests keys, and needs a person to delete one
   const remove = { steps: [{ ref: "More for team-3", action: "press", args: ["Delete…"] }, { ref: "Delete team-3?", action: "press", args: ["Delete key"] }] };
   expect((await agent.act(remove)).ok).toBe(false);
   expect(posts(fetch).some(([u]) => u.endsWith("/delete"))).toBe(false);
+});
+
+test("Add keys lists a key the Provider already holds as Already added, under the key that holds it, and adds only the new one", async () => {
+  const user = userEvent.setup();
+  const held = { code: "upstream_key_duplicate", message: 'Provider acme already holds this secret as Upstream Key "team-1".', details: { provider: "acme", upstream_key: "team-1" } };
+  const fetch = vi.fn<typeof globalThis.fetch>(async (u, init) => {
+    const path = String(u);
+    if ((init?.method ?? "GET") === "GET") return answer(path.startsWith("/api/providers/acme/keys") ? { upstream_keys: [key(1)] } : {});
+    return answer({
+      dry_run: path.includes("dry_run=true"),
+      audit_entry: "aud_1",
+      succeeded: 1,
+      failed: 1,
+      items: [
+        { index: 0, ok: false, error: held, changes: [] },
+        { index: 1, ok: true, outcome: "created", result: key(2, { name: "key-2" }), changes: [] },
+      ],
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={["/providers/acme/keys"]}>
+        <SheetStackProvider>
+          <KeysTab handle="acme" adding setAdding={() => {}} />
+        </SheetStackProvider>
+      </MemoryRouter>
+      <Toaster />
+    </QueryClientProvider>,
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Add Upstream Keys" });
+  await user.type(within(dialog).getByRole("textbox", { name: "Keys, one per line" }), "sk-held-11112222{enter}sk-fresh-33334444");
+  expect(await within(dialog).findByText("Already added")).toBeTruthy();
+  expect(within(dialog).getByText("team-1")).toBeTruthy();
+  expect(within(dialog).queryByText("Refused")).toBeNull();
+  expect(within(dialog).getByRole("button", { name: "Add 1 key" })).toBeTruthy();
 });

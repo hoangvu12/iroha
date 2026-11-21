@@ -59,9 +59,6 @@ test("an agent sees no control of the sample while loading, and the real ones on
   expect(pressed).toHaveBeenCalledWith("acme");
 });
 
-// UI ticket 26: the browser's `inert` keeps people out, but a click dispatched by a
-// script or an automation (or a browser without inert) still reached the sample's
-// handlers and opened a sheet for the sample record.
 test("a skeleton's rows take no click, press or key, even dispatched straight at them", () => {
   const pressed = vi.fn();
   const Page = ({ data }: { data?: Row[] }) => (
@@ -92,14 +89,12 @@ test("a skeleton's rows take no click, press or key, even dispatched straight at
   poke();
   expect(pressed).not.toHaveBeenCalled();
 
-  // Loading again after data (same Skeleton): Skullet draws the last rows as the skeleton; they are as inert.
   rerender(<Page data={[{ handle: "acme" }]} />);
   rerender(<Page data={undefined} />);
   expect(container.querySelectorAll("[skullet-loading] li").length).toBeGreaterThan(0);
   poke();
   expect(pressed).not.toHaveBeenCalled();
 
-  // The real rows work.
   rerender(<Page data={[{ handle: "acme" }]} />);
   const real = screen.getAllByRole("button", { name: "Test acme" }).filter((b) => !b.closest("[skullet-loading], [skullet-exiting]"));
   expect(real).toHaveLength(1);

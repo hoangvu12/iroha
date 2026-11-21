@@ -7,14 +7,6 @@ import { DEFAULT_SETTINGS, firstModelFor, suggestedModelOf } from "./api";
 import type { Turn } from "./store";
 import { newChat } from "./store";
 
-// What each Test button fills in (README "Chat"): a Provider, a Pool, an
-// Upstream Key (pinned), one model of a Provider, a Gateway Key (sent as),
-// or a past Request (its prompt, ready to send again). Each starts a new chat.
-
-/**
- * The model to start a Provider's chat with, the same every time: the one
- * it served most lately, else its first listed (Iroha's `suggested`).
- */
 async function providerModel(handle: string): Promise<string> {
   try {
     return (await suggestedModelOf(handle)) ?? "";
@@ -46,9 +38,7 @@ export async function startFor(target: ChatTarget): Promise<void> {
       let model = "";
       try {
         model = (await firstModelFor(target.gatewayKey)) ?? "";
-      } catch {
-        /* the picker says why */
-      }
+      } catch {}
       newChat({ title: `${target.gatewayKey} test`, settings: { ...base, model, as: target.gatewayKey } });
       return;
     }
@@ -57,7 +47,6 @@ export async function startFor(target: ChatTarget): Promise<void> {
   }
 }
 
-/** The model a Request named, as the global routes take it. */
 export function modelOfRequest(r: RequestRecord): string {
   if (r.pool) return r.pool;
   if (r.route.startsWith("/providers/") && r.provider) return `${r.provider}/${r.model}`;
@@ -86,9 +75,7 @@ async function startReplay(id: string) {
           : { id: `r${i}`, role: "assistant", model: settings.model, shape: settings.shape, replayed: true, rounds: [{ parts: [{ kind: "text", text: b.text }], status: "done" }] },
       );
       settings.tools = [];
-    } catch {
-      /* expired: start from the model alone */
-    }
+    } catch {}
   }
   newChat({ title: `Replay of ${short}`, origin: `Request ${id}`, settings, system, turns, draft });
 }

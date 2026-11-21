@@ -44,7 +44,6 @@ export default function ProviderSheet({ record }: SheetBodyProps<"provider">) {
   const keys = useKeys(handle);
   const chat = useChatActions();
   const refresh = useRefresh();
-  // The sheet stays open, so Disable/Enable says how it went beside its button (UI ticket 04).
   const toggling = useSave({ refresh, describe: errorText });
   const page = `/providers/${seg(handle)}/keys`;
 
@@ -81,7 +80,7 @@ export default function ProviderSheet({ record }: SheetBodyProps<"provider">) {
       <SheetBody>
         <SheetTitle
           kind="Provider"
-          logo={<ProviderTile handle={handle} version={pr.logo_domain} size={44} />}
+          logo={<ProviderTile handle={handle} cacheKey={pr.logo_domain} size={44} />}
           title={handle}
           subtitle={pr.name && pr.name !== handle ? pr.name : undefined}
           state={state}

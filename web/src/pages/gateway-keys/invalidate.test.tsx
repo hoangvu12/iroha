@@ -4,10 +4,6 @@ import type { ReactNode } from "react";
 import { expect, test } from "vitest";
 import { useInvalidateKeys } from "./api";
 
-// UI ticket 32: a Gateway Key change (or its Undo) also refreshes the other
-// places that list Gateway Keys or depend on their scopes: the chat's "Send
-// as" list and model choices, and a Pool's Members tab. Not Providers.
-
 test("a Gateway Key change refreshes every list of Gateway Keys, and nothing about Providers", async () => {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
   const refreshed = {

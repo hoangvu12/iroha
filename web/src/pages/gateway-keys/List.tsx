@@ -27,17 +27,11 @@ import { useKeyQuestions } from "./confirm";
 import { CreateDialog } from "./CreateDialog";
 import { scopeDetail, scopeSummary } from "./scope";
 
-// Gateway Keys (C02, C12) on the shared DataTable (UI ticket 08): name,
-// readable key, access, last use and recent Requests; ?q= searches by name or
-// key, ?sort=&dir= sorts. A row opens the key's page. Revoke… and Delete… ask
-// first (UI ticket 21). Revoked keys fold under the table into their own.
-
 const keyHref = (k: GatewayKey) => `/gateway-keys/${encodeURIComponent(k.id)}`;
 
 type Sort = "name" | "access" | "used" | "requests";
 
 const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
-// Most recent first, then by name.
 const byUse = (a: GatewayKey, b: GatewayKey) => (b.last_used_at ?? "").localeCompare(a.last_used_at ?? "") || natural(a.name, b.name);
 
 const col = columnsFor<GatewayKey>();
@@ -70,7 +64,6 @@ const columns = col.columns([
   col.accessor("recent_requests", {
     id: "requests",
     header: "Requests, 24 h",
-    // The busiest first, then by name.
     sortFn: (a, b) => b.original.recent_requests - a.original.recent_requests || natural(a.original.name, b.original.name),
     meta: { align: "right" },
     cell: ({ row }) => <RequestsCount k={row.original} />,
@@ -93,7 +86,6 @@ const revokedColumns = col.columns([
   col.accessor((k) => k.revoked_at ?? "", {
     id: "revoked",
     header: "Revoked",
-    // The newest revoke first.
     sortFn: (a, b) => (b.original.revoked_at ?? "").localeCompare(a.original.revoked_at ?? "") || natural(a.original.name, b.original.name),
     meta: { width: "w-[22%]", className: "tabular text-fg-muted" },
     cell: ({ row }) => (row.original.revoked_at ? shortDate(row.original.revoked_at) : ""),
@@ -110,7 +102,6 @@ const revokedColumns = col.columns([
 const searchKeys = (k: GatewayKey, needle: string) => !needle || k.name.toLowerCase().includes(needle) || k.secret.toLowerCase().includes(needle);
 const REVOKED_SORT: SortingState = [{ id: "revoked", desc: false }];
 
-/** Gateway Keys (C02, C12): name, readable key, access, last use and recent Requests. */
 export function KeysList() {
   const list = useGatewayKeys();
   const phone = useIsPhone();
@@ -172,7 +163,6 @@ export function KeysList() {
         onClearFilters={() => setParam("q")}
         sorting={sorting}
         onSortingChange={(s) => setSort(s[0]?.id ?? "name", s[0]?.desc ?? false, "name")}
-        // Capture prompts for several keys at once, mixed shown (UI ticket 30).
         bulk={({ rows }) => (
           <>
             <GatewayKeysBulkEdit rows={rows} at={barSave} size={phone ? "sm" : "md"} />
@@ -221,14 +211,13 @@ export function KeysList() {
       )}
 
       {confirm.dialog}
-      <CreateDialog open={creating} onOpenChange={setCreating} existing={list.data ?? []} />
+      <CreateDialog open={creating} onOpenChange={setCreating} />
     </>
   );
 }
 
 type Actions = { onRevoke: (k: GatewayKey) => void; onDelete: (k: GatewayKey) => void };
 
-/** Edit… in the bulk bar: Capture prompts (UI ticket 30). Names and secrets are never bulk-edited; access stays on each key's page. */
 function GatewayKeysBulkEdit({ rows, at, size }: { rows: GatewayKey[]; at: Save; size: "sm" | "md" }) {
   const refresh = useInvalidateKeys();
   const days = useCaptureDays().data;
@@ -251,7 +240,6 @@ function GatewayKeysBulkEdit({ rows, at, size }: { rows: GatewayKey[]; at: Save;
   return <BulkEdit rows={rows} noun={["key", "keys"]} fields={fields} at={at} onApply={apply} size={size} />;
 }
 
-/** The key's name, a real link to its page (Ctrl/⌘-click opens a new tab), named "Open <name>" for the keyboard and agents. */
 function OpenLink({ k }: { k: GatewayKey }) {
   return (
     <SdkButton render={<Link to={keyHref(k)} />} aria-label={`Open ${k.name}`} className="block max-w-full truncate rounded outline-none hover:underline focus-visible:underline">
@@ -267,7 +255,6 @@ function LastUsed({ k }: { k: GatewayKey }) {
 function KeyMenu({ k, onRevoke, onDelete }: { k: GatewayKey } & Actions) {
   const navigate = useNavigate();
   const chat = useChatActions();
-  // "Copy key" closes the menu, so the trigger it closes back to shows the result.
   const copied = useCopy();
   return (
     <RowMenu name={k.name} copy={copied.state}>
@@ -295,13 +282,11 @@ function SecretCell({ k }: { k: GatewayKey }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{shortSecret(k.secret)}</Mono>
-      {/* Shown on the row's hover, at once (row hover is instant); where nothing hovers (a tablet's table), always (row-reveal). */}
       <CopyButton icon value={k.secret} what="Gateway Key" label={`Copy ${k.name}'s key`} className="row-reveal" />
     </span>
   );
 }
 
-/** Phones: two lines per key, name and last use, then the key and its access (C31). */
 function KeyLine({ k }: { k: GatewayKey }) {
   return (
     <span className="block min-w-0 flex-1">
@@ -319,7 +304,6 @@ function KeyLine({ k }: { k: GatewayKey }) {
   );
 }
 
-/** Phones: a revoked key's name and when it was revoked, then its key. */
 function RevokedLine({ k }: { k: GatewayKey }) {
   return (
     <span className="block min-w-0 flex-1 text-fg-muted">

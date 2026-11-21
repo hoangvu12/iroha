@@ -16,14 +16,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/rules"
 )
 
-// Trying a failure (UI ticket 34): the Owner types an upstream answer and
-// sees what the live Failure Rules decide for one Provider. The answer is
-// read by the same code an Attempt uses (failureBody, answerFailure in
-// embedded.go), classified by the live rules.Set and passed through
-// noCredential, so it can never drift from what the Gateway does. Nothing is
-// sent, stored, counted or logged.
-
-// ClassifyFailure is the body of POST /api/providers/{provider}/rules/classify.
 type ClassifyFailure struct {
 	Status      int               `json:"status" doc:"The upstream HTTP status (100-599); 0 for no response at all (a network failure, or with timeout a time-out)."`
 	Body        string            `json:"body,omitempty" doc:"The response body as the Provider sent it: JSON, text, an HTML page or a server-sent event stream (data: lines). A 2xx body is read as an Attempt reads it: an error inside it is a failure."`
@@ -35,7 +27,6 @@ type ClassifyFailure struct {
 	UpstreamKey string            `json:"upstream_key,omitempty" doc:"Name or ID of the Upstream Key that was sent. A keyless key (empty secret), like an Endpoint with auth style none, sent no credential, so an invalid verdict becomes retry_elsewhere as in an Attempt."`
 }
 
-// Classification is what the Failure Rules decide for a ClassifyFailure.
 type Classification struct {
 	DryRun         bool          `json:"dry_run" doc:"Echoes dry_run; this call never changes anything either way."`
 	Provider       string        `json:"provider"`
@@ -53,7 +44,6 @@ type Classification struct {
 	CoolingFrom    string        `json:"cooling_from,omitempty" enum:"response,rule,default" doc:"Where cooling_seconds comes from: a reset time the response names (the rule's reset sources, Retry-After-Ms, Retry-After), the rule's cooling_seconds, or the 60 s default."`
 }
 
-// ClassifyRoutes are the routes trying a failure against the Failure Rules.
 func (g *Gateway) ClassifyRoutes() []api.Route {
 	return []api.Route{{
 		Method: http.MethodPost, Path: "/api/providers/{provider}/rules/classify", Tag: "Failure Rules",
@@ -90,7 +80,7 @@ func (g *Gateway) classifyRoute(c *api.Call) (any, error) {
 	case len(rt.Endpoints) > 0:
 		ep = &rt.Endpoints[0]
 	}
-	key := &planner.Key{Secret: "set"} // no key named: one that sends a credential
+	key := keySendingACredential()
 	if in.UpstreamKey != "" {
 		if key, err = g.providers.ResolveKey(c.R.Context(), &rt, in.UpstreamKey); err != nil {
 			return nil, err
@@ -126,9 +116,8 @@ func (g *Gateway) classifyRoute(c *api.Call) (any, error) {
 	return out, nil
 }
 
-// readFailure builds the upstream answer the Owner typed and reads it as an
-// Attempt on ep does. failed is false for a 2xx answer that is no failure;
-// embedded is true when the failure is an error inside a 2xx answer.
+func keySendingACredential() *planner.Key { return &planner.Key{Secret: "any"} }
+
 func readFailure(in ClassifyFailure, ep planner.Endpoint) (f rules.Failure, failed, embedded bool) {
 	if in.Status == 0 {
 		what := "no response"
@@ -146,11 +135,9 @@ func readFailure(in ClassifyFailure, ep planner.Endpoint) (f rules.Failure, fail
 	}
 	resp := &http.Response{StatusCode: in.Status, Header: h, Body: io.NopCloser(strings.NewReader(in.Body))}
 	if in.Status < 200 || in.Status >= 300 {
-		body, _ := failureBody(resp) // reading a string cannot fail
+		body, _ := failureBody(resp) // a strings.Reader never fails
 		return rules.Failure{Status: in.Status, Header: h, Body: body}, true, false
 	}
-	// A pasted stream is the answer to a streamed request; passthrough
-	// unless the Owner says the answer would be translated.
 	body, embedded := answerFailure(resp, isEventStream(h), normalise.For(ep.URL, ep.Shape), in.Translated)
 	if body == nil {
 		return rules.Failure{}, false, false
@@ -158,8 +145,6 @@ func readFailure(in ClassifyFailure, ep planner.Endpoint) (f rules.Failure, fail
 	return rules.Failure{Status: in.Status, Header: h, Body: body}, true, embedded
 }
 
-// contentTypeOf guesses a typed body's Content-Type: an event stream, JSON
-// or text.
 func contentTypeOf(body string) string {
 	b := bytes.TrimSpace([]byte(body))
 	switch {

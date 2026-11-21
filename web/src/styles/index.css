@@ -1,36 +1,26 @@
-/* UI SDK adds the little CSS its behaviours need in this layer; declared
-   first so every style below wins over it. No web.css: Iroha styles UI SDK
-   parts itself, from their data-slot and state attributes. */
+/* UI SDK puts the CSS its behaviours need in @layer ui-sdk; declared first so every style below wins over it. */
 @layer ui-sdk;
 
 @import "@fontsource-variable/inter/index.css";
 @import "tailwindcss";
 
-/* Dark mode is the .dark class on <html> (src/app/theme.tsx), so the Owner
-   can override the system setting. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/*
- * Design tokens (design/v2-clean/README.md). Every colour in the UI comes
- * from one of these; each has a light and a dark value, so nothing is drawn
- * twice. Use them through Tailwind: bg-bg, bg-subtle, text-fg, text-muted,
- * border-border, bg-primary text-primary-fg, text-danger, bg-danger-tint...
- */
 :root {
-  --bg: #ffffff;              /* page */
-  --bg-subtle: #fafafa;       /* sidebar, canvas, panels */
-  --bg-muted: #f2f2f3;        /* hover, selected nav, skeleton bars, chips */
-  --skeleton-highlight: rgb(255 255 255 / 0.6); /* the shimmer crossing skeleton bars */
-  --bg-elevated: #ffffff;     /* dialogs, menus, toasts */
+  --bg: #ffffff;
+  --bg-subtle: #fafafa;
+  --bg-muted: #f2f2f3;
+  --skeleton-highlight: rgb(255 255 255 / 0.6);
+  --bg-elevated: #ffffff;
   --fg: #171717;
   --fg-muted: #6b6b6f;
   --fg-subtle: #9b9ba1;
   --border: #ebebed;
   --border-strong: #d6d6da;
-  --primary: #1a1a1a;         /* the one main button: near-black */
+  --primary: #1a1a1a;
   --primary-hover: #333335;
   --primary-fg: #ffffff;
-  --danger: #c8291e;          /* red only on the button that does it */
+  --danger: #c8291e;
   --danger-hover: #ad2219;
   --danger-text: #c8291e;
   --danger-tint: #fdeceb;
@@ -38,12 +28,11 @@
   --success-tint: #e8f6ed;
   --warning: #d97706;
   --warning-tint: #fef3e2;
-  --info: #1d63ed;            /* links, toast actions, focus ring */
+  --info: #1d63ed;
   --info-tint: #eaf1fe;
-  --selected: #eff4fe;        /* selected table rows */
+  --selected: #eff4fe;
   --overlay: rgb(0 0 0 / 0.12);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.08);
-  /* Code highlighting (ui/highlight.tsx), readable on --bg-subtle and --bg-muted */
   --code-key: #0550ae;
   --code-string: #116329;
   --code-number: #953800;
@@ -64,7 +53,7 @@
   --fg-subtle: #6f6f77;
   --border: #26262a;
   --border-strong: #37373c;
-  --primary: #f2f2f2;         /* the primary button turns light */
+  --primary: #f2f2f2;
   --primary-hover: #ffffff;
   --primary-fg: #111113;
   --danger: #d23a2d;
@@ -127,57 +116,43 @@
   --shadow-elevated: var(--shadow);
 }
 
-/*
- * Motion tokens (architecture.md "UI motion system"). Every transition in
- * the UI takes its duration, curve, distance and scale from here; never type
- * a number. A transition lists its properties (never `all`): movement
- * (translate, scale, rotate, height, an indicator's width) and opacity.
- * Under reduced motion the rule at the end of this file holds movement still
- * and lets enter/exit, hover and arrival play as fades.
- */
 :root {
-  /* Durations */
-  --duration-hover: 150ms;       /* colour and background on hover, selection */
-  --duration-press: 160ms;       /* :active scale on buttons */
-  --duration-release: 100ms;     /* ...and back when let go: the response snaps */
-  --duration-tooltip: 125ms;     /* tooltip in (out is the same; instant after the first) */
-  --duration-popup-in: 180ms;    /* menu, select, combobox, popover in */
-  --duration-popup-out: 120ms;   /* ...and out: exits are faster than entrances */
-  --duration-dialog-in: 200ms;   /* dialog, alert dialog, their backdrop */
+  --duration-hover: 150ms;
+  --duration-press: 160ms;
+  --duration-release: 100ms;
+  --duration-tooltip: 125ms;
+  --duration-popup-in: 180ms;
+  --duration-popup-out: 120ms;
+  --duration-dialog-in: 200ms;
   --duration-dialog-out: 150ms;
-  --duration-sheet-in: 300ms;    /* a sheet or the chat panel sliding in; older sheets moving aside */
-  --duration-sheet-out: 240ms;   /* the top sheet leaving; the one below sliding back */
-  --duration-indicator: 200ms;   /* tab and segmented indicator sliding */
-  --duration-collapse: 200ms;    /* a disclosure or expandable row opening/closing (height) */
-  --duration-move: 250ms;        /* something repositioning on screen: reorder settle, canvas pan to a card */
-  --duration-list-in: 200ms;     /* a row, bar or pill appearing */
-  --duration-list-out: 150ms;    /* ...and leaving */
-  --duration-toast: 400ms;       /* toasts stacking, entering, leaving (with ease, not ease-out) */
-  --duration-fade: 150ms;        /* a crossfade; what a moving entrance becomes under reduced motion */
-  --duration-flash: 1600ms;      /* the background of a row that just arrived, fading back */
-  --duration-scrollbar-in: 100ms;  /* a Scroll Area's bar showing on hover or scroll */
-  --duration-scrollbar-out: 200ms; /* ...and fading once it isn't needed (it lingers, unlike other exits) */
+  --duration-sheet-in: 300ms;
+  --duration-sheet-out: 240ms;
+  --duration-indicator: 200ms;
+  --duration-collapse: 200ms;
+  --duration-move: 250ms;
+  --duration-list-in: 200ms;
+  --duration-list-out: 150ms;
+  --duration-toast: 400ms;
+  --duration-fade: 150ms;
+  --duration-flash: 1600ms;
+  --duration-scrollbar-in: 100ms;
+  --duration-scrollbar-out: 200ms;
 
-  /* Distances and scales: where an entrance starts and an exit ends */
-  --motion-scale-popup: 0.96;    /* popups and dialogs grow from this; never from 0 */
-  --motion-scale-press: 0.97;    /* a pressed button */
-  --motion-shift: 8px;           /* a bar or pill rising into place */
-  --motion-shift-sm: 4px;        /* a row arriving */
-  --motion-sheet-offset: 100%;   /* a sheet starts one own-width off the right edge */
-  --motion-toast-offset: 100%;   /* a toast starts one own-height below its place */
+  --motion-scale-popup: 0.96;
+  --motion-scale-press: 0.97;
+  --motion-shift: 8px;
+  --motion-shift-sm: 4px;
+  --motion-sheet-offset: 100%;
+  --motion-toast-offset: 100%;
 }
 
-/* Curves, also as Tailwind utilities: ease-out, ease-in-out, ease-drawer.
-   ease-in is removed: nothing in the UI starts slow. Hover and toasts use
-   CSS `ease`; progress and loops `linear`. */
 @theme static {
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);       /* entering, exiting, indicators: starts fast */
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);   /* moving from one place on screen to another */
-  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);    /* sheets and the chat panel */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-in: initial;
 }
 
-/* Durations as Tailwind utilities: duration-popup-in, duration-sheet-out... */
 @theme inline {
   --transition-duration-hover: var(--duration-hover);
   --transition-duration-press: var(--duration-press);
@@ -197,27 +172,8 @@
   --transition-duration-fade: var(--duration-fade);
   --transition-duration-scrollbar-in: var(--duration-scrollbar-in);
   --transition-duration-scrollbar-out: var(--duration-scrollbar-out);
-
-  /* animate-rise-in: a page's first screen entering once (Login, Setup).
-     A keyframe, not @starting-style, because Chrome skips @starting-style
-     for elements styled before the first frame. Under reduced motion the
-     shift is 0, so it plays as a fade. `backwards`, not `both`: once done it
-     holds nothing, so the column doesn't keep a compositor layer. */
-  --animate-rise-in: rise-in var(--duration-dialog-in) var(--ease-out) backwards;
 }
 
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    translate: 0 var(--motion-shift);
-  }
-}
-
-/* press: every Button and icon button (ui/Button.tsx). Held, it scales down
-   on --duration-press; let go, it snaps back on --duration-release. Not for a
-   key (Space on a focused button is :active too, and a key never animates),
-   nor while disabled or pending. Hover colours keep their own duration and
-   `ease`. Under reduced motion press and release are 0 and the scale is 1. */
 @utility press {
   transition: scale var(--duration-release) var(--ease-out), background-color var(--duration-hover) ease, color var(--duration-hover) ease;
   &:active:not(:focus-visible):not([data-disabled]):not([data-pending]) {
@@ -226,11 +182,6 @@
   }
 }
 
-/* row-reveal: a row's quiet button (copy a secret, Test in Chat) in a
-   DataTable row (the row is the `group`). Hidden until the row is hovered,
-   where there is hover; shown while focused or showing a copy's result; always
-   shown where there is no hover (touch), which would otherwise never see it.
-   Instant: row hover is high-frequency (architecture.md "UI motion system"). */
 @utility row-reveal {
   opacity: 0;
   @media (hover: hover) {
@@ -258,8 +209,7 @@
     line-height: 1.45;
     font-feature-settings: "cv11", "ss01";
   }
-  /* UI SDK popups render in place: a menu in a right-aligned cell or a bold
-     header would take on its text styles, so they start from the body's. */
+  /* UI SDK popups render in place, so they would inherit the text styles of the cell or header around them. */
   :is([popover], dialog) {
     font-size: 14px;
     font-weight: 400;
@@ -275,9 +225,7 @@
     outline: 2px solid var(--info);
     outline-offset: 2px;
   }
-  /* Tailwind 4 dropped the pointer on buttons: every control that acts on a
-     press shows it, and none does while disabled. On touch, a control never
-     double-tap-zooms, so a tap acts at once. */
+  /* Tailwind 4's preflight gives buttons no pointer cursor. */
   :is(button, a[href], summary, select, input:is([type="checkbox"], [type="radio"], [type="file"]),
     [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="menuitemradio"],
     [role="menuitemcheckbox"], [role="option"], [role="switch"], [role="checkbox"], [role="radio"]) {
@@ -293,10 +241,7 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Fallback for anything still scrolling natively (the page itself, a
-     textarea): a thin rounded thumb, no track and no arrow buttons. Scroll
-     regions use ui/ScrollArea instead. Chrome ignores these once an element
-     sets scrollbar-width or scrollbar-color, so neither is set here. */
+  /* Chrome ignores ::-webkit-scrollbar once an element sets scrollbar-width or scrollbar-color. */
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -323,8 +268,6 @@
     }
   }
 
-  /* ui/ScrollArea's edge fades: the viewport fades out at an edge while more
-     content lies past it (UI SDK's overflow variables, taken from the root). */
   .scroll-fade-y {
     --scroll-area-overflow-y-start: inherit;
     --scroll-area-overflow-y-end: inherit;
@@ -367,12 +310,6 @@
   }
 }
 
-/* Skeletons are Skullet's (ui/Skeleton.tsx, app/skeletons.tsx), coloured from
-   --bg-muted with this highlight. .skeleton-fill passes a flex parent's height
-   through Skullet's wrappers, for content that fills it (the route canvases). */
-/* Skullet's React Skeleton paints a skeleton from the first frame when it
-   mounts loading; this holds it unseen (still taking its space) for 150 ms,
-   so a fast load shows the content straight away and never a skeleton. */
 .skeleton-hold[aria-busy="true"] {
   animation: skeleton-hold 150ms step-end both;
 }
@@ -381,23 +318,15 @@
     visibility: hidden;
   }
 }
-/* A skeleton drawn from a big table's remembered shape (UI ticket 26: the feed's
-   100 rows were 1,414 bones, 1.6 s to draw and a shimmer repainting them all)
-   is cut at a window's height: Skullet draws no bone outside an element that
-   clips, so only what can be seen is drawn and swept. The rows below arrive with
-   the content, out of view. */
+/* Skullet draws no bone outside an element that clips. */
 [skullet-loading] :is(.table-scroller, ul[data-rows]) {
   max-height: 100vh !important;
   overflow: hidden !important;
 }
-/* Rows past the first 30 aren't laid out or walked at all. */
 [skullet-loading] [data-rows] > :nth-child(n + 31) {
   display: none !important;
 }
-/* The sweep repaints every bone on the main thread each frame (a background
-   animated per bone); a sample (at most 20 rows) keeps it, a skeleton of more
-   rows (a big table's remembered shape, hundreds of bones) pulses instead: opacity,
-   composited, no paint. Skullet reads this when it draws. */
+/* Skullet reads --skullet-animation when it draws. */
 [skullet-loading]:has([data-rows] > :nth-child(21)) {
   --skullet-animation: pulse;
 }
@@ -409,24 +338,13 @@
   min-height: 0;
 }
 
-/* The theme flips in one step: app/theme.tsx sets this on <html> while .dark
-   changes, so hover-coloured parts don't fade behind the rest. Unlayered and
-   !important so no part's own transition survives it. */
 .theme-switching *,
 .theme-switching *::before,
 .theme-switching *::after {
   transition: none !important;
 }
 
-/* Table header (UI ticket 25): the page scrolls a DataTable's rows, and its
-   header stays at the top of the window while the table is in view. The table's
-   scroller (.table-scroller) scrolls only sideways, but that alone would make a
-   sticky header stick to it, so the header follows the page with a
-   scroll-driven animation instead, off the main thread: from where the table's
-   top passes the window's top it moves down with the scroll, at most
-   --table-stick-end (set by DataTable's TableScroller). Not motion: it holds
-   under reduced motion like sticky does. Browsers without scroll timelines get
-   a header that scrolls away with the table. */
+/* A sideways scroller would make a sticky header stick to it, not to the page, so the header follows the page with a scroll-driven animation. */
 @keyframes table-head-stick {
   to {
     translate: 0 var(--table-stick-end, 0px);
@@ -443,15 +361,6 @@
   }
 }
 
-/*
- * Reduced motion: the one rule (architecture.md "UI motion system").
- * Holds still: anything that moves or changes size (slides, scales, presses,
- * indicators, height, reordering, sheets) and anything that loops (pulse,
- * ping, bounce; Skullet stops its shimmer itself). May fade: enter/exit of popups, dialogs,
- * sheets, rows and toasts, hover colours and a new row's flash keep their
- * durations; with no distance or scale left, they play as plain fades.
- * Unlayered, so it wins over Tailwind's theme layer.
- */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-press: 0ms;

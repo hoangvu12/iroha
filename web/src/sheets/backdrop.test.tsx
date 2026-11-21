@@ -5,9 +5,6 @@ import { useChatPanel } from "@/app/chat-panel";
 import { rec, RecordLink } from "./RecordLink";
 import { loadedSheet, renderWithSheets } from "./test-iroha";
 
-// UI ticket 27: one backdrop under the whole stack; a click on it closes the
-// stack, a click on a lower sheet brings that sheet forward.
-
 afterEach(() => vi.unstubAllGlobals());
 
 const where = () => screen.getByRole("status", { name: "Location" }).textContent;
@@ -39,15 +36,12 @@ test("one backdrop sits under the whole stack while a sheet is open, on the shee
   expect(backdrop().hasAttribute("data-open")).toBe(true);
   await user.click(await within(provider).findByRole("link", { name: "team-5" }));
   await loadedSheet("Upstream Key team-5");
-  // Still one, for two sheets.
   expect(backdrops()).toHaveLength(1);
 
-  // Dims with the overlay token and fades on the sheet durations (0 under reduced motion: instant).
   const cls = backdrop().className;
   expect(cls).toContain("bg-overlay");
   expect(cls).toContain("--duration-sheet-in");
   expect(cls).toContain("--duration-sheet-out");
-  // Under the chat panel (z-30), above the page and sidebar (z-20).
   expect(cls).toContain("z-[25]");
 
   await user.keyboard("{Escape}");
@@ -80,12 +74,10 @@ test("a click on a lower sheet brings it forward: the sheets above it close", as
   renderWithSheets(<Page />, "/page?sheet=provider:acme&sheet=key:acme/team-5");
   await loadedSheet("Upstream Key team-5");
   const provider = await loadedSheet("Provider acme");
-  // Its title, not a link or a button.
   await user.click(within(provider).getByRole("heading", { name: "Provider acme" }));
   await waitFor(() => expect(sheets()).toHaveLength(1));
   await waitFor(() => expect(where()).toBe("/page?sheet=provider:acme"));
   expect(provider.hasAttribute("data-top")).toBe(true);
-  // A click in the top sheet changes nothing.
   await user.click(within(provider).getByRole("heading", { name: "Provider acme" }));
   expect(sheets()).toHaveLength(1);
 });

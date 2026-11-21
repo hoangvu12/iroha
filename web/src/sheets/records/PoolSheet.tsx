@@ -48,7 +48,7 @@ export default function PoolSheet({ record }: SheetBodyProps<"pool">) {
       <SheetBody>
         <SheetTitle
           kind="Model Pool"
-          logo={<PoolTile name={p.name} version={p.maker} size={44} />}
+          logo={<PoolTile name={p.name} cacheKey={p.maker} size={44} />}
           title={p.name}
           subtitle={
             <span className="inline-flex items-center gap-1">

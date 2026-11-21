@@ -15,8 +15,7 @@ import (
 
 const geminiModels = "/providers/acme/v1beta/models/"
 
-// addGeminiProvider adds Provider acme with one Gemini Endpoint that sends
-// its Upstream Key the way Google's API takes it.
+// Google's API takes the key in x-goog-api-key.
 func addGeminiProvider(t *testing.T, srv *testkit.Server, url string, extra map[string]any) {
 	t.Helper()
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
@@ -32,13 +31,12 @@ func generate(text string) map[string]any {
 	return map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": text}}}}}
 }
 
-// geminiCaller sends its Gateway Key the way the Google SDKs do.
+// The Google SDKs send the key in x-goog-api-key.
 func geminiCaller(t *testing.T, srv *testkit.Server) (*testkit.Client, string) {
 	secret := issue(t, srv, "gemini-cli", all)
 	return srv.Anon.WithHeader("x-goog-api-key", secret), secret
 }
 
-// geminiAnswer is a generateContent answer or stream chunk.
 type geminiAnswer struct {
 	ModelVersion string `json:"modelVersion"`
 	Candidates   []struct {
@@ -66,7 +64,6 @@ func (a geminiAnswer) text() string {
 	return b.String()
 }
 
-// geminiChunks decodes a Gemini stream, checking every chunk names model.
 func geminiChunks(t *testing.T, events []testkit.Event, model string) (text string, last geminiAnswer) {
 	t.Helper()
 	var b strings.Builder
@@ -84,7 +81,6 @@ func geminiChunks(t *testing.T, events []testkit.Event, model string) (text stri
 	return b.String(), last
 }
 
-// noSecret fails if the Gateway Key reached the upstream anywhere.
 func noSecret(t *testing.T, got *testkit.Received, secret string) {
 	t.Helper()
 	if strings.Contains(string(got.Body), secret) || strings.Contains(got.Query.Encode(), secret) || strings.Contains(got.Path, secret) {
@@ -123,8 +119,6 @@ func TestGeminiPassesThroughToAGeminiEndpointWithTheModelInTheURL(t *testing.T) 
 		t.Fatalf("request = %+v usage %+v", r, r.Usage)
 	}
 
-	// Streamed: Iroha asks for server-sent events; each chunk names the
-	// model asked for, and the usage of the last is recorded.
 	resp = caller.Post(geminiModels+"flash:streamGenerateContent?alt=sse", body).Expect(200)
 	got = up.Last()
 	if string(got.Body) != body || got.Path != "/v1beta/models/gemini-2.5-flash:streamGenerateContent" || got.Query.Encode() != "alt=sse" {
@@ -145,7 +139,7 @@ func TestGeminiPassesThroughToAGeminiEndpointWithTheModelInTheURL(t *testing.T) 
 func TestGeminiCallersAuthenticateByHeaderOrKeyParameterAndNeitherIsForwarded(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewGemini(t)
-	// The Endpoint itself takes its key as ?key=, like Google's API.
+	// Google's API also takes the key as ?key=.
 	addGeminiProvider(t, srv, up.URL(), map[string]any{"auth_style": "query", "auth_param": "key"})
 	secret := issue(t, srv, "sdk", all)
 
@@ -166,7 +160,6 @@ func TestGeminiCallersAuthenticateByHeaderOrKeyParameterAndNeitherIsForwarded(t 
 	srv.Anon.WithHeader("x-goog-api-key", secret).Post(geminiModels+"m:generateContent", generate("hi")).Expect(200)
 	noSecret(t, up.Last(), secret)
 
-	// The key parameter is a Caller credential on every route.
 	srv.Anon.Post(geminiModels+"m:generateContent?key=sk-iroha_nope", generate("hi")).Expect(401)
 	srv.Anon.Post(geminiModels+"m:generateContent", generate("hi")).Expect(401)
 	if up.Count() != 3 {
@@ -210,8 +203,6 @@ func TestTheGlobalGeminiRouteTakesAQualifiedModelThatMayHoldSlashes(t *testing.T
 		t.Fatalf("model = %q", r.Model)
 	}
 
-	// The ?key= style works on the global route too, and an unqualified
-	// name is refused with a hint.
 	srv.Anon.Post("/v1beta/models/acme/gemini-2.5-flash:streamGenerateContent?alt=sse&key="+secret, generate("hi")).Expect(200)
 	if got := up.Last(); got.Query.Has("key") {
 		t.Fatalf("Caller key reached the upstream: %v", got.Query)
@@ -219,7 +210,6 @@ func TestTheGlobalGeminiRouteTakesAQualifiedModelThatMayHoldSlashes(t *testing.T
 	caller.Post("/v1beta/models/gemini-2.5-flash:generateContent", generate("hi")).Expect(400)
 }
 
-// geminiErr is Google's error envelope as Iroha writes it.
 type geminiErr struct {
 	Error struct {
 		Code                          int
@@ -291,7 +281,6 @@ func TestGeminiIsTranslatedForAnOpenAIChatEndpoint(t *testing.T) {
 		t.Fatalf("request = %+v usage %+v", r, r.Usage)
 	}
 
-	// Streamed: Chat chunks become Gemini chunks, usage on the last one.
 	resp = caller.Post(geminiModels+"glm-4.6:streamGenerateContent?alt=sse", req).Expect(200)
 	sent = up.Last().Map(t)
 	if opts, _ := sent["stream_options"].(map[string]any); sent["stream"] != true || opts["include_usage"] != true {
@@ -403,7 +392,6 @@ func TestGeminiAndResponsesTranslateBothWays(t *testing.T) {
 	srv.Admin.Post("/api/providers/openai/keys", map[string]any{"secret": "sk-test-oai"}).Expect(201)
 	caller, _ := geminiCaller(t, srv)
 
-	// A Responses Caller on the Gemini Endpoint, streamed.
 	req := responsesReq("gemini-2.5-flash")
 	req["stream"] = true
 	resp := caller.Post(responsesPath, req).Expect(200)
@@ -419,7 +407,6 @@ func TestGeminiAndResponsesTranslateBothWays(t *testing.T) {
 		t.Fatalf("request = %+v usage %+v", r, r.Usage)
 	}
 
-	// A Gemini Caller on the Responses Endpoint, buffered and streamed.
 	resp = caller.Post("/providers/openai/v1beta/models/gpt-5:generateContent", generate("hi")).Expect(200)
 	if got := oai.Last(); got.Path != "/v1/responses" || got.Map(t)["model"] != "gpt-5" {
 		t.Fatalf("upstream got %s\n%s", got.Path, got.Body)
@@ -466,7 +453,6 @@ func TestAGeminiStreamIsKeptAliveWithEmptyChunks(t *testing.T) {
 		t.Fatalf("text %q", text)
 	}
 
-	// A committed stream that then fails ends with Google's error envelope.
 	up.Enqueue(testkit.Hang())
 	ch = open()
 	up.Await(2)

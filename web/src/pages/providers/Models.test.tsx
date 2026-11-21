@@ -39,7 +39,6 @@ function Where() {
   return <output aria-label="Where">{l.search}</output>;
 }
 
-/** A fake Iroha that filters, searches and pages `all` the way GET /api/providers/{p}/models does. */
 function renderTab(all: Model[] = TWO, url = "/providers/acme/models") {
   const fetch = vi.fn<typeof globalThis.fetch>(async (u, init) => {
     const where = new URL(String(u), "http://iroha.test");
@@ -104,7 +103,6 @@ test("thousands of models come a page at a time from the server, in numbered pag
   await user.click(screen.getByRole("button", { name: "Page 2" }));
   await waitFor(() => expect(within(rows()[0]).getByText("m-0026")).toBeTruthy());
   expect(listCalls(fetch).at(-1)?.searchParams.get("offset")).toBe("25");
-  // A bigger page asks for more from the start, and is remembered for this table.
   await user.click(screen.getByRole("combobox", { name: "Rows per page" }));
   await user.click(await screen.findByRole("option", { name: "100 per page" }));
   await waitFor(() => expect(rows()).toHaveLength(100));
@@ -162,7 +160,6 @@ test("Edit… works on models selected on several pages: mixed values shown, and
   await user.type(within(dialog).getByRole("textbox", { name: "Max output" }), "4096");
   await user.click(within(dialog).getByRole("button", { name: "Apply to 2 models" }));
   await waitFor(() => expect(posts(fetch)).toHaveLength(1));
-  // The rows were read pages ago; sending their overrides back would undo a change made since.
   expect(JSON.parse(String(posts(fetch)[0][1]?.body))).toEqual({
     items: [
       { model: "m-0001", metadata_patch: { max_output_tokens: 4096 } },

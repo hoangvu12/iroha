@@ -6,11 +6,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Reply } from "./Reply";
 import type { AssistantTurn } from "./store";
 
-// Motion in a reply (ticket 19): Details and Thinking open and close as
-// UI SDK Collapsibles (the collapse recipe), and a failure that arrives while
-// the reply is on screen enters from its starting style; one already in the
-// history is just there.
-
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 
 beforeEach(() => {

@@ -25,10 +25,6 @@ import { type ThemePref, useTheme } from "./theme";
 export const SIDEBAR_WIDTH = 224;
 export { CHAT_WIDTH } from "./ChatSheet";
 
-/**
- * The signed-in app: sidebar (desktop) or bottom tab bar (phone), the page
- * in the middle, the chat panel slot on the right, and the record sheets.
- */
 export function Shell() {
   return (
     <SheetStackProvider>
@@ -64,16 +60,11 @@ function ShellFrame() {
         <ChatPanel mode="sheet" />
       </ChatSheet>
       {phone && <TabBar />}
-      {/* Record sheets beside the page, left of the chat panel (UI tickets 10, 15). The
-          stack reads the chat's state itself, so the chat coming and going re-renders
-          the sheets and not the whole frame and page. */}
       <SheetStack chat={!chatPage} />
     </div>
   );
 }
 
-// No transition: P, G, R and C move the highlight, and a key never animates
-// (architecture.md "UI motion system"); hover is instant too, like menu items.
 const navItemClass = (active: boolean) =>
   cn(
     "group flex h-9 select-none items-center gap-3 rounded-lg px-2.5 text-[14.5px]",
@@ -114,11 +105,8 @@ function Sidebar() {
   return (
     <aside
       style={{ width: SIDEBAR_WIDTH }}
-      // Left padding clears a phone's notch in landscape (wide enough for the sidebar).
       className="fixed inset-y-0 left-0 z-20 flex flex-col border-r border-border bg-subtle pb-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-3 pt-3"
     >
-      {/* Short windows: the banner and nav scroll; health, Settings and the Owner stay.
-          Scrolling past its end doesn't scroll the page behind. */}
       <ScrollArea className="-mx-3 mb-2 flex-1" contentClassName="px-3" viewportClassName="overscroll-contain">
         <img src={BANNER_SRC} alt="Iroha" className="h-[84px] w-full rounded-lg object-cover" draggable={false} />
         <nav aria-label="Main" className="mt-4 flex flex-col gap-1">
@@ -139,7 +127,6 @@ function Sidebar() {
   );
 }
 
-/** Quiet when Iroha is ready (a dot on the avatar); a red line when it is not. */
 function HealthNotice({ health }: { health: HealthState }) {
   if (health.state !== "not_ready" && health.state !== "unreachable") return null;
   return (
@@ -157,7 +144,6 @@ function useSignOutWithToast() {
   const signOut = useSignOut();
   return () =>
     signOut.mutate(undefined, {
-      // Toast: the Owner menu has closed, so the error has nowhere else to go.
       onError: (e) => notify.failure("Couldn't sign out", e),
     });
 }
@@ -197,7 +183,6 @@ function OwnerRow({ health }: { health: HealthState }) {
   );
 }
 
-/** Phones: the sidebar becomes a bottom tab bar (C30). Settings sits behind the avatar in each page header. */
 function TabBar() {
   const { pathname } = useLocation();
   return (
@@ -213,7 +198,6 @@ function TabBar() {
           <NavLink
             key={item.label}
             to={to}
-            // A tab, not a link to copy: long-press neither selects the label nor opens the link callout.
             className={cn(
               "flex h-[64px] select-none flex-col items-center justify-center gap-1 text-[11.5px] font-medium [-webkit-touch-callout:none]",
               active ? "text-fg" : "text-fg-muted",

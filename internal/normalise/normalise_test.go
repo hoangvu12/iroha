@@ -10,11 +10,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Bodies below are the ones v1 recorded from its Provider fleet
-// (test/inference/normalize-openai-response.test.ts and
-// streaming-normalize-openai-response.test.ts in the v1 repository), plus
-// GLM's content blocks and Z.ai's finish reasons, which v1 never tested.
-
 var chat = For("https://api.example.com/v1", shape.OpenAIChat)
 
 func messageOf(t *testing.T, body []byte) map[string]any {
@@ -34,7 +29,7 @@ func TestWholeAnswers(t *testing.T) {
 	cases := []struct {
 		name string
 		body string
-		want map[string]any // the first choice's message; nil: body unchanged
+		want map[string]any
 	}{
 		{"think block lifted, vendor fields dropped (REQ-85, REQ-23)",
 			`{"id":"chatcmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"<think>\nThe user said hi.\n</think>\n\nHello there!","name":"MiniMax AI","audio_content":""},"finish_reason":"stop"}]}`,
@@ -124,8 +119,6 @@ func TestZaiFinishReasons(t *testing.T) {
 	}
 }
 
-// run feeds a stream's data payloads through a normaliser and returns what
-// it passes on, ended cleanly when end is set.
 func run(t *testing.T, s Set, end bool, payloads ...string) []string {
 	t.Helper()
 	st := s.Stream()
@@ -234,7 +227,6 @@ func TestStreamPassesOtherEventsUntouched(t *testing.T) {
 	if got := run(t, chat, true, in...); !reflect.DeepEqual(got, in) {
 		t.Fatalf("changed:\n%v", strings.Join(got, "\n"))
 	}
-	// [DONE] passes once (REQ-65).
 	if got := run(t, chat, true, `[DONE]`, `[DONE]`); len(got) != 1 {
 		t.Fatalf("got %v", got)
 	}
@@ -254,8 +246,6 @@ func TestHeldTextGoesOutBeforeTheEnd(t *testing.T) {
 }
 
 func TestStreamsWithoutAFinishReasonAreClosed(t *testing.T) {
-	// [DONE] with no finish_reason: the closing chunk goes before the usage
-	// chunk, and names tool_calls after tool calls.
 	got := run(t, chat, true,
 		`{"id":"c","model":"qwen","created":1,"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"f","arguments":"{}"}}]}}]}`,
 		`{"id":"c","model":"qwen","created":1,"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":1}}`,
@@ -264,12 +254,10 @@ func TestStreamsWithoutAFinishReasonAreClosed(t *testing.T) {
 		!strings.Contains(got[2], `"usage"`) || got[3] != "[DONE]" {
 		t.Fatalf("got\n%s", strings.Join(got, "\n"))
 	}
-	// A body that ends cleanly without either gets both.
 	got = run(t, chat, true, `{"id":"c","choices":[{"index":0,"delta":{"content":"Hi"}}]}`)
 	if len(got) != 3 || !strings.Contains(got[1], `"finish_reason":"stop"`) || got[2] != "[DONE]" {
 		t.Fatalf("got\n%s", strings.Join(got, "\n"))
 	}
-	// A stream that finished but sent no [DONE] is left as it ended.
 	got = run(t, chat, true, `{"id":"c","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}`)
 	if len(got) != 1 {
 		t.Fatalf("got\n%s", strings.Join(got, "\n"))
@@ -277,8 +265,6 @@ func TestStreamsWithoutAFinishReasonAreClosed(t *testing.T) {
 }
 
 func TestReplayedMessageIDsAreDropped(t *testing.T) {
-	// v1 test/http/inference-anthropic-v1-messages.test.ts: a replayed
-	// assistant turn keeps the id Anthropic gave it (REQ-53).
 	body := `{"model":"mistral-large-latest","messages":[{"role":"user","content":"Hello"},{"id":"msg_01ReplayedAssistantTurn","role":"assistant","content":"Hi"},{"role":"user","content":"Again"}]}`
 	out := chat.RequestBody([]byte(body))
 	if strings.Contains(string(out), "msg_01Replayed") || !strings.Contains(string(out), `{"content":"Hi","role":"assistant"}`) {

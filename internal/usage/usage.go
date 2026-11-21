@@ -1,7 +1,6 @@
 // Package usage reads token usage out of upstream answers, per Shape,
 // buffered bodies and stream events alike. Usage is read from the answer in
 // the Endpoint's Shape (what the Provider counted), before any translation.
-// Translation tickets (14, 15) add the other Shapes to Reader.
 package usage
 
 import (
@@ -14,7 +13,6 @@ import (
 // Usage is the token count of one answer (OpenAI Chat, OpenAI Responses,
 // Anthropic Messages, Gemini), in one convention whatever the Provider's:
 // Input is every prompt token, and CacheRead and CacheWrite are parts of it.
-// subset and separate are the only places a Provider's counts become it.
 type Usage struct {
 	Input          int64 `json:"input" doc:"Prompt tokens, all of them: uncached, read from the Provider's cache and written to it."`
 	Output         int64 `json:"output" doc:"Completion tokens, reasoning included."`
@@ -24,7 +22,6 @@ type Usage struct {
 	Reasoning      int64 `json:"reasoning" doc:"Completion tokens spent on reasoning."`
 }
 
-// cache is what an answer said about the Provider's prompt cache.
 type cache struct{ read, write, writeLong int64 }
 
 // subset is the usage of a Provider whose prompt count already includes the
@@ -48,7 +45,6 @@ type Reader struct {
 	ant anthropicCounts // Anthropic streams spread usage over two events
 }
 
-// NewReader returns a Reader for answers in sh.
 func NewReader(sh shape.Shape) *Reader { return &Reader{sh: sh} }
 
 // Body reads a whole answer.
@@ -77,7 +73,7 @@ func (r *Reader) Event(data []byte) {
 		return
 	}
 	if !bytes.Contains(data, []byte(`"usage`)) { // "usage" or Gemini's "usageMetadata"
-		return // most events carry none; skip decoding them
+		return
 	}
 	switch r.sh {
 	case shape.OpenAIChat:

@@ -3,12 +3,6 @@ import { useRef } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { useArrivals } from "./arrivals";
 
-// Requests arriving live in the feed (UI ticket 18, architecture.md "UI motion
-// system"): the rows of one poll that land in view rise by shift-sm and fade in
-// together, with the background flash; rows that land out of view (the view is
-// held) only flash, the first time they come into view. Values come from the
-// motion tokens; under reduced motion nothing moves (fade and colour only).
-
 type Call = { el: Element; keyframes: Keyframe[]; options: KeyframeAnimationOptions };
 let calls: Call[] = [];
 let observers: { cb: IntersectionObserverCallback; targets: Set<Element> }[] = [];
@@ -49,7 +43,6 @@ beforeEach(() => {
       }
     },
   );
-  // A 400 px scroller under a 40 px header; rows 48 px tall, `top` set per test.
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     const box = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 800, width: 800, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
     if (this.getAttribute("role") === "region") return box(0, 400);
@@ -64,7 +57,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** A feed: rows with their top in px (in the scroller's coordinates), and the IDs that arrived live. */
 function Feed({ rows, added }: { rows: [string, number][]; added: Set<string> }) {
   const box = useRef<HTMLDivElement>(null);
   useArrivals(box, added);
@@ -98,16 +90,15 @@ const isFlash = (c: Call) => "backgroundColor" in c.keyframes[0];
 test("rows of one poll that land in view rise by shift-sm and fade in together, with the flash, on the tokens", () => {
   const old: [string, number][] = [["req_old", 40]];
   const { rerender } = render(<Feed rows={old} added={new Set()} />);
-  expect(calls).toEqual([]); // the first page doesn't animate
+  expect(calls).toEqual([]);
 
   rerender(<Feed rows={[["req_b", 40], ["req_a", 88], ["req_old", 136]]} added={new Set(["req_a", "req_b"])} />);
   for (const id of ["req_a", "req_b"]) {
     const enter = of(id).find(isEntrance)!;
     expect(enter.keyframes[0]).toMatchObject({ opacity: 0, translate: "0 4px", offset: 0 });
     expect(enter.options).toMatchObject({ duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
-    expect(enter.options.delay ?? 0).toBe(0); // no stagger
+    expect(enter.options.delay ?? 0).toBe(0);
     const flash = of(id).find(isFlash)!;
-    // From the tint back to the row's own background (a failed row ends red): one keyframe, the end implicit.
     expect(flash.keyframes).toEqual([{ backgroundColor: "var(--info-tint)", offset: 0 }]);
     expect(flash.options).toMatchObject({ duration: 1600, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
   }
@@ -116,7 +107,6 @@ test("rows of one poll that land in view rise by shift-sm and fade in together, 
 
 test("a row arriving out of view (the view is held) doesn't enter; it flashes once, when it first comes into view", () => {
   const { rerender } = render(<Feed rows={[["req_old", 40]]} added={new Set()} />);
-  // The view held: the scroller moved, so the new row sits above the header.
   rerender(<Feed rows={[["req_new", -8], ["req_old", 40]]} added={new Set(["req_new"])} />);
   expect(of("req_new")).toEqual([]);
   const io = observers.find((o) => o.targets.has(row("req_new")))!;

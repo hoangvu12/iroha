@@ -10,11 +10,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// Prompt caching 03: what a translated request gets for the Provider's
-// prompt cache, end to end through the fake Providers.
-
-// addCachingProvider creates Provider acme with one Endpoint speaking sh at
-// url, with extra Endpoint fields (the caching settings), and one key.
 func addCachingProvider(t *testing.T, srv *testkit.Server, sh, url string, extra map[string]any) {
 	t.Helper()
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
@@ -26,13 +21,10 @@ func addCachingProvider(t *testing.T, srv *testkit.Server, sh, url string, extra
 	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": "sk-test-1"}).Expect(201)
 }
 
-// passthroughCases are one Caller body per Shape, sent to an Endpoint of
-// the same Shape, with markers, conversation fields and Gemini's
-// cachedContent, and odd spacing to show the bytes are the Caller's.
 var passthroughCases = []struct {
 	shape, path, body string
 	up                func(testing.TB) *testkit.Upstream
-	key               bool // an OpenAI Shape: gets the derived prompt_cache_key
+	key               bool
 }{
 	{"openai-chat", chatPath, `{"model":"m",  "messages":[{"role":"system","content":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral","ttl":"1h"}}]},{"role":"user","content":"hi"}],"user":"u-1","safety_identifier":"s-1"}`, testkit.NewOpenAIChat, true},
 	{"openai-responses", responsesPath, `{"model":"m","input":"hi",  "user":"u-1","metadata":{"a":"b"}}`, testkit.NewOpenAIResponses, true},
@@ -40,10 +32,8 @@ var passthroughCases = []struct {
 	{"gemini", geminiModels + "m:generateContent", `{"cachedContent":"cachedContents/abc",  "contents":[{"role":"user","parts":[{"text":"hi"}]}]}`, testkit.NewGemini, false},
 }
 
-// sessionHeaders are the headers relays and Providers route a session by.
 var sessionHeaders = []string{"x-session-affinity", "x-session-id", "session_id"}
 
-// sentKey is the prompt_cache_key of a request body, "" when none.
 func sentKey(t *testing.T, body []byte) string {
 	t.Helper()
 	var b struct {
@@ -60,9 +50,6 @@ func sentKey(t *testing.T, body []byte) string {
 
 var appendedKey = regexp.MustCompile(`,"prompt_cache_key":"[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"}$`)
 
-// callerBytes is a passthrough body without the prompt_cache_key Iroha
-// appends (prompt caching 04), failing the test when none was appended:
-// what remains must be the Caller's bytes.
 func callerBytes(t *testing.T, body []byte) string {
 	t.Helper()
 	loc := appendedKey.FindIndex(body)
@@ -72,11 +59,6 @@ func callerBytes(t *testing.T, body []byte) string {
 	return string(body[:loc[0]]) + "}"
 }
 
-// Prompt caching 04: same-Shape passthrough gets the conversation's ID.
-// OpenAI Chat and Responses bodies are the Caller's plus exactly the
-// appended prompt_cache_key; Anthropic and Gemini bodies stay byte for
-// byte; every Shape gets the session headers with the same value, and
-// Iroha-Session itself is not forwarded.
 func TestPassthroughAddsTheConversationIDAndNothingElse(t *testing.T) {
 	for _, tc := range passthroughCases {
 		t.Run(tc.shape, func(t *testing.T) {
@@ -97,7 +79,6 @@ func TestPassthroughAddsTheConversationIDAndNothingElse(t *testing.T) {
 				t.Fatalf("upstream got\n%s\nwant\n%s", got.Body, want)
 			}
 			if tc.key {
-				// Same value in the headers as in the body.
 				for _, h := range sessionHeaders {
 					if v := got.Header.Values(h); len(v) != 1 || v[0] != key {
 						t.Errorf("%s = %q, want %q", h, v, key)
@@ -117,8 +98,6 @@ func TestPassthroughAddsTheConversationIDAndNothingElse(t *testing.T) {
 	}
 }
 
-// send_prompt_cache_key off turns every addition off, headers included:
-// each Shape's body is byte for byte and no session header is sent.
 func TestPromptCacheKeyOffKeepsPassthroughByteForByte(t *testing.T) {
 	for _, tc := range passthroughCases {
 		t.Run(tc.shape, func(t *testing.T) {
@@ -139,9 +118,6 @@ func TestPromptCacheKeyOffKeepsPassthroughByteForByte(t *testing.T) {
 	}
 }
 
-// The Caller's own prompt_cache_key and session headers are forwarded as
-// they are, never overwritten nor sent twice; only the missing ones are
-// added.
 func TestTheCallersOwnConversationIDsAreKept(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -174,8 +150,6 @@ func TestTheCallersOwnConversationIDsAreKept(t *testing.T) {
 	}
 }
 
-// A Request with no conversation (an empty prompt: affinity source none)
-// gets nothing added.
 func TestNoConversationGetsNoConversationID(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -193,8 +167,6 @@ func TestNoConversationGetsNoConversationID(t *testing.T) {
 	}
 }
 
-// One conversation keeps one value across Requests; another Gateway Key,
-// Provider or model gets another.
 func TestPassthroughConversationIDsAreScopedToKeyProviderAndModel(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -229,8 +201,6 @@ func TestPassthroughConversationIDsAreScopedToKeyProviderAndModel(t *testing.T) 
 	}
 }
 
-// A host that refuses unknown fields gets the session headers (headers it
-// doesn't know are ignored) but no prompt_cache_key in the body.
 func TestAStrictHostGetsHeadersButNoBodyField(t *testing.T) {
 	up := testkit.NewOpenAIChat(t)
 	srv := testkit.Start(t, testkit.Options{HTTPClient: up.Client()})
@@ -248,10 +218,6 @@ func TestAStrictHostGetsHeadersButNoBodyField(t *testing.T) {
 	}
 }
 
-// On passthrough Iroha's prompt_cache_key is the only difference from the
-// Caller's body, so a 400 the Failure Rules would end the Request with is
-// asked again once without it, whatever its wording, outside the Attempt
-// budget. A 400 the rules read as the key's problem is handled as before.
 func TestAPassthrough400IsAskedAgainWithoutThePromptCacheKey(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -275,14 +241,12 @@ func TestAPassthrough400IsAskedAgainWithoutThePromptCacheKey(t *testing.T) {
 		t.Fatalf("attempts %+v", r.Attempts)
 	}
 
-	// The plain retry fails too: the Caller gets that 400, as before.
 	up.Enqueue(odd, odd)
 	resp = caller.WithHeader("Iroha-Session", "s-2").Post(chatPath, chatBody("m")).Expect(400)
 	if up.Count() != 4 || !strings.Contains(string(resp.Body), "something went wrong") {
 		t.Fatalf("%d upstream calls; answer %s", up.Count(), resp.Body)
 	}
 
-	// A 400 that is the key's problem (billing) cools the key, no plain retry.
 	up.Enqueue(testkit.Raw(400, "application/json", `{"error":{"message":"Your credit balance is too low to access the API.","type":"invalid_request_error"}}`))
 	caller.WithHeader("Iroha-Session", "s-3").Post(chatPath, chatBody("m"))
 	if up.Count() != 5 {
@@ -323,7 +287,6 @@ func TestAChatCallerGetsCacheMarkersOnAnAnthropicEndpointUnlessTheyAreOff(t *tes
 	if sent.Metadata.UserID != "u-42" {
 		t.Errorf("metadata.user_id = %q", sent.Metadata.UserID)
 	}
-	// The write the markers caused is reported to the Caller and recorded.
 	var ans struct {
 		Usage struct {
 			Details struct {
@@ -369,9 +332,6 @@ func TestAnthropicsOwnAPIGetsTheAutomaticTopLevelMarker(t *testing.T) {
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
-// A conversation translated to an OpenAI Endpoint gets a prompt_cache_key
-// of its own, the same on every turn, derived from its affinity value (so
-// scoped to the Gateway Key, Provider and model); off sends none.
 func TestTranslatedConversationsGetADerivedPromptCacheKey(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -408,9 +368,6 @@ func TestTranslatedConversationsGetADerivedPromptCacheKey(t *testing.T) {
 	}
 }
 
-// An Endpoint refusing what Iroha added for the cache (a field it doesn't
-// know) is asked again at once without it: nothing that worked before
-// prompt caching 03 fails now, and the key is not blamed.
 func TestAnEndpointRefusingTheCacheFieldsIsAskedAgainWithoutThem(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -430,7 +387,6 @@ func TestAnEndpointRefusingTheCacheFieldsIsAskedAgainWithoutThem(t *testing.T) {
 		t.Errorf("key state %+v", k.State)
 	}
 
-	// The same on Anthropic for markers.
 	srv2 := testkit.Start(t)
 	ant := testkit.NewAnthropic(t)
 	addCachingProvider(t, srv2, "anthropic-messages", ant.URL(), map[string]any{"auth_style": "x-api-key"})
@@ -441,9 +397,6 @@ func TestAnEndpointRefusingTheCacheFieldsIsAskedAgainWithoutThem(t *testing.T) {
 	}
 }
 
-// The retry without Iroha's additions is free: it is its own Attempt but
-// does not use the Request's budget, so a Provider allowing one Attempt
-// still serves, and one with two keys keeps its fallback to the second.
 func TestTheRetryWithoutCacheFieldsUsesNoAttemptOfTheBudget(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -457,8 +410,6 @@ func TestTheRetryWithoutCacheFieldsUsesNoAttemptOfTheBudget(t *testing.T) {
 		t.Fatalf("attempts %+v", r.Attempts)
 	}
 
-	// With two Attempts and two keys, a 5xx on the plain retry still moves on
-	// to the second key.
 	srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": "sk-test-2"}).Expect(201)
 	srv.Admin.Patch("/api/providers/acme", map[string]any{"max_attempts": 2}).Expect(200)
 	srv.SkipShortWaits(time.Second)
@@ -469,8 +420,6 @@ func TestTheRetryWithoutCacheFieldsUsesNoAttemptOfTheBudget(t *testing.T) {
 		t.Fatalf("attempts %+v", r.Attempts)
 	}
 
-	// At most once per Endpoint: a second refusal on the plain request is
-	// judged by the Failure Rules like any other 400.
 	srv.Admin.Patch("/api/providers/acme", map[string]any{"max_attempts": 1}).Expect(200)
 	up.Enqueue(refusal, refusal)
 	resp = caller.WithHeader("Iroha-Session", "s-3").Post(messagesPath, messages("gpt-x"))
@@ -479,10 +428,6 @@ func TestTheRetryWithoutCacheFieldsUsesNoAttemptOfTheBudget(t *testing.T) {
 	}
 }
 
-// Only a refusal of the field as unknown is retried: a 400 that merely
-// quotes 'user' (a role error) or echoes the request (which holds the
-// added prompt_cache_key) is judged by the Failure Rules as before, with
-// no second call.
 func TestAnOrdinary400NamingAnAddedFieldIsNotRetried(t *testing.T) {
 	for name, body := range map[string]string{
 		"role error": `{"error":{"message":"Invalid value: 'tool'. Supported values are: 'system', 'assistant', 'user'.","type":"invalid_request_error","param":"messages[1].role"}}`,
@@ -506,8 +451,6 @@ func TestAnOrdinary400NamingAnAddedFieldIsNotRetried(t *testing.T) {
 	}
 }
 
-// A Gemini request naming a stored cache is refused when it would be
-// translated (its context would be silently lost), before any Attempt.
 func TestGeminiCachedContentIsRefusedWhenTranslated(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -531,7 +474,6 @@ func TestGeminiCachedContentIsRefusedWhenTranslated(t *testing.T) {
 	}
 }
 
-// The two settings are Endpoint fields: checked, audited and revertible.
 func TestCachingSettingsAreEndpointFields(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -553,7 +495,6 @@ func TestCachingSettingsAreEndpointFields(t *testing.T) {
 	if res.Endpoint.CacheMarkers != "" || res.Endpoint.SendPromptCacheKey != "" {
 		t.Fatalf("after revert %+v", res.Endpoint)
 	}
-	// The OpenAPI document describes both settings and the read-only effect.
 	doc := string(srv.Anon.Get("/api/openapi.json").Expect(200).Body)
 	for _, s := range []string{`"cache_markers"`, `"send_prompt_cache_key"`, `"EndpointCaching"`, "top_only"} {
 		if !strings.Contains(doc, s) {

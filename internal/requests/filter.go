@@ -12,9 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// filter is the WHERE clause that GET /api/requests, /api/requests/stats
-// and /api/requests/filters share, so the stats row always describes the
-// list beside it.
 type filter struct {
 	where []string
 	args  []any
@@ -31,7 +28,6 @@ func (f filter) clause() string {
 	return " WHERE " + strings.Join(f.where, " AND ")
 }
 
-// and returns f with one more condition, leaving f as it was.
 func (f filter) and(cond string, a ...any) filter {
 	return filter{where: append(append([]string{}, f.where...), cond), args: append(append([]any{}, f.args...), a...)}
 }
@@ -41,8 +37,6 @@ var timeParams = []api.Param{
 	{Name: "until", Description: "Only Requests that started before this time: RFC 3339, or a duration back from now."},
 }
 
-// filterParams documents every filter; repeat a parameter to match any of
-// its values (caller=a&caller=b).
 var filterParams = append([]api.Param{
 	{Name: "caller", Description: "Caller name at the time of the Request (a Gateway Key name, or a Test caller such as `Test` or `Test (as zeron-fleet)`), or a Gateway Key ID. Repeat for any of several."},
 	{Name: "caller_kind", Enum: []string{CallerGatewayKey, CallerTest}, Description: "Only Requests from Gateway Keys, or only test Requests sent from the chat."},
@@ -59,7 +53,6 @@ var filterParams = append([]api.Param{
 	{Name: "q", Description: "Text search: part of the Request ID, model, Caller name or Provider handle."},
 }, timeParams...)
 
-// affinitySources are the values of affinity_source: affinity.Sources.
 var affinitySources = func() []string {
 	out := make([]string, len(affinity.Sources))
 	for i, s := range affinity.Sources {
@@ -70,7 +63,6 @@ var affinitySources = func() []string {
 
 const timeHint = "Use an RFC 3339 time (2026-01-02T15:04:05Z) or a duration such as 1h."
 
-// parseFilter reads the filters of q; with timeOnly, only since and until.
 func parseFilter(q url.Values, c clock.Clock, timeOnly bool) (filter, error) {
 	var f filter
 	in := func(col string, vals []string) {
@@ -91,7 +83,6 @@ func parseFilter(q url.Values, c clock.Clock, timeOnly bool) (filter, error) {
 			for _, s := range v {
 				args = append(args, s)
 			}
-			// A Gateway Key ID matches only that key's own traffic, never tests sent as it.
 			f.add("(caller_name IN ("+ph+") OR (caller_kind = '"+CallerGatewayKey+"' AND gateway_key_id IN ("+ph+")))", args...)
 		}
 		if s := q.Get("caller_kind"); s != "" {
@@ -191,7 +182,6 @@ func parseFilter(q url.Values, c clock.Clock, timeOnly bool) (filter, error) {
 	return f, nil
 }
 
-// values returns the non-empty values of a repeatable parameter.
 func values(q url.Values, name string) []string {
 	var out []string
 	for _, v := range q[name] {

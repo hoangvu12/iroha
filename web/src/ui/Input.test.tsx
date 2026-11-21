@@ -7,7 +7,6 @@ import { Field, Input, PasswordInput, SearchInput } from "./Input";
 
 const agent = createAgent();
 
-/** The text of the elements aria-describedby points at. */
 function description(el: HTMLElement) {
   return (el.getAttribute("aria-describedby") ?? "")
     .split(/\s+/)
@@ -54,7 +53,6 @@ test("an error replaces the hint, marks the Input invalid and describes it", () 
 });
 
 test("an error drops in from its field and fades, with the motion tokens", () => {
-  // jsdom can't run @starting-style; this pins the recipe, the browser check sees it move.
   render(<Name error="Name taken." />);
   const classes = screen.getByRole("alert").className.split(" ");
   for (const c of ["transition-[opacity,translate]", "duration-list-in", "ease-out", "starting:opacity-0", "starting:-translate-y-(--motion-shift-sm)"])

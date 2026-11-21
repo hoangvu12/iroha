@@ -10,10 +10,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// Ticket 41: keyless Providers end to end.
-
-// noCredential fails when r carried any credential: an auth header of any
-// style Iroha writes, the header a test named, or any query parameter.
 func noCredential(t *testing.T, what string, r *testkit.Received, slots ...string) {
 	t.Helper()
 	if c := credentials(r); c != "" {
@@ -29,11 +25,6 @@ func noCredential(t *testing.T, what string, r *testkit.Received, slots ...strin
 	}
 }
 
-// PRV-07, FAIL-128: a Provider whose Endpoint needs no auth serves Callers
-// with no key added by hand. Adding an Endpoint with auth style none to a
-// Provider holding no Upstream Keys adds one keyless key in the same Audit
-// Entry, so the key has a Key State like any other; nothing upstream ever
-// receives a credential, on inference, streams, key tests or discovery.
 func TestAKeylessProviderServesWithNoKeyAddedByHand(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -41,7 +32,6 @@ func TestAKeylessProviderServesWithNoKeyAddedByHand(t *testing.T) {
 	other := testkit.NewOpenAIChat(t)
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// A Provider without keys says how to fix it, keyless included.
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "keyed", "url": other.URL(), "shape": "openai-chat"}).Expect(201)
 	var ce callerError
@@ -61,7 +51,6 @@ func TestAKeylessProviderServesWithNoKeyAddedByHand(t *testing.T) {
 		t.Fatalf("one Audit Entry for the Endpoint and its key: %+v", created.Changes)
 	}
 
-	// The Caller's Gateway Key arrives as Bearer, x-api-key and ?key=; none of it passes.
 	caller = caller.WithHeader("X-Api-Key", "caller-value")
 	caller.Post(chatPath+"?key=caller-value", chat("llama-3")).Expect(200)
 	noCredential(t, "chat", up.Last())
@@ -82,15 +71,12 @@ func TestAKeylessProviderServesWithNoKeyAddedByHand(t *testing.T) {
 		noCredential(t, "discovery", got)
 	}
 
-	// The keyless key is a key like any other: one Key State, counted by the summary.
 	var sum providers.ProviderSummary
 	srv.Admin.Get("/api/providers/acme/summary").Expect(200).JSON(&sum)
 	if sum.Keys.Total != 1 || sum.Keys.Active != 1 || sum.Keys.Keyless != 1 {
 		t.Fatalf("summary keys = %+v", sum.Keys)
 	}
 
-	// A second keyless Endpoint adds no second key, nor does one on a
-	// Provider that already holds keys.
 	second := testkit.NewOpenAIChat(t)
 	var again providers.EndpointResult
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "second", "url": second.URL(), "shape": "openai-chat", "auth_style": "none"}).
@@ -106,8 +92,6 @@ func TestAKeylessProviderServesWithNoKeyAddedByHand(t *testing.T) {
 		t.Fatalf("a Provider with keys got a keyless key: %+v", paid)
 	}
 
-	// Switching an Endpoint to none by PATCH does the same, and one revert
-	// takes the Endpoint change and the key back.
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "relay"}).Expect(201)
 	srv.Admin.Post("/api/providers/relay/endpoints", map[string]any{"name": "r", "url": up.URL(), "shape": "openai-chat"}).Expect(201)
 	var patched providers.EndpointResult
@@ -124,7 +108,6 @@ func TestAKeylessProviderServesWithNoKeyAddedByHand(t *testing.T) {
 		t.Fatalf("after revert relay keeps %+v", kl.UpstreamKeys)
 	}
 
-	// A dry run says what would happen and writes nothing.
 	var dry providers.EndpointResult
 	srv.Admin.Patch("/api/providers/relay/endpoints/r?dry_run=true", map[string]any{"auth_style": "none"}).Expect(200).JSON(&dry)
 	srv.Admin.Get("/api/providers/relay/keys").Expect(200).JSON(&kl)
@@ -136,8 +119,6 @@ func TestAKeylessProviderServesWithNoKeyAddedByHand(t *testing.T) {
 	}
 }
 
-// REQ-15, PRV-07: a key with no secret sends nothing in every auth style,
-// on Attempts and key tests, and drops a Caller header in the auth slot.
 func TestAKeylessKeySendsNothingInEveryAuthStyle(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -152,7 +133,6 @@ func TestAKeylessKeySendsNothingInEveryAuthStyle(t *testing.T) {
 	for i, ep := range styles {
 		h := handles[i]
 		srv.Admin.Post("/api/providers", map[string]any{"handle": h}).Expect(201)
-		// The hand-made key comes first, so auth style none adds no twin.
 		srv.Admin.Post("/api/providers/"+h+"/keys", map[string]any{"name": "free"}).Expect(201)
 		ep["name"], ep["url"], ep["shape"] = "main", up.URL(), "openai-chat"
 		srv.Admin.Post("/api/providers/"+h+"/endpoints", ep).Expect(201)
@@ -175,9 +155,6 @@ func TestAKeylessKeySendsNothingInEveryAuthStyle(t *testing.T) {
 	}
 }
 
-// PRV-47: a static header with an empty value is never sent, and removes a
-// Caller header of that name; a header the Endpoint does not name passes.
-// So a keyless Endpoint can blank a header without sending "Name: ".
 func TestAnEmptyStaticHeaderIsNotSent(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -202,8 +179,6 @@ func TestAnEmptyStaticHeaderIsNotSent(t *testing.T) {
 	}
 }
 
-// The route preview plans the keyless key like live traffic does, and says
-// no_upstream_key while a Provider has no key at all.
 func TestTheRoutePreviewShowsTheKeylessKey(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -216,15 +191,13 @@ func TestTheRoutePreviewShowsTheKeylessKey(t *testing.T) {
 		t.Fatalf("preview without keys = %+v", pv)
 	}
 	srv.Admin.Patch("/api/providers/local/endpoints/default", map[string]any{"auth_style": "none"}).Expect(200)
-	pv = gateway.RoutePreview{} // decoding into the old value would keep its pointers
+	pv = gateway.RoutePreview{} // encoding/json keeps what the JSON leaves out
 	srv.Admin.Get("/api/route-preview?model=local/m").Expect(200).JSON(&pv)
 	if pv.Ready != 1 || pv.Outcome != nil || pv.Members[0].Candidates[0].UpstreamKey != "keyless" || pv.Members[0].Keys != 1 {
 		t.Fatalf("preview with the keyless key = %+v", pv)
 	}
 }
 
-// The test chat (ticket 23) reaches a keyless Provider with no credential,
-// unpinned and pinned to the keyless key.
 func TestTheTestChatReachesAKeylessProviderWithNoCredential(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -239,9 +212,6 @@ func TestTheTestChatReachesAKeylessProviderWithNoCredential(t *testing.T) {
 	}
 }
 
-// A Model Pool with a keyless member serves from it with no credential, and
-// a refusal there (the relay wanted a key after all) moves on to the next
-// member without marking the keyless key invalid.
 func TestAPoolWithAKeylessMember(t *testing.T) {
 	srv := testkit.Start(t)
 	free, paid := testkit.NewOpenAIChat(t), testkit.NewOpenAIChat(t)

@@ -18,9 +18,6 @@ import { Mono, Status } from "@/ui/bits";
 import { EmptyState } from "@/ui/States";
 import { notify } from "@/ui/toast";
 
-// /states: the shared components in every state (design C25), for anyone
-// building a page to look at. Not linked from the navigation.
-
 function Panel({ title, note, children }: { title: string; note: string; children: ReactNode }) {
   return (
     <section aria-label={title}>
@@ -33,7 +30,7 @@ function Panel({ title, note, children }: { title: string; note: string; childre
 }
 
 const timeout = new ApiError({
-  status: 0,
+  status: null,
   code: "timeout",
   message: "Iroha didn't answer within 10 s. It may be restarting.",
   method: "GET",
@@ -51,7 +48,6 @@ export default function StatesPage() {
       />
       <div className="grid gap-8 lg:grid-cols-2">
         <Panel title="Loading" note="The table's skeleton, measured from its sample rows, so nothing moves when they land. No spinners.">
-          {/* Never loads. */}
           <DemoTable id="states-loading" data={undefined} />
         </Panel>
         <Panel title="Empty" note="One sentence and the one action that fills it; the toolbar hides.">
@@ -122,7 +118,6 @@ export default function StatesPage() {
         </Panel>
         <Panel title="Toasts" note="Only when the place that caused a result is gone. Bottom right for 6 s; a change that can be put back has Undo.">
           <div className="flex flex-wrap gap-2">
-            {/* Toast: these buttons only show each kind of toast on the States page. */}
             <Button onClick={() => notify.success("3 keys disabled", { label: "Undo", onClick: () => notify.success("Change reverted") })}>
               Change with Undo
             </Button>
@@ -188,7 +183,6 @@ const demoColumns = col.columns([
 ]);
 const BY_NAME: SortingState = [{ id: "name", desc: false }];
 
-/** The demo table in one state: `data` undefined loads, `[]` is empty, `error` failed. */
 function DemoTable(p: Partial<DataTableProps<DemoKey>> & { id: string }) {
   return (
     <DataTable<DemoKey>
@@ -228,7 +222,6 @@ function NoResultsDemo() {
   );
 }
 
-/** UI ticket 30: every kind of bulk field, with values the demo keys disagree on; Apply waits, then says what it would do. */
 const demoFields: BulkField<DemoKey>[] = [
   { kind: "boolean", id: "enabled", label: "Enabled", on: "enabled", get: (k) => k.state !== "Disabled", hint: "A disabled key gets no traffic." },
   { kind: "select", id: "tier", label: "Tier", get: (k) => (Number(k.id.slice(1)) % 3 ? "standard" : "priority"), options: [{ value: "standard", label: "Standard" }, { value: "priority", label: "Priority" }] },
@@ -298,7 +291,6 @@ function TableDemo() {
   );
 }
 
-/** CopyButton and an inline save, with a fake call that fails when the name is "taken". */
 function ResultsDemo() {
   const [name, setName] = useState("team-5");
   const [on, setOn] = useState(true);

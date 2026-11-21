@@ -21,18 +21,15 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// KindKeyTest is logged after every key test.
 var KindKeyTest = logs.NewKind("key.test", "An Upstream Key test (a tiny real chat call) finished: upstream_key, endpoint, model, passed, status, rule, reason.")
 
-// A key test is a tiny real chat call: a key whose account is dead often
-// still answers 200 on /models, so only a completion proves it works.
+// A key whose account has no quota can still answer 200 on /models.
 const (
 	keyTestTimeout     = 30 * time.Second
 	keyTestConcurrency = 5
 	keyTestPrompt      = "Reply with the word OK."
 )
 
-// KeyTestResult is the outcome of one key test.
 type KeyTestResult struct {
 	DryRun      bool           `json:"dry_run" doc:"true when nothing was sent."`
 	Provider    string         `json:"provider"`
@@ -49,7 +46,6 @@ type KeyTestResult struct {
 	State       keystate.State `json:"state" doc:"The key's Key State after the test."`
 }
 
-// KeyTestItem is one item of a bulk key test.
 type KeyTestItem struct {
 	Index  int            `json:"index"`
 	OK     bool           `json:"ok" doc:"true when the test ran (read result.passed for its verdict)."`
@@ -57,7 +53,6 @@ type KeyTestItem struct {
 	Error  *api.Error     `json:"error,omitempty" doc:"Why the test could not run."`
 }
 
-// KeyTestBulk is the response of a bulk key test.
 type KeyTestBulk struct {
 	DryRun bool          `json:"dry_run"`
 	Passed int           `json:"passed"`
@@ -77,7 +72,6 @@ const keyTestDescription = "Sends a tiny real chat call (\"" + keyTestPrompt + "
 	"a keyless test (empty secret or auth style none) sends no credential, so a 401 then leaves the key as it is. " +
 	"Disabled keys are tested too and stay disabled. The test is not recorded as a Request."
 
-// AdminRoutes are the admin routes the Gateway serves: key tests.
 func (g *Gateway) AdminRoutes() []api.Route {
 	const tag = "Upstream Keys"
 	return []api.Route{
@@ -170,7 +164,6 @@ func (g *Gateway) AdminRoutes() []api.Route {
 	}
 }
 
-// testModel is the model a key test asks for.
 func (g *Gateway) testModel(ctx context.Context, rt *providers.Routing, given string) (string, error) {
 	if given != "" {
 		return given, nil
@@ -186,7 +179,6 @@ func (g *Gateway) testModel(ctx context.Context, rt *providers.Routing, given st
 	return m, nil
 }
 
-// testKey runs one key test and applies its verdict to the Key State.
 func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner.Key, model, endpoint string, dry bool) (KeyTestResult, error) {
 	res := KeyTestResult{DryRun: dry, Provider: rt.Handle, UpstreamKey: k.Name}
 	ep, err := testEndpoint(rt, k, endpoint)
@@ -201,7 +193,7 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 		res.State = st
 		return res, err
 	}
-	ctx = context.WithoutCancel(ctx) // a test the Owner asked for finishes and records its verdict
+	ctx = context.WithoutCancel(ctx)
 	op, body, header := testCall(ep.Shape, wire)
 	c := planner.Candidate{Provider: &rt.Provider, Endpoint: ep, Key: k, WireModel: wire}
 	started := g.clock.Now()
@@ -226,8 +218,6 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 	res.Status = f.Status
 	res.DurationMs = g.clock.Now().Sub(started).Milliseconds()
 	key := keystate.Key{ID: k.ID, Name: k.Name, Provider: rt.Handle}
-	// An error sent inside a 2xx answer (MiniMax's base_resp) fails the test
-	// as it fails an Attempt: rules.Classify reads it as the status it stands for.
 	if f.Status >= 200 && f.Status < 300 && !rules.EmbeddedError(f.Body) {
 		res.Passed = true
 		res.Action = "Key State is active: the Provider answered the chat call."
@@ -261,8 +251,6 @@ func (g *Gateway) testKey(ctx context.Context, rt *providers.Routing, k *planner
 	return res, nil
 }
 
-// endpointOf is the Provider's Endpoint ref names, by ID or name (an ID
-// wins over another Endpoint's name), or a 404 saying how to list them.
 func endpointOf(rt *providers.Routing, ref string) (*planner.Endpoint, error) {
 	var ep *planner.Endpoint
 	for i := range rt.Endpoints {
@@ -277,8 +265,6 @@ func endpointOf(rt *providers.Routing, ref string) (*planner.Endpoint, error) {
 	return ep, nil
 }
 
-// testEndpoint is the Endpoint a key test uses: the one named by ref, or
-// the first one the key may use.
 func testEndpoint(rt *providers.Routing, k *planner.Key, ref string) (*planner.Endpoint, error) {
 	if ref != "" {
 		ep, err := endpointOf(rt, ref)
@@ -305,10 +291,8 @@ func testEndpoint(rt *providers.Routing, k *planner.Key, ref string) (*planner.E
 		"Provider %s has no Endpoint this key may use.", rt.Handle)
 }
 
-// testCall is the tiny chat call of a key test in Shape sh: the operation
-// path, the body and any header that Shape needs (shapeSpec.testBody).
 func testCall(sh shape.Shape, model string) (op string, body []byte, header http.Header) {
-	v, header := specOf(sh).testBody(model)
+	v, header := specOrChat(sh).testBody(model)
 	if header == nil {
 		header = http.Header{}
 	}
@@ -316,8 +300,6 @@ func testCall(sh shape.Shape, model string) (op string, body []byte, header http
 	return opFor(sh, model, false), body, header
 }
 
-// testMessages is the conversation of a key test in the Shapes that take
-// messages.
 func testMessages() []any {
 	return []any{map[string]any{"role": "user", "content": keyTestPrompt}}
 }

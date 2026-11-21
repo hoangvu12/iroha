@@ -13,8 +13,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// These tests pin down the fakes themselves, so later tickets can trust them.
-
 func post(t *testing.T, url, body string) *http.Response {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(body))

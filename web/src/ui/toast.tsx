@@ -7,12 +7,6 @@ import { isApiError } from "@/api/client";
 import type { AuditResult } from "@/api/types";
 import { cn } from "./cn";
 
-// Toasts: bottom right, 6 s (C25), only for a result whose place is gone (a
-// menu or dialog that closed, a page that moved on, a background job) or an
-// error with nowhere else to go; anything else shows where it happened
-// (CopyButton, SaveStatus). Every change that can be put back gets Undo,
-// which reverts its Audit Entry through the same API agents use.
-
 export const TOAST_MS = 6000;
 
 type Icon = "ok" | "bad" | "undo";
@@ -23,7 +17,6 @@ const icons: Record<Icon, ReactNode> = {
   undo: <RotateCcw size={16} aria-hidden className="shrink-0 text-fg-muted" />,
 };
 
-// Mounted once at the root: renders the toasts (and any confirm()).
 export function Toaster() {
   return (
     <OverlayHost
@@ -36,16 +29,8 @@ export function Toaster() {
         ...({ "data-agent-hidden": true } as object),
         className: cn(
           "fixed bottom-4 right-4 w-[min(380px,calc(100vw-32px))]",
-          // No transition: the region is transparent and doesn't clip, so its
-          // height (the hover area) just follows the stack while the toasts move.
           "h-[calc(var(--toast-stack-height)+(var(--toast-count)-1)*8px)]",
         ),
-        // Motion ("Toast" recipe, architecture.md "UI motion system"): a new
-        // toast rises one own height from the bottom edge while the older ones
-        // move up on the same frame and curve; one that times out or is acted
-        // on fades in place; a swiped one follows the finger (no transition)
-        // and keeps going the way it was thrown. Under reduced motion only
-        // opacity transitions: nothing slides, a swiped toast fades where it was let go.
         children: (item) => (
           <Toast
             className={cn(
@@ -81,18 +66,11 @@ function show(message: ReactNode, icon: Icon, action?: Action) {
 }
 
 export const notify = {
-  // "3 keys disabled  Undo"
   success: (message: ReactNode, action?: Action) => show(message, "ok", action),
-  // "Couldn't test team-5: 401 Invalid key  Open"
   error: (message: ReactNode, action?: Action) => show(message, "bad", action),
-  // A failed call, worded from its error.
   failure: (what: string, e: unknown) => show(`${what}: ${isApiError(e) ? e.message : e instanceof Error ? e.message : String(e)}`, "bad"),
 };
 
-// Toast a change from any mutation response. When it wrote a revertible
-// Audit Entry, the toast offers Undo; undoing toasts "Change reverted" with
-// its own Undo (reverting the revert redoes the change). onUndone runs after
-// each revert so the page can refetch.
 export function notifyChange(
   message: ReactNode,
   result: Pick<AuditResult, "audit_entry">,

@@ -6,7 +6,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/modelmeta"
 )
 
-// api.json: models per models.dev provider (brand).
 const providersJSON = `{
   "anthropic": {"id": "anthropic", "models": {
     "claude-sonnet-4-6": {"id": "claude-sonnet-4-6", "limit": {"context": 1000000, "output": 64000}, "reasoning": true,
@@ -26,7 +25,6 @@ const providersJSON = `{
   }}
 }`
 
-// models.json: models keyed by maker.
 const makersJSON = `{
   "openai/gpt-4o": {"id": "gpt-4o", "limit": {"context": 128000, "output": 16384}, "modalities": {"input": ["text", "image"], "output": ["text"]}},
   "openai/gpt-4o-mini": {"id": "gpt-4o-mini", "limit": {"context": 128000, "output": 16384}},
@@ -56,7 +54,6 @@ func TestLookupMatchesExactlyOrNearlyAndNeverGuesses(t *testing.T) {
 	cases := []struct {
 		name, brand, model, want string
 	}{
-		// By the model alone (no brand): models.json.
 		{"exact, any case", "", "GPT-4o", `{"context_length":128000,"max_output_tokens":16384,"architecture":{"input_modalities":["text","image"],"output_modalities":["text"]}}`},
 		{"maker-qualified ID", "", "openai/gpt-4o-mini", `{"context_length":128000,"max_output_tokens":16384}`},
 		{"other path prefix: model part", "", "requesty/openai/gpt-4o-mini", `{"context_length":128000,"max_output_tokens":16384}`},
@@ -75,7 +72,6 @@ func TestLookupMatchesExactlyOrNearlyAndNeverGuesses(t *testing.T) {
 		{"unknown", "", "nope", `{}`},
 		{"entry with nothing useful is skipped", "", "nothing", `{}`},
 
-		// By brand: api.json first, models.json fills the rest.
 		{"brand entry wins, maker fills", "anthropic", "claude-sonnet-4-6",
 			`{"context_length":1000000,"max_output_tokens":64000,"architecture":{"input_modalities":["text","image","pdf"],"output_modalities":["text"]},"reasoning":true,"reasoning_levels":["low","medium","high","max"]}`},
 		{"brand with dotted spelling", "anthropic", "claude-sonnet-4.6",

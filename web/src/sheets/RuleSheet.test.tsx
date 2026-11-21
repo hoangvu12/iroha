@@ -6,10 +6,6 @@ import type { Rule } from "@/pages/providers/api";
 import { RulesTab } from "@/pages/providers/Rules";
 import { loadedSheet, renderWithSheets, routes } from "./test-iroha";
 
-// UI ticket 33: an existing Failure Rule opens in its own sheet (it was the
-// Rules tab's edit dialog): the rule in words as the Flow view shows it,
-// today's hits, Edit in place, and Restore built-in / Delete asking first.
-
 let approve = false;
 const agent = createAgent({ allow: (step) => !step.confirm || approve });
 const where = () => screen.getByRole("status", { name: "Location" }).textContent;
@@ -69,7 +65,6 @@ test("a rule's sheet says it in words as the Flow view does, with its place in t
   expect(sheet.textContent).toContain("DashScope's quota");
   expect(s.getByRole("link", { name: "acme" })).toBeTruthy();
   expect(s.getByRole("link", { name: "Open page" }).getAttribute("href")).toBe("/providers/acme/rules?sheet=rule%3Aacme%2Frate-quota");
-  // No button over the step: the sheet is the rule already.
   expect(s.queryByRole("button", { name: "Open rate-quota" })).toBeNull();
 });
 
@@ -96,7 +91,7 @@ test("Edit turns the sheet into the rule's fields; Save changes the Owner's rule
 
 test("Change on a built-in rule saves the Owner's rule of its name; Check against last week shows the replay in the sheet", async () => {
   const user = userEvent.setup();
-  routes["POST /api/rules"] = { ...result(RULES[2]), replay: { attempts: 40, changed: 3, since: "2026-11-12T00:00:00Z", rules: [] } };
+  routes["PUT /api/rules/server-error"] = { ...result(RULES[2]), replay: { attempts: 40, changed: 3, since: "2026-11-12T00:00:00Z", rules: [] } };
   const { fetch } = renderWithSheets(null, "/x?sheet=rule:acme/server-error");
   const s = within(await ruleSheet("server-error"));
   expect(s.queryByRole("button", { name: /^Delete/ })).toBeNull();
@@ -104,9 +99,10 @@ test("Change on a built-in rule saves the Owner's rule of its name; Check agains
   await user.click(await s.findByRole("button", { name: "Check against last week" }));
   expect(await s.findByText("3 of the last 7 days' 40 failed Attempts would be decided differently.")).toBeTruthy();
   await user.click(s.getByRole("button", { name: "Save rule" }));
-  await waitFor(() => expect(sent(fetch, "POST")).toHaveLength(2));
-  expect(sent(fetch, "POST").map(([u]) => u)).toEqual(["/api/rules?dry_run=true", "/api/rules"]);
-  expect(sent(fetch, "POST")[1][1]).toMatchObject({ name: "server-error", status: ["5xx"], outcome: "retry_elsewhere" });
+  await waitFor(() => expect(sent(fetch, "PUT")).toHaveLength(2));
+  expect(sent(fetch, "PUT").map(([u]) => u)).toEqual(["/api/rules/server-error?dry_run=true", "/api/rules/server-error"]);
+  expect(sent(fetch, "PUT")[1][1]).toMatchObject({ status: ["5xx"], outcome: "retry_elsewhere" });
+  expect(sent(fetch, "POST")).toEqual([]);
 });
 
 test("Restore the built-in asks and keeps the sheet; Delete asks and closes it", async () => {

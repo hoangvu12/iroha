@@ -21,7 +21,6 @@ export type SessionStatus = {
 
 export const sessionKey = ["session"] as const;
 
-/** GET /api/session: is a password set, is this browser signed in. */
 export function useSession() {
   return useQuery({
     queryKey: sessionKey,
@@ -42,7 +41,6 @@ export function useSignIn() {
   });
 }
 
-/** First visit: set the password with an Admin Token, then sign in with it. */
 export function useSetUpPassword() {
   const qc = useQueryClient();
   return useMutation({
@@ -59,8 +57,6 @@ export function useSignOut() {
   return useMutation({
     mutationFn: () => api.delete<void>("/api/session"),
     onSettled: () => {
-      // Keep the session query itself (the auth gate observes it); drop every other cached answer,
-      // and the skeleton shapes remembered from what this session saw.
       qc.setQueryData<SessionStatus>(sessionKey, { password_set: true, signed_in: false });
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== sessionKey[0] });
       forgetShapes();

@@ -5,16 +5,11 @@ import (
 	"strings"
 )
 
-// Refused is the field of added (the top-level fields Iroha added to a
-// translated request, and cache_control wherever it put one) that an
-// Endpoint's error body refuses as unknown; "" when the body is no such
-// refusal. Only what Providers really answer for a field they don't know
-// counts, with the field named as the parameter refused, never a word in
-// the text: a role error quoting 'user' or a Provider echoing the request
-// (which holds prompt_cache_key) is an ordinary 400 for the Failure Rules.
+// Refused is the field of added that an Endpoint's error body refuses as
+// unknown; "" when the body is no such refusal.
 //
-// The answers read: OpenAI-compatible "Unrecognized request argument(s)
-// supplied: x", OpenAI "Unknown parameter: 'x'" and "Unsupported
+// Providers answer an unknown field with: OpenAI-compatible "Unrecognized
+// request argument(s) supplied: x", OpenAI "Unknown parameter: 'x'" and "Unsupported
 // parameter: 'x'", Go's `json: unknown field "x"`, Google's `Unknown name
 // "x"`, pydantic (FastAPI, vLLM, Mistral) "Extra inputs are not permitted"
 // with x in its loc, Anthropic "x.y: Extra inputs are not permitted", and
@@ -62,13 +57,8 @@ var (
 	pathSep      = regexp.MustCompile("[.\\[\\]'\"`()\\s]+")
 )
 
-// nested are the fields Iroha adds below the top level (on blocks and
-// tools); the others it adds only at the top level, so a path refusing them
-// must start with them.
-var nested = map[string]bool{"cache_control": true}
+var addedBelowTopLevel = map[string]bool{"cache_control": true}
 
-// namedIn is the field of added that path p names: its first segment
-// (after pydantic's "body"), or any segment for a nested field.
 func namedIn(p string, added []string) string {
 	var segs []string
 	for _, s := range pathSep.Split(p, -1) {
@@ -76,12 +66,13 @@ func namedIn(p string, added []string) string {
 			segs = append(segs, s)
 		}
 	}
+	// pydantic's loc starts with "body".
 	if len(segs) > 0 && segs[0] == "body" {
 		segs = segs[1:]
 	}
 	for _, name := range added {
 		for i, s := range segs {
-			if s == name && (i == 0 || nested[name]) {
+			if s == name && (i == 0 || addedBelowTopLevel[name]) {
 				return name
 			}
 		}

@@ -40,7 +40,6 @@ function json(status: number, body: unknown) {
 const image = () => new Response("<svg/>", { status: 200, headers: { "Content-Type": "image/svg+xml" } });
 const noLogo = () => json(404, { error: { code: "logo_unavailable", message: "No logo was found.", hint: "" } });
 
-/** Answers logo lookups from `logos` (url -> answer) and records every call. */
 function renderWith(page: React.ReactNode, logos: Record<string, () => Response>) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = String(input);
@@ -69,7 +68,6 @@ test("an agent sets a Pool's logo to a website, sees none was found before savin
   for (const entry of components) expect(entry.label, `${entry.component} ${entry.ref} has no name`).toBeTruthy();
   expect(components.map((e) => e.label)).toContain("Maker or website");
 
-  // The guessed maker is checked at once.
   expect(await screen.findByText("Logo found for openai.")).toBeTruthy();
 
   const typed = await agent.act({ steps: [{ ref: "Maker or website", action: "setValue", args: ["chatgpt.com"] }] });
@@ -93,20 +91,16 @@ test("the Pool logo field previews what it finds as you type, debounced, and is 
   await screen.findByText("Logo found for openai.");
   await user.clear(input);
   await user.type(input, "chatgpt.com");
-  // One lookup for the whole word, not one per key.
   expect(await screen.findByText("Logo found for chatgpt.com.", undefined, { timeout: 2000 })).toBeTruthy();
   expect(logoCalls(fetch)).toEqual(["/api/logos?maker=openai", "/api/logos?maker=chatgpt.com"]);
-  // Not UI SDK's page announcer, which earlier toasts left behind.
   const status = screen.getAllByRole("status").find((el) => !el.hasAttribute("data-ui-sdk-announcer"))!;
   expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(status.id);
   expect(document.querySelector("img")?.getAttribute("src")).toBe("/api/logos?maker=chatgpt.com");
 });
 
-// Motion (UI ticket 17): each logo the field finds fades into the tile (duration-fade); the tile it first drew doesn't.
 test("a logo found while typing fades into the tile; the tile first drawn doesn't", async () => {
   const user = userEvent.setup();
   renderWith(<PoolSettingsTab pool={pool} />, { "/api/logos?maker=chatgpt.com": image });
-  // Fades and grows from the popup scale (1 under reduced motion: a plain fade).
   const FADE = ["transition-[opacity,scale]", "duration-fade", "ease-out", "starting:opacity-0", "starting:scale-(--motion-scale-popup)"];
   const tile = () => document.querySelector("[data-logo-tile]")!;
   await screen.findByText("No logo found for openai. The tile shows a letter.");
@@ -139,7 +133,6 @@ test("the Provider logo field reports the same way", async () => {
   await user.type(input, "example.org");
   expect(await screen.findByText("No logo found for example.org. The tile shows a letter.", undefined, { timeout: 2000 })).toBeTruthy();
   expect(logoCalls(fetch)).toEqual(["/api/logos?domain=aliyuncs.com", "/api/logos?domain=example.org"]);
-  // "none" asks for the letter: nothing to look up.
   await user.clear(input);
   await user.type(input, "none");
   expect(await screen.findByText("Shows the first letter.", undefined, { timeout: 2000 })).toBeTruthy();

@@ -15,9 +15,6 @@ import { useChangePassword, useOwnerSessions, useRevokeOtherSessions, useRevokeO
 import { shortDate } from "./format";
 import { SAMPLE_SESSIONS } from "./samples";
 
-// Settings → Sign-in: the Owner password and the browsers signed in with
-// it (ticket 21 built the API; this is its UI).
-
 export function SignInTab() {
   const [changing, setChanging] = useState(false);
   return (
@@ -30,7 +27,6 @@ export function SignInTab() {
             </h2>
             <p className="mt-1 text-sm text-fg-muted">Changing it signs out every other browser.</p>
           </div>
-          {/* "…": it opens the dialog, whose own button is "Save the new password" (distinct names for agents). */}
           <Button onClick={() => setChanging(true)} className="self-start md:self-auto">
             Change password…
           </Button>
@@ -42,7 +38,6 @@ export function SignInTab() {
   );
 }
 
-/** "Chrome on Windows" from a User-Agent; good enough to tell browsers apart. */
 export function browserName(ua: string): string {
   if (!ua) return "Unknown browser";
   const browsers: [RegExp, string][] = [
@@ -92,7 +87,6 @@ const columns = col.columns([
   col.accessor(seen, {
     id: "seen",
     header: "Last seen",
-    // The most recently seen first; this browser is seen now.
     sortFn: (a, b) => Number(b.original.current) - Number(a.original.current) || seen(b.original).localeCompare(seen(a.original)),
     meta: { className: "tabular" },
     cell: ({ row }) => (row.original.current ? "Now" : timeAgo(seen(row.original))),
@@ -106,10 +100,8 @@ const columns = col.columns([
   }),
 ]);
 
-// The newest sign-in first.
 const NEWEST: SortingState = [{ id: "created", desc: true }];
 
-/** A browser's name in its controls; two of the same kind are told apart by when they signed in. */
 function sessionName(s: OwnerSession, all: OwnerSession[]): string {
   const name = browserName(s.user_agent);
   return all.filter((x) => browserName(x.user_agent) === name).length > 1 ? `${name}, signed in ${shortDate(s.created_at)}` : name;
@@ -131,7 +123,6 @@ function Sessions() {
       confirmLabel: "Sign it out",
       onConfirm: async () => {
         const res = await revoke.mutateAsync(s.id);
-        // Toast: the confirm dialog has closed and the row is gone.
         notifyChange(`${name} signed out`, res, { undoable: false });
       },
     });
@@ -143,7 +134,6 @@ function Sessions() {
       confirmLabel: "Sign them out",
       onConfirm: async () => {
         const res = await revokeOthers.mutateAsync(others.map((s) => s.id));
-        // Toast: the confirm dialog has closed and the rows are gone.
         notifyChange(`${res.succeeded} browsers signed out`, res, { undoable: false });
       },
     });
@@ -192,7 +182,6 @@ function Sessions() {
 
 function EndButton({ s, name, onEnd }: { s: OwnerSession; name: string; onEnd: (s: OwnerSession) => void }) {
   const signOut = useSignOut();
-  // Signing out works by leaving this page; a failure stays here, under the button.
   const ending = useSave({ describe: (e) => `Couldn't sign out: ${describeError(e)}` });
   if (s.current)
     return (
@@ -241,7 +230,6 @@ function PasswordDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
         onSuccess: (res) => {
           close(false);
           const others = res.changes.filter((c) => c.resource === "owner_session").length;
-          // Toast: the password dialog has closed.
           notifyChange(others ? `Password changed. ${others} other browsers signed out` : "Password changed", res, { undoable: false });
         },
         onError: (e) => {

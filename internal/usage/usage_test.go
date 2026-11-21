@@ -6,14 +6,12 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Iroha's convention: input is every prompt token; cache read and cache
-// write are parts of it, whatever way the Provider counted them.
 func TestCacheReadsAndWritesAreReadForEveryProviderFamily(t *testing.T) {
 	cases := []struct {
 		name   string
 		sh     shape.Shape
-		body   string   // a whole answer
-		events []string // or the data of stream events
+		body   string
+		events []string
 		want   Usage
 	}{
 		{

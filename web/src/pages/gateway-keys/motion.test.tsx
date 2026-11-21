@@ -8,11 +8,6 @@ import { CreateDialog } from "./CreateDialog";
 import { type Draft, emptyDraft } from "./scope";
 import { ScopeEditor } from "./ScopeEditor";
 
-// Motion of Gateway Keys (UI ticket 20): what opens inside the access editor
-// and the model picker grows with the collapse recipe, from the motion tokens
-// (architecture.md "UI motion system"). jsdom has no Tailwind, so this reads
-// the classes on the real markup; the feel is checked in Chrome.
-
 const CREATED: GatewayKey = {
   id: "gk_9",
   name: "linh",
@@ -44,7 +39,6 @@ afterEach(() => vi.unstubAllGlobals());
 
 const classesOf = (el: Element) => el.getAttribute("class")!.split(/\s+/);
 
-/** The collapse recipe, tokens only: height from UI SDK's measure, 0 on the first and last frame. */
 function expectCollapse(panel: Element) {
   const c = classesOf(panel);
   expect(panel.getAttribute("data-slot")).toBe("collapsible-panel");
@@ -81,7 +75,6 @@ describe("access editor", () => {
   test("an editor that starts on Only some shows its checklist at once", async () => {
     renderEditor({ all: false, providers: new Map(), pools: new Set() });
     const list = await screen.findByRole("region", { name: "Providers and Pools" });
-    // Open on its first paint: UI SDK sets no starting style, so nothing grows when the dialog opens.
     expect(list.closest("[data-slot=collapsible-panel]")!.hasAttribute("data-starting-style")).toBe(false);
   });
 
@@ -102,7 +95,6 @@ describe("access editor", () => {
   });
 });
 
-/** Rises a row's distance into place as it fades in (list-in, ease-out); a plain fade under reduced motion, where the shift token is 0. */
 function expectRiseIn(el: Element) {
   const c = classesOf(el);
   for (const k of ["transition-[opacity,translate]", "duration-list-in", "ease-out", "starting:translate-y-(--motion-shift-sm)", "starting:opacity-0"]) expect(c).toContain(k);
@@ -114,7 +106,7 @@ describe("the new key, shown once", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
-        <CreateDialog open onOpenChange={() => {}} existing={[]} />
+        <CreateDialog open onOpenChange={() => {}} />
       </QueryClientProvider>,
     );
     const name = screen.getByRole("textbox", { name: "Name" });

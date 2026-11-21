@@ -14,20 +14,12 @@ import (
 	"strings"
 )
 
-// Migrations live in migrations/ as <ticket>_<seq>_<slug>.sql, for example
-// 04_01_providers.sql. The ticket number keeps parallel branches from
-// colliding; seq orders several files of one ticket. Files apply in
-// numeric (ticket, seq) order, each once, tracked by file name, so a file
-// merged later with a lower number is still applied on an existing database.
-// Never edit a migration that has shipped; add a new one.
-//
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
 // MigrationNamePattern is the required file name form.
 var MigrationNamePattern = regexp.MustCompile(`^(\d+)_(\d+)_[a-z0-9_]+\.sql$`)
 
-// Migration is one embedded SQL file.
 type Migration struct {
 	Name   string
 	Ticket int
@@ -75,7 +67,6 @@ func Migrations() ([]Migration, error) {
 	return out, nil
 }
 
-// MigrationResult says what Migrate did.
 type MigrationResult struct {
 	Applied []string // newly applied this time, in order
 	Total   int      // applied overall after this run

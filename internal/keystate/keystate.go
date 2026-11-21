@@ -1,13 +1,3 @@
-// Package keystate keeps the Key State of every Upstream Key: active,
-// disabled (the Owner's choice, stored with the key), invalid (refused by
-// the Provider until a test passes or the secret changes) or cooling until
-// a known time, for the whole key or for one key-and-model pair. Every state
-// carries the reason it was entered.
-//
-// The Gateway reports failed and successful Attempts here; candidate
-// planning reads the state through providers.Store.Routing; the admin API
-// shows it on every Upstream Key. Every change is logged as key.state
-// (logs.KindKeyState).
 package keystate
 
 import (
@@ -24,7 +14,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// The visible Key States.
 const (
 	Active   = "active"
 	Disabled = "disabled"
@@ -32,18 +21,14 @@ const (
 	Cooling  = "cooling"
 )
 
-// Cooling defaults (spec "Failure handling").
 const (
-	DefaultCooling   = 60 * time.Second
-	MaxDefaultCool   = time.Hour
-	EscalationModels = 3               // distinct models refused...
-	EscalationWindow = 5 * time.Minute // ...within this window cool the whole key
-	// repeatWindow: a cooling that starts within this time after the last
-	// one ended counts as a repeat and doubles.
-	repeatWindow = time.Hour
+	DefaultCooling         = 60 * time.Second
+	MaxDefaultCool         = time.Hour
+	ModelsRefusedToCoolKey = 3
+	EscalationWindow       = 5 * time.Minute
+	repeatWindow           = time.Hour
 )
 
-// State is the one visible Key State of an Upstream Key.
 type State struct {
 	State     string     `json:"state" enum:"active,disabled,invalid,cooling"`
 	Reason    string     `json:"reason" doc:"Why the key is in this state, e.g. \"429 rate_limit_exceeded: Slow down (rule rate-limited)\"."`
@@ -53,7 +38,6 @@ type State struct {
 	RequestID string     `json:"request_id,omitempty" doc:"The Request whose Attempt put the key in this state."`
 }
 
-// ModelCooling is the cooling of one key for one model.
 type ModelCooling struct {
 	Model     string    `json:"model" doc:"The model as sent upstream."`
 	Until     time.Time `json:"until"`
@@ -63,14 +47,11 @@ type ModelCooling struct {
 	RequestID string    `json:"request_id,omitempty"`
 }
 
-// Record is the stored runtime state of one key (key_states and
-// key_model_cooling), whether or not it is current.
 type Record struct {
-	Key    *row       // nil: active since added
+	Key    *row
 	Models []row      // every key-and-model cooling row, current or past
 	Gaps   []ModelGap // every stored Model Gap, live or expired, soonest expiry first
-	// EndpointGaps are the key's Endpoint Gaps and Worked the Endpoints it
-	// has worked on (ticket 40), both in Endpoint order.
+	// EndpointGaps and Worked are in Endpoint order.
 	EndpointGaps []EndpointGap
 	Worked       []EndpointSuccess
 }
@@ -86,18 +67,15 @@ type row struct {
 	Level     int
 }
 
-// Querier is what reads need from *sql.Tx or *store.DB.
 type Querier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// ForProvider reads the Record of every key of a Provider that has one.
 func ForProvider(ctx context.Context, q Querier, providerID string) (map[string]Record, error) {
 	return read(ctx, q, `SELECT id FROM upstream_keys WHERE provider_id = ?`, providerID)
 }
 
-// ForKey reads the Record of one key.
 func ForKey(ctx context.Context, q Querier, keyID string) (Record, error) {
 	m, err := read(ctx, q, `SELECT ?`, keyID)
 	return m[keyID], err
@@ -156,7 +134,6 @@ func read(ctx context.Context, q Querier, keysQuery string, arg string) (map[str
 	return out, readEndpointGaps(ctx, q, keysQuery, arg, out)
 }
 
-// Invalid reports whether the key is invalid.
 func (r Record) Invalid() bool { return r.Key != nil && r.Key.State == Invalid }
 
 // CoolingUntil is when the key's own cooling ends; zero when it is not cooling at now.
@@ -167,7 +144,6 @@ func (r Record) CoolingUntil(now time.Time) time.Time {
 	return time.Time{}
 }
 
-// ModelsCooling maps each model the key is cooling for at now to when it ends.
 func (r Record) ModelsCooling(now time.Time) map[string]time.Time {
 	var out map[string]time.Time
 	for _, m := range r.Models {
@@ -181,8 +157,7 @@ func (r Record) ModelsCooling(now time.Time) map[string]time.Time {
 	return out
 }
 
-// Recovering reports whether a successful Attempt on model has state to
-// clear: a past key cooling, a repeat level, or a cooling row for model.
+// Recovering reports whether Succeeded on model has state to clear.
 func (r Record) Recovering(model string) bool {
 	if r.Key != nil && r.Key.State == Cooling {
 		return true
@@ -190,14 +165,11 @@ func (r Record) Recovering(model string) bool {
 	return slices.ContainsFunc(r.Models, func(m row) bool { return m.Model == model })
 }
 
-// OwnerDisabled is the Owner's disabled flag of a key with who set it and when.
 type OwnerDisabled struct {
 	By string
 	At time.Time
 }
 
-// View is the visible Key State at now, and the models the key is cooling
-// for. disabled is nil for an enabled key.
 func View(disabled *OwnerDisabled, r Record, now time.Time) (State, []ModelCooling) {
 	models := []ModelCooling{}
 	for _, m := range r.Models {
@@ -231,50 +203,44 @@ func View(disabled *OwnerDisabled, r Record, now time.Time) (State, []ModelCooli
 
 func ptr(t time.Time) *time.Time { t = t.UTC(); return &t }
 
-// Store writes Key States.
 type Store struct {
 	db  *store.DB
 	log *slog.Logger
 }
 
-// New returns a Store.
 func New(db *store.DB, log *slog.Logger) *Store { return &Store{db: db, log: log} }
 
-// Key names the key a change is about, for log events.
 type Key struct {
 	ID       string
 	Name     string
 	Provider string // handle
 }
 
-// Failure is a failed Attempt the rules decided changes the key.
 type Failure struct {
 	Key       Key
-	Endpoint  Endpoint // the Endpoint of the Attempt; empty: an invalid outcome never becomes an Endpoint Gap
+	Endpoint  Endpoint // empty: an invalid outcome never becomes an Endpoint Gap
 	Model     string   // wire model of the Attempt
 	RequestID string
 	Decision  rules.Decision
 }
 
-// Effect is what Fail did, for the Attempt's record.
 type Effect struct {
-	State     string    // invalid or cooling; "" when nothing changed
-	Model     string    // set when only this model cools
-	Until     time.Time // cooling end
-	Escalated bool      // a model cooling escalated to the whole key
-	GapUntil  time.Time // model_gap: when the Model Gap for Model expires
+	State     string // invalid or cooling; "" when nothing changed
+	Model     string
+	Until     time.Time
+	Escalated bool
+	GapUntil  time.Time
 	// EndpointGap names the Endpoint an invalid outcome became an Endpoint
-	// Gap on: the key keeps its Key State and serves its other Endpoints.
+	// Gap on instead of changing the Key State.
 	EndpointGap string
-	Action      string // one line for the Attempt's record
+	Action      string
 }
 
 // Fail applies a decision with outcome invalid, cooling_key,
-// cooling_key_model or model_gap (which records a Model Gap and leaves the
-// Key State alone). Other outcomes change nothing. An invalid outcome on an
-// Endpoint, for a key that has worked on another Endpoint it may still use,
-// records an Endpoint Gap instead (endpointgaps.go); whatever the rule, the
-// Owner's included.
+// cooling_key_model or model_gap (which leaves the Key State alone). Other
+// outcomes change nothing. An invalid outcome on an Endpoint, for a key that
+// has worked on another Endpoint it may still use, records an Endpoint Gap
+// instead.
 func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 	ctx = context.WithoutCancel(ctx)
 	now := s.db.Clock().Now().UTC()
@@ -327,8 +293,6 @@ func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 			if err := putKey(ctx, tx, f.Key.ID, row{State: Invalid, Reason: reason, Rule: d.Rule, RequestID: f.RequestID, Since: now}); err != nil {
 				return err
 			}
-			// Refused where it last worked too: the refusal is the key's,
-			// so its Endpoint Gaps were symptoms of it.
 			cleared, err := ClearEndpointGaps(ctx, tx, f.Key, "", "The key became invalid (refused on every Endpoint it had worked on).", nil)
 			if err != nil {
 				return err
@@ -371,40 +335,13 @@ func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 			eff = Effect{State: Cooling, Model: f.Model, Until: until,
 				Action: fmt.Sprintf("Upstream Key %s cooling for %s until %s.", f.Key.Name, f.Model, until.Format(time.RFC3339))}
 			events = append(events, event{from: Active, to: Cooling, model: f.Model, until: until, reason: reason, rule: d.Rule})
-
-			// Escalation: distinct models refused within the window.
-			rows, err := tx.QueryContext(ctx, `SELECT model FROM key_model_cooling WHERE key_id = ? AND since_at > ? ORDER BY since_at, model`,
-				f.Key.ID, store.Millis(now.Add(-EscalationWindow)))
-			if err != nil {
+			esc, err := escalateToKey(ctx, tx, f, cur, reason, until, now)
+			if err != nil || esc == nil {
 				return err
 			}
-			var models []string
-			for rows.Next() {
-				var m string
-				if err := rows.Scan(&m); err != nil {
-					rows.Close()
-					return err
-				}
-				models = append(models, m)
-			}
-			rows.Close()
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			if len(models) >= EscalationModels && cur.CoolingUntil(now).IsZero() {
-				why := fmt.Sprintf("Refused for %d models within %s (%s); last: %s", len(models), EscalationWindow, strings.Join(models, ", "), reason)
-				kd := rules.Decision{Rule: d.Rule, Outcome: rules.CoolingKey}
-				if until.After(now.Add(DefaultCooling)) {
-					kd.ResetAt = until
-				}
-				kuntil, ev, err := coolKey(ctx, tx, f.Key.ID, cur.Key, kd, why, f.RequestID, now)
-				if err != nil {
-					return err
-				}
-				events = append(events, ev)
-				eff.Escalated, eff.Until, eff.Model = true, kuntil, ""
-				eff.Action += fmt.Sprintf(" Refused for %d models within %s, so the whole key cools until %s.", len(models), EscalationWindow, kuntil.Format(time.RFC3339))
-			}
+			events = append(events, esc.event)
+			eff.Escalated, eff.Until, eff.Model = true, esc.until, ""
+			eff.Action += fmt.Sprintf(" Refused for %d models within %s, so the whole key cools until %s.", len(esc.models), EscalationWindow, esc.until.Format(time.RFC3339))
 		}
 		return nil
 	})
@@ -417,6 +354,50 @@ func (s *Store) Fail(ctx context.Context, f Failure) (Effect, error) {
 	LogGaps(s.log, gaps)
 	LogEndpointGaps(s.log, egaps)
 	return eff, nil
+}
+
+type keyEscalation struct {
+	until  time.Time
+	event  event
+	models []string
+}
+
+func escalateToKey(ctx context.Context, tx *sql.Tx, f Failure, cur Record, reason string, modelUntil, now time.Time) (*keyEscalation, error) {
+	if !cur.CoolingUntil(now).IsZero() {
+		return nil, nil
+	}
+	models, err := modelsCooledSince(ctx, tx, f.Key.ID, now.Add(-EscalationWindow))
+	if err != nil || len(models) < ModelsRefusedToCoolKey {
+		return nil, err
+	}
+	why := fmt.Sprintf("Refused for %d models within %s (%s); last: %s", len(models), EscalationWindow, strings.Join(models, ", "), reason)
+	kd := rules.Decision{Rule: f.Decision.Rule, Outcome: rules.CoolingKey}
+	if modelUntil.After(now.Add(DefaultCooling)) {
+		kd.ResetAt = modelUntil
+	}
+	until, ev, err := coolKey(ctx, tx, f.Key.ID, cur.Key, kd, why, f.RequestID, now)
+	if err != nil {
+		return nil, err
+	}
+	return &keyEscalation{until: until, event: ev, models: models}, nil
+}
+
+func modelsCooledSince(ctx context.Context, tx *sql.Tx, keyID string, since time.Time) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT model FROM key_model_cooling WHERE key_id = ? AND since_at > ? ORDER BY since_at, model`,
+		keyID, store.Millis(since))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var models []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, err
+		}
+		models = append(models, m)
+	}
+	return models, rows.Err()
 }
 
 type event struct {
@@ -450,66 +431,64 @@ func (s *Store) logEvent(k Key, requestID string, e event) {
 	s.log.Info(msg, attrs...)
 }
 
-// visible is the state name a Record shows at now (ignoring disabled).
 func visible(r Record, now time.Time) string {
 	st, _ := View(nil, r, now)
 	return st.State
 }
 
-// FirstCooling is when a cooling decided by d ends for a key (or key and
-// model) that has not been cooling within the last hour: the reset time the
-// response named, when it is still to come, else the rule's fixed time, else
-// DefaultCooling. Repeats double the default (Fail); this is the first step.
+// FirstCooling ignores repeats: Fail doubles the default for a key that
+// cooled within the last hour.
 func FirstCooling(d rules.Decision, now time.Time) time.Time {
 	until, _ := coolingEnd(nil, d, now)
 	return until
 }
 
-// coolingEnd is when a new cooling ends and its repeat level, given the
-// previous cooling of the same scope (nil when none).
 func coolingEnd(prev *row, d rules.Decision, now time.Time) (time.Time, int) {
 	level := 0
-	if prev != nil && prev.State == Cooling {
-		switch {
-		case prev.Until.After(now): // already cooling (concurrent Attempts): not a repeat
-			level = prev.Level
-		case now.Sub(prev.Until) < repeatWindow:
-			level = prev.Level + 1
-		}
+	switch {
+	case prev.stillCooling(now):
+		level = prev.Level
+	case prev.cooledWithin(repeatWindow, now):
+		level = prev.Level + 1
 	}
 	var until time.Time
 	switch {
 	case !d.ResetAt.IsZero() && d.ResetAt.After(now):
-		// The Provider named a time still to come: cool until then.
 		until = d.ResetAt
 	case d.Cooling > 0:
 		until = now.Add(d.Cooling)
 	default:
-		// The Provider named a time that has passed (its promise expired, so
-		// the thing it promised is not ready) or named none: cool for the
-		// escalating default, so a key that keeps refusing is tried less and
-		// less often instead of on every Request.
-		dur := DefaultCooling
-		for range level {
-			dur *= 2
-			if dur >= MaxDefaultCool {
-				dur = MaxDefaultCool
-				break
-			}
-		}
-		until = now.Add(dur)
+		until = now.Add(escalatingDefault(level))
 	}
-	// A cooling never shortens one already running (FAIL-61).
-	if prev != nil && prev.State == Cooling && prev.Until.After(until) {
+	if prev.stillCooling(now) && prev.Until.After(until) {
 		until = prev.Until
 	}
 	return until.UTC(), level
 }
 
+func (r *row) stillCooling(now time.Time) bool {
+	return r != nil && r.State == Cooling && r.Until.After(now)
+}
+
+func (r *row) cooledWithin(window time.Duration, now time.Time) bool {
+	return r != nil && r.State == Cooling && !r.Until.After(now) && now.Sub(r.Until) < window
+}
+
+func escalatingDefault(level int) time.Duration {
+	dur := DefaultCooling
+	for range level {
+		dur *= 2
+		if dur >= MaxDefaultCool {
+			return MaxDefaultCool
+		}
+	}
+	return dur
+}
+
 func coolKey(ctx context.Context, tx *sql.Tx, keyID string, prev *row, d rules.Decision, reason, requestID string, now time.Time) (time.Time, event, error) {
 	until, level := coolingEnd(prev, d, now)
 	from := Active
-	if prev != nil && prev.State == Cooling && prev.Until.After(now) {
+	if prev.stillCooling(now) {
 		from = Cooling
 	}
 	err := putKey(ctx, tx, keyID, row{State: Cooling, Reason: reason, Rule: d.Rule, RequestID: requestID, Since: now, Until: until, Level: level})
@@ -528,9 +507,7 @@ func putKey(ctx context.Context, tx *sql.Tx, keyID string, r row) error {
 	return err
 }
 
-// Succeeded records that an Attempt with the key on model succeeded: the
-// cooling of that model and a past key cooling are cleared. Call it only
-// when Record.Recovering(model) said there is something to clear.
+// Call Succeeded only when Record.Recovering(model) is true.
 func (s *Store) Succeeded(ctx context.Context, k Key, model, requestID string) error {
 	ctx = context.WithoutCancel(ctx)
 	now := s.db.Clock().Now().UTC()
@@ -567,10 +544,9 @@ func (s *Store) Succeeded(ctx context.Context, k Key, model, requestID string) e
 	return nil
 }
 
-// TestPassed makes the key active after a passing key test on ep: invalid
-// and cooling end, the tested model's cooling is cleared, every Model Gap of
-// the key is cleared (the Provider may have upgraded the key's plan), the key
-// has worked on ep, and its Endpoint Gap on ep is cleared.
+// TestPassed makes the key active, clears the tested model's cooling, every
+// Model Gap of the key and its Endpoint Gap on ep, and records that it has
+// worked on ep.
 func (s *Store) TestPassed(ctx context.Context, k Key, ep Endpoint, model string) error {
 	ctx = context.WithoutCancel(ctx)
 	now := s.db.Clock().Now().UTC()
@@ -610,9 +586,8 @@ func (s *Store) TestPassed(ctx context.Context, k Key, ep Endpoint, model string
 	return err
 }
 
-// Reset clears every runtime state of a key inside tx: its secret changed,
-// so it is a new credential that has worked nowhere yet. The caller logs the
-// change after commit (LogChange) and clears the key's gaps itself, tracked.
+// Reset leaves the key's gaps and logging to the caller: clear the gaps
+// tracked, and call LogChange after commit.
 func Reset(ctx context.Context, tx *sql.Tx, keyID string, now time.Time) error {
 	if err := forgetSuccesses(ctx, tx, keyID); err != nil {
 		return err
@@ -630,8 +605,7 @@ func Reset(ctx context.Context, tx *sql.Tx, keyID string, now time.Time) error {
 	return putKey(ctx, tx, keyID, row{State: Active, Reason: "The secret was replaced.", Since: now})
 }
 
-// LogChange logs a Key State change made outside this package (the Owner
-// disabling or enabling a key, a secret change), after it committed.
+// Call LogChange only after the change committed.
 func LogChange(log *slog.Logger, k Key, from, to, reason string) {
 	(&Store{log: log}).logEvent(k, "", event{from: from, to: to, reason: reason})
 }

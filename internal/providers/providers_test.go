@@ -28,22 +28,23 @@ func TestProviderHandlesAreValidatedUniqueAndImmutable(t *testing.T) {
 		len(p.Endpoints) != 0 || created.AuditEntry == "" {
 		t.Fatalf("created = %+v", created)
 	}
-	srv.Admin.Post("/api/providers", map[string]any{"handle": "zai-coding"}).Expect(200).JSON(&again)
+	if e := srv.Admin.Post("/api/providers", map[string]any{"handle": "zai-coding"}).Expect(409).Err(); e.Code != "name_taken" || !strings.Contains(e.Hint, "PUT /api/providers/zai-coding") {
+		t.Fatalf("second create = %+v", e)
+	}
+	srv.Admin.Put("/api/providers/zai-coding", map[string]any{"handle": "zai-coding"}).Expect(200).JSON(&again)
 	if again.Outcome != "unchanged" || again.Provider.ID != p.ID || again.AuditEntry != "" {
 		t.Fatalf("repeat = %+v", again)
 	}
-	srv.Admin.Post("/api/providers", map[string]any{"handle": "zai-coding", "name": "Z.ai coding plan"}).Expect(200).JSON(&renamed)
+	srv.Admin.Put("/api/providers/"+p.ID, map[string]any{"name": "Z.ai coding plan"}).Expect(200).JSON(&renamed)
 	if renamed.Outcome != "updated" || renamed.Provider.Name != "Z.ai coding plan" || !slices.Equal(renamed.Changes[0].Fields, []string{"name"}) {
 		t.Fatalf("rename = %+v", renamed)
 	}
 
-	// Handles never change.
 	if e := srv.Admin.Patch("/api/providers/zai-coding", map[string]any{"handle": "zai"}).Expect(400).Err(); e.Code != "handle_immutable" || e.Hint == "" {
 		t.Fatalf("handle change: %+v", e)
 	}
 	srv.Admin.Patch("/api/providers/zai-coding", map[string]any{"handle": "zai-coding", "enabled": false}).Expect(200)
 
-	// Read by handle or ID; archive and filter.
 	for _, ref := range []string{"zai-coding", p.ID} {
 		var got providers.Provider
 		srv.Admin.Get("/api/providers/" + ref).Expect(200).JSON(&got)
@@ -62,8 +63,9 @@ func TestProviderHandlesAreValidatedUniqueAndImmutable(t *testing.T) {
 	if len(list.Providers) != 2 {
 		t.Fatalf("all: %+v", list)
 	}
-	// An archived handle stays reserved: creating it again updates the archived Provider.
-	srv.Admin.Post("/api/providers", map[string]any{"handle": "zai-coding"}).Expect(200)
+	if e := srv.Admin.Post("/api/providers", map[string]any{"handle": "zai-coding"}).Expect(409).Err(); e.Code != "name_taken" {
+		t.Fatalf("create on an archived handle: %+v", e)
+	}
 	if e := srv.Admin.Get("/api/providers/nope").Expect(404).Err(); !strings.Contains(e.Hint, "GET /api/providers") {
 		t.Fatalf("unknown: %+v", e)
 	}
@@ -97,7 +99,7 @@ func TestEndpointsAreCreatedByNameValidatedAndRevertible(t *testing.T) {
 		t.Fatalf("audit name = %q", created.Changes[0].Name)
 	}
 	var same providers.EndpointResult
-	srv.Admin.Post(base, map[string]any{"name": "default", "url": "https://api.example.com/v1"}).Expect(200).JSON(&same)
+	srv.Admin.Put(base+"/default", map[string]any{"name": "default", "url": "https://api.example.com/v1"}).Expect(200).JSON(&same)
 	if same.Outcome != "unchanged" {
 		t.Fatalf("repeat = %+v", same)
 	}
@@ -124,7 +126,6 @@ func TestEndpointsAreCreatedByNameValidatedAndRevertible(t *testing.T) {
 	if back.ID != ep.ID || back.URL != "https://eu.example.com/v1" {
 		t.Fatalf("after revert = %+v", back)
 	}
-	// Endpoint names are per Provider.
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "other"}).Expect(201)
 	srv.Admin.Post("/api/providers/other/endpoints", map[string]any{"url": "https://o.example.com/v1", "shape": "anthropic-messages"}).Expect(201)
 	if e := srv.Admin.Get("/api/providers/other/endpoints/" + ep.ID).Expect(404).Err(); !strings.Contains(e.Hint, "/api/providers/other/endpoints") {
@@ -154,8 +155,8 @@ func TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited(t *testing.T) {
 		{"static_headers": map[string]string{"X-A": "line\r\nbreak"}},
 		{"renames": map[string]string{"glm": ""}},
 		{"renames": map[string]string{" glm": "x"}},
-		{"renames": map[string]string{strings.Repeat("m", 257): "x"}}, // MOD-13: names are at most 256 characters
-		{"renames": manyRenames(1001)},                                // MOD-13: at most 1000 renames
+		{"renames": map[string]string{strings.Repeat("m", 257): "x"}},
+		{"renames": manyRenames(1001)},
 	} {
 		if e := srv.Admin.Post(base, ep(bad)).Expect(400).Err(); e.Hint == "" {
 			t.Errorf("%v: no hint", bad)
@@ -169,14 +170,13 @@ func TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited(t *testing.T) {
 	if e.AuthStyle != "header" || e.AuthParam != "api-key" || e.StaticHeaders["HTTP-Referer"] != "https://example.com" || e.Renames["glm-4.6"] != "glm-4.6-fp8" {
 		t.Fatalf("created = %+v", e)
 	}
-	// A static Authorization header is fine when the key is not sent there.
 	var edited providers.EndpointResult
 	srv.Admin.Patch(base+"/eu", map[string]any{"auth_style": "none", "static_headers": map[string]string{"Authorization": "Bearer relay-fixed"}}).Expect(200).JSON(&edited)
 	if edited.Endpoint.AuthStyle != "none" || edited.Endpoint.AuthParam != "" || !slices.Equal(edited.Changes[0].Fields, []string{"auth_param", "auth_style", "static_headers"}) {
 		t.Fatalf("edit = %+v", edited)
 	}
 	var unchanged providers.EndpointResult
-	srv.Admin.Post(base, map[string]any{"name": "eu", "auth_style": "none"}).Expect(200).JSON(&unchanged)
+	srv.Admin.Put(base+"/eu", map[string]any{"auth_style": "none"}).Expect(200).JSON(&unchanged)
 	if unchanged.Outcome != "unchanged" {
 		t.Fatalf("repeat = %+v", unchanged)
 	}
@@ -188,11 +188,10 @@ func TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited(t *testing.T) {
 	}
 	var entries audit.EntryPage
 	srv.Admin.Get("/api/audit-entries?record=acme/eu").Expect(200).JSON(&entries)
-	if len(entries.Entries) != 3 { // created, edited, revert
+	if len(entries.Entries) != 3 {
 		t.Fatalf("entries for acme/eu = %d", len(entries.Entries))
 	}
 
-	// MOD-13: the caps themselves are accepted; {} clears the renames.
 	srv.Admin.Patch(base+"/eu", map[string]any{"renames": manyRenames(1000)}).Expect(200)
 	srv.Admin.Patch(base+"/eu", map[string]any{"renames": map[string]string{strings.Repeat("m", 256): "x"}}).Expect(200)
 	var cleared providers.EndpointResult
@@ -202,7 +201,6 @@ func TestEndpointAuthHeadersAndRenamesAreValidatedAndAudited(t *testing.T) {
 	}
 }
 
-// manyRenames is n distinct renames.
 func manyRenames(n int) map[string]string {
 	m := map[string]string{}
 	for i := range n {
@@ -216,7 +214,7 @@ func TestKeysAreRestrictedToEndpointsAndEndpointDeletesKeepThemConsistent(t *tes
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
 	for _, n := range []string{"eu", "us"} {
 		srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": n, "url": "https://" + n + ".example.com/v1", "shape": "openai-chat"}).Expect(201)
-		srv.Clock.Advance(time.Second) // Endpoints keep their creation order, also across a revert
+		srv.Clock.Advance(time.Second)
 	}
 	keys := "/api/providers/acme/keys"
 	var k providers.UpstreamKeyResult
@@ -227,20 +225,16 @@ func TestKeysAreRestrictedToEndpointsAndEndpointDeletesKeepThemConsistent(t *tes
 	if e := srv.Admin.Post(keys, map[string]any{"name": "x", "secret": "sk-test-x", "endpoints": []string{"mars"}}).Expect(404).Err(); !strings.Contains(e.Hint, "/api/providers/acme/endpoints") {
 		t.Fatalf("unknown endpoint: %+v", e)
 	}
-	// Pasting the same secret with a restriction restricts the existing key.
-	srv.Admin.Post(keys, map[string]any{"secret": "sk-test-plan", "endpoints": []string{"eu", "us", "eu"}}).Expect(200).JSON(&k)
+	srv.Admin.Put(keys+"/plan", map[string]any{"endpoints": []string{"eu", "us", "eu"}}).Expect(200).JSON(&k)
 	if k.Outcome != "updated" || !slices.Equal(k.UpstreamKey.Endpoints, []string{"eu", "us"}) {
-		t.Fatalf("restricted by secret = %+v", k)
+		t.Fatalf("restricted by PUT = %+v", k)
 	}
 	srv.Admin.Patch(keys+"/plan", map[string]any{"endpoints": []string{"eu"}}).Expect(200)
 
-	// An Endpoint a key may use alone cannot go.
 	e := srv.Admin.Delete("/api/providers/acme/endpoints/eu").Expect(409).Err()
 	if e.Code != "endpoint_in_use" || !strings.Contains(e.Message, "plan") || e.Hint == "" {
 		t.Fatalf("delete in use: %+v", e)
 	}
-	// With another Endpoint left, the delete takes eu out of the key's
-	// restriction in the same Audit Entry, and its revert puts both back.
 	srv.Admin.Patch(keys+"/plan", map[string]any{"endpoints": []string{"eu", "us"}}).Expect(200)
 	var del providers.EndpointResult
 	srv.Admin.Delete("/api/providers/acme/endpoints/eu").Expect(200).JSON(&del)
@@ -258,7 +252,6 @@ func TestKeysAreRestrictedToEndpointsAndEndpointDeletesKeepThemConsistent(t *tes
 		t.Fatalf("after revert = %+v", got.Endpoints)
 	}
 
-	// [] lifts the restriction; the key list shows it.
 	srv.Admin.Patch(keys+"/plan", map[string]any{"endpoints": []string{}}).Expect(200)
 	var list providers.UpstreamKeyList
 	srv.Admin.Get(keys).Expect(200).JSON(&list)
@@ -283,23 +276,18 @@ func TestUpstreamKeysArePastedWithoutDuplicatesAndReadable(t *testing.T) {
 	if ch := first.Changes[0]; ch.Name != "acme/key-1" || strings.Contains(string(ch.After), "sk-test-aaaa1111") {
 		t.Fatalf("change shows %s %s", ch.Name, ch.After)
 	}
-	// Pasting the same secret again answers that key unchanged.
-	var again providers.UpstreamKeyResult
-	srv.Admin.Post(base, map[string]any{"secret": "sk-test-aaaa1111"}).Expect(200).JSON(&again)
-	if again.Outcome != "unchanged" || again.UpstreamKey.ID != k1.ID {
-		t.Fatalf("repeat = %+v", again)
+	if e := srv.Admin.Post(base, map[string]any{"secret": "sk-test-aaaa1111"}).Expect(409).Err(); e.Code != "upstream_key_duplicate" || !strings.Contains(e.Message, "key-1") {
+		t.Fatalf("repeat = %+v", e)
 	}
-	// Bulk paste: new keys get the next names, known ones are unchanged.
 	var bulk keyBulk
 	srv.Admin.Post(base+"/bulk", map[string]any{"items": []any{
 		map[string]any{"secret": "sk-test-bbbb2222"}, map[string]any{"secret": "sk-test-aaaa1111"},
 		map[string]any{"secret": "sk-test-cccc3333"}, map[string]any{"secret": "two words"},
 	}}).Expect(200).JSON(&bulk)
-	if bulk.Succeeded != 3 || bulk.Failed != 1 || bulk.Items[0].Result.Name != "key-2" || bulk.Items[1].Outcome != "unchanged" ||
+	if bulk.Succeeded != 2 || bulk.Failed != 2 || bulk.Items[0].Result.Name != "key-2" || bulk.Items[1].Error.Code != "upstream_key_duplicate" ||
 		bulk.Items[2].Result.Name != "key-3" || bulk.Items[3].Error == nil || bulk.AuditEntry == "" {
 		t.Fatalf("bulk = %+v", bulk)
 	}
-	// A named keyless slot; a secret already held under another name is refused.
 	var keyless providers.UpstreamKeyResult
 	srv.Admin.Post(base, map[string]any{"name": "free-relay"}).Expect(201).JSON(&keyless)
 	if keyless.UpstreamKey.Secret != "" {
@@ -312,7 +300,6 @@ func TestUpstreamKeysArePastedWithoutDuplicatesAndReadable(t *testing.T) {
 		t.Fatalf("empty: %+v", e)
 	}
 
-	// Secrets are readable by name or ID, singly and in the list.
 	for _, ref := range []string{"key-1", k1.ID} {
 		var got providers.UpstreamKey
 		srv.Admin.Get(base + "/" + ref).Expect(200).JSON(&got)
@@ -335,7 +322,6 @@ func TestUpstreamKeysArePastedWithoutDuplicatesAndReadable(t *testing.T) {
 		t.Fatalf("count = %d", p.UpstreamKeyCount)
 	}
 
-	// Rename and replace the secret; delete in bulk and revert it all.
 	var edited providers.UpstreamKeyResult
 	srv.Admin.Patch(base+"/key-3", map[string]any{"name": "team-3", "secret": "sk-test-dddd4444"}).Expect(200).JSON(&edited)
 	if edited.UpstreamKey.Name != "team-3" || edited.UpstreamKey.Secret != "sk-test-dddd4444" || !slices.Equal(edited.Changes[0].Fields, []string{"name", "secret"}) {
@@ -355,11 +341,10 @@ func TestUpstreamKeysArePastedWithoutDuplicatesAndReadable(t *testing.T) {
 	}
 	var entries audit.EntryPage
 	srv.Admin.Get("/api/audit-entries?record=acme/key-1").Expect(200).JSON(&entries)
-	if len(entries.Entries) != 3 { // added, deleted, revert
+	if len(entries.Entries) != 3 {
 		t.Fatalf("entries for acme/key-1 = %d", len(entries.Entries))
 	}
 
-	// Dry runs write nothing.
 	var dry providers.UpstreamKeyResult
 	srv.Admin.Post(base+"?dry_run=true", map[string]any{"secret": "sk-test-eeee5555"}).Expect(200).JSON(&dry)
 	if !dry.DryRun || dry.Outcome != "created" {

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,30 +19,44 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// providerSnapshot is what an Audit Entry records of a Provider.
 type providerSnapshot struct {
-	ID        string    `json:"id"`
-	Handle    string    `json:"handle"`
-	Name      string    `json:"name"`
-	Enabled   bool      `json:"enabled"`
-	Archived  bool      `json:"archived"`
-	CreatedAt time.Time `json:"created_at"`
-	// Budget overrides; 0 is the default.
-	MaxAttempts      int `json:"max_attempts,omitempty"`
-	FirstByteSeconds int `json:"first_byte_seconds,omitempty"`
-	// Model list configuration (ticket 10); zero values are the defaults
-	// (not strict, discovery per Provider).
-	Strict    bool   `json:"strict,omitempty"`
-	Discovery string `json:"discovery,omitempty"`
-	// Ticket 11; "" is none.
-	ModelsDevBrand string `json:"models_dev_brand,omitempty"`
-	// Ticket 22; "" is guessed from the Endpoints.
-	LogoDomain string `json:"logo_domain,omitempty"`
-	// Prompt caching 02; "" is on (the default).
-	Affinity string `json:"affinity,omitempty"`
+	ID               string    `json:"id"`
+	Handle           string    `json:"handle"`
+	Name             string    `json:"name"`
+	Enabled          bool      `json:"enabled"`
+	Archived         bool      `json:"archived"`
+	CreatedAt        time.Time `json:"created_at"`
+	MaxAttempts      int       `json:"max_attempts,omitempty"`
+	FirstByteSeconds int       `json:"first_byte_seconds,omitempty"`
+	Strict           bool      `json:"strict,omitempty"`
+	Discovery        string    `json:"discovery,omitempty"`
+	ModelsDevBrand   string    `json:"models_dev_brand,omitempty"`
+	LogoDomain       string    `json:"logo_domain,omitempty"`
+	Affinity         string    `json:"affinity,omitempty"`
 }
 
-// Resource is the Provider resource of the audit machinery.
+func (s providerSnapshot) MarshalJSON() ([]byte, error) {
+	type stored providerSnapshot
+	out := stored(s)
+	if out.Discovery == DiscoveryProvider {
+		out.Discovery = ""
+	}
+	if out.Affinity == AffinityOn {
+		out.Affinity = ""
+	}
+	return json.Marshal(out)
+}
+
+func (s *providerSnapshot) UnmarshalJSON(b []byte) error {
+	type stored providerSnapshot
+	in := stored{Discovery: DiscoveryProvider, Affinity: AffinityOn}
+	if err := json.Unmarshal(b, &in); err != nil {
+		return err
+	}
+	*s = providerSnapshot(in)
+	return nil
+}
+
 var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 	Name: "provider", Label: "Provider", Plural: "Providers", Path: "/api/providers",
 	Table: "providers", NameColumn: "handle",
@@ -51,12 +66,6 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 		var created int64
 		err := q.QueryRowContext(ctx, `SELECT id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain, affinity FROM providers WHERE id = ?`, id).
 			Scan(&s.ID, &s.Handle, &s.Name, &s.Enabled, &s.Archived, &created, &s.MaxAttempts, &s.FirstByteSeconds, &s.Strict, &s.Discovery, &s.ModelsDevBrand, &s.LogoDomain, &s.Affinity)
-		if s.Discovery == DiscoveryProvider {
-			s.Discovery = "" // the default, as entries written before ticket 10 have it
-		}
-		if s.Affinity == AffinityOn {
-			s.Affinity = "" // the default, as entries written before it existed have it
-		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -86,26 +95,17 @@ var Resource = audit.Register(&audit.Resource[providerSnapshot]{
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		discovery := s.Discovery
-		if discovery == "" {
-			discovery = DiscoveryProvider
-		}
-		aff := s.Affinity
-		if aff == "" {
-			aff = AffinityOn
-		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO providers (id, handle, name, enabled, archived, created_at, max_attempts, first_byte_seconds, strict, discovery, models_dev_brand, logo_domain, affinity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET name = excluded.name, enabled = excluded.enabled, archived = excluded.archived,
 			max_attempts = excluded.max_attempts, first_byte_seconds = excluded.first_byte_seconds, strict = excluded.strict, discovery = excluded.discovery,
 			models_dev_brand = excluded.models_dev_brand, logo_domain = excluded.logo_domain, affinity = excluded.affinity`,
-			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt), s.MaxAttempts, s.FirstByteSeconds, s.Strict, discovery, s.ModelsDevBrand, s.LogoDomain, aff)
+			id, s.Handle, s.Name, s.Enabled, s.Archived, store.Millis(s.CreatedAt), s.MaxAttempts, s.FirstByteSeconds, s.Strict, s.Discovery, s.ModelsDevBrand, s.LogoDomain, s.Affinity)
 		return err
 	},
 })
 
-// CreateProvider is the body of POST /api/providers and each item of its bulk.
 type CreateProvider struct {
-	Handle  string  `json:"handle" doc:"Unique handle: lowercase letters, digits and single hyphens, at most 63. Never changes. Repeating a create with an existing handle updates that Provider."`
+	Handle  string  `json:"handle" doc:"Unique handle: lowercase letters, digits and single hyphens, at most 63. Never changes. On PUT the path names the Provider: leave it out or send the same handle."`
 	Name    *string `json:"name,omitempty" doc:"Display name; defaults to the handle for a new Provider."`
 	Enabled *bool   `json:"enabled,omitempty" doc:"Default true for a new Provider."`
 	BudgetOverrides
@@ -113,7 +113,6 @@ type CreateProvider struct {
 	RoutingSettings
 }
 
-// RoutingSettings change how a Provider's Upstream Keys are chosen.
 type RoutingSettings struct {
 	Affinity *string `json:"affinity,omitempty" enum:"on,off" doc:"on (default): the turns of one conversation go to one Upstream Key (keys ranked per conversation by rendezvous hashing), so the Provider's prompt cache stays warm; off: keys are used in turn (round-robin) whatever the conversation."`
 }
@@ -125,7 +124,6 @@ func (s RoutingSettings) check() error {
 	return nil
 }
 
-// ModelListSettings change how a Provider's model list is kept and used.
 type ModelListSettings struct {
 	Strict         *bool   `json:"strict,omitempty" doc:"true: refuse models missing from the model list before any Attempt (404 model_not_found). Default false: unlisted models are forwarded."`
 	Discovery      *string `json:"discovery,omitempty" enum:"none,provider,key" doc:"provider (default): read each Endpoint's model list with one key. key: read it with every key, so keys whose list names a model are tried first for it; use it when keys see different models. none: never discover."`
@@ -135,7 +133,6 @@ type ModelListSettings struct {
 
 var brandPattern = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
 
-// check validates the settings and normalises logo_domain in place.
 func (s *ModelListSettings) check() error {
 	if d := s.LogoDomain; d != nil && *d != "" && *d != NoLogo {
 		n, err := logos.NormalizeDomain(*d)
@@ -159,13 +156,11 @@ func (s *ModelListSettings) check() error {
 	return nil
 }
 
-// BudgetOverrides change a Provider's Request budget.
 type BudgetOverrides struct {
 	MaxAttempts      *int `json:"max_attempts,omitempty" doc:"Attempts per Request at most, 1 to 10; 0 restores the default (3)."`
 	FirstByteSeconds *int `json:"first_byte_seconds,omitempty" doc:"Seconds a Request waits for the first upstream byte across its Attempts, 1 to 95; 0 restores the default (60). Never above the 95 s ceiling, so every Request answers before the 100 s edge cutoff."`
 }
 
-// Check validates the overrides (Model Pools take the same ones).
 func (b BudgetOverrides) Check() error { return b.check() }
 
 func (b BudgetOverrides) check() error {
@@ -180,7 +175,6 @@ func (b BudgetOverrides) check() error {
 	return nil
 }
 
-// UpdateProvider is the body of PATCH /api/providers/{provider}.
 type UpdateProvider struct {
 	Handle   *string `json:"handle,omitempty" doc:"Handles never change; a different value is refused with handle_immutable."`
 	Name     *string `json:"name,omitempty"`
@@ -191,18 +185,15 @@ type UpdateProvider struct {
 	RoutingSettings
 }
 
-// ProviderResult is the response of a single Provider change.
 type ProviderResult struct {
 	audit.Result
 	Provider Provider `json:"provider" doc:"The Provider after the change (on a dry run, as it would be)."`
 }
 
-// ProviderList is the response of GET /api/providers.
 type ProviderList struct {
 	Providers []Provider `json:"providers"`
 }
 
-// Routes returns the Provider, Endpoint and Upstream Key routes.
 func Routes(tr *audit.Trail, db *store.DB, log *slog.Logger) []api.Route {
 	h := handlers{tr: tr, db: db, log: log}
 	return slices.Concat(h.providerRoutes(), []api.Route{h.summaryRoute()}, h.endpointRoutes(), h.keyRoutes(), h.gapRoutes(), h.endpointGapRoutes())
@@ -240,8 +231,9 @@ func (h handlers) providerRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/providers", Tag: tag,
-			Summary: "Create a Provider, or update the one with that handle",
-			Description: "A new Provider has no Endpoints or Upstream Keys; add them with POST /api/providers/{provider}/endpoints and POST /api/providers/{provider}/keys. " +
+			Summary: "Create a Provider",
+			Description: "Answers 201 with the new Provider; a handle in use answers 409 name_taken (PUT /api/providers/{provider} updates that Provider). " +
+				"A new Provider has no Endpoints or Upstream Keys; add them with POST /api/providers/{provider}/endpoints and POST /api/providers/{provider}/keys. " +
 				"Callers then reach it at /providers/<handle>/v1/...",
 			Query:   []api.Param{audit.DryRun},
 			Request: CreateProvider{}, Response: ProviderResult{},
@@ -253,7 +245,7 @@ func (h handlers) providerRoutes() []api.Route {
 				var out Provider
 				res, err := h.tr.Mutate(c, "provider.create", "Created", func(m *audit.Mutation) error {
 					var err error
-					out, err = h.upsertProvider(m, in)
+					out, err = h.createProvider(m, in)
 					return err
 				})
 				return ProviderResult{Result: res, Provider: out}, err
@@ -261,8 +253,8 @@ func (h handlers) providerRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/providers/bulk", Tag: tag,
-			Summary:     "Create or update many Providers, each by handle",
-			Description: "Each item is applied or refused on its own; read failed and each item's error.",
+			Summary:     "Create many Providers",
+			Description: "Each item is created or refused on its own (a handle in use: 409 name_taken); read failed and each item's error.",
 			Query:       []api.Param{audit.DryRun},
 			Request:     audit.BulkRequest[CreateProvider]{}, Response: audit.BulkResult[Provider]{},
 			Handle: func(c *api.Call) (any, error) {
@@ -270,7 +262,43 @@ func (h handlers) providerRoutes() []api.Route {
 				if err := c.Decode(&in); err != nil {
 					return nil, err
 				}
-				return audit.Bulk(h.tr, c, "provider.create", "Created", in.Items, h.upsertProvider)
+				return audit.Bulk(h.tr, c, "provider.create", "Created", in.Items, h.createProvider)
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/providers/{provider}", Tag: tag,
+			Summary:     "Create or update the Provider with that handle",
+			Description: "Answers 201 with a new Provider whose handle is the path, or 200 when the Provider exists (outcome updated or unchanged): fields sent are applied, the others kept.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     CreateProvider{}, Response: ProviderResult{},
+			Handle: func(c *api.Call) (any, error) {
+				var in CreateProvider
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				var out Provider
+				res, err := h.tr.Mutate(c, "provider.update", "Saved", func(m *audit.Mutation) error {
+					var err error
+					out, err = h.putProvider(m, c.Path("provider"), in)
+					return err
+				})
+				return ProviderResult{Result: res, Provider: out}, err
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/providers/bulk", Tag: tag,
+			Summary:     "Create or update many Providers, each by handle",
+			Description: "Each item is PUT /api/providers/{provider} with the item's handle, applied or refused on its own; read failed and each item's error.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     audit.BulkRequest[CreateProvider]{}, Response: audit.BulkResult[Provider]{},
+			Handle: func(c *api.Call) (any, error) {
+				var in audit.BulkRequest[CreateProvider]
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				return audit.Bulk(h.tr, c, "provider.update", "Saved", in.Items, func(m *audit.Mutation, in CreateProvider) (Provider, error) {
+					return h.putProvider(m, in.Handle, in)
+				})
 			},
 		},
 		{
@@ -337,14 +365,37 @@ func (h handlers) listProviders(c *api.Call) (any, error) {
 	return out, nil
 }
 
-func (h handlers) upsertProvider(m *audit.Mutation, in CreateProvider) (Provider, error) {
+func (h handlers) putProvider(m *audit.Mutation, ref string, in CreateProvider) (Provider, error) {
+	id, err := Resource.Find(m.Ctx, m.Tx, ref)
+	if err != nil {
+		return Provider{}, err
+	}
+	current := ""
+	if id != "" {
+		if err := m.Tx.QueryRowContext(m.Ctx, `SELECT handle FROM providers WHERE id = ?`, id).Scan(&current); err != nil {
+			return Provider{}, err
+		}
+	}
+	if err := audit.CheckPutName("handle", ref, in.Handle, current); err != nil {
+		return Provider{}, err
+	}
+	if id == "" {
+		m.Act("provider.create", "Created")
+		in.Handle = ref
+		return h.createProvider(m, in)
+	}
+	m.Act("provider.update", "Edited")
+	return h.updateProvider(m, id, UpdateProvider{Name: in.Name, Enabled: in.Enabled, BudgetOverrides: in.BudgetOverrides, ModelListSettings: in.ModelListSettings, RoutingSettings: in.RoutingSettings})
+}
+
+func (h handlers) createProvider(m *audit.Mutation, in CreateProvider) (Provider, error) {
 	if err := CheckHandle(in.Handle); err != nil {
 		return Provider{}, err
 	}
 	var id string
 	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM providers WHERE handle = ?`, in.Handle).Scan(&id)
 	if err == nil {
-		return h.updateProvider(m, id, UpdateProvider{Name: in.Name, Enabled: in.Enabled, BudgetOverrides: in.BudgetOverrides, ModelListSettings: in.ModelListSettings, RoutingSettings: in.RoutingSettings})
+		return Provider{}, Resource.Taken(id, in.Handle, "/api/providers/"+in.Handle)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Provider{}, err

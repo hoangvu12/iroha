@@ -18,24 +18,15 @@ import { ModelTile } from "./Picker";
 import type { AssistantTurn, Part, Round } from "./store";
 import { toolIcon } from "./tools";
 
-// One assistant reply (C15): the model, then what it said and called in
-// order, a caret while it streams, a collapsed Details block (serving key,
-// timings, tokens, tool-call check) and, when it failed, the same Attempt
-// explanation as the Requests page.
-
-// The collapse recipe (architecture.md "UI motion system"); the tokens hold it still under reduced motion.
 const collapseClass = "h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-collapse ease-out data-starting-style:h-0 data-ending-style:h-0";
 const chevronClass = "shrink-0 transition-[rotate] duration-collapse ease-out";
 
-/** get_weather({ "city": "Hanoi" }) */
 export function callText(name: string, args: string): string {
   let shown = args.trim();
   try {
     const one = JSON.stringify(JSON.parse(shown || "{}"));
     shown = one.length <= 90 ? one.replace(/^\{"/, '{ "').replace(/"\}$/, '" }').replace(/":/g, '": ').replace(/,"/g, ', "') : JSON.stringify(JSON.parse(shown), null, 2);
-  } catch {
-    /* as written: the check says what is wrong */
-  }
+  } catch {}
   return `${name}(${shown})`;
 }
 
@@ -43,7 +34,6 @@ export function Reply({ turn }: { turn: AssistantTurn }) {
   const streaming = turn.rounds.some((r) => r.status === "streaming");
   const failed = turn.rounds.find((r) => r.status === "failed");
   const first = turn.rounds[0];
-  // Only a failure that happens while the reply is on screen enters; one in the history is just there.
   const failedAtMount = useRef(!!failed);
   return (
     <div className="flex flex-col gap-2">
@@ -93,9 +83,6 @@ function PartView({ p, caret }: { p: Part; caret: boolean }) {
   }
   if (p.kind === "reasoning")
     return (
-      // Open while it streams (open on first paint, so no animation). It folds at
-      // once when the answer starts: the stream moved it, not the Owner, and
-      // streamed content changes in place. Only the Owner's own toggles animate.
       <Collapsible
         open={open || caret}
         onOpenChange={(o) => {
@@ -125,7 +112,6 @@ function Failure({ r, enter }: { r: Round; enter: boolean }) {
   const navigate = useNavigate();
   const req = useRequest(r.requestId);
   const attempts = !!req.data && req.data.attempt_count > 0;
-  // The Attempt list below spells out each Attempt; the headline needn't.
   const text = attempts ? (r.error ?? "").split(/: #1 /)[0] : r.error;
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -151,9 +137,6 @@ function Failure({ r, enter }: { r: Round; enter: boolean }) {
 }
 
 function Details({ round, rounds }: { round: Round; rounds: Round[] }) {
-  // Fetched as soon as the trigger is pointed at or focused, so the panel opens
-  // with its facts at their full height (nothing re-renders or grows while it
-  // animates), and kept after, so they stay while it folds away.
   const [wanted, setWanted] = useState(false);
   const want = () => setWanted(true);
   const req = useRequest(wanted ? round.requestId : undefined);

@@ -15,11 +15,6 @@ const DOTS: CSSProperties = {
   backgroundSize: "20px 20px",
 };
 
-/**
- * The dotted route canvas (Pool Route tab, Request Route view): `children`
- * is the world that pans and zooms, `overlay` stays put above it (the live
- * bar). Zoom controls sit at the bottom centre. Give it a size.
- */
 export function Canvas({
   label,
   children,
@@ -42,7 +37,6 @@ export function Canvas({
       aria-label={label}
       controller={controller}
       className={cn("cursor-grab select-none bg-subtle outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-info active:cursor-grabbing", className)}
-      // A press on a card glides the pan that reveals it (focusin); a press on empty space or the wheel is 1:1.
       onPointerDownCapture={(e) => (cardPress(e.target) ? glide.start() : glide.stop())}
       onWheelCapture={glide.stop}
       onKeyDownCapture={glide.stop}
@@ -63,16 +57,8 @@ export function Canvas({
   );
 }
 
-/** A press on something focusable in the world (a card), not on empty space. */
 const cardPress = (t: EventTarget | null) => t instanceof Element && !!t.closest('[data-slot="canvas-world"] :is(button, a, [tabindex])');
 
-/**
- * Motion (architecture.md "UI motion system"): the world eases from one view
- * to the next for one `--duration-move` after a pointer press on a zoom
- * button or a card (`data-glide` turns its transform transition on). The
- * wheel, a pan and the keys drop it at once, so they stay 1:1 and instant.
- * Under reduced motion the token is 0 ms, so nothing glides.
- */
 function useGlide(frame: RefObject<HTMLDivElement | null>) {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const world = () => frame.current?.querySelector<HTMLElement>('[data-slot="canvas-world"]');
@@ -86,7 +72,7 @@ function useGlide(frame: RefObject<HTMLDivElement | null>) {
     change?.();
     timer.current = setTimeout(stop, durationOf("--duration-move"));
   };
-  // A click made by a key (Enter or Space on the button: `detail` 0) or an agent changes the view at once.
+  // A click from a key (Enter, Space) or from script has `detail` 0.
   const press = (e: { detail: number }, change: () => void) => (e.detail > 0 ? start(change) : (stop(), change()));
   useEffect(() => () => clearTimeout(timer.current), []);
   return { start, stop, press };

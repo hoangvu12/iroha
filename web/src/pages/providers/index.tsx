@@ -3,12 +3,6 @@ import { ProvidersList } from "./List";
 import { PoolPage } from "./PoolPage";
 import { ProviderPage } from "./ProviderPage";
 
-// Providers (ticket 22). App.tsx mounts this at /providers/*:
-//   /providers                         Providers and Model Pools (C05, C30)
-//   /providers/<handle>/<tab>          a Provider: keys, endpoints, models, rules, settings
-//   /providers/pools/<name>/<tab>      a Model Pool: route, members, settings
-// "pools" is reserved as a Provider handle so the two never collide.
-
 export default function ProvidersPage() {
   return (
     <Routes>

@@ -6,9 +6,6 @@ import { Code, type Lang, langOf } from "@/ui/highlight";
 import { ScrollArea } from "@/ui/ScrollArea";
 import type { RequestRecord, Shape } from "./api";
 
-// Small pieces every view of a Request shares: status words and colours,
-// Shape names, times, and the Provider logo.
-
 const shapeShort: Record<Shape, string> = {
   "openai-chat": "Chat",
   "openai-responses": "Responses",
@@ -25,7 +22,6 @@ const shapeLong: Record<Shape, string> = {
 export const shortShape = (s?: string) => (s ? (shapeShort[s as Shape] ?? s) : "–");
 export const longShape = (s?: string) => (s ? (shapeLong[s as Shape] ?? s) : "–");
 
-/** "Messages → Chat" when translated, else the one Shape. */
 export function shapeInOut(r: Pick<RequestRecord, "shape_in" | "shape_out">): string {
   if (r.shape_out && r.shape_out !== r.shape_in) return `${shortShape(r.shape_in)} → ${shortShape(r.shape_out)}`;
   return shortShape(r.shape_in);
@@ -53,14 +49,12 @@ const reasons: Record<number, string> = {
   529: "Overloaded",
 };
 
-/** "429 Too Many Requests"'s second half; "" when unknown. */
 export const statusText = (status: number) => reasons[status] ?? "";
 
 export function failed(r: Pick<RequestRecord, "state" | "status">): boolean {
   return r.state === "interrupted" || (r.state !== "in_progress" && (r.status >= 400 || r.status < 100));
 }
 
-/** The colour of a status: green served, amber refused for now (429, 503, timeouts), red failed. */
 export function statusTone(status: number, state: RequestRecord["state"] = "completed"): Tone {
   if (state === "in_progress") return "gray";
   if (state === "interrupted" || status === 0) return "red";
@@ -69,7 +63,6 @@ export function statusTone(status: number, state: RequestRecord["state"] = "comp
   return "red";
 }
 
-/** The status cell: a dot and the code ("● 200", "● 502"). */
 export function StatusCell({ r }: { r: Pick<RequestRecord, "state" | "status"> }) {
   if (r.state === "in_progress")
     return (
@@ -99,7 +92,6 @@ const badgeTone: Record<string, string> = {
   gray: "bg-muted text-fg-muted",
 };
 
-/** A tinted pill: "200", "429", "Start", "End". 404s (Model Gaps) are blue. */
 export function Badge({ tone = "gray", children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
   return (
     <span className={cn("inline-flex h-6 shrink-0 items-center rounded-md px-2 text-[13px] font-medium tabular", badgeTone[tone], className)}>
@@ -113,7 +105,6 @@ export function statusBadgeTone(status: number): Tone {
   return statusTone(status);
 }
 
-/** "● 200 OK" as a pill, for headers. */
 export function StatusPill({ r }: { r: Pick<RequestRecord, "state" | "status"> }) {
   const tone = statusTone(r.status, r.state);
   const label =
@@ -126,7 +117,6 @@ export function StatusPill({ r }: { r: Pick<RequestRecord, "state" | "status"> }
   );
 }
 
-/** Seconds as the feed shows them: "0.62 s", "3.4 s", "41.7 s", "112 s". */
 export function secs(ms?: number | null): string {
   if (ms === undefined || ms === null) return "–";
   const s = ms / 1000;
@@ -135,7 +125,6 @@ export function secs(ms?: number | null): string {
   return `${Math.round(s)} s`;
 }
 
-/** Milliseconds for small gaps ("12 ms"), seconds above one. */
 export function msOrSecs(ms?: number | null): string {
   if (ms === undefined || ms === null) return "–";
   return ms < 1000 ? `${Math.round(ms)} ms` : secs(ms);
@@ -143,16 +132,13 @@ export function msOrSecs(ms?: number | null): string {
 
 const pad = (n: number, w = 2) => String(n).padStart(w, "0");
 
-/** "14:32:07". */
 export const clock = (iso: string) => {
   const d = new Date(iso);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
-/** "14:32:01.104". */
 export const clockMs = (iso: string) => `${clock(iso)}.${pad(new Date(iso).getMilliseconds(), 3)}`;
 
-/** "Today at 14:32:01.104", "Yesterday at ...", "18 Nov at ...". */
 export function when(iso: string, now = new Date()): string {
   const d = new Date(iso);
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
@@ -167,21 +153,17 @@ export function when(iso: string, now = new Date()): string {
 }
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 });
-/** 2140000 -> "2.14M". */
 export const compactNumber = (n: number) => compact.format(n);
 
-/** A Provider's logo (the shared ProviderTile); nothing when no Provider was tried. */
 export function ProviderLogo({ handle, size = 20 }: { handle?: string; size?: number }) {
   if (!handle) return null;
   return <ProviderTile handle={handle} size={size} />;
 }
 
-/** The small grey "Pool" tag after a model served through a Model Pool. */
 export function PoolTag() {
   return <span className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[12px] font-normal text-fg-muted">Pool</span>;
 }
 
-/** A label/value pair in a two-column grid of facts. `wide` spans both columns and wraps (for a sentence, not a name). */
 export function Fact({ label, children, mono, wide }: { label: ReactNode; children: ReactNode; mono?: boolean; wide?: boolean }) {
   return (
     <div className={cn("min-w-0", wide && "col-span-2")}>
@@ -191,7 +173,6 @@ export function Fact({ label, children, mono, wide }: { label: ReactNode; childr
   );
 }
 
-/** A label left, value right row (the Route view's side panel). */
 export function Row({ label, children, mono, className }: { label: ReactNode; children: ReactNode; mono?: boolean; className?: string }) {
   return (
     <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3 py-1.5">
@@ -201,7 +182,6 @@ export function Row({ label, children, mono, className }: { label: ReactNode; ch
   );
 }
 
-/** A Request's one-line summary ("#1 team-10: 429 ...; #2 ...; stopped: ..."), one Attempt per line. */
 export function Summary({ text, className }: { text: string; className?: string }) {
   const parts = text.split(/;\s+/).filter(Boolean);
   return (
@@ -213,7 +193,6 @@ export function Summary({ text, className }: { text: string; className?: string 
   );
 }
 
-/** JSON text pretty-printed when it parses, as-is otherwise. */
 export function pretty(text: string): string {
   try {
     return JSON.stringify(JSON.parse(text), null, 2);
@@ -222,12 +201,6 @@ export function pretty(text: string): string {
   }
 }
 
-/**
- * Code and JSON in a Scroll Area, highlighted as `lang` (`auto`: JSON or a
- * stream when it looks like one; long text stays plain, see `ui/highlight`).
- * Wraps by default, `nowrap` scrolls sideways too; `maxHeight={false}` shows
- * it all. `className` places the block.
- */
 export function CodeBlock({
   children,
   lang = "auto",

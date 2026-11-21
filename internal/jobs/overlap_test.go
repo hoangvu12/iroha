@@ -12,9 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// USE-56: runs of one job never overlap: a scheduled run that falls due
-// while a manual one is running starts only once it ended, and a manual run
-// asked for during a scheduled one waits for it. Every run is stored.
 func TestRunsOfOneJobNeverOverlapAndAManualRunWaits(t *testing.T) {
 	var active, most atomic.Int32
 	started := make(chan string, 4)
@@ -47,14 +44,13 @@ func TestRunsOfOneJobNeverOverlapAndAManualRunWaits(t *testing.T) {
 		return done
 	}
 
-	// A manual run holds the job; the scheduled run falls due meanwhile.
 	first := manual()
 	<-started
 	waiters := srv.Clock.Waiters()
 	srv.Clock.Advance(10 * time.Minute)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Clock.BlockUntil(ctx, waiters); err != nil { // the schedule set its next timer: its run is on the way
+	if err := srv.Clock.BlockUntil(ctx, waiters); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -63,13 +59,12 @@ func TestRunsOfOneJobNeverOverlapAndAManualRunWaits(t *testing.T) {
 	default:
 	}
 	srv.Clock.Advance(time.Minute)
-	gate <- struct{}{} // the manual run ends
+	gate <- struct{}{}
 	if status := <-first; status != http.StatusOK {
 		t.Fatalf("manual run = %d", status)
 	}
-	<-started // then the scheduled one starts
+	<-started
 
-	// A manual run asked for now waits for the scheduled one.
 	second := manual()
 	gate <- struct{}{}
 	<-started
@@ -94,5 +89,43 @@ func TestRunsOfOneJobNeverOverlapAndAManualRunWaits(t *testing.T) {
 	}
 	if !v.Runs[1].StartedAt.Equal(v.Runs[2].FinishedAt) || !v.Runs[1].StartedAt.Equal(testkit.Epoch.Add(11*time.Minute)) {
 		t.Fatalf("the scheduled run started at %v, want when the manual run ended (%v)", v.Runs[1].StartedAt, v.Runs[2].FinishedAt)
+	}
+}
+
+func TestTimePassingDuringARunCountsTowardTheNextRun(t *testing.T) {
+	started := make(chan struct{}, 4)
+	gate := make(chan struct{})
+	probe := jobs.Job{
+		Name: "probe", Description: "A test job.", Schedule: jobs.Every(10 * time.Minute),
+		Run: func(ctx context.Context, dry bool) (jobs.Outcome, error) {
+			started <- struct{}{}
+			select {
+			case <-gate:
+				return jobs.Outcome{Summary: "Probed."}, nil
+			case <-ctx.Done():
+				return jobs.Outcome{}, ctx.Err()
+			}
+		},
+	}
+	srv := testkit.Start(t, testkit.Options{Jobs: []jobs.Job{probe}})
+	srv.Clock.Advance(10 * time.Minute)
+	<-started
+	srv.Clock.Advance(10 * time.Minute)
+	gate <- struct{}{}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the ten minutes that passed during the first run did not start a second one")
+	}
+	gate <- struct{}{}
+	srv.SettleJobs()
+
+	var v jobs.JobView
+	srv.Admin.Get("/api/jobs/probe").Expect(200).JSON(&v)
+	if len(v.Runs) != 2 || !v.Runs[0].StartedAt.Equal(testkit.Epoch.Add(20*time.Minute)) {
+		t.Fatalf("runs = %+v", v.Runs)
+	}
+	if v.NextRunAt == nil || !v.NextRunAt.Equal(testkit.Epoch.Add(30*time.Minute)) {
+		t.Fatalf("next run at %v, want 30 minutes after the start", v.NextRunAt)
 	}
 }

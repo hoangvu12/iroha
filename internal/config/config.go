@@ -17,10 +17,9 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Config is the startup configuration.
 type Config struct {
-	DataDir      string        // holds iroha.db; default: the binary's directory
-	Addr         string        // listen address
+	DataDir      string // holds iroha.db; default: the binary's directory
+	Addr         string
 	LogLevel     slog.Level    // minimum level for console and stored logs
 	LogFormat    string        // "json" or "text" (console only)
 	DrainTimeout time.Duration // how long shutdown waits for in-flight requests
@@ -37,19 +36,15 @@ type Config struct {
 	LogoMakers   string
 }
 
-// DefaultModelsDev is the default of --models-dev.
 const DefaultModelsDev = "https://models.dev,https://raw.githubusercontent.com/anomalyco/models.dev/dev"
 
-// Defaults of --logo-favicons and --logo-makers.
 const (
 	DefaultLogoFavicons = "https://www.google.com/s2/favicons?domain={domain}&sz=64"
 	DefaultLogoMakers   = "https://models.dev/logos/{maker}.svg"
 )
 
-// DBPath is the SQLite file.
 func (c Config) DBPath() string { return filepath.Join(c.DataDir, store.FileName) }
 
-// Default listen address.
 const DefaultAddr = ":8080"
 
 // Parse reads args (without the program name) and getenv.
@@ -78,7 +73,6 @@ func Parse(args []string, getenv func(string) string, stderr io.Writer) (Config,
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
-	// Every bad value is reported at once, so one restart fixes them all.
 	var errs []error
 	if fs.NArg() > 0 {
 		errs = append(errs, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " ")))
@@ -124,7 +118,8 @@ func Parse(args []string, getenv func(string) string, stderr io.Writer) (Config,
 			continue
 		}
 		if !strings.HasPrefix(v, "https://") && !strings.HasPrefix(v, "http://") || !strings.Contains(v, t.token) {
-			return c, fmt.Errorf("%s: %q is not an http(s) URL containing %s", t.flag, v, t.token)
+			errs = append(errs, fmt.Errorf("%s: %q is not an http(s) URL containing %s", t.flag, v, t.token))
+			continue
 		}
 		*t.p = v
 	}

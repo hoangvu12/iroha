@@ -1,22 +1,11 @@
-// Package caching decides what a request gets for the Provider's prompt
-// cache: which cache markers a translated request gets (prompt caching 03),
-// and whether the conversation's ID is sent, as a prompt_cache_key derived
-// from it on OpenAI Chat and Responses Endpoints and in the session headers
-// relays route by on every Endpoint, passthrough included (prompt caching
-// 04). It is pure. An Endpoint's two settings (cache_markers, send_prompt_cache_key:
-// "" for Iroha's default, "on", "off") meet what each Provider documents,
-// known by host like built-in Failure Rules and normalisers (research
-// docs/research/prompt-caching.md, section 2):
+// Package caching follows what each Provider documents about its prompt
+// cache (docs/research/prompt-caching.md, section 2):
 //
 //   - Anthropic's own API takes the automatic top-level cache_control;
 //   - Moonshot/Kimi take only the top-level form (block markers get 400);
-//   - DeepSeek ignores markers, so none are added;
+//   - DeepSeek ignores markers;
 //   - OpenRouter and Alibaba (Qwen) honour markers on OpenAI Chat;
 //   - Gemini's and Mistral's OpenAI APIs refuse fields they don't know.
-//
-// Same-Shape passthrough gets only the conversation's ID (appended
-// prompt_cache_key on OpenAI Shapes, the session headers); its markers and
-// every other byte are the Caller's.
 package caching
 
 import (
@@ -29,27 +18,19 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Values of an Endpoint's cache_markers and send_prompt_cache_key. ""
-// means Iroha's default for the Endpoint's Shape and host.
 const (
 	Default = ""
 	On      = "on"
 	Off     = "off"
 )
 
-// ValidSetting reports whether v is a value of either setting.
 func ValidSetting(v string) bool { return v == Default || v == On || v == Off }
 
-// Settings are an Endpoint's two prompt caching settings, as stored and
-// shown (embedded in the Endpoint, its audit snapshot and the planner's
-// Endpoint, so they travel together).
 type Settings struct {
 	CacheMarkers       string `json:"cache_markers" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint (prompt caching): \"\" Iroha's default for its Shape and host (see caching), on (markers whatever the host; caching.summary warns where the host refuses or ignores them), or off (none are sent). Same-Shape requests pass through untouched."`
 	SendPromptCacheKey string `json:"send_prompt_cache_key" enum:",on,off" doc:"Whether requests to this Endpoint carry their conversation's ID (a UUID derived from it, scoped to the Gateway Key, Provider and model; never the Caller's raw session): on an OpenAI-shaped Endpoint a prompt_cache_key when the request has none, passthrough or translated (and user from an Anthropic Caller's metadata.user_id when translated); on every Endpoint the x-session-affinity, x-session-id and session_id headers the Caller did not send. \"\" Iroha's default (on, except no body field to hosts known to refuse unknown fields; they still get the headers), on, or off (nothing, headers included)."`
 }
 
-// SettingsPatch is the settings of a create or update body: only those
-// sent change.
 type SettingsPatch struct {
 	CacheMarkers       *string `json:"cache_markers,omitempty" enum:",on,off" doc:"Cache markers on requests translated to this Endpoint: \"\" (default) Iroha's choice for its Shape and host, on, or off. Endpoint.caching shows the effect."`
 	SendPromptCacheKey *string `json:"send_prompt_cache_key,omitempty" enum:",on,off" doc:"Send the conversation's derived ID: a prompt_cache_key to an OpenAI-shaped Endpoint on requests that have none (passthrough too), and session headers (x-session-affinity, x-session-id, session_id) to any Endpoint: \"\" (default) Iroha's choice, on, or off (neither)."`
@@ -76,18 +57,15 @@ func (s *Settings) Apply(p SettingsPatch) error {
 	return nil
 }
 
-// Markers is what a translated request's cache markers become.
 type Markers string
 
 const (
-	// AsBefore leaves the conversion as it was before prompt caching 03:
-	// toward Anthropic no markers, toward OpenAI Chat the markers of an
-	// Anthropic Caller's messages but not of its system prompt.
-	AsBefore Markers = ""
-	// Strip removes every marker.
-	Strip Markers = "strip"
-	// Keep keeps the Caller's markers where the request still has them
-	// (toward Anthropic: at most 4, longer lifetimes first) and adds none.
+	// AsConverted: toward Anthropic no markers, toward OpenAI Chat the markers
+	// of an Anthropic Caller's messages but not of its system prompt.
+	AsConverted Markers = ""
+	Strip       Markers = "strip"
+	// Keep keeps the Caller's markers where the request still has them and
+	// adds none. Anthropic takes at most 4: longer lifetimes are kept first.
 	Keep Markers = "keep"
 	// Blocks keeps the Caller's markers, and when it sent none marks the
 	// last tool, the last system block and the last message.
@@ -106,25 +84,20 @@ const (
 // request that belongs to a conversation, passthrough included.
 type Policy struct {
 	Markers Markers
-	// PromptCacheKey: an OpenAI Endpoint is sent a prompt_cache_key derived
-	// from the conversation when the request carries none.
+	// PromptCacheKey: send a prompt_cache_key derived from the conversation
+	// when the request carries none.
 	PromptCacheKey bool
 	// SessionHeaders: the same derived value goes in SessionHeaderNames the
-	// Caller did not send, on every Shape and host (strict hosts refuse
-	// unknown body fields, not headers); only send_prompt_cache_key off
-	// turns them off.
+	// Caller did not send. Strict hosts refuse unknown body fields, not
+	// headers, so they get these too.
 	SessionHeaders bool
 	// Fields: conversation fields are carried across Shapes (user,
 	// safety_identifier, prompt_cache_key <-> Anthropic metadata.user_id).
-	// Anthropic Endpoints always take metadata; OpenAI Endpoints follow
-	// send_prompt_cache_key, since a strict one refuses user alike.
+	// A strict OpenAI host refuses user as it refuses prompt_cache_key.
 	Fields bool
-	// Note warns when the Owner's setting goes against what the host is known
-	// to do (markers on where they are refused or ignored); Describe adds it.
-	Note string
+	Note   string
 }
 
-// Hosts that decide a default (a domain matches itself and its subdomains).
 var (
 	topLevelHosts  = []string{"anthropic.com"}
 	topOnlyHosts   = []string{"moonshot.ai", "moonshot.cn", "kimi.com"}
@@ -133,11 +106,6 @@ var (
 	strictHosts    = []string{"googleapis.com", "mistral.ai"}
 )
 
-// For is the policy of an Endpoint speaking sh at url with the Owner's
-// settings s. Only the default
-// follows the host; an explicit on or off is the Owner's and wins (on
-// toward Anthropic is block markers, with a Note where the host refuses or
-// ignores them).
 func For(sh shape.Shape, url string, s Settings) Policy {
 	markers, promptCacheKey := s.CacheMarkers, s.SendPromptCacheKey
 	host := hosts.Of(url)
@@ -147,7 +115,7 @@ func For(sh shape.Shape, url string, s Settings) Policy {
 		switch {
 		case markers == Off:
 			p.Markers = Strip
-		case markers == On: // the Owner's on wins over what the host is known to do
+		case markers == On:
 			p.Markers = Blocks
 			switch {
 			case matches(host, topOnlyHosts):
@@ -210,7 +178,6 @@ func SetSessionHeaders(h http.Header, v string) {
 	}
 }
 
-// Describe says in a sentence what p does, for the API and the UI.
 func (p Policy) Describe(sh shape.Shape) string {
 	var parts []string
 	switch p.Markers {
@@ -256,13 +223,10 @@ func (p Policy) Describe(sh shape.Shape) string {
 
 func matches(host string, domains []string) bool { return hosts.Matches(host, domains...) }
 
-// namespace is Iroha's UUID namespace for derived prompt_cache_keys.
 var namespace = [16]byte{0x6f, 0x1c, 0x2b, 0x8e, 0x4d, 0x3a, 0x4e, 0x55, 0x9a, 0x0b, 0x6c, 0x2d, 0x1e, 0x7f, 0x30, 0x41}
 
-// PromptCacheKey is the prompt_cache_key derived from an affinity value
-// (affinity.Key: the conversation, its Caller, the Provider and the model),
-// as CLIProxyAPI derives its own: a version 5 UUID, 36 characters, within
-// OpenAI's 64. "" when there is no conversation.
+// PromptCacheKey is a version 5 UUID, 36 characters, within OpenAI's 64-character
+// limit on prompt_cache_key. "" when affinityValue is "".
 func PromptCacheKey(affinityValue string) string {
 	if affinityValue == "" {
 		return ""

@@ -17,8 +17,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// snapshot is what an Audit Entry records of a Pool: all of it, members
-// (by Provider ID) included, so a revert restores order and switches.
 type snapshot struct {
 	ID               string           `json:"id"`
 	Name             string           `json:"name"`
@@ -35,7 +33,6 @@ type snapshotMember struct {
 	Enabled    bool   `json:"enabled"`
 }
 
-// Resource is the Model Pool resource of the audit machinery.
 var Resource = audit.Register(&audit.Resource[snapshot]{
 	Name: "pool", Label: "Model Pool", Plural: "Model Pools", Path: "/api/pools",
 	Table:  "pools",
@@ -48,7 +45,7 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 		if err != nil {
 			return nil, err
 		}
-		s := &snapshot{ID: p.ID, Name: p.Name, Maker: p.maker, MaxAttempts: p.Budget.MaxAttempts, FirstByteSeconds: p.Budget.FirstByteSeconds,
+		s := &snapshot{ID: p.ID, Name: p.Name, Maker: p.ownerMaker, MaxAttempts: p.Budget.MaxAttempts, FirstByteSeconds: p.Budget.FirstByteSeconds,
 			Members: []snapshotMember{}, CreatedAt: p.CreatedAt}
 		var members string
 		if err := q.QueryRowContext(ctx, `SELECT coalesce(json_group_array(json_object('provider_id', provider_id, 'model', model,
@@ -91,7 +88,6 @@ func insertMembers(ctx context.Context, tx *sql.Tx, poolID string, members []sna
 	return nil
 }
 
-// nameFree refuses a name another Pool has, whatever its case.
 func nameFree(ctx context.Context, q audit.Querier, name, id string) error {
 	var other, otherName string
 	err := q.QueryRowContext(ctx, `SELECT id, name FROM pools WHERE name = ? COLLATE NOCASE AND id != ?`, name, id).Scan(&other, &otherName)
@@ -118,10 +114,10 @@ type BudgetInput struct {
 	FirstByteSeconds *int `json:"first_byte_seconds,omitempty" doc:"Seconds to the first upstream byte across all members, 1 to 95; 0: each serving Provider's own."`
 }
 
-// CreatePool is the body of POST /api/pools and each item of its bulk.
+// CreatePool is the body of POST and PUT /api/pools and each item of their bulk.
 type CreatePool struct {
-	Name    string         `json:"name" doc:"The model name Callers will send: no slash, 1 to 64 letters, digits, '.', '_' or '-'. Repeating a create with an existing name updates that Pool."`
-	Members *[]MemberInput `json:"members,omitempty" doc:"Every member in try order; replaces the list. Omit to keep an existing Pool's members (a new Pool then has none)."`
+	Name    string         `json:"name" doc:"The model name Callers will send: no slash, 1 to 64 letters, digits, '.', '_' or '-'. On PUT the path names the Pool: leave it out or send the same name."`
+	Members *[]MemberInput `json:"members,omitempty" doc:"Every member in try order; replaces the list. A new Pool without it has none; on PUT, omit to keep an existing Pool's members."`
 	Budget  *BudgetInput   `json:"budget,omitempty"`
 	Maker   *string        `json:"maker,omitempty" doc:"The Pool's logo: a model maker (e.g. openai) or a website (chatgpt.com, or a URL read for its host; a value with a dot is a website); \"\" to guess the maker from the model name."`
 }
@@ -150,7 +146,6 @@ const MaxMembers = 32
 
 const membersHint = `Send "members": [{"provider": "<handle>", "model": "<model ID>"}, ...] in the order to try them, at most 32, each Provider and model once.`
 
-// Routes returns the Model Pool routes.
 func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 	h := handlers{tr: tr, db: db}
 	const tag = "Model Pools"
@@ -187,8 +182,8 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/pools", Tag: tag,
-			Summary:     "Create a Model Pool, or update the one with that name",
-			Description: "Answers 201 with the new Pool. Callers name it as the model on the global routes; Gateway Keys need it in their scope (or scope all).",
+			Summary:     "Create a Model Pool",
+			Description: "Answers 201 with the new Pool; a name in use (whatever its case) answers 409 name_taken, and PUT /api/pools/{pool} updates that Pool. Callers name it as the model on the global routes; Gateway Keys need it in their scope (or scope all).",
 			Query:       []api.Param{audit.DryRun},
 			Request:     CreatePool{}, Response: PoolResult{},
 			Handle: func(c *api.Call) (any, error) {
@@ -199,7 +194,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 				var out Pool
 				res, err := h.tr.Mutate(c, "pool.create", "Created", func(m *audit.Mutation) error {
 					var err error
-					out, err = h.upsert(m, in)
+					out, err = h.create(m, in)
 					return err
 				})
 				return PoolResult{Result: res, Pool: out}, err
@@ -207,8 +202,8 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/pools/bulk", Tag: tag,
-			Summary:     "Create or update many Model Pools, each by name",
-			Description: "Each item is applied or refused on its own; read failed and each item's error.",
+			Summary:     "Create many Model Pools",
+			Description: "Each item is created or refused on its own (a name in use: 409 name_taken); read failed and each item's error.",
 			Query:       []api.Param{audit.DryRun},
 			Request:     audit.BulkRequest[CreatePool]{}, Response: audit.BulkResult[Pool]{},
 			Handle: func(c *api.Call) (any, error) {
@@ -216,7 +211,43 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 				if err := c.Decode(&in); err != nil {
 					return nil, err
 				}
-				return audit.Bulk(h.tr, c, "pool.create", "Created", in.Items, h.upsert)
+				return audit.Bulk(h.tr, c, "pool.create", "Created", in.Items, h.create)
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/pools/{pool}", Tag: tag,
+			Summary:     "Create or update the Model Pool of that name",
+			Description: "Answers 201 with a new Pool named as the path, or 200 when the Pool exists (outcome updated or unchanged): fields sent are applied, the others kept (members, when sent, replace the list).",
+			Query:       []api.Param{audit.DryRun},
+			Request:     CreatePool{}, Response: PoolResult{},
+			Handle: func(c *api.Call) (any, error) {
+				var in CreatePool
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				var out Pool
+				res, err := h.tr.Mutate(c, "pool.update", "Saved", func(m *audit.Mutation) error {
+					var err error
+					out, err = h.put(m, c.Path("pool"), in)
+					return err
+				})
+				return PoolResult{Result: res, Pool: out}, err
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/pools/bulk", Tag: tag,
+			Summary:     "Create or update many Model Pools, each by name",
+			Description: "Each item is PUT /api/pools/{pool} with the item's name, applied or refused on its own; read failed and each item's error.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     audit.BulkRequest[CreatePool]{}, Response: audit.BulkResult[Pool]{},
+			Handle: func(c *api.Call) (any, error) {
+				var in audit.BulkRequest[CreatePool]
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				return audit.Bulk(h.tr, c, "pool.update", "Saved", in.Items, func(m *audit.Mutation, in CreatePool) (Pool, error) {
+					return h.put(m, in.Name, in)
+				})
 			},
 		},
 		{
@@ -274,7 +305,6 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 	}
 }
 
-// notInUse refuses to delete a Pool an unrevoked Gateway Key's scope names.
 func notInUse(ctx context.Context, tx *sql.Tx, p row) error {
 	rows, err := tx.QueryContext(ctx, `SELECT name FROM gateway_keys WHERE revoked_at IS NULL
 		AND EXISTS (SELECT 1 FROM json_each(gateway_keys.scope, '$.pools') WHERE value = ?) ORDER BY name`, p.ID)
@@ -305,19 +335,16 @@ type handlers struct {
 	db *store.DB
 }
 
-func (h handlers) upsert(m *audit.Mutation, in CreatePool) (Pool, error) {
+func (h handlers) create(m *audit.Mutation, in CreatePool) (Pool, error) {
 	if err := api.CheckName("name", in.Name); err != nil {
 		return Pool{}, err
 	}
-	var id string
-	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM pools WHERE name = ? COLLATE BINARY`, in.Name).Scan(&id)
+	var id, name string
+	err := m.Tx.QueryRowContext(m.Ctx, `SELECT id, name FROM pools WHERE name = ? COLLATE NOCASE`, in.Name).Scan(&id, &name)
 	if err == nil {
-		return h.update(m, id, UpdatePool{Members: in.Members, Budget: in.Budget, Maker: in.Maker})
+		return Pool{}, Resource.Taken(id, name, "/api/pools/"+name)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return Pool{}, err
-	}
-	if err := nameFree(m.Ctx, m.Tx, in.Name, ""); err != nil {
 		return Pool{}, err
 	}
 	id = ids.New("pl")
@@ -328,6 +355,29 @@ func (h handlers) upsert(m *audit.Mutation, in CreatePool) (Pool, error) {
 		return Pool{}, err
 	}
 	return h.apply(m, id, UpdatePool{Members: in.Members, Budget: in.Budget, Maker: in.Maker})
+}
+
+func (h handlers) put(m *audit.Mutation, ref string, in CreatePool) (Pool, error) {
+	id, err := Resource.Find(m.Ctx, m.Tx, ref)
+	if err != nil {
+		return Pool{}, err
+	}
+	current := ""
+	if id != "" {
+		if err := m.Tx.QueryRowContext(m.Ctx, `SELECT name FROM pools WHERE id = ?`, id).Scan(&current); err != nil {
+			return Pool{}, err
+		}
+	}
+	if err := audit.CheckPutName("name", ref, in.Name, current); err != nil {
+		return Pool{}, err
+	}
+	if id == "" {
+		m.Act("pool.create", "Created")
+		in.Name = ref
+		return h.create(m, in)
+	}
+	m.Act("pool.update", "Edited")
+	return h.update(m, id, UpdatePool{Members: in.Members, Budget: in.Budget, Maker: in.Maker})
 }
 
 func (h handlers) update(m *audit.Mutation, id string, in UpdatePool) (Pool, error) {
@@ -348,7 +398,6 @@ func (h handlers) update(m *audit.Mutation, id string, in UpdatePool) (Pool, err
 	return h.apply(m, id, in)
 }
 
-// apply writes the members, budget and maker of in (each when sent).
 func (h handlers) apply(m *audit.Mutation, id string, in UpdatePool) (Pool, error) {
 	if in.Members != nil {
 		members, err := checkMembers(m.Ctx, m.Tx, *in.Members)
@@ -390,7 +439,6 @@ func (h handlers) apply(m *audit.Mutation, id string, in UpdatePool) (Pool, erro
 	return p.Pool, err
 }
 
-// checkMembers validates members and resolves their Providers.
 func checkMembers(ctx context.Context, tx *sql.Tx, in []MemberInput) ([]snapshotMember, error) {
 	if len(in) > MaxMembers {
 		return nil, api.BadRequest(membersHint, "A Pool has at most %d members; %d were sent.", MaxMembers, len(in))

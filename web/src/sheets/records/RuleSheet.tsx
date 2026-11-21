@@ -17,14 +17,6 @@ import type { SheetBodyProps } from "../SheetStack";
 import { useSheets } from "../stack";
 import { useEditing } from "./editing";
 
-/**
- * A Failure Rule as it applies to one Provider (UI ticket 33: it was the
- * Rules tab's edit dialog): the rule in words as the Flow view draws it, its
- * place in the order, today's hits on the Provider, then Edit in place.
- * Read from the Provider's rule list (`GET /api/rules?provider=`), which
- * the Rules tab already holds: that list alone has the order and the hits
- * on this Provider.
- */
 export default function RuleSheet({ record }: SheetBodyProps<"rule">) {
   const { provider, rule } = record;
   const rules = useRules(provider);
@@ -102,7 +94,6 @@ function RuleDetails({ r, n, count, most, provider }: { r: Rule; n: number; coun
     void saving.run(() => sendRule(f, provider, r, false), { message: `${r.name} saved` }).then((ok) => ok && setEditing(false));
   };
 
-  // Restore keeps the rule (the built-in decides again), so its result shows here; a deleted rule's sheet closes and the result toasts.
   const askDelete = () =>
     confirm.ask({
       ...deleteQuestion(r),
@@ -114,7 +105,6 @@ function RuleDetails({ r, n, count, most, provider }: { r: Rule; n: number; coun
         }
         const res = await calls.deleteRule(r.name);
         void refresh();
-        // Toast: the rule's sheet closes with the rule.
         notifyChange(`${r.name} deleted`, res, { onUndone: refresh });
         const at = sheets.stack.findIndex((s) => recordKey(s.record) === recordKey(rec.rule(provider, r.name)));
         if (at >= 0) sheets.close(at);
@@ -181,7 +171,6 @@ function RuleDetails({ r, n, count, most, provider }: { r: Rule; n: number; coun
       ) : (
         <>
           <SheetSection title="In the flow">
-            {/* As the Flow view draws it: what it matches, its source and scope, and what a match does. */}
             <RuleStep r={r} n={n} most={most} stacked />
             <SaveError save={saving} className="mt-3" />
           </SheetSection>

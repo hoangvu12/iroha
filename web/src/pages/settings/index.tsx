@@ -6,10 +6,6 @@ import { useAdminTokens } from "./api";
 import { AuditEntriesTab } from "./AuditEntries";
 import { SignInTab } from "./SignIn";
 
-// Settings (C28, C29): a title, underline tabs and a table, nothing more.
-// Reached from the sidebar's Settings item, and on phones from the Iroha
-// avatar in every page header (C30). Each tab is a route under /settings.
-
 export default function SettingsPage() {
   const tokens = useAdminTokens();
   const tab = useLocation().pathname.split("/")[2] ?? "";

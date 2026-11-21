@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 import { Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
-import { api, isApiError, seg } from "@/api/client";
 import { formatNumber, plural } from "@/lib/format";
 import { useStoredChoice } from "@/lib/stored-choice";
 import { useUrlParams } from "@/lib/url-state";
@@ -17,7 +16,7 @@ import { EmptyState, ErrorState } from "@/ui/States";
 import { SaveError, useSave } from "@/ui/SaveStatus";
 import { notifyChange } from "@/ui/toast";
 import type { Classification, Outcome, Replay, Rule, RuleFields } from "./api";
-import { calls, errorText, OUTCOMES, useProvider, useRefresh, useRules } from "./api";
+import { calls, errorText, nameTaken, OUTCOMES, useProvider, useRefresh, useRules } from "./api";
 import { Reveal, riseIn } from "@/ui/Reveal";
 import { appearClass } from "@/ui/motion";
 import { Checkbox, Pill, ringRoom, Segmented, Select, Switch } from "./controls";
@@ -25,20 +24,17 @@ import { RulesFlow } from "./RulesFlow";
 import { TryFailure } from "./RulesTry";
 import { SAMPLE_RULES } from "./samples";
 import { rec } from "@/sheets/RecordLink";
-import { startEditing } from "@/sheets/records/editing";
 import { useMaybeSheets } from "@/sheets/stack";
 
-/** The Rules tab (C09): which Failure Rules decide this Provider's failures, in order, and how often each did today. */
 export function RulesTab({ handle, adding, setAdding }: { handle: string; adding: boolean; setAdding: (o: boolean) => void }) {
   const rules = useRules(handle);
   const refresh = useRefresh();
   const confirm = useConfirm();
   const sheets = useMaybeSheets();
-  // An existing rule opens in its sheet, from a row or a Flow step (UI ticket 33); Edit… opens it on its fields.
   const open = (r: Rule, edit = false) => {
     const record = rec.rule(handle, r.name);
-    if (edit) startEditing(record);
-    sheets?.open(record);
+    if (edit) sheets?.openEditing(record);
+    else sheets?.open(record);
   };
   const { params, setParam } = useUrlParams();
   const q = params.get("q") ?? "";
@@ -46,9 +42,7 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
   const [view, setView] = useRulesView();
   const phone = useIsPhone();
   const [flowWidth, flowRef] = useWidth();
-  // A rule and its match branch side by side need about 940 px; narrower, each step holds its effect.
   const stacked = phone || (flowWidth !== undefined && flowWidth < 940);
-  // A failure tried against the rules (UI ticket 34). The rules changing (an edit, a switch) makes it stale.
   const provider = useProvider(handle);
   const [tried, setTried] = useState<Classification>();
   const [triedOn, setTriedOn] = useState(rules.data);
@@ -57,17 +51,14 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
     setTried(undefined);
   }
 
-  // Asks first, naming the rule; the result (with Undo) toasts, since the confirm has closed.
   const askDelete = (r: Rule) =>
     confirm.ask({
       ...deleteQuestion(r),
       onConfirm: async () => {
         const res = await calls.deleteRule(r.name);
         refresh();
-        // A deleted rule's sheet, if open, closes with it.
         const at = r.overrides ? -1 : (sheets?.stack.findIndex((s) => s.record.kind === "rule" && s.record.provider === handle && s.record.rule === r.name) ?? -1);
         if (at >= 0) sheets?.close(at);
-        // Toast: the confirm dialog has closed; Undo after a delete.
         notifyChange(r.overrides ? `${r.name} restored` : `${r.name} deleted`, res, { onUndone: refresh });
       },
     });
@@ -101,7 +92,6 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
         ) : (
           <>
           {rules.data && <TryFailure handle={handle} rules={rules.data} endpoints={provider.data?.endpoints} result={tried} onResult={setTried} />}
-          {/* The route view's dotted ground (C19); on phones a band across the screen, as there. */}
           <div
             ref={flowRef}
             className={cn(phone ? "-mx-4 bg-subtle px-4 py-6" : "rounded-xl border border-border bg-subtle px-8 py-8")}
@@ -153,7 +143,6 @@ export function RulesTab({ handle, adding, setAdding }: { handle: string; adding
   );
 }
 
-/** Table or Flow (UI ticket 31): the same rules as rows, or as the path a failure takes through them. Remembered in this browser. */
 type RulesView = "table" | "flow";
 const VIEWS: { value: RulesView; label: string }[] = [
   { value: "table", label: "Table" },
@@ -161,7 +150,6 @@ const VIEWS: { value: RulesView; label: string }[] = [
 ];
 const useRulesView = () => useStoredChoice<RulesView>("iroha:rules:view", ["table", "flow"], "table");
 
-/** The width of an element, kept up to date (undefined until measured, and where ResizeObserver is missing). */
 function useWidth() {
   const [width, setWidth] = useState<number>();
   const ref = useCallback((el: HTMLElement | null) => {
@@ -178,7 +166,6 @@ const matchesText = (r: Rule) => [...(r.code ?? []), ...(r.body ? [r.body] : [])
 const searchRules = (r: Rule, needle: string) =>
   !needle || [r.name, r.description ?? "", matchesText(r), (r.status ?? []).join(" "), r.key_effect, r.request_effect].some((s) => s.toLowerCase().includes(needle));
 
-// Rules keep the order they are tried in (the first match decides), so no column sorts.
 const col = columnsFor<Rule>();
 const columns = col.columns([
   col.accessor("name", {
@@ -211,13 +198,12 @@ const columns = col.columns([
   col.display({
     id: "source",
     header: "Source",
-    meta: { className: "pl-4", width: "pl-4" /* the header lines up with the pills */ },
+    meta: { className: "pl-4", width: "pl-4" },
     cell: ({ row }) => <Pill>{row.original.source === "builtin" ? "Built-in" : "Custom"}</Pill>,
   }),
   col.display({ id: "on", header: "On", cell: ({ row }) => <RuleSwitch r={row.original} /> }),
 ]);
 
-/** Phones (C31): a rule in two lines, with its switch. */
 function RuleLine({ r }: { r: Rule }) {
   return (
     <>
@@ -234,7 +220,6 @@ function RuleLine({ r }: { r: Rule }) {
   );
 }
 
-/** A rule's On switch: shows its new state while it saves (and the result is read out); a failure puts it back and shows under it. */
 export function RuleSwitch({ r }: { r: Rule }) {
   const refresh = useRefresh();
   const saving = useSave({ refresh, describe: errorText });
@@ -263,12 +248,8 @@ const list = (s: string) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
-// A rule's fields, shared by Add rule (a dialog) and the rule's sheet, where an
-// existing rule is edited (UI ticket 33: it was the same dialog).
-
 export type RuleForm = { name: string; status: string; code: string; body: string; outcome: Outcome; cooling: string; description: string; only: boolean };
 
-/** The form, started from `rule` (or empty, for a new rule). */
 export function ruleForm(handle: string, rule?: Rule): RuleForm {
   if (!rule) return { name: "", status: "", code: "", body: "", outcome: "cooling_key", cooling: "", description: "", only: true };
   return {
@@ -283,7 +264,6 @@ export function ruleForm(handle: string, rule?: Rule): RuleForm {
   };
 }
 
-/** What's missing from the form, said as what to do. */
 export function ruleProblem(f: RuleForm): string | undefined {
   if (!f.name.trim()) return "Name the rule, e.g. rate-quota.";
   if (!f.status.trim() && !f.code.trim() && !f.body.trim()) return "Say what it matches: a status, an error code or text in the body.";
@@ -302,13 +282,12 @@ function ruleFields(f: RuleForm, handle: string, rule?: Rule): RuleFields {
   };
 }
 
-/** Saves the form (or, `dry`, checks it against last week). Owner rules change in place; a built-in rule is changed by adding an owner rule of its name. */
 export function sendRule(f: RuleForm, handle: string, rule: Rule | undefined, dry: boolean) {
   const fields = ruleFields(f, handle, rule);
-  return rule && rule.source === "owner" ? calls.updateRule(rule.name, fields, dry) : calls.createRule({ name: f.name.trim(), ...fields }, dry);
+  if (!rule) return calls.createRule({ name: f.name.trim(), ...fields }, dry);
+  return rule.source === "owner" ? calls.updateRule(rule.name, fields, dry) : calls.putRule(rule.name, fields, dry);
 }
 
-/** Restore the built-in (the Owner's version of one) or Delete (the Owner's own rule): the question, naming the rule. */
 export function deleteQuestion(r: Rule) {
   return {
     title: r.overrides ? `Restore the built-in ${r.name}?` : `Delete ${r.name}?`,
@@ -317,7 +296,6 @@ export function deleteQuestion(r: Rule) {
   };
 }
 
-/** The rule's fields. `set` takes a change to some of them (a change drops an earlier replay). */
 export function RuleFormFields({ f, set, handle, isNew }: { f: RuleForm; set: (patch: Partial<RuleForm>) => void; handle: string; isNew: boolean }) {
   const text = (k: "name" | "status" | "code" | "body" | "cooling" | "description") => (e: { target: { value: string } }) => set({ [k]: e.target.value });
   const outcome = OUTCOMES.find((o) => o.value === f.outcome);
@@ -337,7 +315,6 @@ export function RuleFormFields({ f, set, handle, isNew }: { f: RuleForm; set: (p
       <Field label="Body contains" hint="A regular expression, case-insensitive.">
         {(p) => <Input {...p} mono placeholder="quota exceeded" value={f.body} onChange={text("body")} />}
       </Field>
-      {/* No row gap: on phones the gap above "Cool for" is inside its panel, so it opens and folds with it. */}
       <div className="grid gap-x-4 sm:grid-cols-[1fr_160px]">
         <Field label="Then" hint={outcome?.hint}>
           {() => <Select value={f.outcome} onValueChange={(v) => set({ outcome: v as Outcome })} items={OUTCOMES} />}
@@ -361,7 +338,6 @@ export function RuleFormFields({ f, set, handle, isNew }: { f: RuleForm; set: (p
   );
 }
 
-/** What a check against last week found. */
 export function ReplayNote({ replay }: { replay: Replay }) {
   return (
     <p className={cn("rounded-lg bg-subtle px-4 py-3 text-[14px]", riseIn)}>
@@ -374,7 +350,6 @@ export function ReplayNote({ replay }: { replay: Replay }) {
   );
 }
 
-/** Add rule. An existing rule is edited in its sheet (UI ticket 33). */
 function AddRuleDialog({ handle, open, onOpenChange }: { handle: string; open: boolean; onOpenChange: (o: boolean) => void }) {
   const refresh = useRefresh();
   const [f, setF] = useState(() => ruleForm(handle));
@@ -382,7 +357,6 @@ function AddRuleDialog({ handle, open, onOpenChange }: { handle: string; open: b
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState<"check" | "save">();
 
-  // Opening starts the form afresh in the same render, so the dialog's first frame already shows it.
   const [wasOpen, setWasOpen] = useState(false);
   if (wasOpen !== open) {
     setWasOpen(open);
@@ -398,29 +372,17 @@ function AddRuleDialog({ handle, open, onOpenChange }: { handle: string; open: b
     if (problem) return setError(problem);
     setPending(dry ? "check" : "save");
     setError(undefined);
+    const name = f.name.trim();
     try {
-      // POST /api/rules updates (or overrides) a rule of that name, so a new rule's name must be free.
-      const name = f.name.trim();
-      const taken = await api.get<Rule>(`/api/rules/${seg(name)}`).then(
-        (r) => r,
-        (e) => (isApiError(e) && e.status === 404 ? undefined : Promise.reject(e)),
-      );
-      if (taken)
-        return setError(
-          taken.source === "builtin"
-            ? `${name} is a built-in rule. Pick another name, or use Change on ${name} to replace it.`
-            : `A rule is already named ${name}${taken.provider && taken.provider !== handle ? ` (for ${taken.provider})` : ""}. Pick another name.`,
-        );
-      const res = await sendRule(f, handle, undefined, dry);
+      const res = await calls.createRule({ name, ...ruleFields(f, handle) }, dry);
       if (dry) setReplay(res.replay);
       else {
         refresh();
-        // Toast: the rule dialog closes on Save.
         notifyChange(`${name} added`, res, { onUndone: refresh });
         onOpenChange(false);
       }
     } catch (e) {
-      setError(errorText(e));
+      setError(nameTaken(e) ? `A rule is already named ${name}. Pick another name, or use Change on ${name} to replace it.` : errorText(e));
     } finally {
       setPending(undefined);
     }

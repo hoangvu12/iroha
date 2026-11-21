@@ -1,10 +1,3 @@
-// Package testchat is the test chat's side of the admin API (ticket 23):
-// what one test send asks for (Send), the request a Caller of each Shape
-// would send for it (Build), the tool-call check (CheckTool), the snippets
-// that send the same request to the Gateway (Snippets), and the model
-// search behind the chat's model picker. Sending itself is the Gateway's
-// (POST /api/test, internal/gateway/testrun.go): it runs the built request
-// through the normal inference path as the Test caller.
 package testchat
 
 import (
@@ -20,13 +13,10 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Caller names of test Requests.
 const CallerName = "Test"
 
-// CallerAs is the recorded Caller of a test sent as Gateway Key name.
 func CallerAs(name string) string { return "Test (as " + name + ")" }
 
-// Reasoning levels.
 const (
 	ReasoningOff    = "off"
 	ReasoningLow    = "low"
@@ -34,59 +24,45 @@ const (
 	ReasoningHigh   = "high"
 )
 
-// DefaultPrompt is what a send with no messages asks.
 const DefaultPrompt = "Reply with one short sentence so I know you work."
 
-// Send is one test send: a conversation and the settings to send it with.
 type Send struct {
-	Model    string      `json:"model" doc:"A Model Pool name, or <provider handle>/<model ID>, as Callers name models on the global routes."`
-	Shape    shape.Shape `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The Shape the test Caller speaks. Default openai-chat."`
-	System   string      `json:"system,omitempty" doc:"A system prompt."`
-	Messages []Message   `json:"messages,omitempty" doc:"The conversation so far, oldest first, ending with the user's turn. Default: one user message asking for a short reply."`
-	Stream   *bool       `json:"stream,omitempty" doc:"Default true: the answer streams as the Shape's server-sent events."`
-	// Reasoning is written in the Shape's own field, so translation to the
-	// Endpoint's Shape is exercised like any Caller's.
-	Reasoning string   `json:"reasoning,omitempty" enum:"off,low,medium,high" doc:"Reasoning effort, written in the Shape's own field: reasoning_effort (OpenAI Chat), reasoning.effort (Responses), thinking.budget_tokens 1024/4096/12000 (Anthropic), thinkingConfig.thinkingBudget (Gemini). off or absent: not set."`
-	Tools     []string `json:"tools,omitempty" doc:"Test tools to offer, by name (GET /api/test/tools lists them: get_weather, get_time, calculate, web_search, fetch_url, lookup_order). The answer carries a check of the model's tool calls."`
-	ToolCheck bool     `json:"tool_check,omitempty" doc:"The older form of tools: [\"get_weather\"]. Ignored when tools names any."`
-	MaxTokens int      `json:"max_tokens,omitempty" doc:"Most output tokens. Default 4096 (plus the reasoning budget on Anthropic)."`
-	// Routing.
-	UpstreamKey string `json:"upstream_key,omitempty" doc:"Pin every Attempt to this Upstream Key (name or ID) of the model's Provider. It is tried whatever its Key State (as key tests do); failures still change it. Needs <provider>/<model>."`
-	Endpoint    string `json:"endpoint,omitempty" doc:"Pin every Attempt to this Endpoint (name or ID) of the model's Provider. Needs <provider>/<model>."`
-	As          string `json:"as,omitempty" doc:"Send as this Gateway Key (name or ID): its scope applies, the Request is recorded as \"Test (as <name>)\" and never counts as that key's traffic."`
+	Model       string      `json:"model" doc:"A Model Pool name, or <provider handle>/<model ID>, as Callers name models on the global routes."`
+	Shape       shape.Shape `json:"shape,omitempty" enum:"openai-chat,openai-responses,anthropic-messages,gemini" doc:"The Shape the test Caller speaks. Default openai-chat."`
+	System      string      `json:"system,omitempty" doc:"A system prompt."`
+	Messages    []Message   `json:"messages,omitempty" doc:"The conversation so far, oldest first, ending with the user's turn. Default: one user message asking for a short reply."`
+	Stream      *bool       `json:"stream,omitempty" doc:"Default true: the answer streams as the Shape's server-sent events."`
+	Reasoning   string      `json:"reasoning,omitempty" enum:"off,low,medium,high" doc:"Reasoning effort, written in the Shape's own field: reasoning_effort (OpenAI Chat), reasoning.effort (Responses), thinking.budget_tokens 1024/4096/12000 (Anthropic), thinkingConfig.thinkingBudget (Gemini). off or absent: not set."`
+	Tools       []string    `json:"tools,omitempty" doc:"Test tools to offer, by name (GET /api/test/tools lists them: get_weather, get_time, calculate, web_search, fetch_url, lookup_order). The answer carries a check of the model's tool calls."`
+	ToolCheck   bool        `json:"tool_check,omitempty" doc:"The older form of tools: [\"get_weather\"]. Ignored when tools names any."`
+	MaxTokens   int         `json:"max_tokens,omitempty" doc:"Most output tokens. Default 4096 (plus the reasoning budget on Anthropic)."`
+	UpstreamKey string      `json:"upstream_key,omitempty" doc:"Pin every Attempt to this Upstream Key (name or ID) of the model's Provider. It is tried whatever its Key State (as key tests do); failures still change it. Needs <provider>/<model>."`
+	Endpoint    string      `json:"endpoint,omitempty" doc:"Pin every Attempt to this Endpoint (name or ID) of the model's Provider. Needs <provider>/<model>."`
+	As          string      `json:"as,omitempty" doc:"Send as this Gateway Key (name or ID): its scope applies, the Request is recorded as \"Test (as <name>)\" and never counts as that key's traffic."`
 }
 
-// Message is one turn of a test conversation.
 type Message struct {
-	Role    string `json:"role" enum:"user,assistant"`
-	Content string `json:"content"`
-	// ToolCalls are calls an assistant turn made to test tools; Iroha
-	// answers each (toolAnswer) before the next turn.
+	Role      string     `json:"role" enum:"user,assistant"`
+	Content   string     `json:"content"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty" doc:"Assistant turns only: the test tool calls the model made. Iroha answers each in the request with that tool's result (made up, or computed for get_time and calculate)."`
 }
 
-// ToolCall is one call of the test tool.
 type ToolCall struct {
 	ID        string          `json:"id,omitempty" doc:"The call's ID as the model gave it; made up when empty."`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments,omitempty" doc:"The arguments, a JSON object (or a string holding one)."`
 }
 
-// StreamOn reports whether the send streams.
 func (s Send) StreamOn() bool { return s.Stream == nil || *s.Stream }
 
-// Built is the request a Caller of the send's Shape would make to the
-// Gateway's global route.
 type Built struct {
 	Shape  shape.Shape
-	Model  string // as named on the global routes
-	Path   string // the global route's path (Gemini: model and method included)
-	Body   []byte // JSON, keys in a readable order
+	Model  string
+	Path   string
+	Body   []byte
 	Stream bool
 }
 
-// Check validates a send and fills in its defaults; afterwards Tools holds
-// the tools offered (tool_check alone becomes get_weather), each once.
 func (s *Send) Check() error {
 	s.Model = strings.TrimSpace(s.Model)
 	if s.Model == "" {
@@ -134,11 +110,8 @@ func (s *Send) Check() error {
 	return nil
 }
 
-// Checked reports whether the answer gets a tool check: some tool was
-// chosen. Call Check first.
 func (s Send) Checked() bool { return len(s.Tools) > 0 }
 
-// budget is the thinking budget of a level (Anthropic, Gemini).
 func budget(level string) int {
 	switch level {
 	case ReasoningLow:
@@ -165,10 +138,7 @@ func (s Send) maxTokens() int {
 	return 4096
 }
 
-// offered is the tools the request offers: the chosen ones, then any test
-// tool earlier turns called that is no longer chosen (Providers refuse tool
-// calls in the history of a request offering no such tool). History with
-// calls to no known tool still offers get_weather, as before ticket 29.
+// Providers refuse tool calls in the history of a request that offers no tools.
 func (s Send) offered() []*tool {
 	var out []*tool
 	add := func(name string) {
@@ -192,8 +162,6 @@ func (s Send) offered() []*tool {
 	return out
 }
 
-// Build writes the send as the request a Caller of its Shape would make;
-// now is when get_time results are for. Call Check first.
 func Build(s Send, now time.Time) (Built, error) {
 	b := Built{Shape: s.Shape, Model: s.Model, Stream: s.StreamOn()}
 	var body obj
@@ -225,7 +193,6 @@ func Build(s Send, now time.Time) (Built, error) {
 	return b, nil
 }
 
-// callID is a tool call's ID, made up when the model gave none.
 func callID(c ToolCall, turn, i int) string {
 	if c.ID != "" {
 		return c.ID
@@ -233,7 +200,6 @@ func callID(c ToolCall, turn, i int) string {
 	return fmt.Sprintf("call_%d_%d", turn, i)
 }
 
-// args is a tool call's arguments as a JSON object.
 func args(c ToolCall) json.RawMessage {
 	a := bytes.TrimSpace(c.Arguments)
 	if len(a) > 0 && a[0] == '"' {
@@ -248,7 +214,6 @@ func args(c ToolCall) json.RawMessage {
 	return json.RawMessage(a)
 }
 
-// argsString is a tool call's arguments as the JSON string OpenAI Shapes use.
 func argsString(c ToolCall) string { return string(args(c)) }
 
 func toolResultString(c ToolCall, now time.Time) string {
@@ -256,7 +221,6 @@ func toolResultString(c ToolCall, now time.Time) string {
 	return string(b)
 }
 
-// toolDefs writes the offered tools in a Shape's own form.
 func (s Send) toolDefs(def func(t *tool) any) []any {
 	var out []any
 	for _, t := range s.offered() {
@@ -346,7 +310,6 @@ func buildAnthropic(s Send, now time.Time) obj {
 		}
 		msgs = append(msgs, obj{{"role", "assistant"}, {"content", blocks}}, obj{{"role", "user"}, {"content", results}})
 	}
-	msgs = mergeUserTurns(msgs)
 	limit := s.maxTokens()
 	think := budget(s.reasoning())
 	if think > 0 && s.MaxTokens == 0 {
@@ -369,29 +332,6 @@ func buildAnthropic(s Send, now time.Time) obj {
 		body = append(body, kv{"stream", true})
 	}
 	return body
-}
-
-// mergeUserTurns joins a tool-result turn with the user turn after it:
-// Anthropic wants turns to alternate.
-func mergeUserTurns(msgs []any) []any {
-	var out []any
-	for _, m := range msgs {
-		o := m.(obj)
-		if len(out) > 0 && o.get("role") == "user" && out[len(out)-1].(obj).get("role") == "user" {
-			prev := out[len(out)-1].(obj)
-			out[len(out)-1] = obj{{"role", "user"}, {"content", append(blocksOf(prev.get("content")), blocksOf(o.get("content"))...)}}
-			continue
-		}
-		out = append(out, o)
-	}
-	return out
-}
-
-func blocksOf(content any) []any {
-	if s, ok := content.(string); ok {
-		return []any{obj{{"type", "text"}, {"text", s}}}
-	}
-	return content.([]any)
 }
 
 func buildGemini(s Send, now time.Time) obj {
@@ -435,8 +375,6 @@ func buildGemini(s Send, now time.Time) obj {
 	return body
 }
 
-// obj is a JSON object that keeps its keys in the order written, so built
-// requests and snippets read in a natural order.
 type obj []kv
 
 type kv struct {
@@ -453,7 +391,6 @@ func (o obj) get(k string) any {
 	return nil
 }
 
-// MarshalJSON writes the object with its keys in order.
 func (o obj) MarshalJSON() ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteByte('{')

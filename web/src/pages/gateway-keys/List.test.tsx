@@ -8,10 +8,6 @@ import { Toaster } from "@/ui/toast";
 import type { GatewayKey } from "./api";
 import { KeysList } from "./List";
 
-// The Gateway Keys list on the shared DataTable (UI ticket 08): its columns'
-// sort and search in the URL, the row menu's confirms and calls, and the
-// Revoked Gateway Keys table under its disclosure.
-
 let approve = false;
 const agent = createAgent({ allow: (step) => !step.confirm || approve });
 const { openChat } = vi.hoisted(() => ({ openChat: vi.fn() }));
@@ -37,12 +33,30 @@ function Where() {
   return <output aria-label="Where">{l.pathname + l.search}</output>;
 }
 
-function renderList(keys: GatewayKey[], url = "/gateway-keys") {
+test("New key sends the name to the server and shows its refusal of a taken name in the dialog", async () => {
+  const user = userEvent.setup();
+  const fetch = renderList([], "/gateway-keys", () =>
+    new Response(JSON.stringify({ error: { code: "name_taken", message: 'A Gateway Key named "linh" exists.', hint: "Pick another name." } }), {
+      status: 409,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  await user.click((await screen.findAllByRole("button", { name: "New key" }))[0]);
+  const dialog = await screen.findByRole("dialog", { name: "New Gateway Key" });
+  await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "linh");
+  await user.click(within(dialog).getByRole("radio", { name: /Everything/ }));
+  await user.click(within(dialog).getByRole("button", { name: "Create key" }));
+  expect(await within(dialog).findByText("A Gateway Key is already named linh. Pick another name.")).toBeTruthy();
+  expect(writes(fetch)).toEqual(["POST /api/gateway-keys"]);
+});
+
+function renderList(keys: GatewayKey[], url = "/gateway-keys", create?: () => Response) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (u, init) => {
     const path = String(u);
     const method = init?.method ?? "GET";
     if (path.startsWith("/api/gateway-keys") && method === "GET") return answer({ gateway_keys: keys });
     if (path === "/api/settings") return answer({ settings: [{ name: "retention.captures_days", value: 7 }] });
+    if (create && path === "/api/gateway-keys" && method === "POST") return create();
     if (path === "/api/gateway-keys/bulk/update") {
       const items: { key: string; capture: boolean }[] = JSON.parse(String(init?.body)).items;
       const outcome = (it: { key: string; capture: boolean }) => (keys.find((k) => k.id === it.key)?.capture === it.capture ? "unchanged" : "updated");
@@ -195,7 +209,6 @@ test("a row's copy button, shown on hover, is always shown where nothing hovers 
   renderList([gk(1)]);
   const copy = await screen.findByRole("button", { name: "Copy caller-1's key" });
   const c = copy.getAttribute("class")!.split(/\s+/);
-  // row-reveal (styles/index.css): hidden until the row is hovered, always shown where nothing hovers.
   expect(c).toContain("row-reveal");
 });
 
@@ -207,7 +220,6 @@ test("a Requests, 24 h count opens Requests from that key in the last 24 hours, 
   const count = screen.getByRole("link", { name: "Requests of caller-2, last 24 h" });
   expect(count.textContent).toBe("20");
   await user.click(count);
-  // By ID, so Requests sent before a rename still count, as recent_requests does.
   expect(where()).toBe("/requests?caller=gk_2&range=24h");
 });
 

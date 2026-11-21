@@ -1,10 +1,5 @@
 // Package webui serves the Owner's UI embedded in the binary: the React app
 // built from web/ into dist/, and the Iroha brand art in brand/.
-//
-// dist/ is build output. Only dist/.gitkeep is committed, so a fresh clone
-// builds and tests without Node and serves a page saying the UI was not
-// built. `npm --prefix web ci && npm --prefix web run build` fills dist/;
-// the next `go build` embeds it. See docs/agents/architecture.md.
 package webui
 
 import (
@@ -64,12 +59,9 @@ func Handler() http.Handler {
 		}
 		if p == "" || p == "index.html" || wantsPage(r, p) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			// Revalidated on every load, so a deploy shows at once; the ETag
-			// makes an unchanged page a 304.
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("ETag", indexTag)
 			w.Header().Set("X-Frame-Options", "DENY")
-			// No modification time: the ETag is the validator.
 			http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(index))
 			return
 		}
@@ -80,14 +72,11 @@ func Handler() http.Handler {
 	})
 }
 
-// etag is a strong validator for an embedded file's content.
 func etag(b []byte) string {
 	h := sha256.Sum256(b)
 	return `"` + hex.EncodeToString(h[:10]) + `"`
 }
 
-// tags remembers each embedded file's ETag (the files never change while
-// the binary runs).
 var tags sync.Map
 
 func tagOf(key string, b []byte) string {
@@ -99,8 +88,6 @@ func tagOf(key string, b []byte) string {
 	return t
 }
 
-// wantsPage reports whether a miss is a browser loading one of the app's
-// pages rather than a missing file or an API client.
 func wantsPage(r *http.Request, p string) bool {
 	return path.Ext(p) == "" && strings.Contains(r.Header.Get("Accept"), "text/html")
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Copy, KeyRound, Plus, Trash2 } from "lucide-react";
-import { errorText } from "@/api/client";
+import { errorText, isApiError } from "@/api/client";
 import { timeAgo } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
@@ -40,23 +40,19 @@ const columns = col.columns([
   col.accessor((t) => t.last_used_at ?? "", {
     id: "used",
     header: "Last used",
-    // The most recent use first, then by name.
     sortFn: (a, b) => (b.original.last_used_at ?? "").localeCompare(a.original.last_used_at ?? "") || natural(a.original.name, b.original.name),
     meta: { className: "tabular" },
     cell: ({ row }) => <LastUsed t={row.original} />,
   }),
 ]);
 
-// Oldest first, as the API lists them.
 const BY_CREATED: SortingState = [{ id: "created", desc: false }];
 
-/** Settings → Admin Tokens (C28), on the shared DataTable (UI ticket 08). */
 export function AdminTokensTab() {
   const tokens = useAdminTokens();
   const [creating, setCreating] = useState(false);
   const confirm = useConfirm();
   const revoke = useRevokeAdminToken();
-  // Revoking can't be undone: it asks for the name typed (UI ticket 21).
   const askRevoke = (token: AdminToken) =>
     confirm.ask({
       title: `Revoke ${token.name}?`,
@@ -65,7 +61,6 @@ export function AdminTokensTab() {
       confirmLabel: "Revoke token",
       onConfirm: async () => {
         const res = await revoke.mutateAsync(token.id);
-        // Toast: the confirm dialog has closed and the row is gone.
         notifyChange(`${token.name} revoked`, res, { undoable: false });
       },
     });
@@ -105,7 +100,7 @@ export function AdminTokensTab() {
       />
 
       {confirm.dialog}
-      <CreateDialog open={creating} onOpenChange={setCreating} existing={tokens.data ?? []} />
+      <CreateDialog open={creating} onOpenChange={setCreating} />
     </section>
   );
 }
@@ -123,7 +118,6 @@ function LastUsed({ t }: { t: AdminToken }) {
 }
 
 function TokenMenu({ t, onRevoke }: { t: AdminToken; onRevoke: (t: AdminToken) => void }) {
-  // "Copy token" closes the menu, so the trigger it closes back to shows the result.
   const copied = useCopy();
   return (
     <RowMenu name={t.name} copy={copied.state}>
@@ -142,13 +136,11 @@ function SecretCell({ t }: { t: AdminToken }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Mono className="text-fg-muted">{shortSecret(t.secret)}</Mono>
-      {/* Shown on the row's hover, at once (row hover is instant); where nothing hovers (a tablet's table), always (row-reveal). */}
       <CopyButton icon value={t.secret} what="Admin Token" label={`Copy ${t.name}`} className="row-reveal" />
     </span>
   );
 }
 
-/** Phones: two lines per token, name, then the token and its last use; the menu at the end. */
 function TokenLine({ t }: { t: AdminToken }) {
   return (
     <div className="min-w-0 flex-1">
@@ -160,7 +152,13 @@ function TokenLine({ t }: { t: AdminToken }) {
     </div>
   );
 }
-function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenChange: (o: boolean) => void; existing: AdminToken[] }) {
+function createError(e: unknown, name: string): string {
+  if (isApiError(e) && e.code === "name_taken") return `An Admin Token is already named ${name}. Pick another name.`;
+  if (isApiError(e) && e.code === "admin_token_revoked") return `${name} was revoked and its name stays on record. Pick another name.`;
+  return errorText(e);
+}
+
+function CreateDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const create = useCreateAdminToken();
   const invalidate = useInvalidateAll();
   const [name, setName] = useState("");
@@ -184,14 +182,12 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
   const submit = () => {
     const n = name.trim();
     if (!n) return setError("Give the token a name, usually the script or agent that will hold it.");
-    if (existing.some((t) => t.name === n)) return setError(`An Admin Token is already named ${n}. Pick another name.`);
     setError(undefined);
     create.mutate(
       { name: n, note: note.trim() || undefined },
       {
-        // The dialog stays open on the new token, which says it was created; Undo is in its footer.
         onSuccess: (res) => setMade({ token: res.admin_token, entry: res.audit_entry }),
-        onError: (e) => setError(errorText(e)),
+        onError: (e) => setError(createError(e, n)),
       },
     );
   };
@@ -202,12 +198,10 @@ function CreateDialog({ open, onOpenChange, existing }: { open: boolean; onOpenC
       <Dialog
         open={open}
         onOpenChange={close}
-        // Shown once, in place of the form: title, text and token rise into place on one frame (UI ticket 20).
         title={<span className={cn("block", riseIn)}>Admin Token created</span>}
         description={<span className={cn("block", riseIn)}>Give it to {token.name}. It works on every admin route, sent as a Bearer token.</span>}
         footer={
           <>
-            {/* Undo deletes the token again and closes the dialog; with the dialog gone, a toast says so. */}
             <UndoCreate save={undo} entry={entry} name={token.name} deleted={`Admin Token ${token.name} deleted`} onClose={() => close(false)} />
             <Button variant="primary" onClick={() => close(false)}>
               Done

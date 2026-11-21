@@ -25,31 +25,27 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Discovery limits.
 const (
-	discoveryTimeout     = 30 * time.Second // per list, all pages included
+	discoveryTimeout     = 30 * time.Second
 	discoveryConcurrency = 5
 	maxListBody          = 32 << 20
 	maxPages             = 20
-	maxReported          = 16 << 10 // a model object larger than this is not kept for metadata
+	maxReported          = 16 << 10
 	maxModelLen          = 256
-	providerModeTries    = 3 // per-Provider discovery tries this many usable keys before giving up on an Endpoint
+	providerModeTries    = 3
 )
 
-// Outcomes of one list read and of a whole refresh.
 const (
 	ListOK      = "ok"
 	ListFailed  = "failed"
-	ListPlanned = "planned" // dry run: would be read
+	ListPlanned = "planned"
 
 	RefreshOK      = "ok"
-	RefreshPartial = "partial" // some lists failed; their previous models were kept
-	RefreshFailed  = "failed"  // every list failed; the previous list is kept
-	RefreshSkipped = "skipped" // nothing to read (discovery none, no Endpoint to ask, no usable key)
+	RefreshPartial = "partial"
+	RefreshFailed  = "failed"
+	RefreshSkipped = "skipped"
 )
 
-// ListResult is one discovered list: one Endpoint's, or one key's on one
-// Endpoint under per-key discovery.
 type ListResult struct {
 	Endpoint    string `json:"endpoint"`
 	UpstreamKey string `json:"upstream_key,omitempty" doc:"The key whose list this is (per-key discovery), or the key the Endpoint was read with (per-Provider discovery)."`
@@ -60,7 +56,6 @@ type ListResult struct {
 	Error       string `json:"error,omitempty" doc:"Why the list could not be read; the models it named last time are kept."`
 }
 
-// RefreshResult is the outcome of one refresh of a Provider's model list.
 type RefreshResult struct {
 	DryRun      bool         `json:"dry_run" doc:"true: nothing was sent or written; lists says what would be read."`
 	Provider    string       `json:"provider"`
@@ -75,22 +70,30 @@ type RefreshResult struct {
 	ModelsDev   string       `json:"models_dev,omitempty" enum:"ok,stale,unavailable,off" doc:"How the list's models were looked up in models.dev for metadata: ok; stale (models.dev unreachable, its last catalog used); unavailable (never read: earlier lookups kept); off. It never changes the outcome. Absent on a dry run."`
 }
 
-// listJob is one list to read.
+type listMode int
+
+const (
+	endpointList listMode = iota
+	keyList
+)
+
 type listJob struct {
 	ep   *planner.Endpoint
-	key  *planner.Key   // per-key: whose list; nil under per-Provider discovery
-	try  []*planner.Key // per-Provider: keys to read it with, in order (none: keyless)
+	mode listMode
+	keys []*planner.Key
 	url  string
 	res  ListResult
 	got  []entry
 	used *planner.Key
 }
 
-// Refresh reads the model lists of the Provider addressed by handle or ID
-// and stores what they name. Lists that fail keep the models they named
-// before; every list is logged as a discovery event, the whole refresh as
-// one more. Model Gaps a key's own list contradicts are cleared. With dry,
-// nothing is sent or written. A jobs.Job may call it directly.
+func (j *listJob) listKey() *planner.Key {
+	if j.mode == keyList {
+		return j.keys[0]
+	}
+	return nil
+}
+
 func (s *Store) Refresh(ctx context.Context, provider string, dry bool) (RefreshResult, error) {
 	rt, err := s.providers.ResolveRouting(ctx, provider)
 	if err != nil {
@@ -119,7 +122,7 @@ func (s *Store) Refresh(ctx context.Context, provider string, dry bool) (Refresh
 		res.Summary = fmt.Sprintf("Would read %d model lists.", len(jobs))
 		return res, nil
 	}
-	ctx = context.WithoutCancel(ctx) // a started refresh finishes and records what it read
+	ctx = context.WithoutCancel(ctx)
 	s.readAll(ctx, &rt, jobs)
 	gaps, err := s.apply(ctx, &rt, jobs, &res)
 	if err != nil {
@@ -152,10 +155,8 @@ func (s *Store) Refresh(ctx context.Context, provider string, dry bool) (Refresh
 	return res, nil
 }
 
-// usable reports whether discovery may use key k.
 func usable(k *planner.Key) bool { return !k.Disabled && !k.Invalid }
 
-// discoveryURL is where Endpoint e's list is read, or "" for none.
 func discoveryURL(rt *providers.Routing, e *planner.Endpoint) string {
 	switch d := rt.DiscoveryURLs[e.ID]; d {
 	case providers.NoDiscovery:
@@ -167,7 +168,6 @@ func discoveryURL(rt *providers.Routing, e *planner.Endpoint) string {
 	}
 }
 
-// plan lists the lists a refresh reads.
 func plan(rt *providers.Routing) []*listJob {
 	var out []*listJob
 	if rt.Discovery == providers.DiscoveryNone {
@@ -183,12 +183,12 @@ func plan(rt *providers.Routing) []*listJob {
 			for ki := range rt.Keys {
 				k := &rt.Keys[ki]
 				if usable(k) && k.Allows(ep.ID) {
-					out = append(out, &listJob{ep: ep, key: k, url: u, res: ListResult{Endpoint: ep.Name, UpstreamKey: k.Name, URL: u}})
+					out = append(out, &listJob{ep: ep, mode: keyList, keys: []*planner.Key{k}, url: u, res: ListResult{Endpoint: ep.Name, UpstreamKey: k.Name, URL: u}})
 				}
 			}
 			continue
 		}
-		j := &listJob{ep: ep, url: u, res: ListResult{Endpoint: ep.Name, URL: u}}
+		j := &listJob{ep: ep, mode: endpointList, url: u, res: ListResult{Endpoint: ep.Name, URL: u}}
 		allowed := 0
 		for ki := range rt.Keys {
 			k := &rt.Keys[ki]
@@ -196,12 +196,12 @@ func plan(rt *providers.Routing) []*listJob {
 				continue
 			}
 			allowed++
-			if usable(k) && len(j.try) < providerModeTries {
-				j.try = append(j.try, k)
+			if usable(k) && len(j.keys) < providerModeTries {
+				j.keys = append(j.keys, k)
 			}
 		}
-		if allowed > 0 && len(j.try) == 0 {
-			continue // every key that may use it is disabled or invalid
+		if allowed > 0 && len(j.keys) == 0 {
+			continue
 		}
 		out = append(out, j)
 	}
@@ -223,7 +223,6 @@ func skipReason(rt *providers.Routing) string {
 	return "Every Endpoint has discovery_url none."
 }
 
-// readAll reads every list, a few at a time.
 func (s *Store) readAll(ctx context.Context, rt *providers.Routing, jobs []*listJob) {
 	sem := make(chan struct{}, discoveryConcurrency)
 	var wg sync.WaitGroup
@@ -239,20 +238,15 @@ func (s *Store) readAll(ctx context.Context, rt *providers.Routing, jobs []*list
 	wg.Wait()
 }
 
-// read reads one list; under per-Provider discovery it tries the next key
-// when one fails.
 func (s *Store) read(ctx context.Context, rt *providers.Routing, j *listJob) {
-	keys := j.try
-	switch {
-	case j.key != nil:
-		keys = []*planner.Key{j.key}
-	case len(keys) == 0:
-		keys = []*planner.Key{{}} // keyless: the Provider has no key that may use this Endpoint
+	keys := j.keys
+	if len(keys) == 0 {
+		keys = []*planner.Key{{}}
 	}
 	for _, k := range keys {
 		got, status, err := s.fetch(ctx, rt, j.ep, k, j.url)
 		j.res.Status = status
-		if j.key == nil && k.ID != "" {
+		if j.mode == endpointList && k.ID != "" {
 			j.res.UpstreamKey = k.Name
 		}
 		if err == nil {
@@ -263,7 +257,6 @@ func (s *Store) read(ctx context.Context, rt *providers.Routing, j *listJob) {
 	}
 }
 
-// fetch reads every page of one list with key k (an empty key sends no credential).
 func (s *Store) fetch(ctx context.Context, rt *providers.Routing, ep *planner.Endpoint, k *planner.Key, raw string) ([]entry, int, error) {
 	ctx, cancel := clock.WithTimeout(ctx, s.clock, discoveryTimeout)
 	defer cancel()
@@ -290,13 +283,15 @@ func (s *Store) fetch(ctx context.Context, rt *providers.Routing, ep *planner.En
 			return nil, status, fmt.Errorf("the answer could not be read: %s", scrub(err.Error(), k.Secret))
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			// Scrubbed before cutting, so no part of an echoed key is left.
-			return nil, status, fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet([]byte(scrub(string(body), k.Secret))))
+			return nil, status, fmt.Errorf("HTTP %d: %s", resp.StatusCode, redactedSnippet(body, k.Secret))
 		}
 		if len(body) > maxListBody {
 			return nil, status, fmt.Errorf("the answer is larger than %d MiB", maxListBody>>20)
 		}
 		list, cont, err := parseList(body)
+		if errors.Is(err, errNotJSON) {
+			return nil, status, fmt.Errorf("%w: %s", errNotJSON, redactedSnippet(body, k.Secret))
+		}
 		if err != nil {
 			return nil, status, err
 		}
@@ -314,9 +309,6 @@ func (s *Store) fetch(ctx context.Context, rt *providers.Routing, ep *planner.En
 	return all, status, nil
 }
 
-// discoveryRequest builds the GET of one page: the Endpoint's static
-// headers, then the key per the Endpoint's auth style, as on an Attempt
-// (planner.Endpoint.Authorize).
 func discoveryRequest(ctx context.Context, ep *planner.Endpoint, k *planner.Key, raw string) (*http.Request, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -336,8 +328,6 @@ func discoveryRequest(ctx context.Context, ep *planner.Endpoint, k *planner.Key,
 	return req, nil
 }
 
-// pageToken says how to ask for the next page: Anthropic's after_id or
-// Gemini's pageToken.
 type pageToken struct{ param, value string }
 
 func nextPage(raw string, t *pageToken) string {
@@ -351,18 +341,16 @@ func nextPage(raw string, t *pageToken) string {
 	return u.String()
 }
 
-// entry is one model a list names.
 type entry struct {
 	id  string
-	raw json.RawMessage // the model's object, or nil
+	raw json.RawMessage
 }
 
-var errNoList = errors.New("the answer has no data or models array")
+var (
+	errNoList  = errors.New("the answer has no data or models array")
+	errNotJSON = errors.New("the answer is not JSON")
+)
 
-// parseList reads a model list answer: an object with a data or models
-// array (or a bare array), whose items are objects with an id (or Gemini's
-// name "models/<id>", or model) or plain strings. It also says how to ask
-// for the next page, if the answer has one.
 func parseList(body []byte) ([]entry, *pageToken, error) {
 	body = bytes.TrimSpace(body)
 	var items []json.RawMessage
@@ -382,7 +370,7 @@ func parseList(body []byte) ([]entry, *pageToken, error) {
 		}
 		var keys map[string]json.RawMessage
 		if json.Unmarshal(body, &keys) != nil {
-			return nil, nil, fmt.Errorf("the answer is not JSON: %s", snippet(body))
+			return nil, nil, errNotJSON
 		}
 		_, hasData := keys["data"]
 		_, hasModels := keys["models"]
@@ -403,7 +391,7 @@ func parseList(body []byte) ([]entry, *pageToken, error) {
 			next = &pageToken{"pageToken", obj.NextPageToken}
 		}
 	default:
-		return nil, nil, fmt.Errorf("the answer is not JSON: %s", snippet(body))
+		return nil, nil, errNotJSON
 	}
 	out := []entry{}
 	seen := map[string]bool{}
@@ -454,9 +442,8 @@ func checkID(s string, raw json.RawMessage) (entry, bool) {
 	return entry{id: s, raw: raw}, true
 }
 
-// snippet is the start of a body, for an error message.
-func snippet(b []byte) string {
-	s := strings.Join(strings.Fields(string(b)), " ")
+func redactedSnippet(body []byte, secret string) string {
+	s := strings.Join(strings.Fields(scrub(string(body), secret)), " ")
 	if len(s) > 200 {
 		s = s[:200] + "..."
 	}
@@ -466,7 +453,7 @@ func snippet(b []byte) string {
 	return s
 }
 
-// scrub keeps a secret out of an error text (a query-style key is in the URL).
+// A query-style key is in the URL, which Go's request errors quote.
 func scrub(s, secret string) string {
 	if secret == "" {
 		return s
@@ -474,15 +461,13 @@ func scrub(s, secret string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, url.QueryEscape(secret), "***"), secret, "***")
 }
 
-// keyRef is how a stored list names its key: NULL under per-Provider discovery.
 func keyRef(j *listJob) any {
-	if j.key == nil {
-		return nil
+	if k := j.listKey(); k != nil {
+		return k.ID
 	}
-	return j.key.ID
+	return nil
 }
 
-// apply stores what the lists named, in one transaction, and fills res.
 func (s *Store) apply(ctx context.Context, rt *providers.Routing, jobs []*listJob, res *RefreshResult) ([]keystate.GapEvent, error) {
 	now := s.clock.Now().UTC()
 	var gaps []keystate.GapEvent
@@ -492,8 +477,6 @@ func (s *Store) apply(ctx context.Context, rt *providers.Routing, jobs []*listJo
 		if err != nil {
 			return err
 		}
-		// Forget lists that are no longer read at all: Endpoints with
-		// discovery none, keys now restricted elsewhere, the other mode's rows.
 		if err := dropStaleLists(ctx, tx, rt); err != nil {
 			return err
 		}
@@ -511,9 +494,6 @@ func (s *Store) apply(ctx context.Context, rt *providers.Routing, jobs []*listJo
 					rt.ID, j.ep.ID, keyRef(j), e.id, store.Millis(now)); err != nil {
 					return err
 				}
-				// The first list (in Endpoint and key order) whose object says
-				// something of the model wins; an object that says nothing
-				// (a bare {"id": ...}) keeps the facts reported before.
 				raw := ""
 				if e.raw != nil && !reported[e.id] && !modelmeta.Normalize(e.raw).IsZero() {
 					raw, reported[e.id] = string(e.raw), true
@@ -525,7 +505,7 @@ func (s *Store) apply(ctx context.Context, rt *providers.Routing, jobs []*listJo
 					return err
 				}
 			}
-			if j.key != nil {
+			if j.mode == keyList {
 				evs, err := clearListedGaps(ctx, tx, rt, j, now)
 				if err != nil {
 					return err
@@ -575,10 +555,10 @@ func (s *Store) apply(ctx context.Context, rt *providers.Routing, jobs []*listJo
 }
 
 func keyIDOrEmpty(j *listJob) string {
-	if j.key == nil {
-		return ""
+	if k := j.listKey(); k != nil {
+		return k.ID
 	}
-	return j.key.ID
+	return ""
 }
 
 func firstError(jobs []*listJob) string {
@@ -594,15 +574,14 @@ func firstError(jobs []*listJob) string {
 	return ""
 }
 
-// clearListedGaps clears the Model Gaps of the list's key for the models
-// its list names: the Provider says the key can call them now.
 func clearListedGaps(ctx context.Context, tx *sql.Tx, rt *providers.Routing, j *listJob, now time.Time) ([]keystate.GapEvent, error) {
 	var out []keystate.GapEvent
+	k := j.listKey()
 	for _, e := range j.got {
-		if _, ok := j.key.ModelGaps[e.id]; !ok {
+		if _, ok := k.ModelGaps[e.id]; !ok {
 			continue
 		}
-		evs, err := keystate.ClearGaps(ctx, tx, keystate.Key{ID: j.key.ID, Name: j.key.Name, Provider: rt.Handle}, e.id,
+		evs, err := keystate.ClearGaps(ctx, tx, keystate.Key{ID: k.ID, Name: k.Name, Provider: rt.Handle}, e.id,
 			"The key's discovered model list names the model.", now, nil)
 		if err != nil {
 			return nil, err
@@ -612,10 +591,6 @@ func clearListedGaps(ctx context.Context, tx *sql.Tx, rt *providers.Routing, j *
 	return out, nil
 }
 
-// dropStaleLists deletes stored lists no refresh of the Provider's current
-// configuration reads: lists of Endpoints with discovery none, lists of the
-// other discovery mode, and per-key lists of keys now restricted to other
-// Endpoints. Lists of keys skipped for their Key State are kept.
 func dropStaleLists(ctx context.Context, tx *sql.Tx, rt *providers.Routing) error {
 	for i := range rt.Endpoints {
 		ep := &rt.Endpoints[i]
@@ -643,7 +618,6 @@ func dropStaleLists(ctx context.Context, tx *sql.Tx, rt *providers.Routing) erro
 	return nil
 }
 
-// discoveredSet is the set of models some stored list names.
 func discoveredSet(ctx context.Context, q querier, providerID string) (map[string]bool, error) {
 	rows, err := q.QueryContext(ctx, `SELECT DISTINCT model FROM provider_model_sources WHERE provider_id = ?`, providerID)
 	if err != nil {
@@ -661,7 +635,6 @@ func discoveredSet(ctx context.Context, q querier, providerID string) (map[strin
 	return out, rows.Err()
 }
 
-// diff lists the members of a missing from b, sorted.
 func diff(a, b map[string]bool) []string {
 	out := []string{}
 	for m := range a {
@@ -690,15 +663,12 @@ func (s *Store) saveSkipped(ctx context.Context, rt *providers.Routing, res Refr
 	return nil
 }
 
-// LastRefresh is the latest refresh of a Provider's model list.
 type LastRefresh struct {
 	At      time.Time `json:"at"`
 	Outcome string    `json:"outcome" enum:"ok,partial,failed,skipped"`
 	Summary string    `json:"summary"`
 }
 
-// LastRefreshOf reads the latest refresh of a Provider (nil: never refreshed).
-// The daily job (ticket 20) uses it to find Providers that are due.
 func (s *Store) LastRefreshOf(ctx context.Context, providerID string) (*LastRefresh, error) {
 	return lastRefresh(ctx, s.db, providerID)
 }
@@ -717,7 +687,6 @@ func lastRefresh(ctx context.Context, q querier, providerID string) (*LastRefres
 	return &r, nil
 }
 
-// ResetResult is the outcome of forgetting a Provider's discovered models.
 type ResetResult struct {
 	DryRun   bool     `json:"dry_run"`
 	Provider string   `json:"provider"`
@@ -725,9 +694,6 @@ type ResetResult struct {
 	Kept     int      `json:"kept" doc:"Entries kept because the Owner added or hid them."`
 }
 
-// Reset forgets every discovered list of a Provider. Entries the Owner
-// added or hid stay; the Provider, its Endpoints, keys and every Gateway Key
-// scope naming it are untouched. The next refresh discovers afresh.
 func (s *Store) Reset(ctx context.Context, provider string, dry bool) (ResetResult, error) {
 	rt, err := s.providers.ResolveRouting(ctx, provider)
 	if err != nil {

@@ -9,9 +9,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// UI ticket 30: one call edits many Upstream Keys; fields an item leaves out
-// stay as each key has them, one Audit Entry reverts the lot, and a key that
-// can't be changed fails alone and is named by its index.
 func TestManyUpstreamKeysAreEditedInOneRevertibleCall(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
@@ -30,8 +27,6 @@ func TestManyUpstreamKeysAreEditedInOneRevertibleCall(t *testing.T) {
 		return k
 	}
 
-	// Enable a and b; give a and c "asia" on top of what each has. c's
-	// enabled is left out, so it stays as it is.
 	var res audit.BulkResult[providers.UpstreamKey]
 	srv.Admin.Post(keys+"/bulk/update", map[string]any{"items": []any{
 		map[string]any{"key": "a", "enabled": true, "endpoints": []string{"eu", "asia"}},
@@ -59,14 +54,12 @@ func TestManyUpstreamKeysAreEditedInOneRevertibleCall(t *testing.T) {
 		t.Fatalf("c = %+v", c)
 	}
 
-	// One Audit Entry: its revert puts every key back as it was.
 	srv.Admin.Post("/api/audit-entries/"+res.AuditEntry+"/revert", nil).Expect(200)
 	a, b, c = read("a"), read("b"), read("c")
 	if !slices.Equal(a.Endpoints, []string{"eu"}) || b.Enabled || !slices.Equal(c.Endpoints, []string{"us"}) {
 		t.Fatalf("after revert a=%v b.enabled=%v c=%v", a.Endpoints, b.Enabled, c.Endpoints)
 	}
 
-	// An item must address a key, and the dry run writes nothing.
 	srv.Admin.Post(keys+"/bulk/update", map[string]any{"items": []any{map[string]any{"enabled": false}}}).Expect(200).JSON(&res)
 	if res.Failed != 1 {
 		t.Fatalf("no key = %+v", res)
@@ -75,13 +68,9 @@ func TestManyUpstreamKeysAreEditedInOneRevertibleCall(t *testing.T) {
 	if !res.DryRun || res.Items[0].Outcome != "updated" || !read("a").Enabled {
 		t.Fatalf("dry run = %+v", res)
 	}
-	// Names and secrets are not bulk-edited: unknown fields are refused.
 	srv.Admin.Post(keys+"/bulk/update", map[string]any{"items": []any{map[string]any{"key": "a", "secret": "sk-x"}}}).Expect(400)
 }
 
-// Review fix (batch 2): endpoints_add and endpoints_remove change each key's
-// Endpoints as the server holds them now, so a list changed after the UI
-// loaded its rows keeps that change.
 func TestBulkEndpointChangesApplyToEachKeysCurrentList(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
@@ -100,7 +89,6 @@ func TestBulkEndpointChangesApplyToEachKeysCurrentList(t *testing.T) {
 		return out
 	}
 
-	// The rows were loaded with a on eu alone; since then someone added us to it.
 	srv.Admin.Patch(keys+"/a", map[string]any{"endpoints": []string{"eu", "us"}}).Expect(200)
 
 	var res audit.BulkResult[providers.UpstreamKey]
@@ -112,12 +100,9 @@ func TestBulkEndpointChangesApplyToEachKeysCurrentList(t *testing.T) {
 	if res.Succeeded != 3 || res.AuditEntry == "" {
 		t.Fatalf("bulk update = %+v", res)
 	}
-	// a keeps us, the change made after the rows loaded; with asia it has every
-	// Endpoint, so it is no longer restricted.
 	if got := read("a"); len(got) != 0 {
 		t.Fatalf("a = %v, want every Endpoint (no restriction)", got)
 	}
-	// b had every Endpoint: taking asia off leaves eu and us.
 	if got := read("b"); !slices.Equal(got, []string{"eu", "us"}) {
 		t.Fatalf("b = %v", got)
 	}
@@ -125,14 +110,11 @@ func TestBulkEndpointChangesApplyToEachKeysCurrentList(t *testing.T) {
 		t.Fatalf("c = %v", got)
 	}
 
-	// Taking off every Endpoint a key has leaves it with none, which means every one.
 	srv.Admin.Post(keys+"/bulk/update", map[string]any{"items": []any{map[string]any{"key": "c", "endpoints_remove": []string{"eu", "us"}}}}).Expect(200).JSON(&res)
 	if res.Succeeded != 1 || len(read("c")) != 0 {
 		t.Fatalf("c emptied = %+v, %v", res, read("c"))
 	}
 
-	// endpoints replaces the list and can't be sent with a change to it; one
-	// Endpoint can't be both added and removed; an unknown one fails the item.
 	srv.Admin.Post(keys+"/bulk/update", map[string]any{"items": []any{
 		map[string]any{"key": "a", "endpoints": []string{"eu"}, "endpoints_add": []string{"us"}},
 		map[string]any{"key": "a", "endpoints_add": []string{"us"}, "endpoints_remove": []string{"us"}},

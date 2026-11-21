@@ -4,13 +4,8 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 )
 
-// OpenAI Responses: what the Gateway knows of the Shape beyond translation.
-
-// opResponses is the operation path of a Responses call.
 const opResponses = "/responses"
 
-// ResponsesRequest documents the body of the Responses routes. Iroha reads
-// only model and stream; on passthrough everything else is forwarded as sent.
 type ResponsesRequest struct {
 	Model  string `json:"model" doc:"The model, as the Provider names it (or as an Endpoint rename maps it)."`
 	Input  any    `json:"input" doc:"A string or a list of input items."`
@@ -26,11 +21,9 @@ const responsesDescription = "OpenAI Responses. Authenticate with \"Authorizatio
 	"Errors use the OpenAI envelope {\"error\":{\"message\",\"type\",\"code\",\"hint\",\"request_id\"}}. " +
 	"A stream with no upstream byte after 10 s is committed (200, keep-alive comments every 15 s of silence); failures after that arrive as an error event, then response.failed."
 
-// responsesStream: SSE comments keep the stream alive (the SDKs and Codex
-// skip them). A failure is the Responses error event, whose top-level error
-// object the OpenAI SDKs raise as an API error, then response.failed, which
-// clients reading only response.* events (Codex) report with its message.
-// No response.completed follows: the answer did not complete.
+// The OpenAI SDKs and Codex skip SSE comments. The OpenAI SDKs raise an event
+// whose data holds a top-level error object; Codex ignores an error event
+// whose code it does not know and reports response.failed with its message.
 type responsesStream struct{}
 
 func (responsesStream) keepAlive() []byte { return []byte(": keep-alive\n\n") }
@@ -48,9 +41,8 @@ func (responsesStream) errorEvent(e *api.Error, requestID string) []byte {
 	return append(out, "\n\n"...)
 }
 
-// echoResponsesEvent names the Caller's model in a passed-through Responses
-// stream event: only the response object of response.* lifecycle events
-// carries one.
+// In a Responses stream only the response object of response.* lifecycle
+// events names the model.
 func echoResponsesEvent(p []byte, model string) []byte {
 	r, ok := field(p, "response")
 	if !ok || len(r) == 0 || r[0] != '{' {

@@ -1,33 +1,7 @@
-// Package planner is candidate planning, the one deep module that decides
-// where a Request may go. Given the Request (Shape, model) and the routing
-// view of one or more Providers, it returns the ordered list of
-// (Provider, Endpoint, Upstream Key, wire model) to try. It does no I/O and
-// reads no clock; the only state it consults is the Rotation it is handed.
-//
-// Order: Providers in the order given (a Model Pool's members, each with its
-// own Provider.Model, in member order). Within a
-// Provider, Endpoints come in tiers (endpointTiers) and the first tier that
-// yields any candidate is the one used, so a later tier is reached only when
-// nothing in an earlier one can serve: first the Endpoints speaking the
-// Caller's Shape, then those speaking a Shape the Gateway translates it to
-// (Request.Translate). Within a tier, Upstream Keys are in the
-// conversation's order (Request.Affinity: rendezvous hashing, see
-// keyOrder) or, without one or on a Provider with affinity off,
-// round-robin, each key paired with every Endpoint of the tier it may use,
-// in configured order; then keys back from a cooling that ended
-// (Key.Recovering) move behind the others, and within each of those groups
-// keys whose discovered list names the wire model (Key.Carries) move ahead,
-// each group keeping that order.
-//
-// Excluded: disabled and invalid keys, keys cooling at Request.Now, keys
-// with a live Model Gap for the wire model of that Endpoint (ticket 08), keys
-// cooling for that wire model, keys restricted to other Endpoints (09), and
-// keys with an Endpoint Gap on that Endpoint (40). Each exclusion is reported
-// as a Skip. Later tickets add exclusions and key
-// tiers (known carriers first) here, and nowhere else.
 package planner
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -40,40 +14,30 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Request is what planning needs to know about a Request.
 type Request struct {
-	Shape shape.Shape // the Caller's Shape
-	Model string      // the model as the Caller named it, without any Provider handle
-	Now   time.Time   // the time Key States are judged at
-	// Translate lists the other Shapes the Gateway can translate the
-	// Caller's Shape to; Endpoints speaking them form the second tier.
+	Shape     shape.Shape
+	Model     string // the model as the Caller named it, without any Provider handle
+	Now       time.Time
 	Translate []shape.Shape
-	// Affinity is the conversation the Request belongs to, scoped to its
-	// Caller (affinity.Conversation.ID after For): each Provider's keys are
-	// ranked for it, so its turns land on one key. "" keeps round-robin.
+	// Affinity is the Caller-scoped conversation ID (affinity.Conversation.ID
+	// after For); "" keeps round-robin.
 	Affinity string
 }
 
-// Provider is the routing view of one Provider.
 type Provider struct {
 	ID        string
 	Handle    string
 	Endpoints []Endpoint
 	Keys      []Key
-	// Model is the model on this Provider when it is not Request.Model: a
-	// Pool member's own model. Empty means Request.Model.
+	// Model is a Pool member's own model; empty means Request.Model.
 	Model string
 	// Budget overrides; zero means the Gateway's default.
 	MaxAttempts int
 	FirstByte   time.Duration
-	// AffinityOff keeps round-robin on this Provider even for Requests that
-	// belong to a conversation (the Provider's affinity setting).
 	AffinityOff bool
 }
 
-// AffinityKey is the value p's keys are ranked by for req: the
-// conversation scoped to p and the model asked of it; "" when keys
-// round-robin (no conversation, or affinity off on p).
+// AffinityKey is "" when p's keys round-robin for req.
 func (p *Provider) AffinityKey(req Request) string {
 	if p.AffinityOff {
 		return ""
@@ -89,28 +53,19 @@ func (p *Provider) ModelFor(req Request) string {
 	return req.Model
 }
 
-// Endpoint is one URL of a Provider.
 type Endpoint struct {
-	ID    string
-	Name  string
-	URL   string // base URL including the version path
-	Shape shape.Shape
-	// AuthStyle is how the Upstream Key is sent: AuthBearer (also when
-	// empty), AuthXAPIKey, AuthHeader, AuthQuery or AuthNone; AuthParam
-	// names the header or query parameter for AuthHeader and AuthQuery.
+	ID            string
+	Name          string
+	URL           string // base URL including the version path
+	Shape         shape.Shape
 	AuthStyle     AuthStyle
-	AuthParam     string
+	AuthParam     string // the header or query parameter for AuthHeader and AuthQuery
 	StaticHeaders map[string]string
 	// Renames maps a Caller-facing model name to the name this URL uses.
 	Renames map[string]string
-	// Caching is the Owner's prompt caching settings for requests
-	// translated to this URL (caching.For reads them).
 	Caching caching.Settings
 }
 
-// WireModel is the model name this Endpoint uses for the Caller's model:
-// the rename applied after the Endpoint is chosen, so each Attempt sends
-// its own Endpoint's name.
 func (e *Endpoint) WireModel(model string) string {
 	if w, ok := e.Renames[model]; ok && w != "" {
 		return w
@@ -118,12 +73,10 @@ func (e *Endpoint) WireModel(model string) string {
 	return model
 }
 
-// Key is one Upstream Key with its Key State. An empty Secret sends no auth
-// at all.
 type Key struct {
 	ID       string
 	Name     string
-	Secret   string
+	Secret   string // empty sends no auth at all
 	Disabled bool
 	Invalid  bool
 	// Endpoints restricts the key to these Endpoint IDs; empty means every
@@ -139,77 +92,61 @@ type Key struct {
 	// expires, which may be past.
 	ModelGaps map[string]time.Time
 	// Carries holds the wire models this key's own discovered model list
-	// names (per-key discovery, ticket 10). Within a tier, carriers of the
-	// wire model go first; a list never excludes a key.
-	Carries map[string]bool
-	// EndpointGaps holds the Endpoint IDs the key has an Endpoint Gap on
-	// (ticket 40): it is not sent there, and serves its other Endpoints.
+	// names.
+	Carries      map[string]bool
 	EndpointGaps map[string]bool
 	// WorkedOn maps Endpoint IDs to the latest time the key worked there (a
-	// 2xx Attempt or a passing key test), so the Gateway writes it at most
-	// once a minute.
+	// 2xx Attempt or a passing key test).
 	WorkedOn map[string]time.Time
 }
 
-// Allows reports whether the key may be sent to Endpoint id.
 func (k *Key) Allows(id string) bool {
 	return len(k.Endpoints) == 0 || slices.Contains(k.Endpoints, id)
 }
 
-// Keyless reports whether an Attempt with this key on e sends no credential.
 func (k *Key) Keyless(e *Endpoint) bool { return k.Secret == "" || e.AuthStyle == AuthNone }
 
-// Recovering reports whether a success with this key on model has a
-// cooling to clear.
 func (k *Key) Recovering(model string) bool {
 	_, ok := k.ModelCooling[model]
 	return ok || !k.CoolingUntil.IsZero()
 }
 
-// Candidate is one Attempt Iroha may make.
 type Candidate struct {
 	Provider  *Provider
 	Endpoint  *Endpoint
 	Key       *Key
-	WireModel string // the model name sent on this Endpoint
+	WireModel string
 }
 
-// EmptyCode says why a plan is empty.
 type EmptyCode string
 
-// Reasons a plan is empty. All but Cooling mean nothing can serve the
-// Request until the Owner changes something.
 const (
-	NoEndpoint    EmptyCode = "no_endpoint"     // no Endpoint speaks the Caller's Shape
-	NoUpstreamKey EmptyCode = "no_upstream_key" // the Provider holds no Upstream Keys
-	NoUsableKey   EmptyCode = "no_usable_key"   // every Upstream Key is disabled, invalid, restricted to other Endpoints or has an Endpoint Gap on them
-	Cooling       EmptyCode = "cooling"         // every usable key is cooling; Empty.Until says until when
-	ModelGap      EmptyCode = "model_gap"       // every usable key has a Model Gap for the model; Empty.Until is the first expiry
+	NoEndpoint    EmptyCode = "no_endpoint"
+	NoUpstreamKey EmptyCode = "no_upstream_key"
+	NoUsableKey   EmptyCode = "no_usable_key"
+	Cooling       EmptyCode = "cooling"   // Empty.Until says until when
+	ModelGap      EmptyCode = "model_gap" // Empty.Until is the first expiry
 )
 
-// SkipReason says why a key was left out of a plan.
 type SkipReason string
 
-// Reasons a key is skipped.
 const (
 	SkipDisabled     SkipReason = "disabled"
 	SkipInvalid      SkipReason = "invalid"
 	SkipCooling      SkipReason = "cooling"
 	SkipCoolingModel SkipReason = "cooling_model"
 	SkipModelGap     SkipReason = "model_gap"
-	SkipRestricted   SkipReason = "restricted"   // restricted to Endpoints outside the tier that served (or to none that could)
-	SkipEndpointGap  SkipReason = "endpoint_gap" // refused on this Endpoint after working on another (Skip.Endpoint)
+	SkipRestricted   SkipReason = "restricted"
+	SkipEndpointGap  SkipReason = "endpoint_gap"
 )
 
-// Empty explains why nothing can serve the Request.
 type Empty struct {
 	Code     EmptyCode
 	Message  string
-	Until    time.Time // Cooling: when the first key is usable again
-	Provider string    // handle of the Provider the explanation is about
+	Until    time.Time
+	Provider string // handle of the Provider the explanation is about
 }
 
-// Skip is a key left out of the plan, and why.
 type Skip struct {
 	Provider *Provider
 	Key      *Key
@@ -219,20 +156,18 @@ type Skip struct {
 	Until    time.Time // cooling end, or when the Model Gap expires
 }
 
-// Result is the plan: Candidates in the order to try, or why there is none.
 type Result struct {
 	Candidates []Candidate
-	Skipped    []Skip // keys left out, once per key and reason
+	Skipped    []Skip // once per key and reason
 	Empty      *Empty // set when Candidates is empty
 }
 
-// Rotation gives the round-robin starting point of a group of keys. Next
-// returns a counter that grows by one per call for the same group.
+// Rotation.Next must return a counter that grows by one per call for the
+// same group.
 type Rotation interface {
 	Next(group string) uint64
 }
 
-// Plan orders the candidates for req across providers.
 func Plan(req Request, providers []Provider, rot Rotation) Result {
 	var out []Candidate
 	var skipped []Skip
@@ -253,20 +188,9 @@ func Plan(req Request, providers []Provider, rot Rotation) Result {
 			}
 			continue
 		}
-		order := keyOrder(p, req, rot)
-		var pSkips []Skip
-		for _, eps := range tiers {
-			cands, skips := planTier(req, p, eps, order)
-			if len(cands) > 0 {
-				out = append(out, cands...)
-				pSkips = skips // only the serving tier's skips explain the plan
-				break
-			}
-			for _, s := range skips {
-				pSkips = addSkip(pSkips, s)
-			}
-		}
-		for _, s := range pSkips {
+		served := firstServingTier(req, p, tiers, keyOrder(p, req, rot))
+		out = append(out, served.candidates...)
+		for _, s := range served.skipped {
 			skipped = addSkip(skipped, s)
 		}
 	}
@@ -274,10 +198,7 @@ func Plan(req Request, providers []Provider, rot Rotation) Result {
 		return Result{Candidates: out, Skipped: skipped}
 	}
 	if len(skipped) > 0 {
-		// Cooling (servable soon) beats a never-servable reason of another Provider.
-		if e := emptyFromSkips(skipped); empty == nil || e.Code == Cooling {
-			empty = e
-		}
+		empty = preferCooling(empty, emptyFromSkips(skipped))
 	}
 	if empty == nil {
 		empty = &Empty{Code: NoEndpoint, Message: "No Provider was given to plan for."}
@@ -285,11 +206,32 @@ func Plan(req Request, providers []Provider, rot Rotation) Result {
 	return Result{Skipped: skipped, Empty: empty}
 }
 
-// endpointTiers groups p's Endpoints in the order they are tried; Plan uses
-// the first tier that yields a candidate. The first tier speaks the Caller's
-// Shape (passthrough); the second speaks a Shape in req.Translate, which
-// gives "translate only when no same-Shape Endpoint has a candidate"
-// (restricted, cooling and disabled keys included).
+type tierResult struct {
+	candidates []Candidate
+	skipped    []Skip
+}
+
+func firstServingTier(req Request, p *Provider, tiers [][]*Endpoint, order []int) tierResult {
+	var unserved []Skip
+	for _, eps := range tiers {
+		t := planTier(req, p, eps, order)
+		if len(t.candidates) > 0 {
+			return t
+		}
+		for _, s := range t.skipped {
+			unserved = addSkip(unserved, s)
+		}
+	}
+	return tierResult{skipped: unserved}
+}
+
+func preferCooling(first, fromSkips *Empty) *Empty {
+	if first == nil || fromSkips.Code == Cooling {
+		return fromSkips
+	}
+	return first
+}
+
 func endpointTiers(p *Provider, req Request) [][]*Endpoint {
 	var same, other []*Endpoint
 	for ei := range p.Endpoints {
@@ -316,48 +258,40 @@ func noEndpoint(p *Provider, req Request) string {
 	return fmt.Sprintf("Provider %s has no Endpoint speaking %s or a Shape Iroha translates it to.", p.Handle, req.Shape)
 }
 
-// keyOrder is the order p's keys are taken in, as indexes into p.Keys.
-//
-// For a conversation (p.AffinityKey) it is rendezvous (highest random
-// weight) hashing: each key scores hash(affinity key, key ID) and keys go in
-// descending score. Nothing is stored and every Request of the conversation
-// gets the same order; a key that drops out (cooling, invalid, disabled,
-// removed) moves only the conversations it led, each to its own next key,
-// and they come back when it is usable again. Over many conversations each
-// key leads about 1/n of them, as round-robin spreads Requests.
-//
-// Without one, round-robin from the Rotation's counter for p.
 func keyOrder(p *Provider, req Request, rot Rotation) []int {
-	n := len(p.Keys)
-	order := make([]int, n)
 	if ak := p.AffinityKey(req); ak != "" {
-		scores := make([]uint64, n)
-		for i := range p.Keys {
-			order[i] = i
-			sum := sha256.Sum256([]byte(ak + "/" + p.Keys[i].ID))
-			scores[i] = binary.BigEndian.Uint64(sum[:8])
-		}
-		slices.SortStableFunc(order, func(a, b int) int {
-			switch {
-			case scores[a] > scores[b]:
-				return -1
-			case scores[a] < scores[b]:
-				return 1
-			}
-			return a - b
-		})
-		return order
+		return rendezvousOrder(ak, p.Keys)
 	}
-	start := int(rot.Next(p.ID) % uint64(n))
+	return roundRobinOrder(rot.Next(p.ID), len(p.Keys))
+}
+
+func rendezvousOrder(affinityKey string, keys []Key) []int {
+	order := make([]int, len(keys))
+	scores := make([]uint64, len(keys))
+	for i := range keys {
+		order[i] = i
+		sum := sha256.Sum256([]byte(affinityKey + "/" + keys[i].ID))
+		scores[i] = binary.BigEndian.Uint64(sum[:8])
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		if c := cmp.Compare(scores[b], scores[a]); c != 0 {
+			return c
+		}
+		return a - b
+	})
+	return order
+}
+
+func roundRobinOrder(turn uint64, n int) []int {
+	order := make([]int, n)
+	start := int(turn % uint64(n))
 	for i := range n {
 		order[i] = (start + i) % n
 	}
 	return order
 }
 
-// planTier pairs p's keys, in order, with the Endpoints of one tier each key
-// may use.
-func planTier(req Request, p *Provider, eps []*Endpoint, order []int) ([]Candidate, []Skip) {
+func planTier(req Request, p *Provider, eps []*Endpoint, order []int) tierResult {
 	var out []Candidate
 	var skipped []Skip
 	for _, i := range order {
@@ -380,24 +314,24 @@ func planTier(req Request, p *Provider, eps []*Endpoint, order []int) ([]Candida
 			skipped = addSkip(skipped, Skip{Provider: p, Key: k, Reason: SkipRestricted})
 		}
 	}
-	// Healthy keys before keys back from a cooling (FAIL-104), then known
-	// carriers first within each, keeping the key order (the conversation's,
-	// or round-robin) within each group. A cooling that ended with no success since (Key.Recovering: the
-	// key's own past cooling or one for this wire model) is likely still
-	// spent: after a 15 min billing cooling, dozens of such keys must not use
-	// up the budget while a key with no recent refusal waits. Both are
-	// orderings: every usable key stays in the plan.
 	slices.SortStableFunc(out, func(a, b Candidate) int {
-		if c := cmpTrue(!a.Key.Recovering(a.WireModel), !b.Key.Recovering(b.WireModel)); c != 0 {
+		if c := recoveringLast(a, b); c != 0 {
 			return c
 		}
-		return cmpTrue(a.Key.Carries[a.WireModel], b.Key.Carries[b.WireModel])
+		return carriersFirst(a, b)
 	})
-	return out, skipped
+	return tierResult{candidates: out, skipped: skipped}
 }
 
-// cmpTrue orders true before false.
-func cmpTrue(a, b bool) int {
+func recoveringLast(a, b Candidate) int {
+	return trueFirst(!a.Key.Recovering(a.WireModel), !b.Key.Recovering(b.WireModel))
+}
+
+func carriersFirst(a, b Candidate) int {
+	return trueFirst(a.Key.Carries[a.WireModel], b.Key.Carries[b.WireModel])
+}
+
+func trueFirst(a, b bool) int {
 	switch {
 	case a && !b:
 		return -1
@@ -407,7 +341,6 @@ func cmpTrue(a, b bool) int {
 	return 0
 }
 
-// skip says why key k cannot serve wire model wm on ep at now, or nil.
 func skip(k *Key, ep *Endpoint, wm string, now time.Time) *Skip {
 	switch {
 	case k.Disabled:
@@ -437,9 +370,6 @@ func addSkip(list []Skip, s Skip) []Skip {
 	return append(list, s)
 }
 
-// emptyFromSkips explains a plan whose every key was skipped: cooling until
-// the earliest end when any key is cooling, else a Model Gap when any key has
-// one, else nothing usable.
 func emptyFromSkips(skipped []Skip) *Empty {
 	var until, gapUntil time.Time
 	var handle, gapHandle, gapModel string
@@ -477,16 +407,13 @@ func emptyFromSkips(skipped []Skip) *Empty {
 	return &Empty{Code: NoUsableKey, Message: fmt.Sprintf("Every Upstream Key of %s is %s.", skipped[0].Provider.Handle, what), Provider: skipped[0].Provider.Handle}
 }
 
-// Counter is the in-memory Rotation of live traffic. It resets on restart.
 type Counter struct {
 	mu sync.Mutex
 	n  map[string]uint64
 }
 
-// NewCounter returns an empty Counter.
 func NewCounter() *Counter { return &Counter{n: map[string]uint64{}} }
 
-// Next returns the group's counter and advances it.
 func (c *Counter) Next(group string) uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -496,8 +423,7 @@ func (c *Counter) Next(group string) uint64 {
 }
 
 // Peek is a Rotation answering what c would answer next without advancing
-// it: a route preview shows the order the next Request would get, and
-// planning without sending never moves live traffic's rotation.
+// it.
 func (c *Counter) Peek() Rotation { return peek{c} }
 
 type peek struct{ c *Counter }
@@ -508,9 +434,6 @@ func (p peek) Next(group string) uint64 {
 	return p.c.n[group]
 }
 
-// Fixed is a Rotation that always answers the same value, for tests and
-// previews that want the configured order.
 type Fixed uint64
 
-// Next returns f.
 func (f Fixed) Next(string) uint64 { return uint64(f) }

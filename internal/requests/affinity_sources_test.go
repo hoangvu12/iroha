@@ -10,9 +10,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// The affinity sources the API documents and filters on are affinity's
-// own list: a new source is accepted by affinity_source and described in
-// the OpenAPI enum without a second list to keep in step.
 func TestAffinitySourcesAreAffinitysList(t *testing.T) {
 	var want []string
 	for _, s := range affinity.Sources {

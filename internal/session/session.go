@@ -30,10 +30,8 @@ const Lifetime = 30 * 24 * time.Hour
 // OwnerName is the actor name of every Owner session in Audit Entries.
 const OwnerName = "Owner"
 
-// secretPrefix starts every session secret.
 const secretPrefix = "iroha_session"
 
-// Log event kinds.
 var (
 	KindLogin       = logs.NewKind("owner.login", "The Owner signed in; names the new session.")
 	KindLoginFailed = logs.NewKind("owner.login_failed", "A sign-in with a wrong Owner password, or one refused because of too many recent failures.")
@@ -61,7 +59,6 @@ type Store struct {
 	limit limiter
 }
 
-// New returns a Store.
 func New(db *store.DB, log *slog.Logger) *Store {
 	return &Store{db: db, clock: db.Clock(), log: log}
 }
@@ -92,24 +89,19 @@ func sessionByID(ctx context.Context, q audit.Querier, id string, now time.Time)
 	return scanSession(q.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM owner_sessions WHERE id = ?`, id), now)
 }
 
-// PasswordSet reports whether the Owner has set a password. Other packages
-// use it to decide whether the Owner can still get in (the last Admin Token
-// guard).
+// PasswordSet reports whether the Owner has set a password.
 func PasswordSet(ctx context.Context, q audit.Querier) (bool, error) {
 	var n int
 	err := q.QueryRowContext(ctx, `SELECT count(*) FROM owner_password`).Scan(&n)
 	return n > 0, err
 }
 
-// passwordHash returns the stored hash; sql.ErrNoRows when none is set.
 func passwordHash(ctx context.Context, q audit.Querier) (string, error) {
 	var hash string
 	err := q.QueryRowContext(ctx, `SELECT hash FROM owner_password WHERE id = 'owner'`).Scan(&hash)
 	return hash, err
 }
 
-// fromCookie returns the session whose secret the request's cookie holds,
-// with sql.ErrNoRows when there is no cookie or no such session.
 func (s *Store) fromCookie(r *http.Request) (OwnerSession, error) {
 	c, err := r.Cookie(CookieName)
 	if err != nil || c.Value == "" {
@@ -187,7 +179,6 @@ func (l *limiter) prune(now time.Time) {
 	l.fails = l.fails[i:]
 }
 
-// blocked returns how long sign-in stays refused, or 0.
 func (l *limiter) blocked(now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -10,7 +10,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/api"
 )
 
-// Lookups find what to draw for a record the UI names.
 type Lookups struct {
 	// ProviderDomain is the logo domain of the Provider addressed by handle
 	// or ID ("" when it has none); an *api.Error when there is no Provider.
@@ -21,8 +20,6 @@ type Lookups struct {
 	PoolMaker func(ctx context.Context, ref string) (string, error)
 }
 
-// Routes serves logos: a Provider's, a Pool's, and any domain's or maker's
-// (to preview a change before saving it).
 func Routes(s *Service, l Lookups) []api.Route {
 	const desc = "Answers the image (PNG, ICO, SVG...) fetched by Iroha and cached for a day, or 404 logo_unavailable when there is none; draw the first letter of the name then. Iroha serves every logo itself, so the browser never loads a third-party image."
 	return []api.Route{
@@ -38,7 +35,7 @@ func Routes(s *Service, l Lookups) []api.Route {
 					return
 				}
 				img, err := s.Domain(r.Context(), d)
-				serve(w, r, img, err, "Provider "+r.PathValue("provider"), recordLogo)
+				serve(w, r, img, err, "Provider "+r.PathValue("provider"), revalidateStableURL)
 			}),
 		},
 		{
@@ -53,7 +50,7 @@ func Routes(s *Service, l Lookups) []api.Route {
 					return
 				}
 				img, err := s.Pool(r.Context(), m)
-				serve(w, r, img, err, "Model Pool "+r.PathValue("pool"), recordLogo)
+				serve(w, r, img, err, "Model Pool "+r.PathValue("pool"), revalidateStableURL)
 			}),
 		},
 		{
@@ -75,7 +72,7 @@ func Routes(s *Service, l Lookups) []api.Route {
 						return
 					}
 					img, err := s.Domain(r.Context(), d)
-					serve(w, r, img, err, d, previewLogo)
+					serve(w, r, img, err, d, cacheSourceInURL)
 				case q.Get("maker") != "":
 					m, err := ReadPoolLogo(q.Get("maker"))
 					if err != nil {
@@ -83,7 +80,7 @@ func Routes(s *Service, l Lookups) []api.Route {
 						return
 					}
 					img, err := s.Pool(r.Context(), m)
-					serve(w, r, img, err, m, previewLogo)
+					serve(w, r, img, err, m, cacheSourceInURL)
 				default:
 					api.WriteError(w, api.BadRequest("Pass domain=<site> or maker=<maker ID>.", "Name a domain or a maker."))
 				}
@@ -92,7 +89,6 @@ func Routes(s *Service, l Lookups) []api.Route {
 	}
 }
 
-// PoolLogoError is the 400 for a Pool logo value ReadPoolLogo refused.
 func PoolLogoError(value string, err error) *api.Error {
 	v := strings.TrimSpace(value)
 	if errors.Is(err, ErrBadDomain) {
@@ -101,16 +97,11 @@ func PoolLogoError(value string, err error) *api.Error {
 	return api.BadRequest("Use a maker ID such as anthropic, openai or zhipuai (letters, digits, '_', '-'), a website such as chatgpt.com, or \"\" to guess it.", "%q is not a maker ID.", v)
 }
 
-// How long a browser may keep a logo (UI ticket 32).
 type cachePolicy struct{ hit, miss string }
 
 var (
-	// A record's logo URL stays the same when its logo domain or maker
-	// changes, so the browser asks again on every use; the ETag makes an
-	// unchanged logo a 304.
-	recordLogo = cachePolicy{hit: "private, no-cache", miss: "private, no-cache"}
-	// A preview's URL names the domain or maker itself.
-	previewLogo = cachePolicy{hit: "private, max-age=3600", miss: "private, max-age=60"}
+	revalidateStableURL = cachePolicy{hit: "private, no-cache", miss: "private, no-cache"}
+	cacheSourceInURL    = cachePolicy{hit: "private, max-age=3600", miss: "private, max-age=60"}
 )
 
 func serve(w http.ResponseWriter, r *http.Request, img *Image, err error, what string, cache cachePolicy) {

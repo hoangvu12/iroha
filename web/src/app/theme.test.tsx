@@ -3,10 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { ThemeProvider, useTheme } from "./theme";
 
-// The theme flips colours in one step: while the .dark class changes, every
-// transition is off (architecture.md "UI motion system": theme switching), so
-// hover-coloured parts don't fade 150 ms behind the rest of the page.
-
 function Picker() {
   const { setPref } = useTheme();
   return (
@@ -23,7 +19,6 @@ const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r(undefin
 beforeEach(() => {
   localStorage.clear();
   html.className = "";
-  // index.html's two theme-color tags (light and dark schemes).
   for (const media of ["(prefers-color-scheme: light)", "(prefers-color-scheme: dark)"]) {
     const meta = Object.assign(document.createElement("meta"), { name: "theme-color", content: "#ffffff" });
     meta.media = media;
@@ -46,8 +41,6 @@ test("switching the theme turns transitions off for the flip and back on after t
   await nextFrame();
   expect(html.classList.contains("theme-switching")).toBe(false);
 
-  // Each class change, as the class list before it; the one that adds .dark
-  // must already have transitions off.
   const before: string[] = [];
   const observer = new MutationObserver((records) => before.push(...records.map((r) => r.oldValue ?? "")));
   observer.observe(html, { attributes: true, attributeFilter: ["class"], attributeOldValue: true });

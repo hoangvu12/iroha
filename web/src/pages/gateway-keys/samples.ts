@@ -1,8 +1,5 @@
 import type { GatewayKey } from "./api";
 
-// What the Gateway Keys pages' skeletons are measured from before any data
-// has loaded (ui/Skeleton.tsx): typical lengths, never shown as text.
-
 const at = "2026-11-19T09:41:07.000Z";
 
 const sampleKey = (name: string, i: number): GatewayKey => ({

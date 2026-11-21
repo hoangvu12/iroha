@@ -13,15 +13,12 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// How far back a dry run replays, and how many failed Attempts at most.
 const (
 	ReplayWindow = 7 * 24 * time.Hour
 	ReplayLimit  = 1000
 	replayShown  = 20
 )
 
-// Replay is what a rule change would have decided on recent failed
-// Attempts, compared with the rules in force.
 type Replay struct {
 	Since    time.Time         `json:"since" doc:"Start of the window replayed (7 days back)."`
 	Attempts int               `json:"attempts" doc:"Failed Attempts replayed: the most recent ones in the window, at most 1000."`
@@ -30,20 +27,17 @@ type Replay struct {
 	Examples []ReplayedAttempt `json:"examples" doc:"Up to 20 Attempts whose decision would change, newest first."`
 }
 
-// ReplayRule counts one rule's matches in a replay.
 type ReplayRule struct {
 	Rule  string `json:"rule" doc:"Rule name; empty for Attempts no rule matches (5xx and network then retry elsewhere, anything else fails the Request)."`
 	Now   int    `json:"now" doc:"Attempts it matches under the rules in force."`
 	After int    `json:"after" doc:"Attempts it would match after the change."`
 }
 
-// ReplayDecision is a rule and its outcome.
 type ReplayDecision struct {
 	Rule    string        `json:"rule"`
 	Outcome rules.Outcome `json:"outcome"`
 }
 
-// ReplayedAttempt is one failed Attempt whose decision would change.
 type ReplayedAttempt struct {
 	RequestID   string         `json:"request_id" doc:"Read it whole with GET /api/requests/{request}."`
 	Seq         int            `json:"seq"`
@@ -57,7 +51,6 @@ type ReplayedAttempt struct {
 	After       ReplayDecision `json:"after" doc:"What the rules would decide after the change."`
 }
 
-// replay classifies the recent failed Attempts with both sets.
 func replay(ctx context.Context, q queryer, now, after *rules.Set, at time.Time) (*Replay, error) {
 	since := at.Add(-ReplayWindow)
 	rows, err := q.QueryContext(ctx, `SELECT request_id, seq, started_at, provider_handle, endpoint_url, upstream_key_name, wire_model,

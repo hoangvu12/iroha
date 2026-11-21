@@ -19,30 +19,19 @@ import type { ModelChoice, Reasoning, Settings, Shape } from "./api";
 import { bareModel, preferOf, providerOf, SHAPES, shapeLabel, useModelChoices } from "./api";
 import { recentModels } from "./store";
 
-// The composer's model button (C16, C27): the model, then Provider,
-// Upstream Key, Endpoint, Shape, Send as and Reasoning (test tools are the
-// composer's wrench, tools.tsx).
-// Each row opens its own list in the same popover; the model list searches
-// on the server (GET /api/test/models), the picked model's Provider first
-// (else Pools first), and takes typed IDs.
-
 export type View = "main" | "models" | "keys" | "endpoints" | "shapes" | "as";
 
-/** Opens the picker from its triggers and from code, at a given view. */
 export const createPickerController = () => createPopoverController<View>();
 export type PickerController = ReturnType<typeof createPickerController>;
 export const PickerTrigger = PopoverTrigger;
 
-// Stands for "no pin" in lists whose values are names.
-const ANY = "*any";
+const NO_PIN = "*any";
 
-/** A model's logo: square for a Pool, round for a Provider's model. */
 export function ModelTile({ model, size = 20 }: { model: string; size?: number }) {
   const p = providerOf(model);
   return p ? <ProviderTile handle={p} size={size} /> : <PoolTile name={model} size={size} />;
 }
 
-/** The popover above the composer, lined up with `anchor` (the composer column). */
 export function PickerPopover({
   controller,
   anchor,
@@ -54,7 +43,6 @@ export function PickerPopover({
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
 }) {
-  // Escape in a list goes back to the settings; on the settings it closes.
   const back = useRef<() => boolean>(() => false);
   const [opening, setOpening] = useState(0);
   return (
@@ -75,8 +63,6 @@ export function PickerPopover({
         initialFocus="[data-autofocus]"
         className={cn(
           "flex w-(--anchor-width) max-h-[min(640px,calc(100dvh-160px),var(--available-height))] flex-col overflow-hidden rounded-xl border border-border bg-elevated text-fg shadow-elevated outline-none",
-          // The shared popup recipe: grows from the composer, leaves faster; fades only under reduced motion.
-          // Its own surface (wider radius, no padding), so the recipe without popupClass's surface.
           popupMotionClass,
         )}
       >
@@ -115,7 +101,6 @@ function Picker({
     return true;
   };
 
-  // The view that took the old one's place takes focus, so it stays inside.
   useLayoutEffect(() => {
     root.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
   }, [view]);
@@ -225,7 +210,6 @@ function Main({ settings, onChange, open }: { settings: Settings; onChange: (p: 
   );
 }
 
-/** A setting and its value ("Shape OpenAI Chat Completions", its name too); pressing it opens the setting's list. `children` draws the value when it is more than text. */
 function Row({ label, value, children, onClick, disabled }: { label: string; value: string; children?: ReactNode; onClick: () => void; disabled?: boolean }) {
   return (
     <SdkButton
@@ -257,7 +241,6 @@ const optionClass =
 const searchClass = "h-8 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-fg-subtle md:text-[14.5px]";
 const noteClass = "shrink-0 border-t border-border px-4 py-2 text-[12.5px] text-fg-muted";
 
-// A short list: arrows move, Enter or a press picks.
 function Choices({
   title,
   value,
@@ -275,7 +258,7 @@ function Choices({
   note?: string;
   loading?: string;
 }) {
-  const current = value ?? ANY;
+  const current = value ?? NO_PIN;
   const focus = items.some((it) => it.value === current) ? current : items[0]?.value;
   return (
     <>
@@ -285,7 +268,7 @@ function Choices({
           aria-label={title}
           activation="manual"
           value={current}
-          onValueChange={(v) => v !== null && onPick(v === ANY ? undefined : v)}
+          onValueChange={(v) => v !== null && onPick(v === NO_PIN ? undefined : v)}
           className="p-1.5 outline-none"
         >
           {items.map((it) => (
@@ -306,8 +289,6 @@ function Choices({
 
 const SAMPLE_ROWS = ["team-1", "team-2", "team-3", "team-4"];
 
-// While a list's options load: rows shaped like them, drawn as a skeleton
-// under the list (outside it, so they never join its keyboard navigation).
 function LoadingRows({ label }: { label: string }) {
   return (
     <Skeleton data={undefined} sample={SAMPLE_ROWS} label={label}>
@@ -328,13 +309,13 @@ function LoadingRows({ label }: { label: string }) {
 function KeyList({ handle, value, onPick, onBack }: { handle: string; value?: string; onPick: (k?: string) => void; onBack: () => void }) {
   const keys = useKeys(handle);
   return (
-    <Command filter="contains" loop={false} onAction={(v) => onPick(v === ANY ? undefined : v)} className="flex min-h-0 flex-1 flex-col">
+    <Command filter="contains" loop={false} onAction={(v) => onPick(v === NO_PIN ? undefined : v)} className="flex min-h-0 flex-1 flex-col">
       <Header onBack={onBack}>
         <CommandInput data-autofocus aria-label={`Search keys of ${handle}`} placeholder={`Keys of ${handle}`} className={searchClass} />
       </Header>
       <ScrollArea className="min-h-0 flex-1">
         <CommandList className="p-1.5">
-          <CommandItem value={ANY} label="Any active key" className={optionClass}>
+          <CommandItem value={NO_PIN} label="Any active key" className={optionClass}>
             <span className="flex-1">Any active key</span>
             {!value && <Check size={16} aria-hidden className="shrink-0 text-info" />}
           </CommandItem>
@@ -364,7 +345,7 @@ function EndpointList({ handle, value, onPick, onBack }: { handle: string; value
       onPick={onPick}
       loading={p.isPending ? "Loading endpoints" : undefined}
       items={[
-        { value: ANY, label: "Any" },
+        { value: NO_PIN, label: "Any" },
         ...(p.data?.endpoints ?? []).map((e) => ({
           value: e.name,
           label: (
@@ -391,7 +372,7 @@ function AsList({ value, onPick, onBack }: { value?: string; onPick: (k?: string
       note="Uses that key's access. Shows in Requests as Test (as name), never as its traffic."
       items={[
         {
-          value: ANY,
+          value: NO_PIN,
           label: (
             <>
               <span className="flex-1">Owner</span>
@@ -413,7 +394,6 @@ function AsList({ value, onPick, onBack }: { value?: string; onPick: (k?: string
   );
 }
 
-/** "1M", "256K", "131K". */
 function contextText(n?: number): string {
   if (!n) return "";
   if (n >= 1_000_000) return `${Math.round(n / 100_000) / 10}M`.replace(".0M", "M");
@@ -437,7 +417,6 @@ function ModelList({ settings, initialQuery, onPick, onBack }: { settings: Setti
   const [q, setQ] = useState(initialQuery);
   const [filter, setFilter] = useState<Filter>("all");
   const dq = useDebounced(q.trim(), 150);
-  // The picked model's Provider (or Pool) comes first; it was set by where Test was pressed.
   const prefer = preferOf(settings.model);
   const preferred = providerOf(settings.model);
   const res = useModelChoices(dq, settings.as, prefer);
@@ -472,7 +451,6 @@ function ModelList({ settings, initialQuery, onPick, onBack }: { settings: Setti
   const shown = groups.reduce((n, g) => n + g.items.length, 0);
   const exact = groups.some((g) => g.items.some((c) => c.id === typed));
   const offerTyped = !!typed && !/\s/.test(typed) && (typed.includes("/") ? /^[^/]+\/.+/.test(typed) : true) && !exact;
-  // Results for an older search stay until the new ones land; Enter waits for them.
   const settled = dq === typed && !res.isPlaceholderData;
 
   const option = (c: ModelChoice, label: ReactNode) => (

@@ -2,9 +2,6 @@ import type { OwnerSession } from "@/api/session";
 import type { AuditEntry } from "@/api/types";
 import type { AdminToken } from "./api";
 
-// What the Settings tabs' skeletons are measured from before any data has
-// loaded (ui/Skeleton.tsx): typical lengths, never shown as text.
-
 const at = "2026-11-19T09:41:07.000Z";
 
 export const SAMPLE_ADMIN_TOKENS: AdminToken[] = ["deploy-script", "zeron-agent", "backup-cron"].map((name, i) => ({
@@ -17,7 +14,6 @@ export const SAMPLE_ADMIN_TOKENS: AdminToken[] = ["deploy-script", "zeron-agent"
   last_used_at: at,
 }));
 
-// More than a screen: the history is usually longer than the window, so the skeleton fills it.
 export const SAMPLE_AUDIT_ENTRIES: AuditEntry[] = Array.from({ length: 20 }, (_, i) => ({
   id: `ae_sample_${i}`,
   time: at,

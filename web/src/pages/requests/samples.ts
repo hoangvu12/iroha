@@ -1,8 +1,5 @@
 import type { Attempt, Capture, FilterOptions, RequestRecord, Stats } from "./api";
 
-// What the Requests page's skeletons are measured from before any data has
-// loaded (ui/Skeleton.tsx): typical lengths, never shown as text.
-
 const at = "2026-11-19T09:41:07.000Z";
 
 function sampleRequest(i: number): RequestRecord {
@@ -69,7 +66,6 @@ export const SAMPLE_ATTEMPTS: Attempt[] = [
   },
 ];
 
-/** One Request with its Attempts, for the drawer and the Route view before its own answer arrives. */
 export const SAMPLE_REQUEST: RequestRecord = {
   ...sampleRequest(0),
   id: "req_sample_0000000000",

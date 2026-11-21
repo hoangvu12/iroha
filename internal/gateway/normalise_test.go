@@ -9,15 +9,8 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// Normalisers end to end (ticket 16): the Endpoint's answer is normalised
-// before it is passed through or translated, whole or streamed. Bodies are
-// the ones v1 recorded (see internal/normalise/normalise_test.go).
-
-// minimaxThink is a MiniMax M2 answer with its reasoning inline and its
-// vendor fields.
 const minimaxThink = `{"id":"chatcmpl-1","object":"chat.completion","model":"MiniMax-M2","choices":[{"index":0,"message":{"role":"assistant","content":"<think>\nThe user said hi.\n</think>\n\nHello there!","name":"MiniMax AI","audio_content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}`
 
-// minimaxThinkStream is the same answer streamed, the tags split across writes.
 var minimaxThinkStream = []string{
 	`data: {"id":"c","object":"chat.completion.chunk","model":"MiniMax-M2","choices":[{"index":0,"delta":{"role":"assistant","content":"<th","name":"MiniMax AI","audio_content":""}}]}` + "\n\n",
 	`data: {"id":"c","object":"chat.completion.chunk","model":"MiniMax-M2","choices":[{"index":0,"delta":{"content":"ink>\nThe user said hi.\n</thi"}}]}` + "\n\n",
@@ -26,7 +19,6 @@ var minimaxThinkStream = []string{
 	"data: [DONE]\n\n",
 }
 
-// glmBlocks is a GLM answer whose content is an array of blocks.
 const glmBlocks = `{"id":"chatcmpl-glm","object":"chat.completion","model":"glm-4.6","choices":[{"index":0,"message":{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"Greet back."}]},{"type":"text","text":"Hello!"}]},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`
 
 type chatAnswer struct {
@@ -36,8 +28,6 @@ type chatAnswer struct {
 	}
 }
 
-// chatStream reads a Chat stream: the text and reasoning it carried, and
-// whether every delta was free of vendor fields.
 func chatStream(t *testing.T, events []testkit.Event) (text, reasoning string, finish []string) {
 	t.Helper()
 	for _, e := range events {
@@ -72,7 +62,6 @@ func chatStream(t *testing.T, events []testkit.Event) (text, reasoning string, f
 	return text, reasoning, finish
 }
 
-// anthropicAnswer reads an Anthropic message's thinking and text.
 func anthropicAnswer(t *testing.T, body []byte) (thinking, text string) {
 	t.Helper()
 	var m struct {
@@ -92,7 +81,6 @@ func anthropicAnswer(t *testing.T, body []byte) (thinking, text string) {
 	return thinking, text
 }
 
-// anthropicStream reads the thinking and text an Anthropic stream carried.
 func anthropicStream(t *testing.T, events []testkit.Event) (thinking, text string, names []string) {
 	t.Helper()
 	for _, e := range events {
@@ -115,7 +103,6 @@ func TestThinkTextMovesIntoReasoningOnEveryPath(t *testing.T) {
 	caller := srv.Client(issue(t, srv, "opencode", all))
 	claude := claudeCaller(t, srv)
 
-	// Chat Caller, whole answer (REQ-85, REQ-23).
 	up.Enqueue(testkit.Raw(200, "application/json", minimaxThink))
 	var a chatAnswer
 	caller.Post(chatPath, chat("minimax-m2")).Expect(200).JSON(&a)
@@ -124,7 +111,6 @@ func TestThinkTextMovesIntoReasoningOnEveryPath(t *testing.T) {
 		t.Fatalf("answer = %+v", a)
 	}
 
-	// Chat Caller, streamed with the tags split across writes (REQ-86).
 	up.Enqueue(testkit.SSE(minimaxThinkStream...))
 	st := chat("minimax-m2")
 	st["stream"] = true
@@ -134,8 +120,6 @@ func TestThinkTextMovesIntoReasoningOnEveryPath(t *testing.T) {
 		t.Fatalf("text %q reasoning %q finish %v\n%s", text, reasoning, finish, resp.Text())
 	}
 
-	// Anthropic Caller (translated): the reasoning is a thinking block, not
-	// text (REQ-37, REQ-61).
 	up.Enqueue(testkit.Raw(200, "application/json", minimaxThink))
 	resp = claude.Post(messagesPath, messages("minimax-m2")).Expect(200)
 	if thinking, text := anthropicAnswer(t, resp.Body); thinking != "\nThe user said hi.\n" || text != "Hello there!" {
@@ -150,7 +134,6 @@ func TestThinkTextMovesIntoReasoningOnEveryPath(t *testing.T) {
 		t.Fatalf("thinking %q text %q events %v\n%s", thinking, text, names, resp.Text())
 	}
 
-	// An OpenAI Responses Caller (translated too) gets the answer text alone.
 	up.Enqueue(testkit.Raw(200, "application/json", minimaxThink))
 	resp = caller.Post("/providers/acme/v1/responses", map[string]any{"model": "minimax-m2", "input": "hi"}).Expect(200)
 	var r struct {
@@ -179,7 +162,6 @@ func TestGLMContentBlocksAreFlattened(t *testing.T) {
 	addProvider(t, srv, "acme", up.URL(), "sk-test-one")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// REQ-24: a Chat Caller gets string content plus reasoning_content.
 	up.Enqueue(testkit.Raw(200, "application/json", glmBlocks))
 	var a chatAnswer
 	caller.Post(chatPath, chat("glm-4.6")).Expect(200).JSON(&a)
@@ -187,7 +169,6 @@ func TestGLMContentBlocksAreFlattened(t *testing.T) {
 		t.Fatalf("answer = %+v", a)
 	}
 
-	// REQ-61: translated for Claude Code the message is not empty.
 	up.Enqueue(testkit.Raw(200, "application/json", glmBlocks))
 	resp := claudeCaller(t, srv).Post(messagesPath, messages("glm-4.6")).Expect(200)
 	if thinking, text := anthropicAnswer(t, resp.Body); thinking != "Greet back." || text != "Hello!" {
@@ -220,14 +201,12 @@ func TestStreamsEndingWithoutAFinishReasonAreClosed(t *testing.T) {
 		`data: {"id":"c","object":"chat.completion.chunk","model":"qwen3","choices":[{"index":0,"delta":{"content":"lo"}}]}` + "\n\n",
 	}
 
-	// [DONE] but no finish_reason: a closing chunk goes before [DONE].
 	up.Enqueue(testkit.SSE(append(noFinish, "data: [DONE]\n\n")...))
 	resp := caller.Post(chatPath, st).Expect(200)
 	if text, _, finish := chatStream(t, resp.Events()); text != "Hello" || len(finish) != 1 || finish[0] != "stop" || !strings.HasSuffix(resp.Text(), "data: [DONE]\n\n") {
 		t.Fatalf("stream:\n%s", resp.Text())
 	}
 
-	// The body ends cleanly with neither: the stream is closed with both.
 	up.Enqueue(testkit.SSE(noFinish...))
 	resp = caller.Post(chatPath, st).Expect(200)
 	if text, _, finish := chatStream(t, resp.Events()); text != "Hello" || len(finish) != 1 || !strings.HasSuffix(resp.Text(), "data: [DONE]\n\n") {
@@ -238,7 +217,6 @@ func TestStreamsEndingWithoutAFinishReasonAreClosed(t *testing.T) {
 		t.Fatalf("request = %+v", r)
 	}
 
-	// Translated for an Anthropic Caller it ends like any answer.
 	up.Enqueue(testkit.SSE(noFinish...))
 	sm := messages("qwen3")
 	sm["stream"] = true
@@ -247,7 +225,6 @@ func TestStreamsEndingWithoutAFinishReasonAreClosed(t *testing.T) {
 		t.Fatalf("events %v\n%s", names, resp.Text())
 	}
 
-	// A stream that breaks off is still reported as broken.
 	up.Enqueue(testkit.SSE(noFinish...).ThenDisconnect())
 	resp = caller.Post(chatPath, st).Expect(200)
 	if !strings.Contains(resp.Text(), "upstream_stream_broken") || strings.Contains(resp.Text(), "[DONE]") {
@@ -260,8 +237,7 @@ func TestReplayedMessageIDsNeverReachAChatEndpoint(t *testing.T) {
 	srv := testkit.Start(t, testkit.Options{HTTPClient: up.Client()})
 	addProvider(t, srv, "mistral", up.URLAt("api.mistral.ai"), "sk-test-one")
 
-	// REQ-53, recorded from v1's inference-anthropic-v1-messages test: Claude
-	// Code replays the assistant turn with the id Anthropic gave it.
+	// Claude Code replays an assistant turn with the id Anthropic gave it.
 	turns := []any{
 		map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Hello"}}},
 		map[string]any{"id": "msg_01ReplayedAssistantTurn", "role": "assistant", "content": []any{map[string]any{"type": "text", "text": "Hi"}}},
@@ -274,8 +250,6 @@ func TestReplayedMessageIDsNeverReachAChatEndpoint(t *testing.T) {
 		t.Fatalf("upstream got %s", b)
 	}
 
-	// A Chat Caller that replays such a turn on passthrough: the id is
-	// dropped, everything else kept.
 	body := `{"model":"mistral-large-latest","messages":[{"role":"user","content":"Hello"},{"id":"msg_01ReplayedAssistantTurn","role":"assistant","content":"Hi"},{"role":"user","content":"Again"}],"safe_prompt":true}`
 	srv.Client(issue(t, srv, "pi", all)).Post("/providers/mistral/v1/chat/completions", body).Expect(200)
 	got := up.Last().Map(t)
@@ -294,13 +268,12 @@ func TestZaiFinishReasons(t *testing.T) {
 		return `{"id":"c","object":"chat.completion","model":"glm-4.6","choices":[{"index":0,"message":{"role":"assistant","content":"partial"},"finish_reason":"` + finish + `"}]}`
 	}
 
-	// FAIL-22: Z.ai's own reasons read as OpenAI's.
+	// sensitive is Z.ai's finish reason for filtered content.
 	up.Enqueue(testkit.Raw(200, "application/json", answer("sensitive")))
 	if b := caller.Post(chatPath, chat("glm-4.6")).Expect(200).Text(); !strings.Contains(b, `"finish_reason":"content_filter"`) {
 		t.Fatalf("answer = %s", b)
 	}
 
-	// network_error in a whole answer is a failed Attempt: the next key serves.
 	up.Enqueue(testkit.Raw(200, "application/json", answer("network_error")), up.Text("hello"))
 	resp := caller.Post(chatPath, chat("glm-4.6")).Expect(200)
 	r := readRequest(t, srv, resp.Header.Get("X-Request-Id"))
@@ -308,7 +281,6 @@ func TestZaiFinishReasons(t *testing.T) {
 		t.Fatalf("attempts = %+v", r.Attempts)
 	}
 
-	// In a stream that has begun it ends the stream with an error event.
 	up.Enqueue(testkit.SSE(
 		`data: {"id":"c","choices":[{"index":0,"delta":{"role":"assistant","content":"part"}}]}`+"\n\n",
 		`data: {"id":"c","choices":[{"index":0,"delta":{},"finish_reason":"network_error"}]}`+"\n\n",

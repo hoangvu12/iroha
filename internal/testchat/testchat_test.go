@@ -32,7 +32,6 @@ func addEndpoint(t *testing.T, srv *testkit.Server, handle, name, sh, url string
 	srv.Admin.Post("/api/providers/"+handle+"/endpoints", ep).Expect(201)
 }
 
-// issue creates a Gateway Key and returns its secret.
 func issue(t *testing.T, srv *testkit.Server, name string, scope any) string {
 	t.Helper()
 	var out struct {
@@ -56,19 +55,14 @@ func send(m map[string]any) map[string]any {
 	return m
 }
 
-// TestPinningSendsEveryAttemptToOneKeyOrEndpoint: a pinned key gets every
-// Attempt (the 5xx replay included), whatever its Key State, and a pinned
-// Endpoint is the only one called.
 func TestPinningSendsEveryAttemptToOneKeyOrEndpoint(t *testing.T) {
 	srv := testkit.Start(t)
 	up, other := testkit.NewOpenAIChat(t), testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", "openai-chat", up.URL(), "sk-test-1", "sk-test-2", "sk-test-3")
 	addEndpoint(t, srv, "acme", "other", "openai-chat", other.URL())
 
-	// key-2 disabled: still tried when pinned. Two 500s: the Request fails
-	// with both Attempts on key-2 (replayed once), never key-1 or key-3.
 	srv.Admin.Post("/api/providers/acme/keys/key-2/disable", nil).OK()
-	srv.SkipShortWaits(time.Second) // the pause before a replay (ticket 31)
+	srv.SkipShortWaits(time.Second)
 	up.Default(up.Error(500, "boom"))
 	other.Default(other.Error(500, "boom"))
 	resp := srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/m", "upstream_key": "key-2", "stream": false})).Expect(502)
@@ -98,7 +92,6 @@ func TestPinningSendsEveryAttemptToOneKeyOrEndpoint(t *testing.T) {
 		}
 	}
 
-	// Pinned to Endpoint "other": main is never called.
 	n := up.Count()
 	other.Enqueue(other.Text("from other"))
 	resp = srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/m", "endpoint": "other", "stream": false})).Expect(200)
@@ -109,12 +102,10 @@ func TestPinningSendsEveryAttemptToOneKeyOrEndpoint(t *testing.T) {
 		t.Fatalf("served by Endpoint %q", r.Endpoint)
 	}
 
-	// Pins need one Provider and must exist; checked before anything is sent.
 	srv.Admin.Post("/api/test", send(map[string]any{"model": "pool-x", "upstream_key": "key-1"})).Expect(400)
 	srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/m", "upstream_key": "nope"})).Expect(404)
 	srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/m", "endpoint": "nope"})).Expect(404)
 
-	// dry_run shows the request and sends nothing.
 	n = up.Count() + other.Count()
 	var dry struct {
 		DryRun      bool `json:"dry_run"`
@@ -129,7 +120,6 @@ func TestPinningSendsEveryAttemptToOneKeyOrEndpoint(t *testing.T) {
 	}
 }
 
-// TestSendingAsAGatewayKeyAppliesItsScopeButNeverCountsAsItsTraffic.
 func TestSendingAsAGatewayKeyAppliesItsScopeButNeverCountsAsItsTraffic(t *testing.T) {
 	srv := testkit.Start(t)
 	acme, other := testkit.NewOpenAIChat(t), testkit.NewOpenAIChat(t)
@@ -137,7 +127,6 @@ func TestSendingAsAGatewayKeyAppliesItsScopeButNeverCountsAsItsTraffic(t *testin
 	addProvider(t, srv, "other", "openai-chat", other.URL(), "sk-test-o")
 	issue(t, srv, "zeron-fleet", map[string]any{"providers": []any{map[string]any{"provider": "acme"}}})
 
-	// Outside the key's scope: refused like the key's own Request would be.
 	resp := srv.Admin.Post("/api/test", send(map[string]any{"model": "other/m", "as": "zeron-fleet", "stream": false})).Expect(403)
 	if !strings.Contains(resp.Text(), "provider_not_allowed") || other.Count() != 0 {
 		t.Fatalf("answer %s, other called %d", resp.Body, other.Count())
@@ -163,12 +152,10 @@ func TestSendingAsAGatewayKeyAppliesItsScopeButNeverCountsAsItsTraffic(t *testin
 	if !strings.Contains(srv.Admin.Get("/api/requests?caller_kind=test").OK().Text(), r.ID) {
 		t.Fatalf("the test feed misses the test")
 	}
-	// A revoked key cannot be sent as.
 	srv.Admin.Post("/api/gateway-keys/zeron-fleet/revoke", nil).OK()
 	srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/m", "as": "zeron-fleet"})).Expect(409)
 }
 
-// streamText collects the text of a streamed answer in any Shape.
 func streamText(t *testing.T, sh string, body []byte) string {
 	t.Helper()
 	var b strings.Builder
@@ -213,9 +200,6 @@ func anyList(v any) []any         { l, _ := v.([]any); return l }
 
 var shapes = []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini"}
 
-// TestMultiTurnChatStreamsInEveryShapeWithReasoningTranslated: each Shape's
-// request reaches an OpenAI Chat Endpoint with the whole conversation and
-// the reasoning level, and streams back in the Shape.
 func TestMultiTurnChatStreamsInEveryShapeWithReasoningTranslated(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -266,7 +250,6 @@ data: [DONE]
 
 `
 
-// toolCheck reads the verdict that ends a streamed test answer.
 func toolCheck(t *testing.T, body []byte) testchat.ToolCheck {
 	t.Helper()
 	const prefix = ": iroha-tool-check "
@@ -282,8 +265,6 @@ func toolCheck(t *testing.T, body []byte) testchat.ToolCheck {
 	return c
 }
 
-// TestToolCheckReportsPassOrFailWithTheRawCall in every Shape, and a
-// follow-up turn answers the call with the made-up weather.
 func TestToolCheckReportsPassOrFailWithTheRawCall(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -307,7 +288,6 @@ func TestToolCheckReportsPassOrFailWithTheRawCall(t *testing.T) {
 		})
 	}
 
-	// A plain answer fails the check; non-streamed, the verdict is a header.
 	up.Enqueue(up.Text("It is sunny."))
 	resp := srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/m", "tool_check": true, "stream": false})).Expect(200)
 	var c testchat.ToolCheck
@@ -318,7 +298,6 @@ func TestToolCheckReportsPassOrFailWithTheRawCall(t *testing.T) {
 		t.Fatalf("answer %s", resp.Body)
 	}
 
-	// The next turn sends the call back with its made-up result.
 	up.Enqueue(up.Text("27C in Hanoi."))
 	srv.Admin.Post("/api/test", map[string]any{"model": "acme/m", "stream": false, "messages": []any{
 		map[string]any{"role": "user", "content": "Weather in Hanoi?"},
@@ -340,8 +319,6 @@ func TestToolCheckReportsPassOrFailWithTheRawCall(t *testing.T) {
 	}
 }
 
-// TestFailedTestCarriesTheAttemptExplanation: a failed test answers the
-// Shape's error with every Attempt, and the Request explains each one.
 func TestFailedTestCarriesTheAttemptExplanation(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -357,7 +334,6 @@ func TestFailedTestCarriesTheAttemptExplanation(t *testing.T) {
 	}
 }
 
-// TestModelSearchListsPoolsFirstWithinTheScope.
 func TestModelSearchListsPoolsFirstWithinTheScope(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -386,9 +362,6 @@ func TestModelSearchListsPoolsFirstWithinTheScope(t *testing.T) {
 	}
 }
 
-// TestModelSearchPutsThePreferredProviderOrPoolFirst: prefer=<provider>/
-// lists that Provider before the Pools (and fills limit with it first);
-// prefer=<pool> puts that Pool first among the Pools. Search filters both.
 func TestModelSearchPutsThePreferredProviderOrPoolFirst(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -412,12 +385,10 @@ func TestModelSearchPutsThePreferredProviderOrPoolFirst(t *testing.T) {
 	if len(got.Providers) != 2 || got.Providers[0].Provider != "zeta" || got.Providers[1].Provider != "acme" || len(got.Pools) != 2 || got.Pools[0].ID != "alpha" {
 		t.Fatalf("prefer zeta %+v", got)
 	}
-	// Any <provider>/<model> names its Provider; limit is filled with it first.
 	get("prefer=zeta/z-1&limit=1")
 	if !got.Truncated || got.Matched != 5 || len(got.Pools) != 0 || len(got.Providers[0].Models) != 1 || got.Providers[0].Models[0].ID != "zeta/z-1" {
 		t.Fatalf("prefer zeta, limit 1 %+v", got)
 	}
-	// Search filters the preferred Provider and everything else alike.
 	get("prefer=zeta/&q=1")
 	if got.Matched != 2 || len(got.Pools) != 0 || len(got.Providers) != 2 || got.Providers[0].Models[0].ID != "zeta/z-1" || got.Providers[1].Models[0].ID != "acme/a-1" {
 		t.Fatalf("prefer zeta, q=1 %+v", got)
@@ -426,16 +397,12 @@ func TestModelSearchPutsThePreferredProviderOrPoolFirst(t *testing.T) {
 	if len(got.Pools) != 2 || got.Pools[0].ID != "fast" || got.Pools[1].ID != "alpha" || got.Providers[0].Provider != "acme" || got.Suggested != "" {
 		t.Fatalf("prefer fast %+v", got)
 	}
-	// A Provider the caller may not use, or that doesn't exist, changes nothing.
 	get("prefer=nope/")
 	if got.Providers[0].Provider != "acme" || got.Suggested != "" {
 		t.Fatalf("prefer nope %+v", got)
 	}
 }
 
-// TestModelSearchSuggestsTheModelAProviderServedMost: with prefer naming a
-// Provider, suggested is its model with the most 2xx Requests of the last
-// 7 days (direct, global or through a Pool), else its first listed model.
 func TestModelSearchSuggestsTheModelAProviderServedMost(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -458,7 +425,6 @@ func TestModelSearchSuggestsTheModelAProviderServedMost(t *testing.T) {
 	for _, m := range []string{"acme/b-2", "acme/b-2", "fast", "fast", "fast"} {
 		srv.Admin.Post("/api/test", send(map[string]any{"model": m, "stream": false})).Expect(200)
 	}
-	// A failed Request served nothing.
 	up.Default(up.Error(400, "bad"))
 	for range 3 {
 		srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/a-1", "stream": false}))
@@ -466,7 +432,6 @@ func TestModelSearchSuggestsTheModelAProviderServedMost(t *testing.T) {
 	if s := suggested("prefer=acme/&q=b&limit=1"); s != "acme/c-3" {
 		t.Fatalf("suggested %q, want acme/c-3 (3 through the Pool; q and limit don't matter)", s)
 	}
-	// A hidden model is not offered.
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "c-3", "hidden": true}).OK()
 	if s := suggested("prefer=acme/"); s != "acme/b-2" {
 		t.Fatalf("c-3 hidden: suggested %q", s)
@@ -477,7 +442,6 @@ func TestModelSearchSuggestsTheModelAProviderServedMost(t *testing.T) {
 	}
 }
 
-// curlArgs splits a POSIX shell command (quotes, backslash-newline).
 func curlArgs(t *testing.T, cmd string) []string {
 	t.Helper()
 	var args []string
@@ -523,7 +487,6 @@ func curlArgs(t *testing.T, cmd string) []string {
 	return args
 }
 
-// runCurl sends what a curl snippet sends, without needing curl.
 func runCurl(t *testing.T, cmd string) (*http.Response, []byte) {
 	t.Helper()
 	args := curlArgs(t, cmd)
@@ -571,9 +534,6 @@ func runCurl(t *testing.T, cmd string) (*http.Response, []byte) {
 	return resp, []byte(b.String())
 }
 
-// TestSnippetsRunUnchangedAgainstIroha: each Shape's curl snippet, as
-// written, is answered by the Gateway as the Gateway Key it names; with
-// sh and curl installed the snippet also runs in a real shell.
 func TestSnippetsRunUnchangedAgainstIroha(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -596,7 +556,6 @@ func TestSnippetsRunUnchangedAgainstIroha(t *testing.T) {
 			if sh != "gemini" && (!strings.Contains(sn.Python, "get_weather") || !strings.Contains(sn.Python, "True")) {
 				t.Fatalf("python snippet:\n%s", sn.Python)
 			}
-			// It was the key's own Request, not a test.
 			r := readRequest(t, srv, resp.Header.Get("X-Request-Id"))
 			if r.Caller.Kind != requests.CallerGatewayKey || r.Caller.Name != "zeron-fleet" {
 				t.Fatalf("recorded caller %+v", r.Caller)
@@ -604,7 +563,6 @@ func TestSnippetsRunUnchangedAgainstIroha(t *testing.T) {
 		})
 	}
 
-	// Without as, the key comes from IROHA_KEY; pins are test-only and not carried.
 	var sn testchat.Snippets
 	resp := srv.Admin.Get("/api/test/snippets?model=acme/m&upstream_key=key-1&base_url=" + url.QueryEscape(srv.URL)).OK()
 	resp.JSON(&sn)
@@ -617,7 +575,6 @@ func TestSnippetsRunUnchangedAgainstIroha(t *testing.T) {
 		t.Fatalf("a pin shows in the snippets: %v", fields)
 	}
 
-	// A real shell, when there is one.
 	shell, errSh := exec.LookPath("sh")
 	_, errCurl := exec.LookPath("curl")
 	if errSh != nil || errCurl != nil {

@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
 import { Switch as SdkSwitch, SwitchThumb } from "@ui-sdk/react/switch";
 
-// A press doesn't reach a clickable row around the switch.
-// `pending` (a save running, see useSave): the switch shows the state it was
-// pressed to at once, is busy, and ignores presses; when the save ends it
-// shows `checked` again, so a failed save puts it back.
+function useOptimisticChecked(checked: boolean, pending: boolean | undefined) {
+  const [target, setTarget] = useState<boolean>();
+  useEffect(() => {
+    if (!pending) setTarget(undefined);
+  }, [pending]);
+  const shown = pending && target !== undefined ? target : checked;
+  return [shown, setTarget] as const;
+}
+
 export function Switch({
   checked,
   onChange,
@@ -18,11 +23,7 @@ export function Switch({
   disabled?: boolean;
   pending?: boolean;
 }) {
-  const [target, setTarget] = useState<boolean>();
-  useEffect(() => {
-    if (!pending) setTarget(undefined);
-  }, [pending]);
-  const shown = pending && target !== undefined ? target : checked;
+  const [shown, showUntilSettled] = useOptimisticChecked(checked, pending);
   return (
     <SdkSwitch
       aria-label={label}
@@ -31,13 +32,11 @@ export function Switch({
       disabled={disabled}
       onCheckedChange={(on, details) => {
         if (pending) return details.cancel();
-        setTarget(on);
+        showUntilSettled(on);
         onChange(on);
       }}
       onClick={(e) => e.stopPropagation()}
       className={
-        // Motion tokens (UI ticket 20): the track's colour on the hover timing (it still fades under reduced motion),
-        // the thumb's slide on the press timing (0 under reduced motion, so it jumps).
         "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full bg-border-strong transition-colors duration-hover ease-[ease] " +
         "data-checked:bg-primary data-disabled:cursor-not-allowed data-disabled:opacity-50 aria-busy:cursor-progress"
       }

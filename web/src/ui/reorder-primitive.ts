@@ -1,21 +1,11 @@
 import { type ChangeDetails, type ReorderDraft, createChange, createReorder, definePrimitive } from "@ui-sdk/core";
 
-// Rows put in order by a drag handle, built on UI SDK core's createReorder (it
-// ships no sortable list). The rows are the page's (a DataTable's), so the
-// handle is the bound item: its rect stands for its row's when a drag finds
-// its place, and focus stays on it while the keyboard moves it. Space or
-// Enter on a handle picks its row up, the arrows (Home, End) move it, Space or
-// Enter drops it, Escape puts it back; a pointer drags it. Only a drop
-// changes `value`; the rows follow `order` (the draft while one moves).
-
 export type RowOrderReason = "drag" | "move-key" | "imperative";
 
 type RowOrderOptions = {
-  /** Row keys in order (controlled). */
   value?: string[];
   defaultValue?: string[];
   onValueChange?: (value: string[], details: ChangeDetails<RowOrderReason>) => void;
-  /** What screen readers call a row ("acme (m-1)"), else the handle's text. */
   itemLabel?: (key: string) => string | undefined;
 };
 
@@ -36,21 +26,17 @@ export const rowOrder = definePrimitive({
     });
     return {
       reorder,
-      /** Moves the row with `key` to `index` (from 0) at once, like a menu's Move up. */
       move: (key: string, index: number) => reorder.move(key, index),
     };
   },
   slots: (slot) => ({
     root: slot<{}, { order: string[]; moving: string | null; dragging: boolean }>({
-      // `dragging`: a pointer holds the row (not the keyboard), so the rows glide (RowOrder).
       state: (state) => ({ order: state.moving?.order ?? state.value, moving: state.moving?.key ?? null, dragging: !!state.moving?.pointer }),
     }),
     handle: slot<{ value: string }>({
       role: "button",
       focus: "native",
       press: { none: "Space and Enter pick the row up and drop it, in keydown; a click alone does nothing." },
-      // "string", not "key": the React adapter reads a "key" prop through api internals only UI SDK's own parts have.
-      // A part is keyed by its `value` either way.
       props: { value: "string" },
       attrs: (state, part) => ({
         type: "button",

@@ -1,11 +1,3 @@
-// Package logos resolves the logos the UI shows: a Provider's from its logo
-// domain (a site's favicon), a Model Pool's from its model's maker (the
-// maker's mark on models.dev, else the favicon of the maker's site) or from
-// a website the Owner names, looked up like a Provider's domain. Iroha
-// fetches and caches them and serves them from its own URLs, so the browser
-// never loads a third-party image. Where the images come from is two URL
-// templates (config --logo-favicons, --logo-makers), so tests point them at
-// a fake.
 package logos
 
 import (
@@ -33,27 +25,23 @@ import (
 	"github.com/hoangvu12/iroha/internal/logs"
 )
 
-// KindLogo is the log event of a logo fetch that failed.
 var KindLogo = logs.NewKind("logo", "Iroha could not fetch a logo (Provider favicon or model maker mark): key, url, error. The UI shows a lettered tile instead.")
 
-// Cache timings and limits.
 const (
-	HitTTL       = 24 * time.Hour   // a fetched logo is served this long before it is fetched again
-	MissTTL      = time.Minute      // a failed lookup is not retried for this long
-	FetchTimeout = 10 * time.Second // per URL
+	HitTTL       = 24 * time.Hour
+	MissTTL      = time.Minute
+	FetchTimeout = 10 * time.Second
 	maxImage     = 512 << 10
 	maxEntries   = 512
 )
 
-// Options are a Service's dependencies.
 type Options struct {
 	// FaviconURL is the URL template a domain's favicon is read from,
 	// with {domain} in it; "" never reads favicons.
 	FaviconURL string
 	// MakerURL is the URL template a model maker's mark is read from, with
 	// {maker} in it (models.dev: https://models.dev/logos/{maker}.svg); ""
-	// never reads them. A maker without a mark there falls back to the
-	// favicon of its site (Makers).
+	// never reads them.
 	MakerURL   string
 	HTTPClient *http.Client
 	Clock      clock.Clock
@@ -62,29 +50,27 @@ type Options struct {
 	Dir string
 }
 
-// Image is one logo.
 type Image struct {
 	Type string
 	Body []byte
 }
 
-// Service fetches and caches logos. One fetch per key at a time; others
-// asking meanwhile wait for it.
+// Service runs one fetch per key at a time; others asking meanwhile wait
+// for it. Its lookups return a nil Image and nil error when there is no logo.
 type Service struct {
 	o Options
 
 	mu       sync.Mutex
 	entries  map[string]*entry
 	inflight map[string]chan struct{}
-	generic  *string // hash of the maker source's placeholder for unknown makers ("" when it has none)
+	generic  *string
 }
 
 type entry struct {
-	img     *Image // nil: a miss
+	img     *Image
 	expires time.Time
 }
 
-// New returns a Service.
 func New(o Options) *Service {
 	if o.HTTPClient == nil {
 		o.HTTPClient = &http.Client{}
@@ -98,8 +84,7 @@ func New(o Options) *Service {
 	return &Service{o: o, entries: map[string]*entry{}, inflight: map[string]chan struct{}{}}
 }
 
-// Domain returns the logo of a site (its favicon); nil when there is none.
-// domain must be normalised (NormalizeDomain).
+// Domain takes a domain already normalised by NormalizeDomain.
 func (s *Service) Domain(ctx context.Context, domain string) (*Image, error) {
 	if domain == "" || s.o.FaviconURL == "" {
 		return nil, nil
@@ -109,8 +94,6 @@ func (s *Service) Domain(ctx context.Context, domain string) (*Image, error) {
 	})
 }
 
-// Maker returns the logo of a model maker (anthropic, zhipuai...): its mark
-// from the maker source, else the favicon of its site; nil when neither.
 func (s *Service) Maker(ctx context.Context, maker string) (*Image, error) {
 	maker = strings.ToLower(strings.TrimSpace(maker))
 	if !makerPattern.MatchString(maker) {
@@ -138,9 +121,6 @@ func (s *Service) Maker(ctx context.Context, maker string) (*Image, error) {
 	return nil, nil
 }
 
-// Pool returns the logo of a Model Pool from its logo value (ReadPoolLogo):
-// a website's favicon, looked up like a Provider's logo domain, or a model
-// maker's logo (Maker); nil when there is none.
 func (s *Service) Pool(ctx context.Context, logo string) (*Image, error) {
 	if !IsSite(logo) {
 		return s.Maker(ctx, logo)
@@ -152,13 +132,10 @@ func (s *Service) Pool(ctx context.Context, logo string) (*Image, error) {
 	return s.Domain(ctx, d)
 }
 
-// ErrBadMaker is returned by ReadPoolLogo for a maker ID it cannot read.
 var ErrBadMaker = errors.New("not a maker ID")
 
-// ReadPoolLogo reads what the Owner typed as a Model Pool's logo: a model
-// maker ("OpenAI" -> "openai") or a website ("chatgpt.com", or a URL read
-// for its host, as NormalizeDomain does). A value with a dot or a slash is a
-// website. "" stays "" (the maker is then guessed).
+// ReadPoolLogo returns a model maker ("OpenAI" -> "openai") or, for a value
+// with a dot or a slash, a domain as NormalizeDomain returns it. "" stays "".
 func ReadPoolLogo(s string) (string, error) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	switch {
@@ -172,12 +149,9 @@ func ReadPoolLogo(s string) (string, error) {
 	return s, nil
 }
 
-// IsSite reports whether a Pool's logo value (ReadPoolLogo) names a website
-// rather than a model maker.
 func IsSite(logo string) bool { return strings.Contains(logo, ".") }
 
-// unknownMaker is a maker no source knows, read once to learn what the maker
-// source answers for one (models.dev sends a generic mark with 200).
+// models.dev answers an unknown maker with a generic mark and 200.
 const unknownMaker = "iroha-unknown-maker"
 
 func (s *Service) genericHash(ctx context.Context) (string, error) {
@@ -209,8 +183,6 @@ func hash(b []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-// cached answers key from memory, then disk, then load, one load per key at
-// a time. A load error is logged and cached as a miss.
 func (s *Service) cached(ctx context.Context, key string, load func(context.Context) (*Image, error)) (*Image, error) {
 	for {
 		s.mu.Lock()
@@ -245,8 +217,6 @@ func (s *Service) cached(ctx context.Context, key string, load func(context.Cont
 	}
 }
 
-// resolve reads key from disk when fresh, else loads it; a failed load
-// keeps a stale disk copy.
 func (s *Service) resolve(ctx context.Context, key string, load func(context.Context) (*Image, error)) (*Image, time.Time) {
 	now := s.o.Clock.Now()
 	disk, fetched := s.readDisk(key)
@@ -267,7 +237,6 @@ func (s *Service) resolve(ctx context.Context, key string, load func(context.Con
 	return img, now.Add(HitTTL)
 }
 
-// evict drops expired entries, or every entry when none has expired.
 func (s *Service) evict() {
 	now := s.o.Clock.Now()
 	for k, e := range s.entries {
@@ -280,7 +249,6 @@ func (s *Service) evict() {
 	}
 }
 
-// fetch reads one image; nil when the source has none (non-2xx, not an image).
 func (s *Service) fetch(ctx context.Context, u string) (*Image, error) {
 	ctx, cancel := clock.WithTimeout(ctx, s.o.Clock, FetchTimeout)
 	defer cancel()
@@ -318,8 +286,6 @@ func host(u string) string {
 	return "logo source"
 }
 
-// imageType is the type to serve body as; "" when it is not an image the UI
-// can show.
 func imageType(header string, body []byte) string {
 	if bytes.Contains(bytes.ToLower(body[:min(len(body), 512)]), []byte("<svg")) {
 		return "image/svg+xml"
@@ -333,8 +299,6 @@ func imageType(header string, body []byte) string {
 	}
 	return ""
 }
-
-// Disk cache: <Dir>/<key>.img and <key>.json ({"type", "fetched_at"}).
 
 type meta struct {
 	Type      string `json:"type"`
@@ -383,8 +347,6 @@ func (s *Service) writeDisk(key string, img *Image, at time.Time) {
 	_ = os.WriteFile(p+".json", mb, 0o600)
 }
 
-// Makers maps model makers to their site, whose favicon stands in when the
-// maker source has no mark for them.
 var Makers = map[string]string{
 	"anthropic":  "anthropic.com",
 	"openai":     "openai.com",
@@ -411,13 +373,10 @@ var Makers = map[string]string{
 
 var makerPattern = regexp.MustCompile(`^[a-z0-9]+(?:[_-][a-z0-9]+)*$`)
 
-// CheckMaker reports whether maker can name a model maker (no dot: a value
-// with one is a website, see ReadPoolLogo).
 func CheckMaker(maker string) bool { return len(maker) <= 64 && makerPattern.MatchString(maker) }
 
 var labelPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
-// ErrBadDomain is returned by NormalizeDomain for input that is not a domain.
 var ErrBadDomain = errors.New("not a domain")
 
 // NormalizeDomain reads a domain from what the Owner typed: a bare host or
@@ -457,10 +416,8 @@ func NormalizeDomain(s string) (string, error) {
 // level deeper (example.co.uk, example.com.cn).
 var secondLevel = map[string]bool{"co": true, "com": true, "net": true, "org": true, "gov": true, "edu": true, "ac": true}
 
-// SiteOf guesses the site behind an Endpoint URL, for a Provider whose
-// Owner set no logo domain: the registrable part of its host
-// (api.openai.com -> openai.com, dashscope-intl.aliyuncs.com -> aliyuncs.com).
-// "" for IP addresses, localhost and anything unreadable.
+// SiteOf returns the registrable part of the URL's host (api.openai.com ->
+// openai.com); "" for IP addresses, localhost and anything unreadable.
 func SiteOf(rawURL string) string {
 	d, err := NormalizeDomain(hosts.Of(rawURL))
 	if err != nil {

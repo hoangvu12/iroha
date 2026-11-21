@@ -12,8 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// c26Keys answers GET /v1/models per bearer: a list of items (strings or
-// model objects), a failure status, or 401 for an unknown key.
 type c26Keys struct {
 	mu   sync.Mutex
 	list map[string][]any
@@ -51,15 +49,12 @@ func (k *c26Keys) set(bearer string, items ...any) {
 	k.list[bearer] = items
 }
 
-// failWith makes bearer's list answer status (0: answer again).
 func (k *c26Keys) failWith(bearer string, status int) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.fail[bearer] = status
 }
 
-// c26ListReads names (by secret, without sk-test-) the keys of the model
-// list reads a fake received from request number from on.
 func c26ListReads(up *testkit.Upstream, from int) string {
 	var out []string
 	for _, r := range up.Requests()[from:] {
@@ -70,9 +65,6 @@ func c26ListReads(up *testkit.Upstream, from int) string {
 	return strings.Join(out, ",")
 }
 
-// MOD-69: a list naming a model without metadata keeps the facts reported
-// before; with several keys (discovery: key) the first answering key's
-// object wins for each model.
 func TestAListEntryWithoutMetadataKeepsTheLastReportedFactsAndTheFirstAnsweringKeyWins(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -93,7 +85,6 @@ func TestAListEntryWithoutMetadataKeepsTheLastReportedFactsAndTheFirstAnsweringK
 	if c := context("m1"); c != 1000000 {
 		t.Fatalf("m1 context = %d", c)
 	}
-	// The same model listed bare: the facts stay.
 	lists.set("sk-test-one", map[string]any{"id": "m1", "object": "model"})
 	if r := refresh(t, srv); r.Outcome != "ok" || r.Discovered != 1 {
 		t.Fatalf("refresh = %+v", r)
@@ -104,25 +95,21 @@ func TestAListEntryWithoutMetadataKeepsTheLastReportedFactsAndTheFirstAnsweringK
 	if l := list(t, srv, "q=m1"); l.Models[0].Reported.ContextLength == nil || *l.Models[0].Reported.ContextLength != 1000000 {
 		t.Fatalf("reported after a bare entry = %+v", l.Models[0].Reported)
 	}
-	// New facts replace the old ones.
 	lists.set("sk-test-one", map[string]any{"id": "m1", "context_length": 2000})
 	refresh(t, srv)
 	if c := context("m1"); c != 2000 {
 		t.Fatalf("m1 context after new facts = %d", c)
 	}
 
-	// Per-key lists: each key reports its own object; the first key's wins.
 	srv.Admin.Patch("/api/providers/acme", map[string]any{"discovery": "key"}).Expect(200)
 	lists.set("sk-test-one", map[string]any{"id": "m2", "context_length": 111}, "m1")
 	lists.set("sk-test-two", map[string]any{"id": "m2", "context_length": 222}, map[string]any{"id": "m1", "context_length": 999})
 	if r := refresh(t, srv); r.Outcome != "ok" || len(r.Lists) != 2 {
 		t.Fatalf("per-key refresh = %+v", r)
 	}
-	// key-1 lists m1 bare: key-2's object is the first that says something of it.
 	if c2, c1 := context("m2"), context("m1"); c2 != 111 || c1 != 999 {
 		t.Fatalf("contexts m2 %d, m1 %d", c2, c1)
 	}
-	// key-1's list fails: key-2 is the first answering key.
 	lists.failWith("sk-test-one", 500)
 	if r := refresh(t, srv); r.Outcome != "partial" {
 		t.Fatalf("refresh = %+v", r)
@@ -137,8 +124,6 @@ func TestAListEntryWithoutMetadataKeepsTheLastReportedFactsAndTheFirstAnsweringK
 	}
 }
 
-// USE-22: a model list failure whose body echoes the key's secret never puts
-// the secret in the refresh result, the discovery events or the console.
 func TestAModelListEchoingTheKeyNeverPutsTheSecretInResultsLogsOrTheConsole(t *testing.T) {
 	const secret = "sk-test-echo-0123456789abcdef"
 	srv := testkit.Start(t)
@@ -170,8 +155,26 @@ func TestAModelListEchoingTheKeyNeverPutsTheSecretInResultsLogsOrTheConsole(t *t
 	}
 }
 
-// MOD-32: under per-key discovery a key whose list fails keeps the list it
-// read before, and so stays first for the models it carries.
+func TestANonJSONModelListEchoingTheKeyAtTheCutKeepsNoPartOfTheSecret(t *testing.T) {
+	const secret = "sk-test-echo-0123456789abcdef"
+	srv := testkit.Start(t)
+	up := testkit.NewOpenAIChat(t)
+	up.Handle(http.MethodGet, "/v1/models", func(r *testkit.Received) testkit.Reply {
+		return testkit.Raw(200, "text/html", strings.Repeat("a", 190)+r.Bearer())(r)
+	})
+	addProvider(t, srv, up.URL(), nil, secret)
+
+	resp := srv.Admin.Post("/api/providers/acme/models/refresh", nil).Expect(200)
+	var r models.RefreshResult
+	resp.JSON(&r)
+	if r.Outcome != "failed" || !strings.Contains(r.Lists[0].Error, "not JSON") {
+		t.Fatalf("refresh = %+v", r)
+	}
+	if strings.Contains(resp.Text(), secret[:8]) {
+		t.Fatalf("the refresh result holds the start of the secret: %s", resp.Text())
+	}
+}
+
 func TestAKeysFailedRediscoveryKeepsItsListAndItsPlaceFirst(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -203,9 +206,6 @@ func TestAKeysFailedRediscoveryKeepsItsListAndItsPlaceFirst(t *testing.T) {
 	}
 }
 
-// MOD-34, MOD-49, PRV-69: per-Provider discovery reads each Endpoint's list
-// once, with the first key; when that key's list is refused it reads with
-// the next key; with every key disabled nothing is read.
 func TestPerProviderDiscoveryReadsOnceWithTheFirstKeyThenTheNext(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -249,8 +249,6 @@ func TestPerProviderDiscoveryReadsOnceWithTheFirstKeyThenTheNext(t *testing.T) {
 	}
 }
 
-// MOD-39: an Endpoint without a key, or with a keyless slot, is read with
-// no credential at all, whatever its auth style.
 func TestKeylessDiscoverySendsNoCredential(t *testing.T) {
 	srv := testkit.Start(t)
 	plain := testkit.NewOpenAIChat(t)
@@ -287,8 +285,6 @@ func TestKeylessDiscoverySendsNoCredential(t *testing.T) {
 	noCredential("keyless slot")
 }
 
-// PRV-02: under per-key discovery a key restricted to some Endpoints never
-// reads the other Endpoints' lists.
 func TestARestrictedKeyNeverReadsOtherEndpointsLists(t *testing.T) {
 	srv := testkit.Start(t)
 	a := testkit.NewOpenAIChat(t)
@@ -316,8 +312,6 @@ func TestARestrictedKeyNeverReadsOtherEndpointsLists(t *testing.T) {
 	}
 }
 
-// MOD-65: an archived Provider's models are refused and left out of the
-// global list; the Owner may still edit its model list (deviation).
 func TestAnArchivedProvidersModelsAreRefusedAndUnlisted(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -344,9 +338,6 @@ func TestAnArchivedProvidersModelsAreRefusedAndUnlisted(t *testing.T) {
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "m2"}).Expect(201)
 }
 
-// MOD-66: a model ID with a slash is added, hidden and reverted through the
-// admin API (the ID travels in the body) and its Audit Entries are found by
-// <handle>/<model>.
 func TestASlashedModelIDIsAddedHiddenAndRevertedLikeAnyOther(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -383,8 +374,6 @@ func TestASlashedModelIDIsAddedHiddenAndRevertedLikeAnyOther(t *testing.T) {
 	}
 }
 
-// PRV-54: a model list answered with a redirect is a failed list; the
-// redirect is never followed, so the key never reaches the other host.
 func TestAModelListRedirectIsNeverFollowed(t *testing.T) {
 	srv := testkit.Start(t)
 	elsewhere := testkit.NewOpenAIChat(t)

@@ -7,9 +7,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Classification, Rule } from "./api";
 import { RulesTab } from "./Rules";
 
-// Try a failure (UI ticket 34): the Flow view's panel sends a typed failure to
-// POST /api/providers/{p}/rules/classify and lights the path it takes.
-
 const agent = createAgent();
 const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 
@@ -103,19 +100,15 @@ test("the result is said in words and the path lights up to the rule that matche
   await user.click(within(p).getByRole("button", { name: "429 cooling" }));
   await user.click(within(p).getByRole("button", { name: "Try this failure" }));
   const said = await within(p).findByRole("status");
-  // The server's own words for the effects (key_effect, request_effect), never re-worded here.
   expect(said.textContent).toContain("Rule 3, rate-limited, matches. Upstream Key: Cool 30 s for the model (the time the response names). Request: Try next key.");
   expect(said.textContent).toContain("429 rate_limit_exceeded: Rate limit reached");
   const [owner, off, rate, server] = steps();
-  // Passed on the way: didn't match; a switched-off rule stays skipped.
   expect(within(owner).getByText("Didn't match")).toBeTruthy();
   expect(within(off).queryByText("Didn't match")).toBeNull();
   expect(within(off).getByText("Off, skipped")).toBeTruthy();
-  // The rule that matched, with what it does to this failure.
   expect(rate.getAttribute("aria-current")).toBe("step");
   expect(within(rate).getByText("Matched")).toBeTruthy();
   expect(rate.textContent).toContain("Cool 30 s for the model");
-  // After it: never reached.
   expect(server.getAttribute("data-trace")).toBe("unreached");
   expect(screen.getByRole("group", { name: "No rule matched" }).getAttribute("data-trace")).toBe("unreached");
 });

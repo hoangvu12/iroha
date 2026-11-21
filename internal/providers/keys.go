@@ -19,22 +19,17 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// keySnapshot is what an Audit Entry records of an Upstream Key: its
-// configuration (disabled included), not last_used_at nor its runtime Key
-// State (invalid, cooling).
 type keySnapshot struct {
-	ID         string `json:"id"`
-	ProviderID string `json:"provider_id"`
-	Provider   string `json:"provider"`
-	Name       string `json:"name"`
-	Secret     string `json:"secret"`
-	Disabled   bool   `json:"disabled"`
-	// EndpointIDs is the restriction (sorted); empty: every Endpoint.
+	ID          string    `json:"id"`
+	ProviderID  string    `json:"provider_id"`
+	Provider    string    `json:"provider"`
+	Name        string    `json:"name"`
+	Secret      string    `json:"secret"`
+	Disabled    bool      `json:"disabled"`
 	EndpointIDs []string  `json:"endpoint_ids,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// KeyResource is the Upstream Key resource of the audit machinery.
 var KeyResource = audit.Register(&audit.Resource[keySnapshot]{
 	Name: "upstream_key", Label: "Upstream Key", Plural: "Upstream Keys", Path: "/api/providers/{provider}/keys",
 	Table: "upstream_keys", Secrets: []string{"secret"},
@@ -72,15 +67,12 @@ var KeyResource = audit.Register(&audit.Resource[keySnapshot]{
 	},
 })
 
-// CreateUpstreamKey is the body of POST /api/providers/{provider}/keys and
-// each item of its bulk.
 type CreateUpstreamKey struct {
-	Name      string    `json:"name,omitempty" doc:"Unique within the Provider. Omit it to match by secret: a secret the Provider already holds answers that key unchanged, a new one gets the next free name key-N. Repeating a create with an existing name updates that key."`
-	Secret    *string   `json:"secret,omitempty" doc:"The key issued by the Provider. Omit (with a name) for a keyless slot that sends no auth header. Surrounding whitespace is trimmed."`
+	Name      string    `json:"name,omitempty" doc:"Unique within the Provider; a new key without a name gets the next free name key-N. On PUT the path names the key: leave it out or send the same name."`
+	Secret    *string   `json:"secret,omitempty" doc:"The key issued by the Provider; a Provider holds each secret once (409 upstream_key_duplicate). Omit (with a name) for a keyless slot that sends no auth header. Surrounding whitespace is trimmed."`
 	Endpoints *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs); it is never sent to the others. [] or omitted on a new key: every Endpoint."`
 }
 
-// UpdateUpstreamKey is the body of PATCH /api/providers/{provider}/keys/{key}.
 type UpdateUpstreamKey struct {
 	Name      *string   `json:"name,omitempty"`
 	Secret    *string   `json:"secret,omitempty" doc:"Replace the secret; empty makes the key keyless. A new secret clears invalid and cooling, and forgets where the key worked. A new name, secret or Endpoint restriction clears the key's Model Gaps; a new secret or Endpoint restriction clears its Endpoint Gaps."`
@@ -88,20 +80,17 @@ type UpdateUpstreamKey struct {
 	Endpoints *[]string `json:"endpoints,omitempty" doc:"Restrict the key to these Endpoints (names or IDs); [] lifts the restriction."`
 }
 
-// UpstreamKeyResult is the response of a single Upstream Key change.
 type UpstreamKeyResult struct {
 	audit.Result
 	UpstreamKey UpstreamKey `json:"upstream_key" doc:"The key after the change (before it, for a delete)."`
 }
 
-// UpstreamKeyList is the response of GET /api/providers/{provider}/keys.
 type UpstreamKeyList struct {
 	UpstreamKeys []UpstreamKey `json:"upstream_keys"`
 }
 
 const secretHint = "Paste the key exactly as the Provider issued it; it cannot contain spaces or line breaks."
 
-// cleanSecret trims and validates a secret.
 func cleanSecret(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if len(s) > 4096 {
@@ -150,36 +139,25 @@ func (h handlers) keyRoutes() []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: base, Tag: tag,
-			Summary:     "Add an Upstream Key, or update the one with that name",
-			Description: "Without a name the key is matched by its secret, so pasting the same key twice never makes a duplicate.",
-			Query:       []api.Param{audit.DryRun},
-			Request:     CreateUpstreamKey{}, Response: UpstreamKeyResult{},
+			Summary: "Add an Upstream Key",
+			Description: "Answers 201. Without a name the key gets the next free name key-N. A name in use answers 409 name_taken (PUT .../keys/{key} updates that key); " +
+				"a secret the Provider already holds answers 409 upstream_key_duplicate naming the key that holds it, so pasting the same key twice never makes a duplicate.",
+			Query:   []api.Param{audit.DryRun},
+			Request: CreateUpstreamKey{}, Response: UpstreamKeyResult{},
 			Handle: func(c *api.Call) (any, error) {
 				var in CreateUpstreamKey
 				if err := c.Decode(&in); err != nil {
 					return nil, err
 				}
-				var out UpstreamKey
-				var p ref
-				var sl stateLogs
-				res, err := h.tr.Mutate(c, "upstream_key.create", "Added", func(m *audit.Mutation) error {
-					var err error
-					if p, err = resolveProvider(m.Ctx, m.Tx, c.Path("provider")); err != nil {
-						return err
-					}
-					out, err = h.upsertKey(m, p, in, &sl)
-					return err
+				return h.saveKey(c, "upstream_key.create", "Added", func(m *audit.Mutation, p ref, sl *stateLogs) (UpstreamKey, error) {
+					return h.createKey(m, p, in)
 				})
-				if err == nil && !res.DryRun {
-					sl.emit(h.log, p.handle)
-				}
-				return UpstreamKeyResult{Result: res, UpstreamKey: out}, err
 			},
 		},
 		{
 			Method: http.MethodPost, Path: base + "/bulk", Tag: tag,
-			Summary:     "Add or update many Upstream Keys of a Provider",
-			Description: `Paste many keys at once: {"items": [{"secret": "sk-..."}, {"secret": "sk-..."}]}. Each item is applied or refused on its own; read failed and each item's error.`,
+			Summary:     "Add many Upstream Keys to a Provider",
+			Description: `Paste many keys at once: {"items": [{"secret": "sk-..."}, {"secret": "sk-..."}]}. Each item is added or refused on its own (as POST .../keys; a secret already held: 409 upstream_key_duplicate); read failed and each item's error.`,
 			Query:       []api.Param{audit.DryRun},
 			Request:     audit.BulkRequest[CreateUpstreamKey]{}, Response: audit.BulkResult[UpstreamKey]{},
 			Handle: func(c *api.Call) (any, error) {
@@ -187,18 +165,41 @@ func (h handlers) keyRoutes() []api.Route {
 				if err := c.Decode(&in); err != nil {
 					return nil, err
 				}
-				p, err := resolveProvider(c.R.Context(), h.db, c.Path("provider"))
-				if err != nil {
+				return h.saveKeys(c, "upstream_key.create", "Added", in.Items, func(m *audit.Mutation, p ref, in CreateUpstreamKey, sl *stateLogs) (UpstreamKey, error) {
+					return h.createKey(m, p, in)
+				})
+			},
+		},
+		{
+			Method: http.MethodPut, Path: base + "/{key}", Tag: tag,
+			Summary:     "Add or update the Upstream Key of that name",
+			Description: "Answers 201 with a new key named as the path (without a secret: a keyless slot), or 200 when the key exists (outcome updated or unchanged): fields sent are applied, the others kept.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     CreateUpstreamKey{}, Response: UpstreamKeyResult{},
+			Handle: func(c *api.Call) (any, error) {
+				var in CreateUpstreamKey
+				if err := c.Decode(&in); err != nil {
 					return nil, err
 				}
-				var sl stateLogs
-				res, err := audit.Bulk(h.tr, c, "upstream_key.create", "Added", in.Items, func(m *audit.Mutation, in CreateUpstreamKey) (UpstreamKey, error) {
-					return h.upsertKey(m, p, in, &sl)
+				return h.saveKey(c, "upstream_key.update", "Saved", func(m *audit.Mutation, p ref, sl *stateLogs) (UpstreamKey, error) {
+					return h.putKey(m, p, c.Path("key"), in, sl)
 				})
-				if err == nil && !res.DryRun {
-					sl.emit(h.log, p.handle)
+			},
+		},
+		{
+			Method: http.MethodPut, Path: base + "/bulk", Tag: tag,
+			Summary:     "Add or update many Upstream Keys of a Provider, each by name",
+			Description: `Each item is PUT .../keys/{key} with the item's name, applied or refused on its own: {"items": [{"name": "team-1", "endpoints": ["eu"]}, {"name": "team-2", "secret": "sk-..."}]}. Read failed and each item's error.`,
+			Query:       []api.Param{audit.DryRun},
+			Request:     audit.BulkRequest[CreateUpstreamKey]{}, Response: audit.BulkResult[UpstreamKey]{},
+			Handle: func(c *api.Call) (any, error) {
+				var in audit.BulkRequest[CreateUpstreamKey]
+				if err := c.Decode(&in); err != nil {
+					return nil, err
 				}
-				return res, err
+				return h.saveKeys(c, "upstream_key.update", "Saved", in.Items, func(m *audit.Mutation, p ref, in CreateUpstreamKey, sl *stateLogs) (UpstreamKey, error) {
+					return h.putKey(m, p, in.Name, in, sl)
+				})
 			},
 		},
 		{
@@ -259,7 +260,6 @@ func (h handlers) keyRoutes() []api.Route {
 	}
 }
 
-// updateOne applies in to the key the call addresses as one audited change.
 func (h handlers) updateOne(c *api.Call, action, verb string, in UpdateUpstreamKey) (UpstreamKeyResult, error) {
 	var out UpstreamKey
 	var p ref
@@ -289,7 +289,6 @@ func enableWords(enable bool) (word, verb string) {
 	return "disable", "Disabled"
 }
 
-// enableRoute is POST .../keys/{key}/enable or /disable.
 func (h handlers) enableRoute(enable bool) api.Route {
 	word, verb := enableWords(enable)
 	desc := "A disabled key gets no traffic and shows the Key State disabled until enabled. Nothing in the background ever disables a key."
@@ -306,7 +305,6 @@ func (h handlers) enableRoute(enable bool) api.Route {
 	}
 }
 
-// bulkEnableRoute is POST .../keys/bulk/enable or /bulk/disable.
 func (h handlers) bulkEnableRoute(enable bool) api.Route {
 	word, verb := enableWords(enable)
 	return api.Route{
@@ -340,7 +338,6 @@ func (h handlers) bulkEnableRoute(enable bool) api.Route {
 	}
 }
 
-// BulkUpdateUpstreamKey is one item of POST .../keys/bulk/update.
 type BulkUpdateUpstreamKey struct {
 	Key             string    `json:"key" doc:"The key to change, by name or ID."`
 	Enabled         *bool     `json:"enabled,omitempty" doc:"false disables the key, true enables it; omit to keep it as it is."`
@@ -349,7 +346,6 @@ type BulkUpdateUpstreamKey struct {
 	EndpointsRemove []string  `json:"endpoints_remove,omitempty" doc:"Endpoints (names or IDs) to take off the key's list as it is now; a key with no restriction starts from every Endpoint. A list left with every Endpoint, or none, means every Endpoint. Not with endpoints."`
 }
 
-// bulkUpdateRoute is POST .../keys/bulk/update (UI ticket 30: edit many keys at once).
 func (h handlers) bulkUpdateRoute() api.Route {
 	return api.Route{
 		Method: http.MethodPost, Path: "/api/providers/{provider}/keys/bulk/update", Tag: "Upstream Keys",
@@ -399,7 +395,6 @@ func (h handlers) bulkUpdateRoute() api.Route {
 	}
 }
 
-// secretFree refuses a secret another key of the same Provider holds.
 func secretFree(ctx context.Context, q audit.Querier, p ref, secret, id string) error {
 	if secret == "" {
 		return nil
@@ -413,10 +408,68 @@ func secretFree(ctx context.Context, q audit.Querier, p ref, secret, id string) 
 		return err
 	}
 	return api.Conflict("upstream_key_duplicate", fmt.Sprintf("Address that key as %s (GET /api/providers/%s/keys/%s) instead of adding it again.", other, p.handle, other),
-		"Provider %s already holds this secret as Upstream Key %q.", p.handle, other)
+		"Provider %s already holds this secret as Upstream Key %q.", p.handle, other).
+		WithDetails(map[string]string{"provider": p.handle, "upstream_key": other})
 }
 
-func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey, logs *stateLogs) (UpstreamKey, error) {
+func (h handlers) saveKey(c *api.Call, action, verb string, fn func(m *audit.Mutation, p ref, sl *stateLogs) (UpstreamKey, error)) (UpstreamKeyResult, error) {
+	var out UpstreamKey
+	var p ref
+	var sl stateLogs
+	res, err := h.tr.Mutate(c, action, verb, func(m *audit.Mutation) error {
+		var err error
+		if p, err = resolveProvider(m.Ctx, m.Tx, c.Path("provider")); err != nil {
+			return err
+		}
+		out, err = fn(m, p, &sl)
+		return err
+	})
+	if err == nil && !res.DryRun {
+		sl.emit(h.log, p.handle)
+	}
+	return UpstreamKeyResult{Result: res, UpstreamKey: out}, err
+}
+
+func (h handlers) saveKeys(c *api.Call, action, verb string, items []CreateUpstreamKey, fn func(m *audit.Mutation, p ref, in CreateUpstreamKey, sl *stateLogs) (UpstreamKey, error)) (audit.BulkResult[UpstreamKey], error) {
+	p, err := resolveProvider(c.R.Context(), h.db, c.Path("provider"))
+	if err != nil {
+		return audit.BulkResult[UpstreamKey]{}, err
+	}
+	var sl stateLogs
+	res, err := audit.Bulk(h.tr, c, action, verb, items, func(m *audit.Mutation, in CreateUpstreamKey) (UpstreamKey, error) {
+		return fn(m, p, in, &sl)
+	})
+	if err == nil && !res.DryRun {
+		sl.emit(h.log, p.handle)
+	}
+	return res, err
+}
+
+func (h handlers) putKey(m *audit.Mutation, p ref, name string, in CreateUpstreamKey, logs *stateLogs) (UpstreamKey, error) {
+	id, err := findChild(m.Ctx, m.Tx, "upstream_keys", p, name)
+	if err != nil {
+		return UpstreamKey{}, err
+	}
+	current, err := childName(m.Ctx, m.Tx, "upstream_keys", id)
+	if err != nil {
+		return UpstreamKey{}, err
+	}
+	if err := audit.CheckPutName("name", name, in.Name, current); err != nil {
+		return UpstreamKey{}, err
+	}
+	if id == "" {
+		if err := api.CheckName("name", name); err != nil {
+			return UpstreamKey{}, err
+		}
+		m.Act("upstream_key.create", "Added")
+		in.Name = name
+		return h.createKey(m, p, in)
+	}
+	m.Act("upstream_key.update", "Edited")
+	return h.updateKey(m, p, id, UpdateUpstreamKey{Secret: in.Secret, Endpoints: in.Endpoints}, logs)
+}
+
+func (h handlers) createKey(m *audit.Mutation, p ref, in CreateUpstreamKey) (UpstreamKey, error) {
 	secret := ""
 	if in.Secret != nil {
 		var err error
@@ -429,14 +482,7 @@ func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey, logs
 		if secret == "" {
 			return UpstreamKey{}, api.BadRequest("Send the key as secret, or give a keyless slot a name.", "An Upstream Key needs a secret or a name.")
 		}
-		var id string
-		err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM upstream_keys WHERE provider_id = ? AND secret = ?`, p.id, secret).Scan(&id)
-		if err == nil {
-			return h.updateKey(m, p, id, UpdateUpstreamKey{Endpoints: in.Endpoints}, logs)
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return UpstreamKey{}, err
-		}
+		var err error
 		if name, err = nextKeyName(m.Ctx, m.Tx, p.id); err != nil {
 			return UpstreamKey{}, err
 		}
@@ -447,7 +493,7 @@ func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey, logs
 		var id string
 		err := m.Tx.QueryRowContext(m.Ctx, `SELECT id FROM upstream_keys WHERE provider_id = ? AND name = ?`, p.id, name).Scan(&id)
 		if err == nil {
-			return h.updateKey(m, p, id, UpdateUpstreamKey{Secret: in.Secret, Endpoints: in.Endpoints}, logs)
+			return UpstreamKey{}, KeyResource.Taken(id, p.handle+"/"+name, "/api/providers/"+p.handle+"/keys/"+name)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return UpstreamKey{}, err
@@ -477,7 +523,6 @@ func (h handlers) upsertKey(m *audit.Mutation, p ref, in CreateUpstreamKey, logs
 	return readKey(m.Ctx, m.Tx, id, m.Now)
 }
 
-// nextKeyName is the first free key-N, counting from the number of keys + 1.
 func nextKeyName(ctx context.Context, tx *sql.Tx, providerID string) (string, error) {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM upstream_keys WHERE provider_id = ?`, providerID).Scan(&n); err != nil {
@@ -522,7 +567,7 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 		}
 		in.Secret = &s
 	}
-	restricted := false // the Endpoints the key may use changed
+	restricted := false
 	if in.Endpoints != nil {
 		eps, err := resolveEndpoints(m.Ctx, m.Tx, p, *in.Endpoints)
 		if err != nil {
@@ -555,8 +600,6 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 			return UpstreamKey{}, err
 		}
 	}
-	// Editing the key's name, secret or Endpoint restriction clears its
-	// Model Gaps (ADR-0003).
 	renamed := in.Name != nil && *in.Name != before.Name
 	if renamed || restricted || (in.Secret != nil && *in.Secret != before.Secret) {
 		name := before.Name
@@ -567,7 +610,6 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 			return UpstreamKey{}, err
 		}
 	}
-	// A new secret or Endpoint restriction clears its Endpoint Gaps (40).
 	if restricted || (in.Secret != nil && *in.Secret != before.Secret) {
 		name := before.Name
 		if renamed {
@@ -584,7 +626,6 @@ func (h handlers) updateKey(m *audit.Mutation, p ref, id string, in UpdateUpstre
 	return after, err
 }
 
-// setEnabled enables or disables a key, recording who disabled it.
 func setEnabled(m *audit.Mutation, id string, enabled bool) error {
 	var err error
 	if enabled {
@@ -596,8 +637,6 @@ func setEnabled(m *audit.Mutation, id string, enabled bool) error {
 	return err
 }
 
-// stateLogs collects the Key State and Model Gap changes of a mutation,
-// logged as key.state and model_gap once it committed.
 type stateLogs struct {
 	changes [][2]UpstreamKey
 	gaps    []keystate.GapEvent

@@ -4,34 +4,25 @@ import { useLocation, useNavigate } from "react-router";
 import type { RequestRecord } from "@/pages/requests/api";
 import { readStack, recordKey, type SheetRecord, writeStack } from "./records";
 
-// The open sheets (spec "Stacked sheets"): a flat list in the URL, oldest
-// first. React state leads and the URL follows in the same event (UI SDK's
-// controlled-value rule); Back, Forward and links lead the other way.
-
-/**
- * One open sheet. `id` names the sheet itself, which keeps it while its record
- * changes in place (↑/↓, a tab, a record of the same kind opened over it);
- * `opened` changes each time `open` puts a record in it, so the sheet takes focus.
- */
 export type SheetEntry = { id: number; record: SheetRecord; opened?: number };
 
-/** History state on an entry pushed by opening a sheet: the search it was opened from, and the params the link dropped. */
 type Pushed = { sheetBack?: string; dropped?: string[] };
+
+export type EditingWishes = { has: (key: string) => boolean; drop: (key: string) => void };
+
+function createEditingWishes() {
+  const keys = new Set<string>();
+  return { add: (key: string) => void keys.add(key), has: (key: string) => keys.has(key), drop: (key: string) => void keys.delete(key) };
+}
 
 type Stack = {
   stack: SheetEntry[];
-  /**
-   * Open a record from `from` (a sheet's index, -1 for the page): closes the sheets above `from`, or focuses the record if it is open already.
-   * `drop` names search params to remove on the way (a dialog the URL holds, which the sheet replaces; Back brings it back).
-   */
   open: (record: SheetRecord, from?: number, drop?: string[]) => void;
-  /** Close the sheet at `index` and every sheet above it (default: the top one). */
+  openEditing: (record: SheetRecord) => void;
+  editingWishes: EditingWishes;
   close: (index?: number) => void;
-  /** Show another record (or tab) in the sheet at `index`, without a history entry. */
   replace: (index: number, record: SheetRecord) => void;
-  /** The URL that shows the stack after `open(record, from, drop)`, for links' href. */
   hrefFor: (record: SheetRecord, from?: number, drop?: string[]) => string;
-  /** The element focused when the sheet with this id was opened, for focus on close. */
   opener: (id: number) => Element | null;
   requestRows: RequestRecord[];
   setRequestRows: (rows: RequestRecord[]) => void;
@@ -42,7 +33,6 @@ const LevelContext = createContext(-1);
 
 let nextId = 1;
 
-/** Entries for `records`: a record already shown keeps its sheet; a sheet whose record went keeps its place for one of the same kind (Back after a swap). */
 function toEntries(records: SheetRecord[], prev: SheetEntry[]): SheetEntry[] {
   const keys = new Set(records.map(recordKey));
   return records.map((record, i) => {
@@ -54,7 +44,6 @@ function toEntries(records: SheetRecord[], prev: SheetEntry[]): SheetEntry[] {
   });
 }
 
-/** `search` without the params in `drop`. */
 function without(search: string, drop?: string[]): string {
   if (!drop?.length) return search;
   const p = new URLSearchParams(search);
@@ -68,12 +57,6 @@ const sameStack = (a: SheetEntry[], b: SheetEntry[]) =>
 
 let nextOpened = 1;
 
-/**
- * The stack after opening `record` from `from`. A record of the same kind as
- * the sheet it would close takes that sheet's place (a feed row clicked while
- * a Request is open, another key from a Provider's list): the content swaps
- * and nothing slides out and in again.
- */
 function opened(stack: SheetEntry[], record: SheetRecord, from: number): SheetEntry[] {
   const at = stack.findIndex((e) => recordKey(e.record) === recordKey(record));
   if (at >= 0) return stack.slice(0, at + 1);
@@ -91,7 +74,6 @@ export function SheetStackProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(() => ({ url: urlRecords, stack: toEntries(urlRecords, []) }));
   let stack = state.stack;
   if (state.url !== urlRecords) {
-    // The URL moved on its own (Back, Forward, a link, another page).
     const next = toEntries(urlRecords, state.stack);
     stack = sameStack(next, state.stack) ? state.stack : next;
     setState({ url: urlRecords, stack });
@@ -111,14 +93,12 @@ export function SheetStackProvider({ children }: { children: ReactNode }) {
       const pushed = loc.state as Pushed | null;
       const pushedFrom = pushed?.sheetBack;
       if (how === "push") navigate(to, { state: { sheetBack: loc.search, dropped: drop } satisfies Pushed });
-      // Closing what this entry opened is going back, so Back never reopens it (and a dialog the link left comes back).
       else if (how === "close" && pushedFrom !== undefined && without(pushedFrom, pushed?.dropped) === search) navigate(-1);
       else navigate(to, { replace: true, state: loc.state });
     },
     [navigate],
   );
 
-  // Links from before the stack (?request=<id>) become ?sheet=request:<id>.
   useEffect(() => {
     const p = new URLSearchParams(location.search);
     if (p.has("request") && !p.has("sheet"))
@@ -126,26 +106,30 @@ export function SheetStackProvider({ children }: { children: ReactNode }) {
   }, [location, urlRecords, navigate]);
 
   const [requestRows, setRequestRows] = useState<RequestRecord[]>([]);
+  const [editingWishes] = useState(createEditingWishes);
 
-  const value = useMemo<Stack>(
-    () => ({
+  const value = useMemo<Stack>(() => {
+    const open: Stack["open"] = (record, from = -1, drop) => {
+      const cur = latest.current.stack;
+      const next = opened(cur, record, from);
+      const dropping = !!drop?.some((k) => new URLSearchParams(latest.current.location.search).has(k));
+      if (sameStack(next, cur) && !dropping) return;
+      const added = next[next.length - 1];
+      const isNew = !cur.some((e) => recordKey(e.record) === recordKey(added.record));
+      if (isNew) openers.current.set(added.id, document.activeElement);
+      write(next, isNew || dropping ? "push" : "close", drop);
+    };
+    return {
       stack,
-      open: (record, from = -1, drop) => {
-        const cur = latest.current.stack;
-        const next = opened(cur, record, from);
-        const dropping = !!drop?.some((k) => new URLSearchParams(latest.current.location.search).has(k));
-        if (sameStack(next, cur) && !dropping) return;
-        const added = next[next.length - 1];
-        // New to the stack, in a sheet of its own or in the place of one of its kind.
-        const isNew = !cur.some((e) => recordKey(e.record) === recordKey(added.record));
-        if (isNew) openers.current.set(added.id, document.activeElement);
-        // Leaving a dialog for a sheet is a step forward too: Back returns to the dialog.
-        write(next, isNew || dropping ? "push" : "close", drop);
+      open,
+      openEditing: (record) => {
+        editingWishes.add(recordKey(record));
+        open(record);
       },
+      editingWishes,
       close: (index) => {
         const cur = latest.current.stack;
         const keep = index ?? cur.length - 1;
-        // Nothing above `index` (a click that already closed them): no history step.
         if (cur.length === 0 || keep >= cur.length) return;
         write(cur.slice(0, keep), "close");
       },
@@ -162,9 +146,8 @@ export function SheetStackProvider({ children }: { children: ReactNode }) {
       opener: (id) => openers.current.get(id) ?? null,
       requestRows,
       setRequestRows,
-    }),
-    [stack, write, requestRows],
-  );
+    };
+  }, [stack, write, requestRows, editingWishes]);
 
   return <StackContext.Provider value={value}>{children}</StackContext.Provider>;
 }
@@ -175,19 +158,16 @@ export function useSheets(): Stack {
   return ctx;
 }
 
-/** The stack, or null outside a SheetStackProvider (links then fall back to plain navigation). */
 export function useMaybeSheets(): Stack | null {
   return useContext(StackContext);
 }
 
-/** The index of the sheet this is rendered in, -1 on the page. */
 export function useSheetLevel(): number {
   return useContext(LevelContext);
 }
 
 export const SheetLevel = LevelContext.Provider;
 
-/** The Requests feed lends its loaded rows to the Request sheet (seed and ↑/↓ stepping). */
 export function useLendRequestRows(rows: RequestRecord[]) {
   const ctx = useContext(StackContext);
   const set = ctx?.setRequestRows;

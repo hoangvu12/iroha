@@ -5,8 +5,6 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import StatesPage from "./index";
 
-// /states shows the shared DataTable in each of its states (UI ticket 08).
-
 function renderPage() {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ status: "ready", version: "test", ui: true }), { status: 200 })));
   render(
@@ -34,7 +32,7 @@ test("each DataTable state has its panel: loading, empty, no results, error, and
   expect(within(panel("Error")).getByRole("button", { name: "Try again" })).toBeTruthy();
 
   const table = within(panel("Table")).getByRole("table", { name: "Demo keys" });
-  expect(within(table).getAllByRole("row")).toHaveLength(6); // header + a page of 5
+  expect(within(table).getAllByRole("row")).toHaveLength(6);
   expect(within(panel("Table")).getByRole("navigation", { name: "Pages of Demo keys" })).toBeTruthy();
   await user.click(within(table).getByRole("checkbox", { name: "Select team-1" }));
   expect(within(panel("Table")).getByRole("group", { name: "1 selected" })).toBeTruthy();

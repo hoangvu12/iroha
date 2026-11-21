@@ -14,20 +14,11 @@ import { cn } from "./cn";
 export { createScrollAreaController } from "@ui-sdk/react/scroll-area";
 type Controller = ScrollAreaController;
 
-// Shows quickly and lingers when it goes (motion tokens scrollbar-in/out).
 const bar =
   "flex p-0.5 opacity-0 transition-opacity duration-scrollbar-out data-visible:opacity-100 data-visible:duration-scrollbar-in motion-reduce:transition-none";
 const thumb = "rounded-full bg-fg/20 transition-colors hover:bg-fg/35 data-dragging:bg-fg/45";
 
-/**
- * Iroha's one scrolling region: UI SDK Scroll Area with a thin bar that shows
- * on hover or scroll, and edge fades where content continues. The root needs a
- * size (a class, `style`, or `max-h-*` in `viewportClassName`); the viewport is
- * the real scroller, exposed as `viewportRef` and `onScroll` for code that reads
- * the scroll position (a virtualised list). `bars={false}` keeps the bar
- * invisible (tab rows): a Scrollbar part must still render, or the browser's own
- * bars come back.
- */
+/** A Scrollbar part renders even with `bars={false}`: UI SDK hides the browser's own bars only while one does. */
 export function ScrollArea({
   children,
   className,

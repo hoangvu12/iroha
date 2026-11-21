@@ -10,11 +10,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// Conformance with the v1 case catalog (docs/research/v1-case-catalog.md):
-// error envelopes, odd 2xx answers and stream framing, mostly as an
-// Anthropic Messages Caller sees them.
-
-// confAnthropicError is Iroha's error in Anthropic's envelope.
 type confAnthropicError struct {
 	Type      string
 	RequestID string `json:"request_id"`
@@ -33,7 +28,6 @@ type confAnthropicError struct {
 	}
 }
 
-// confAddKeys adds an Upstream Key per secret to Provider acme.
 func confAddKeys(t *testing.T, srv *testkit.Server, secrets ...string) {
 	t.Helper()
 	for _, s := range secrets {
@@ -41,14 +35,12 @@ func confAddKeys(t *testing.T, srv *testkit.Server, secrets ...string) {
 	}
 }
 
-// confStreamed is a Messages request asking for a stream.
 func confStreamed(model string) map[string]any {
 	req := messages(model)
 	req["stream"] = true
 	return req
 }
 
-// confAnthropicText joins the text deltas of an Anthropic stream.
 func confAnthropicText(events []testkit.Event) string {
 	var b strings.Builder
 	for _, e := range events {
@@ -62,14 +54,12 @@ func confAnthropicText(events []testkit.Event) string {
 	return b.String()
 }
 
-// confChatChunk is one OpenAI Chat stream chunk's JSON.
 func confChatChunk(delta map[string]any, finish any) string {
 	b, _ := json.Marshal(map[string]any{"id": "chatcmpl-1", "object": "chat.completion.chunk", "created": 1767225600, "model": "m",
 		"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}})
 	return string(b)
 }
 
-// confUntil reads lines of a live stream until one contains want.
 func confUntil(s *liveStream, want string) {
 	s.t.Helper()
 	for range 100 {
@@ -80,15 +70,11 @@ func confUntil(s *liveStream, want string) {
 	s.t.Fatalf("no line containing %q in %q", want, s.seen)
 }
 
-// REQ-97 (v2 was WRONG): an Iroha error with status 429 is typed
-// rate_limit_error in OpenAI's envelope, with param null; Anthropic's
-// envelope says rate_limit_error and Google's RESOURCE_EXHAUSTED.
 func TestA429FromIrohaIsARateLimitErrorInEveryShape(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a")
-	// The Owner makes a 429 end the Request: the Caller gets the 429.
-	srv.Admin.Post("/api/rules", map[string]any{"name": "rate-limited", "outcome": "fail_request"}).Expect(200)
+	srv.Admin.Put("/api/rules/rate-limited", map[string]any{"outcome": "fail_request"}).Expect(200)
 	up.Default(up.ErrorCode(429, "rate_limit_exceeded", "Slow down"))
 	key := issue(t, srv, "pi", all)
 
@@ -123,10 +109,6 @@ func TestA429FromIrohaIsARateLimitErrorInEveryShape(t *testing.T) {
 	}
 }
 
-// REQ-62 (v1 BUG), REQ-48: a 2xx answer that is not JSON (an HTML page) on
-// a translated path is a failed Attempt the Failure Rules read as a 502, so
-// the budget moves on to another key; when every Attempt gets one, the
-// Caller gets a 502 in its own Shape, never a 200.
 func TestAnHTMLPageSentWith200IsAFailedAttemptWhenTranslating(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -135,7 +117,6 @@ func TestAnHTMLPageSentWith200IsAFailedAttemptWhenTranslating(t *testing.T) {
 	caller := claudeCaller(t, srv)
 	html := testkit.Raw(200, "text/html; charset=utf-8", "<html><body>Please sign in</body></html>")
 
-	// Whole and streamed: key-1's page is a failure, key-2 answers.
 	for _, req := range []map[string]any{messages("m"), confStreamed("m")} {
 		n := up.Count()
 		up.Enqueue(html)
@@ -158,8 +139,7 @@ func TestAnHTMLPageSentWith200IsAFailedAttemptWhenTranslating(t *testing.T) {
 		}
 	}
 
-	// Every key answers a page: a 502 in Anthropic's envelope.
-	srv.SkipShortWaits(time.Second) // the pause before the replay
+	srv.SkipShortWaits(time.Second)
 	up.Default(html)
 	var e confAnthropicError
 	resp := caller.Post(messagesPath, messages("m")).Expect(502).JSON(&e)
@@ -172,8 +152,6 @@ func TestAnHTMLPageSentWith200IsAFailedAttemptWhenTranslating(t *testing.T) {
 	}
 }
 
-// REQ-48 (b): on passthrough the Caller speaks the Endpoint's Shape, so an
-// odd 2xx body is relayed as it came, status and content type included.
 func TestAnHTMLPageSentWith200PassesThroughUntouched(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewAnthropic(t)
@@ -189,11 +167,6 @@ func TestAnHTMLPageSentWith200PassesThroughUntouched(t *testing.T) {
 	}
 }
 
-// REQ-34, REQ-63, REQ-70, FAIL-102: a Messages Caller whose Anthropic
-// Endpoint answers 529 overloaded, then 400 invalid_request on the next
-// key, gets the 400 in Anthropic's envelope (Iroha's code, the Provider's
-// message, the Request ID, every Attempt), whole or streamed: a stream that
-// fails before its first byte keeps the HTTP status.
 func TestAMessagesCallerGetsTheProvidersRefusalInAnthropicsEnvelope(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewAnthropic(t)
@@ -220,10 +193,6 @@ func TestAMessagesCallerGetsTheProvidersRefusalInAnthropicsEnvelope(t *testing.T
 	}
 }
 
-// REQ-101, FAIL-102, REQ-63, REQ-70: when every key of a Messages Caller's
-// Chat Endpoint answers 429 with Retry-After, the Caller gets 503 with
-// Retry-After in Anthropic's envelope (overloaded_error), whole or streamed
-// before the first byte; never a bare upstream 429.
 func TestAMessagesCallerWhoseKeysAreAllRateLimitedGets503WithRetryAfter(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -232,7 +201,6 @@ func TestAMessagesCallerWhoseKeysAreAllRateLimitedGets503WithRetryAfter(t *testi
 	caller := claudeCaller(t, srv)
 	up.Default(up.ErrorCode(429, "rate_limit_exceeded", "Slow down").Header("Retry-After", "30"))
 
-	// A model per case: keys cool per model.
 	for _, req := range []map[string]any{messages("m1"), confStreamed("m2")} {
 		var e confAnthropicError
 		resp := caller.Post(messagesPath, req).Expect(http.StatusServiceUnavailable).JSON(&e)
@@ -248,9 +216,6 @@ func TestAMessagesCallerWhoseKeysAreAllRateLimitedGets503WithRetryAfter(t *testi
 	}
 }
 
-// REQ-76 (v1 BUG): a Messages Caller over a Chat Endpoint whose stream
-// breaks off, or reports an error, mid-answer gets what arrived and then
-// Anthropic's error event; no message_stop pretends the answer completed.
 func TestAMessagesStreamFromChatThatBreaksEndsWithAnErrorEvent(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -287,9 +252,6 @@ func TestAMessagesStreamFromChatThatBreaksEndsWithAnErrorEvent(t *testing.T) {
 	}
 }
 
-// REQ-67 (v1 GAP): an upstream stream framed with CRLF line ends is split
-// into events as they arrive, passed through or translated: the Caller has
-// the first piece before the Provider sends the next.
 func TestCRLFFramedStreamsFlowEventByEvent(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -316,7 +278,6 @@ func TestCRLFFramedStreamsFlowEventByEvent(t *testing.T) {
 		return headers(t, ch)
 	}
 
-	// Passed through to a Chat Caller.
 	hold := make(chan struct{})
 	up.Enqueue(reply(hold))
 	req := chat("m")
@@ -329,7 +290,6 @@ func TestCRLFFramedStreamsFlowEventByEvent(t *testing.T) {
 		t.Fatalf("passthrough: text %q, events %+v", got, events)
 	}
 
-	// Translated for a Messages Caller.
 	hold = make(chan struct{})
 	up.Enqueue(reply(hold))
 	s = open(srv.Anon.WithHeader("x-api-key", key), messagesPath, confStreamed("m"))

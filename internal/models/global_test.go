@@ -9,8 +9,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// addListed creates Provider handle with one OpenAI Chat Endpoint at up, one
-// key, and discovers up's models.
 func addListed(t *testing.T, srv *testkit.Server, handle string, up *testkit.Upstream) {
 	t.Helper()
 	srv.Admin.Post("/api/providers", map[string]any{"handle": handle}).Expect(201)
@@ -51,7 +49,7 @@ func TestGlobalModelListShowsExactlyWhatTheKeyMayUseQualified(t *testing.T) {
 	addListed(t, srv, "off", off)
 	srv.Admin.Patch("/api/providers/off", map[string]any{"enabled": false}).OK()
 	srv.Admin.Post("/api/providers/acme/models", map[string]any{"model": "m2", "hidden": true}).Expect(201)
-	srv.Admin.Post("/api/providers/other/models", map[string]any{"model": "x0"}).Expect(201) // added by hand
+	srv.Admin.Post("/api/providers/other/models", map[string]any{"model": "x0"}).Expect(201)
 
 	wide := issue(t, srv, "wide", all)
 	list := globalModels(t, wide)
@@ -66,8 +64,6 @@ func TestGlobalModelListShowsExactlyWhatTheKeyMayUseQualified(t *testing.T) {
 		t.Fatalf("other/x1 = %+v", list[3])
 	}
 
-	// Narrowed: one Provider whole, one narrowed to models (listed or not,
-	// hidden ones left out), a disabled one not at all.
 	narrow := srv.Client(issueSecret(t, srv, "narrow", map[string]any{"providers": []any{
 		map[string]any{"provider": "other"},
 		map[string]any{"provider": "acme", "models": []string{"zz-unlisted", "m2", "vendor/m3"}},
@@ -82,7 +78,6 @@ func TestGlobalModelListShowsExactlyWhatTheKeyMayUseQualified(t *testing.T) {
 
 	srv.Anon.Get("/v1/models").Expect(401)
 	srv.Client("sk-iroha_wrong").Get("/v1/models").Expect(401)
-	// Gateway Keys in the Anthropic SDK's header work too.
 	if got := globalModels(t, srv.Anon.WithHeader("x-api-key", issueSecret(t, srv, "claude", all))); len(got) != 4 {
 		t.Fatalf("x-api-key list = %v", ids(got))
 	}
@@ -111,7 +106,7 @@ func TestGlobalModelListAnswersQuicklyWith2000Models(t *testing.T) {
 	srv.Admin.Post("/api/providers/p0/models", map[string]any{"model": "model-0007", "metadata": map[string]any{"context_length": 1000000}}).Expect(201)
 	caller := issue(t, srv, "pi", all)
 
-	globalModels(t, caller) // warm up connections and caches
+	globalModels(t, caller)
 	start := time.Now()
 	list := globalModels(t, caller)
 	took := time.Since(start)
@@ -124,8 +119,6 @@ func TestGlobalModelListAnswersQuicklyWith2000Models(t *testing.T) {
 	if c := list[1001].ContextLength; c == nil || *c != 128001 {
 		t.Fatalf("reported metadata lost: %+v", list[1001])
 	}
-	// The spec asks for well under 3 s; the bound is generous for slow
-	// machines and the race detector, the point is no per-model queries.
 	if took > 1500*time.Millisecond {
 		t.Fatalf("GET /v1/models with 2000 models took %v", took)
 	}

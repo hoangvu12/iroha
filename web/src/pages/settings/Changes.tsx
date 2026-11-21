@@ -9,15 +9,10 @@ import { ScrollArea } from "@/ui/ScrollArea";
 import type { ResourceOption } from "./api";
 import { shortDate, clockTime } from "./format";
 
-// The before and after of an opened Audit Entry (C29). Each changed field
-// is one row: its old value, an arrow, its new value. Lists (a Pool's
-// member order) are numbered, with moved items in bold on the After side.
-
 type Labels = Map<string, ResourceOption>;
 
 const MAX_CHANGES = 8;
 
-/** Fields an Audit Entry snapshot carries that are noise to a person. */
 const HIDDEN = new Set(["id", "created_at"]);
 
 export function EntryChanges({ entry, labels }: { entry: AuditEntry; labels: Labels }) {
@@ -43,12 +38,6 @@ export function EntryChanges({ entry, labels }: { entry: AuditEntry; labels: Lab
   );
 }
 
-/**
- * The sheet of the record a change names (UI ticket 11), from its resource and
- * name: "acme/team-5" is acme's Upstream Key team-5; a Model Gap
- * ("acme/team-5/gpt-x") or Endpoint Gap ("acme/team-5@main") is its key's.
- * Records with no sheet (Admin Tokens, Failure Rules, settings...) give none.
- */
 export function changedRecord(resource: string, id: string, name: string): SheetRecord | undefined {
   const slash = name.indexOf("/");
   const provider = slash > 0 ? name.slice(0, slash) : "";
@@ -76,7 +65,6 @@ export function changedRecord(resource: string, id: string, name: string): Sheet
   return undefined;
 }
 
-/** A changed record's name: a link to its sheet when it has one. */
 export function ChangedName({ resource, id, name, className }: { resource: string; id: string; name: string; className?: string }) {
   const r = changedRecord(resource, id, name);
   if (!r) return <span className={cn("truncate", className)}>{name}</span>;
@@ -139,7 +127,6 @@ function isBlank(v: unknown) {
   return v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
 }
 
-/** "upstream_key_ids" -> "Upstream key ids". */
 export function fieldLabel(f: string) {
   const s = f.replace(/_/g, " ");
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -189,7 +176,6 @@ function Value({ v, strong }: { v: unknown; strong?: boolean[] }) {
   );
 }
 
-/** One or two sentences beside the before and after: what Revert would do, or why it can't. */
 export function RevertNote({ entry }: { entry: AuditEntry }) {
   let first: string;
   const c = entry.changes[0];

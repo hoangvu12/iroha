@@ -6,9 +6,6 @@ import type { Provider, UpstreamKey } from "@/pages/providers/api";
 import { KeysTab } from "@/pages/providers/Keys";
 import { loadedSheet, renderWithSheets, routes } from "./test-iroha";
 
-// UI ticket 27: an Upstream Key's details live in its sheet (what the Keys
-// tab's key dialog had), and the old ?key= links open the sheet.
-
 let approve = false;
 const agent = createAgent({ allow: (step) => !step.confirm || approve });
 
@@ -44,7 +41,6 @@ afterEach(() => {
   approve = false;
 });
 
-/** The key's sheet once its body shows the key ("Open page" is in its loading bar too). */
 async function keySheet(name: string) {
   const sheet = await loadedSheet(`Upstream Key ${name}`);
   await within(sheet).findByRole("button", { name: `Test ${name}` });
@@ -60,12 +56,10 @@ test("the key's sheet shows what its dialog did: state, key, name, gaps, Endpoin
   const sheet = await keySheet("team-7");
   const s = within(sheet);
 
-  // State, with the rule and the Request that set it.
   expect(sheet.textContent).toContain("429 Too Many Requests");
   expect(sheet.textContent).toContain("Rule: rate-limit");
   expect(s.getByRole("link", { name: "Open the Request" }).getAttribute("href")).toBe("/x?sheet=key%3Aacme%2Fteam-7&sheet=request%3Areq_1");
 
-  // The key: masked, shown on request, hidden again.
   expect(sheet.textContent).not.toContain("sk-abcdefteam-6");
   await user.click(s.getByRole("button", { name: "Show the key" }));
   expect(sheet.textContent).toContain("sk-abcdefteam-6");
@@ -74,7 +68,6 @@ test("the key's sheet shows what its dialog did: state, key, name, gaps, Endpoin
   expect(s.getByRole("button", { name: "Copy the key" })).toBeTruthy();
   expect(s.getByRole("button", { name: "Replace" })).toBeTruthy();
 
-  // Name, Model Gaps, Endpoints and their gaps, dates.
   expect((s.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("team-7");
   expect(sheet.textContent).toContain("gpt-old");
   expect(s.getByRole("button", { name: "Clear the Model Gap for gpt-old" })).toBeTruthy();
@@ -146,6 +139,19 @@ test("gaps clear one at a time, Restrict to working Endpoints and Test show thei
   expect(results.textContent).toContain("Marked invalid");
 });
 
+test("Saving the Endpoints picker updates the key by name with PUT", async () => {
+  const user = userEvent.setup();
+  routes["PUT /api/providers/acme/keys/bulk"] = { audit_entry: "aud_3", succeeded: 1, failed: 0, items: [{ index: 0, ok: true, outcome: "updated", changes: [] }] };
+  const { fetch } = renderWithSheets(null, "/x?sheet=provider:acme&sheet=key:acme/team-7");
+  const s = within(await keySheet("team-7"));
+  await user.click(await s.findByRole("button", { name: "Change the Endpoints of team-7" }));
+  const picker = await screen.findByRole("dialog", { name: "Endpoints for team-7" });
+  await user.click(within(picker).getByRole("checkbox", { name: "intl" }));
+  await user.click(within(picker).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(calls(fetch, "PUT")).toEqual([["/api/providers/acme/keys/bulk", { items: [{ name: "team-7", endpoints: [] }] }]]));
+  expect(calls(fetch, "POST")).toEqual([]);
+});
+
 test("Change opens the Endpoints picker for the key; Delete… asks, then the key's sheet closes", async () => {
   const user = userEvent.setup();
   routes["POST /api/providers/acme/keys/bulk/delete"] = { audit_entry: "aud_2", succeeded: 1, failed: 0, items: [{ index: 0, ok: true, outcome: "deleted" }] };
@@ -172,7 +178,6 @@ test("the Keys tab opens a key's sheet from its row, and an old ?key= link opens
   renderWithSheets(<KeysTab handle="acme" provider={provider} adding={false} setAdding={() => {}} />, "/providers/acme/keys?state=all&key=team-7");
   await keySheet("team-7");
   await waitFor(() => expect(where()).toBe("/providers/acme/keys?state=all&sheet=key:acme/team-7"));
-  // No key dialog any more.
   expect(screen.queryByRole("dialog", { name: "team-7" })).toBeNull();
 
   await user.keyboard("{Escape}");

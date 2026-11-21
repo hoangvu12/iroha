@@ -12,21 +12,10 @@ import { Input } from "./Input";
 import { type Done, type Save } from "./SaveStatus";
 import { Select, type SelectOption } from "./Select";
 
-// Edit many rows at once (UI ticket 30; research in the ticket's Comments).
-// "Edit…" in a table's bulk bar opens a dialog with one field per value the
-// rows can share. A value the selected rows disagree on shows as mixed: a dash
-// in a checkbox, "Mixed" in a select or a text field, a dash with "2 of 5" on
-// an option of a set. Only the fields the Owner changed reach `onApply`; every
-// other value stays as each row has it. The result (with Undo for the whole
-// change) shows at `at`, the bar's useSave; a failed call keeps the dialog
-// open with its error.
-
-/** The row's noun, one and many: ["key", "keys"]. */
 export type Noun = [one: string, many: string];
 
 const countOf = (n: number, noun: Noun) => plural(n, ...noun);
 
-/** The value every row shares, or mixed (no rows count as mixed). */
 export type Common<V> = { mixed: true } | { mixed: false; value: V };
 
 export function commonValue<T, V>(rows: T[], get: (r: T) => V): Common<V> {
@@ -35,29 +24,21 @@ export function commonValue<T, V>(rows: T[], get: (r: T) => V): Common<V> {
   return rows.every((r) => Object.is(get(r), first)) ? { mixed: false, value: first } : { mixed: true };
 }
 
-/** A set field's change: options to add to every row and to take off every row; the rest stay as each row has them. */
 export type SetChange = { add: string[]; remove: string[] };
 
-/** What the Owner changed, by field ID: a yes-no, a select's or a text field's value, or a set's change. */
 export type BulkChanges = Record<string, boolean | string | SetChange>;
 
 type FieldBase = { id: string; label: string; hint?: ReactNode };
 export type SetOption = { value: string; label: string; detail?: ReactNode };
 
-/** A field the selected rows can share. Names and secrets never are. */
 export type BulkField<T> =
-  | (FieldBase & { kind: "boolean"; get: (r: T) => boolean; /** The word for true in "Mixed: on for 2 of 5 keys". */ on?: string })
+  | (FieldBase & { kind: "boolean"; get: (r: T) => boolean; on?: string })
   | (FieldBase & { kind: "select"; get: (r: T) => string; options: SelectOption[] })
   | (FieldBase & { kind: "text"; get: (r: T) => string; placeholder?: string; mono?: boolean; inputMode?: "text" | "numeric" })
   | (FieldBase & { kind: "set"; get: (r: T) => string[]; options: SetOption[] });
 
 type Draft = Record<string, boolean | string | Record<string, boolean>>;
 
-/**
- * The bulk bar's "Edit…" and its dialog. `onApply` gets only what changed
- * and resolves with the result to show at `at` (see `bulkDone`); a throw keeps
- * the dialog open with the error.
- */
 export function BulkEdit<T>({
   rows,
   noun,
@@ -144,7 +125,6 @@ export function BulkEdit<T>({
   );
 }
 
-/** Only real changes: a set with nothing added or removed is no change. */
 function changesOf(draft: Draft): BulkChanges {
   const out: BulkChanges = {};
   for (const [id, v] of Object.entries(draft)) {
@@ -168,7 +148,6 @@ function FieldRow<T>({
   rows: T[];
   noun: Noun;
   value: Draft[string] | undefined;
-  /** undefined: untouched again. */
   onChange: (v: Draft[string] | undefined) => void;
 }) {
   const labelId = useId();
@@ -262,7 +241,6 @@ function FieldRow<T>({
             value={shown}
             onChange={(e) => {
               const v = e.target.value;
-              // Back to what every row has, or emptied while mixed: untouched.
               onChange((common.mixed ? v === "" : v === common.value) ? undefined : v);
             }}
           />
@@ -272,7 +250,6 @@ function FieldRow<T>({
     );
   }
 
-  // A set: one checkbox per option, each a delta on every row.
   const sets = rows.map((r) => f.get(r));
   const picked = typeof value === "object" ? value : {};
   return (
@@ -317,7 +294,6 @@ function FieldRow<T>({
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** "Mixed: Gold on 2, Silver on 1", from the rows. */
 function spread<T>(rows: T[], get: (r: T) => string, options: SelectOption[]) {
   const counts = new Map<string, number>();
   for (const r of rows) counts.set(get(r), (counts.get(get(r)) ?? 0) + 1);
@@ -325,11 +301,6 @@ function spread<T>(rows: T[], get: (r: T) => string, options: SelectOption[]) {
   return `Mixed: ${[...counts].map(([v, k]) => `${label(v)} on ${k}`).join(", ")}`;
 }
 
-/**
- * A bulk call's result for the bar: how many rows changed, and, when some
- * failed, which (by `names[index]`) and why, in red; Undo (the call's one
- * Audit Entry) reverts the rows that did change.
- */
 export function bulkDone(res: BulkResult<unknown>, names: string[], noun: Noun): Done {
   const changed = res.items.filter((i) => i.ok && i.outcome !== "unchanged").length;
   const same = res.items.filter((i) => i.ok && i.outcome === "unchanged").length;
@@ -342,8 +313,6 @@ export function bulkDone(res: BulkResult<unknown>, names: string[], noun: Noun):
     }
     return { message: `${countOf(changed, noun)} changed${same ? `, ${same} already so` : ""}`, entry };
   }
-  // A row deleted meanwhile is named by the list; the server's not_found
-  // message would repeat it by its ID.
   const why = (i: (typeof failed)[number]) => (i.error?.code === "not_found" ? "no longer exists" : i.error?.message);
   const named = failed.slice(0, 3).map((i) => `${names[i.index] ?? `#${i.index + 1}`}${why(i) ? ` (${why(i)})` : ""}`);
   const more = failed.length > 3 ? ` and ${failed.length - 3} more` : "";

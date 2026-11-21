@@ -6,12 +6,8 @@ import (
 	"strings"
 )
 
-// OpenAI Chat answers.
-
-// chatBody normalises a whole chat.completion. Bodies that are not JSON
-// objects, carry no choices, or are error envelopes pass unchanged.
 func (s Set) chatBody(body []byte) ([]byte, error) {
-	m, ok := decodeObject(body)
+	m, ok := decodeKeepingNumbers(body)
 	if !ok || isError(m) {
 		return body, nil
 	}
@@ -24,7 +20,7 @@ func (s Set) chatBody(body []byte) ([]byte, error) {
 		if msg := obj(c["message"]); msg != nil && s.message(msg) {
 			changed = true
 		}
-		ch, err := s.finishReason(c)
+		ch, err := s.zaiFinishReason(c)
 		if err != nil {
 			return nil, err
 		}
@@ -33,12 +29,11 @@ func (s Set) chatBody(body []byte) ([]byte, error) {
 	if !changed {
 		return body, nil
 	}
-	return encode(m, body), nil
+	return encodeUnescaped(m, body), nil
 }
 
-// message normalises the message of one choice of a whole answer.
 func (s Set) message(msg map[string]any) bool {
-	changed := s.vendorFields(msg, false)
+	changed := s.dropMessageVendorFields(msg)
 	if s.has(ChatContentBlocks) && flattenBlocks(msg) {
 		changed = true
 	}
@@ -56,7 +51,7 @@ func (s Set) message(msg map[string]any) bool {
 		}
 		return changed
 	}
-	var sp splitter
+	var sp leadingReasoningSplitter
 	r, c, acted := sp.feed(content)
 	fr, fc := sp.flush()
 	if !acted && fr == "" && fc == "" {
@@ -66,26 +61,35 @@ func (s Set) message(msg map[string]any) bool {
 	return true
 }
 
-// vendorFields drops audio_content and a brand name. A whole message keeps a
-// name equal to its role; a delta loses any non-empty name.
-func (s Set) vendorFields(msg map[string]any, delta bool) bool {
+func (s Set) dropMessageVendorFields(msg map[string]any) bool {
 	if !s.has(ChatVendorFields) {
 		return false
 	}
-	changed := false
-	if _, ok := msg["audio_content"]; ok {
-		delete(msg, "audio_content")
-		changed = true
-	}
-	if name := str(msg["name"]); name != "" && (delta || name != str(msg["role"])) {
-		delete(msg, "name")
-		changed = true
+	changed := dropKey(msg, "audio_content")
+	if name := str(msg["name"]); name != "" && name != str(msg["role"]) {
+		changed = dropKey(msg, "name") || changed
 	}
 	return changed
 }
 
-// finishReason applies Z.ai's finish reasons to one choice.
-func (s Set) finishReason(c map[string]any) (bool, error) {
+func (s Set) dropDeltaVendorFields(delta map[string]any) bool {
+	if !s.has(ChatVendorFields) {
+		return false
+	}
+	changed := dropKey(delta, "audio_content")
+	if str(delta["name"]) != "" {
+		changed = dropKey(delta, "name") || changed
+	}
+	return changed
+}
+
+func dropKey(m map[string]any, key string) bool {
+	_, ok := m[key]
+	delete(m, key)
+	return ok
+}
+
+func (s Set) zaiFinishReason(c map[string]any) (bool, error) {
 	if !s.has(ZaiFinishReasons) {
 		return false, nil
 	}
@@ -102,10 +106,7 @@ func (s Set) finishReason(c map[string]any) (bool, error) {
 	return true, nil
 }
 
-// flattenBlocks turns a content array of text and thinking blocks into text
-// content, the thinking into reasoning_content (unless the message has its
-// own). GLM writes thinking as {"type":"thinking","thinking":[{"text":...}]};
-// a plain string under "thinking" is read too. Other blocks are dropped.
+// GLM writes thinking as {"type":"thinking","thinking":[{"text":...}]}.
 func flattenBlocks(msg map[string]any) bool {
 	blocks, ok := msg["content"].([]any)
 	if !ok {
@@ -155,36 +156,43 @@ func isError(m map[string]any) bool {
 type Stream struct {
 	set     Set
 	choices map[int]*choiceState
-	order   []int // choice indexes in the order they appeared
+	order   []int
 	env     map[string]any
-	closed  bool // the end of the answer was handled (held text, finish)
-	done    bool // [DONE] passed
-	// closedUnfinished: Iroha added the finish the Provider left out.
-	closedUnfinished bool
+	end     streamEnd
 }
+
+type streamEnd int
+
+const (
+	streamOpen streamEnd = iota
+	streamClosed
+	streamClosedUnfinished
+	streamDoneSent
+)
 
 type choiceState struct {
-	split    splitter
-	native   bool // the choice carries reasoning_content of its own
-	tools    bool // it made tool calls
-	finished bool // a finish_reason arrived
+	split              leadingReasoningSplitter
+	hasNativeReasoning bool
+	madeToolCalls      bool
+	finished           bool
 }
 
-var done = []byte("[DONE]")
+var doneData = []byte("[DONE]")
 
 // Event takes the data of one server-sent event and returns the data to
 // send in its place: usually data itself, untouched; possibly more events
 // before it (held text, a closing chunk) or none. A *Failure means the
 // Provider reported a failure: the stream is over.
 func (st *Stream) Event(data []byte) ([][]byte, error) {
-	if bytes.Equal(bytes.TrimSpace(data), done) {
-		if st.done {
-			return nil, nil // [DONE] once
+	if bytes.Equal(bytes.TrimSpace(data), doneData) {
+		if st.end == streamDoneSent {
+			return nil, nil
 		}
-		st.done = true
-		return append(st.close(), data), nil
+		out := st.close()
+		st.end = streamDoneSent
+		return append(out, data), nil
 	}
-	m, ok := decodeObject(data)
+	m, ok := decodeKeepingNumbers(data)
 	if !ok || isError(m) {
 		return [][]byte{data}, nil
 	}
@@ -214,7 +222,7 @@ func (st *Stream) Event(data []byte) ([][]byte, error) {
 	if !changed {
 		return [][]byte{data}, nil
 	}
-	return [][]byte{encode(m, data)}, nil
+	return [][]byte{encodeUnescaped(m, data)}, nil
 }
 
 // End is called when the Provider ended its body without a transport error.
@@ -222,18 +230,17 @@ func (st *Stream) Event(data []byte) ([][]byte, error) {
 // back, and, for an answer that never said it finished, a closing chunk and
 // [DONE].
 func (st *Stream) End() [][]byte {
-	if st.done {
+	if st.end == streamDoneSent {
 		return nil
 	}
 	out := st.close()
-	if st.closedUnfinished {
-		st.done = true
-		out = append(out, done)
+	if st.end == streamClosedUnfinished {
+		st.end = streamDoneSent
+		out = append(out, doneData)
 	}
 	return out
 }
 
-// choice normalises the delta of one choice in a chunk.
 func (st *Stream) choice(c map[string]any) (bool, error) {
 	s := st.set
 	idx := index(c)
@@ -246,47 +253,46 @@ func (st *Stream) choice(c map[string]any) (bool, error) {
 	changed := false
 	delta := obj(c["delta"])
 	if delta != nil {
-		changed = s.vendorFields(delta, true)
+		changed = s.dropDeltaVendorFields(delta)
 		if s.has(ChatContentBlocks) && flattenBlocks(delta) {
 			changed = true
 		}
 		if len(list(delta["tool_calls"])) > 0 {
-			cs.tools = true
+			cs.madeToolCalls = true
 		}
 		if s.has(ChatReasoningTags) && st.reasoning(delta, cs) {
 			changed = true
 		}
 	}
 	if fr := str(c["finish_reason"]); fr != "" {
-		ch, err := s.finishReason(c)
+		ch, err := s.zaiFinishReason(c)
 		if err != nil {
 			return false, err
 		}
 		changed = changed || ch
 		cs.finished = true
-		if cs.split.pending() { // the answer ends here: nothing more is held
+		if cs.split.pending() {
 			if delta == nil {
 				delta = map[string]any{}
 				c["delta"] = delta
 			}
 			r, t := cs.split.flush()
-			addText(delta, r, t)
+			setBothContentFields(delta, str(delta["reasoning_content"])+r, str(delta["content"])+t)
 			changed = true
 		}
 	}
 	return changed, nil
 }
 
-// reasoning applies the reasoning normaliser to one delta.
 func (st *Stream) reasoning(d map[string]any, cs *choiceState) bool {
 	if str(d["reasoning_content"]) != "" {
-		cs.native = true
+		cs.hasNativeReasoning = true
 	}
 	content, ok := d["content"].(string)
 	if !ok || content == "" {
 		return false
 	}
-	if cs.native {
+	if cs.hasNativeReasoning {
 		if content == str(d["reasoning_content"]) {
 			d["content"] = ""
 			return true
@@ -314,18 +320,15 @@ func (st *Stream) reasoning(d map[string]any, cs *choiceState) bool {
 	if !acted {
 		return false
 	}
-	// Both fields, empty strings included, so consecutive deltas look alike.
-	d["content"], d["reasoning_content"] = text, r
+	setBothContentFields(d, r, text)
 	return true
 }
 
-// close handles the end of the answer once: text still held back goes out,
-// and choices that never finished get a closing chunk.
 func (st *Stream) close() [][]byte {
-	if st.closed {
+	if st.end != streamOpen {
 		return nil
 	}
-	st.closed = true
+	st.end = streamClosed
 	var out [][]byte
 	for _, idx := range st.order {
 		cs := st.choices[idx]
@@ -334,7 +337,7 @@ func (st *Stream) close() [][]byte {
 		}
 		r, t := cs.split.flush()
 		d := map[string]any{}
-		addText(d, r, t)
+		setBothContentFields(d, r, t)
 		out = append(out, st.chunk([]any{map[string]any{"index": idx, "delta": d}}))
 	}
 	if !st.set.has(ChatFinishReason) {
@@ -344,28 +347,23 @@ func (st *Stream) close() [][]byte {
 	for _, idx := range st.order {
 		if cs := st.choices[idx]; !cs.finished {
 			reason := "stop"
-			if cs.tools {
+			if cs.madeToolCalls {
 				reason = "tool_calls"
 			}
 			finish = append(finish, map[string]any{"index": idx, "delta": map[string]any{}, "finish_reason": reason})
 		}
 	}
 	if len(finish) > 0 {
-		st.closedUnfinished = true
+		st.end = streamClosedUnfinished
 		out = append(out, st.chunk(finish))
 	}
 	return out
 }
 
-// addText sets the text held back on a delta (both fields, like the deltas
-// before it).
-func addText(d map[string]any, reasoning, text string) {
-	d["content"] = str(d["content"]) + text
-	d["reasoning_content"] = str(d["reasoning_content"]) + reasoning
+func setBothContentFields(d map[string]any, reasoning, content string) {
+	d["content"], d["reasoning_content"] = content, reasoning
 }
 
-// envelope remembers the identifying fields of the last chunk, for chunks
-// Iroha adds.
 func (st *Stream) envelope(m map[string]any) {
 	env := map[string]any{}
 	for _, k := range []string{"id", "object", "created", "model", "system_fingerprint"} {
@@ -378,14 +376,13 @@ func (st *Stream) envelope(m map[string]any) {
 	}
 }
 
-// chunk is the data of a chunk Iroha adds, named like the Provider's.
 func (st *Stream) chunk(choices []any) []byte {
 	m := map[string]any{"object": "chat.completion.chunk"}
 	for k, v := range st.env {
 		m[k] = v
 	}
 	m["choices"] = choices
-	return encode(m, nil)
+	return encodeUnescaped(m, nil)
 }
 
 func index(c map[string]any) int {

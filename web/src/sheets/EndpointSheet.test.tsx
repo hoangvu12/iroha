@@ -6,8 +6,6 @@ import type { Endpoint, Provider } from "@/pages/providers/api";
 import { EndpointsTab } from "@/pages/providers/Endpoints";
 import { loadedSheet, renderWithSheets, routes } from "./test-iroha";
 
-// UI ticket 27: an Endpoint is edited in its sheet, not in a dialog.
-
 const agent = createAgent();
 const where = () => screen.getByRole("status", { name: "Location" }).textContent;
 const text = { ignore: "script, style, [data-ui-sdk-announcer]" };
@@ -21,7 +19,6 @@ afterEach(() => {
   Object.assign(routes, saved);
 });
 
-/** The Endpoint's sheet once its body shows the Endpoint. */
 async function endpointSheet(name: string) {
   const sheet = await loadedSheet(`Endpoint ${name}`);
   await within(sheet).findByRole("button", { name: `Edit ${name}` });
@@ -43,7 +40,6 @@ test("Edit turns the sheet's facts into the Endpoint's fields; Save keeps the sh
   const url = await s.findByRole("textbox", { name: "URL" });
   expect((url as HTMLInputElement).value).toBe("https://api.acme.test/v1");
   expect((s.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("main");
-  // No dialog: the form is in the sheet.
   expect(screen.queryAllByRole("dialog")).toEqual([sheet]);
 
   await user.clear(url);
@@ -90,11 +86,9 @@ test("picking a header you name opens its name field under the choice, folding a
   const panel = name.closest("[data-slot=collapsible-panel]")!;
   for (const c of ["transition-[height]", "duration-collapse", "data-starting-style:h-0", "data-ending-style:h-0", "overflow-hidden"])
     expect(panel.className.split(/\s+/)).toContain(c);
-  // The input's focus ring has room inside the clipping panel.
   for (const c of ["-mx-1", "px-1", "-mb-1", "pb-1"]) expect(panel.className.split(/\s+/)).toContain(c);
 });
 
-// Prompt caching 03: what translated requests get for the prompt cache, and the two settings that turn it off.
 test("the facts say what translated requests get for the prompt cache; Edit sets cache markers and the prompt_cache_key", async () => {
   const user = userEvent.setup();
   const summary = "Cache markers of an Anthropic Caller's messages are kept, its system prompt's are not; a prompt_cache_key made from the conversation is sent when the request has none.";
@@ -114,7 +108,6 @@ test("the facts say what translated requests get for the prompt cache; Edit sets
   expect(s.getByRole("combobox", { name: "Send prompt_cache_key" }).textContent).toContain("Off");
   await user.click(markers);
   await user.click(await screen.findByRole("option", { name: "Off" }));
-  // Iroha's default is the setting "".
   const key = s.getByRole("combobox", { name: "Send prompt_cache_key" });
   await user.click(key);
   await user.click(await screen.findByRole("option", { name: "Iroha's default" }));

@@ -19,7 +19,6 @@ func responsesReq(model string) map[string]any {
 	return map[string]any{"model": model, "input": "hi"}
 }
 
-// responsesEvent is the part of a Responses stream event the tests read.
 type responsesEvent struct {
 	Type     string
 	Seq      *int `json:"sequence_number"`
@@ -30,8 +29,6 @@ type responsesEvent struct {
 	}
 }
 
-// readResponses decodes a Responses stream, checking every event is named
-// by its type, and returns the events and the text of its deltas.
 func readResponses(t *testing.T, events []testkit.Event) ([]responsesEvent, string) {
 	t.Helper()
 	var out []responsesEvent
@@ -56,9 +53,6 @@ func TestResponsesPassThroughToAResponsesEndpoint(t *testing.T) {
 	caller := srv.Client(issue(t, srv, "codex", all)).WithHeader("Idempotency-Key", "attempt-123")
 	up.SetUsage(40, 12)
 
-	// Stored state, tools, structured output and extensions reach the
-	// Provider byte for byte (plus the conversation's prompt_cache_key,
-	// prompt caching 04).
 	body := `{"model":"gpt-5", "input":"Say hello", "store":true, "previous_response_id":"resp_prev",
 		"tools":[{"type":"function","name":"weather","parameters":{"type":"object"}}],
 		"text":{"format":{"type":"json_schema","name":"answer","schema":{"type":"object"}}}, "provider_extension":{"cache":"ephemeral"}}`
@@ -75,9 +69,6 @@ func TestResponsesPassThroughToAResponsesEndpoint(t *testing.T) {
 		t.Fatalf("request = %+v usage %+v", r, r.Usage)
 	}
 
-	// Streamed: events pass through in order with their names; the response
-	// objects name the model asked for; usage from response.completed is
-	// recorded.
 	srv.Admin.Patch("/api/providers/acme/endpoints/default", map[string]any{"renames": map[string]string{"codex": "gpt-5-codex"}}).OK()
 	st := responsesReq("codex")
 	st["stream"] = true
@@ -100,7 +91,6 @@ func TestResponsesPassThroughToAResponsesEndpoint(t *testing.T) {
 		t.Fatalf("stream request = %+v usage %+v", r, r.Usage)
 	}
 
-	// Cached input and reasoning tokens are recorded too.
 	up.Enqueue(testkit.JSON(200, map[string]any{"id": "resp_9", "object": "response", "status": "completed", "model": "gpt-5", "output": []any{},
 		"usage": map[string]any{"input_tokens": 100, "input_tokens_details": map[string]any{"cached_tokens": 60},
 			"output_tokens": 30, "output_tokens_details": map[string]any{"reasoning_tokens": 20}, "total_tokens": 130}}))
@@ -118,7 +108,6 @@ func TestResponsesAreTranslatedForAChatEndpoint(t *testing.T) {
 	caller := srv.Client(issue(t, srv, "codex", all))
 	up.SetUsage(30, 7)
 
-	// A tool call comes back under the Caller's own tool name.
 	up.Enqueue(testkit.JSON(200, map[string]any{
 		"id": "chatcmpl-1", "object": "chat.completion", "created": 1767225600, "model": "deepseek-chat",
 		"choices": []any{map[string]any{"index": 0, "finish_reason": "tool_calls", "message": map[string]any{"role": "assistant", "content": "Listing.",
@@ -158,8 +147,6 @@ func TestResponsesAreTranslatedForAChatEndpoint(t *testing.T) {
 		t.Fatalf("request = %+v", r)
 	}
 
-	// Streamed: Chat chunks become Responses events, usage included (Iroha
-	// asked the Provider for it).
 	req["stream"] = true
 	resp = caller.Post(responsesPath, req).Expect(200)
 	if opts, _ := up.Last().Map(t)["stream_options"].(map[string]any); opts["include_usage"] != true {
@@ -219,7 +206,6 @@ func TestChatAndMessagesAreTranslatedForAResponsesEndpoint(t *testing.T) {
 	caller := srv.Client(issue(t, srv, "pi", all))
 	up.SetUsage(21, 4)
 
-	// Chat, whole and streamed with include_usage.
 	resp := caller.Post(chatPath, chat("gpt-5")).Expect(200)
 	got := up.Last()
 	sent := got.Map(t)
@@ -256,7 +242,6 @@ func TestChatAndMessagesAreTranslatedForAResponsesEndpoint(t *testing.T) {
 		t.Fatalf("request = %+v usage %+v", r, r.Usage)
 	}
 
-	// Anthropic Messages, streamed.
 	st := messages("gpt-5")
 	st["stream"] = true
 	resp = claudeCaller(t, srv).Post(messagesPath, st).Expect(200)
@@ -354,8 +339,6 @@ func TestAResponsesStreamIsKeptAliveAndFailsWithErrorEvents(t *testing.T) {
 		t.Fatalf("events = %+v", evs)
 	}
 
-	// A committed stream that then fails ends with the error event (whose
-	// top-level error the OpenAI SDKs raise) and response.failed.
 	up.Enqueue(testkit.Hang())
 	ch = make(chan *liveStream, 1)
 	go func() {

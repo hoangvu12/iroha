@@ -20,22 +20,16 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// snapshot is what an Audit Entry records of a model list entry: only the
-// Owner's flags. An entry neither added nor hidden does not exist for the
-// audit machinery, so adding a discovered model is a create and reverting
-// it clears the flag without touching what discovery found.
 type snapshot struct {
-	ID         string `json:"id"`
-	ProviderID string `json:"provider_id"`
-	Provider   string `json:"provider"`
-	Model      string `json:"model"`
-	Added      bool   `json:"added"`
-	Hidden     bool   `json:"hidden"`
-	// Ticket 11: the Owner's metadata overrides; absent when none.
-	Overrides *modelmeta.Facts `json:"overrides,omitempty"`
+	ID         string           `json:"id"`
+	ProviderID string           `json:"provider_id"`
+	Provider   string           `json:"provider"`
+	Model      string           `json:"model"`
+	Added      bool             `json:"added"`
+	Hidden     bool             `json:"hidden"`
+	Overrides  *modelmeta.Facts `json:"overrides,omitempty"`
 }
 
-// Resource is the model list entry resource of the audit machinery.
 var Resource = audit.Register(&audit.Resource[snapshot]{
 	Name: "model", Label: "Model", Plural: "Models", Path: "/api/providers/{provider}/models",
 	Table: "provider_models", NameColumn: "model",
@@ -86,26 +80,19 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 	},
 })
 
-// ModelChange is the body of POST /api/providers/{provider}/models and each
-// item of its bulk.
 type ModelChange struct {
-	Model  string `json:"model" doc:"The model ID exactly as the Provider names it (case-sensitive; may contain /)."`
-	Added  *bool  `json:"added,omitempty" doc:"true: the model is on the list whatever discovery finds; false: take it off unless discovered. Default true when neither hidden nor metadata is sent."`
-	Hidden *bool  `json:"hidden,omitempty" doc:"true: Callers never see it and asking for it is refused (404 model_not_found), even if it was never discovered; false: show it again."`
-	// Metadata replaces the Owner's overrides (ticket 11).
-	Metadata *modelmeta.Facts `json:"metadata,omitempty" doc:"Replaces your metadata overrides of the model: the fields Callers' model lists show (context_length, max_input_tokens, max_output_tokens, architecture, reasoning, reasoning_levels, chat). Each field sent beats what the Provider and models.dev say; {} removes every override. Overrides never change whether the model is listed or routed."`
-	// MetadataPatch changes only the overrides it names (review fix 1 of
-	// UI batch 2), so a bulk edit never rewrites the others from a stale copy.
-	MetadataPatch json.RawMessage `json:"metadata_patch,omitempty" doc:"Changes only the overrides named, keeping the others as the model has them: an object with fields of metadata, each set to a value to override it or to null to remove that override, e.g. {\"context_length\": 200000, \"chat\": null}. Not with metadata."`
+	Model         string           `json:"model" doc:"The model ID exactly as the Provider names it (case-sensitive; may contain /)."`
+	Added         *bool            `json:"added,omitempty" doc:"true: the model is on the list whatever discovery finds; false: take it off unless discovered. Default true when neither hidden nor metadata is sent."`
+	Hidden        *bool            `json:"hidden,omitempty" doc:"true: Callers never see it and asking for it is refused (404 model_not_found), even if it was never discovered; false: show it again."`
+	Metadata      *modelmeta.Facts `json:"metadata,omitempty" doc:"Replaces your metadata overrides of the model: the fields Callers' model lists show (context_length, max_input_tokens, max_output_tokens, architecture, reasoning, reasoning_levels, chat). Each field sent beats what the Provider and models.dev say; {} removes every override. Overrides never change whether the model is listed or routed."`
+	MetadataPatch json.RawMessage  `json:"metadata_patch,omitempty" doc:"Changes only the overrides named, keeping the others as the model has them: an object with fields of metadata, each set to a value to override it or to null to remove that override, e.g. {\"context_length\": 200000, \"chat\": null}. Not with metadata."`
 }
 
-// ModelResult is the response of a single model change.
 type ModelResult struct {
 	audit.Result
 	Model Model `json:"model" doc:"The entry after the change; all flags false when it left the list."`
 }
 
-// ModelCounts counts a Provider's entries per filter.
 type ModelCounts struct {
 	All        int `json:"all"`
 	Visible    int `json:"visible"`
@@ -115,7 +102,6 @@ type ModelCounts struct {
 	Gaps       int `json:"gaps" doc:"Entries some key has a live Model Gap for."`
 }
 
-// ModelList is the response of GET /api/providers/{provider}/models.
 type ModelList struct {
 	Provider    string       `json:"provider"`
 	Strict      bool         `json:"strict" doc:"The Provider refuses models missing from this list."`
@@ -128,7 +114,6 @@ type ModelList struct {
 	Models      []Model      `json:"models" doc:"The page of matching entries, sorted by model."`
 }
 
-// Filters of the model list.
 var filters = []string{"all", "visible", "discovered", "added", "hidden", "gaps"}
 
 const (
@@ -136,8 +121,6 @@ const (
 	maxLimit     = 1000
 )
 
-// Routes returns the admin routes of model lists and the Caller route
-// GET /providers/{handle}/v1/models.
 func Routes(tr *audit.Trail, s *Store) []api.Route {
 	h := handlers{tr: tr, s: s}
 	const tag = "Models"
@@ -283,7 +266,6 @@ type handlers struct {
 	s  *Store
 }
 
-// provRef is a resolved Provider.
 type provRef struct{ id, handle string }
 
 func resolve(ctx context.Context, q audit.Querier, ref string) (provRef, error) {
@@ -391,7 +373,6 @@ func intParam(c *api.Call, name string, def, lo, hi int) (int, error) {
 
 const modelHint = "Send the model ID exactly as the Provider names it: 1 to 256 characters without surrounding spaces or control characters, e.g. \"glm-4.6\" or \"meta-llama/llama-3.3-70b\"."
 
-// change applies one ModelChange to Provider p.
 func (h handlers) change(m *audit.Mutation, p provRef, in ModelChange) (Model, error) {
 	model := in.Model
 	if model == "" || len(model) > maxModelLen || strings.TrimSpace(model) != model || strings.ContainsFunc(model, unicode.IsControl) {
@@ -443,8 +424,6 @@ func (h handlers) change(m *audit.Mutation, p provRef, in ModelChange) (Model, e
 	return out, err
 }
 
-// patchOverrides applies a metadata_patch to the current overrides: each
-// top-level field sent replaces that override, null removes it.
 func patchOverrides(current modelmeta.Facts, patch json.RawMessage) (modelmeta.Facts, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(patch, &fields); err != nil || fields == nil {
@@ -474,9 +453,6 @@ func patchOverrides(current modelmeta.Facts, patch json.RawMessage) (modelmeta.F
 	return out, nil
 }
 
-// CallerModel is one model of the Caller-facing list: the OpenAI list entry
-// plus what is known of the model (ticket 11; the global /v1/models of
-// ticket 12 emits the same fields). chat is always present.
 type CallerModel struct {
 	ID      string `json:"id"`
 	Object  string `json:"object" enum:"model"`
@@ -485,7 +461,6 @@ type CallerModel struct {
 	modelmeta.Facts
 }
 
-// CallerModelList is the answer of GET /providers/{handle}/v1/models.
 type CallerModelList struct {
 	Object string        `json:"object" enum:"list"`
 	Data   []CallerModel `json:"data"`

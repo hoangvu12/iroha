@@ -12,8 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// TestToolListNamesEveryTestTool: GET /api/test/tools lists each made-up
-// tool with a one-line description and a JSON schema, get_weather first.
 func TestToolListNamesEveryTestTool(t *testing.T) {
 	srv := testkit.Start(t)
 	var got testchat.ToolList
@@ -35,7 +33,6 @@ func TestToolListNamesEveryTestTool(t *testing.T) {
 	}
 }
 
-// toolStream is an OpenAI Chat stream calling one tool with arguments.
 func toolStream(name, args string) string {
 	a, _ := json.Marshal(args)
 	return fmt.Sprintf(`data: {"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":%q,"arguments":""}}]},"finish_reason":null}]}
@@ -49,9 +46,6 @@ data: [DONE]
 `, name, a)
 }
 
-// TestChosenToolsAreOfferedAndCheckedInEveryShape: tools offers each named
-// tool in the Shape's own form, and the verdict covers whichever offered
-// tool the model called.
 func TestChosenToolsAreOfferedAndCheckedInEveryShape(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -79,7 +73,6 @@ func TestChosenToolsAreOfferedAndCheckedInEveryShape(t *testing.T) {
 	}
 }
 
-// TestToolCheckFailsCallsOutsideTheOfferOrAgainstTheSchema.
 func TestToolCheckFailsCallsOutsideTheOfferOrAgainstTheSchema(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -101,13 +94,11 @@ func TestToolCheckFailsCallsOutsideTheOfferOrAgainstTheSchema(t *testing.T) {
 			t.Fatalf("%s(%s): check %+v, want %q", tc.name, tc.args, c, tc.reason)
 		}
 	}
-	// No call at all names the one tool offered.
 	up.Enqueue(up.Text("No tools today."))
 	resp := srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/m", "tools": []any{"fetch_url"}})).Expect(200)
 	if c := toolCheck(t, resp.Body); c.Passed || c.Reason != "The model answered without calling fetch_url." {
 		t.Fatalf("check %+v", c)
 	}
-	// Unknown names are refused before anything is sent.
 	n := up.Count()
 	resp = srv.Admin.Post("/api/test", send(map[string]any{"model": "acme/m", "tools": []any{"get_weather", "teleport"}})).Expect(400)
 	if !strings.Contains(resp.Text(), "unknown_tool") || up.Count() != n {
@@ -115,8 +106,6 @@ func TestToolCheckFailsCallsOutsideTheOfferOrAgainstTheSchema(t *testing.T) {
 	}
 }
 
-// followUp sends a conversation whose assistant turn called name(args)
-// and returns the result Iroha put in the tool message.
 func followUp(t *testing.T, srv *testkit.Server, up *testkit.Upstream, name, args string) map[string]any {
 	t.Helper()
 	up.Enqueue(up.Text("ok"))
@@ -142,9 +131,6 @@ func followUp(t *testing.T, srv *testkit.Server, up *testkit.Upstream, name, arg
 	return out
 }
 
-// TestEachToolIsAnsweredByIroha: the follow-up turn carries each tool's
-// result: the real time (Iroha's clock) in the zone asked, a computed
-// expression, made-up search results, page text and a nested order record.
 func TestEachToolIsAnsweredByIroha(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -207,8 +193,6 @@ func TestEachToolIsAnsweredByIroha(t *testing.T) {
 	}
 }
 
-// TestToolCheckAloneStillMeansGetWeather: old callers (tool_check: true)
-// get get_weather only, in requests and snippets.
 func TestToolCheckAloneStillMeansGetWeather(t *testing.T) {
 	srv := testkit.Start(t)
 	var dry struct {
@@ -220,14 +204,12 @@ func TestToolCheckAloneStillMeansGetWeather(t *testing.T) {
 	if len(dry.Body.Tools) != 1 || dry.Body.Tools[0].Function.Name != "get_weather" {
 		t.Fatalf("dry run %+v", dry)
 	}
-	// tools wins over tool_check.
 	srv.Admin.Post("/api/test?dry_run=true", send(map[string]any{"model": "acme/m", "tool_check": true, "tools": []any{"get_time"}})).OK().JSON(&dry)
 	if len(dry.Body.Tools) != 1 || dry.Body.Tools[0].Function.Name != "get_time" {
 		t.Fatalf("dry run %+v", dry)
 	}
 }
 
-// TestSnippetsCarryTheChosenTools.
 func TestSnippetsCarryTheChosenTools(t *testing.T) {
 	srv := testkit.Start(t)
 	var sn testchat.Snippets

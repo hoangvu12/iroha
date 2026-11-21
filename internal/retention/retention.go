@@ -15,7 +15,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Retention settings, one per kind of data.
 var (
 	HistoryDays = settings.NewInt(settings.Int{
 		Name: "retention.history_days", Unit: "days", Default: 30, Min: 1, Max: 3650,
@@ -38,42 +37,39 @@ const JobName = "retention"
 // the write lock for long.
 const batch = 2000
 
-// kind is one kind of data the job deletes.
 type kind struct {
-	detail  string // figure name in the run's details
-	label   string // plural for the summary
-	setting *settings.Int
-	count   string // SQL counting rows older than ?
-	delete  string // SQL deleting at most ? rows older than ?
+	detailKey   string
+	pluralLabel string
+	setting     *settings.Int
+	countSQL    string
+	deleteSQL   string
 }
+
+var endedOwnerSessionsDays = LogsDays
 
 var kinds = []kind{
 	{
-		detail: "captures", label: "captures", setting: CapturesDays,
-		count:  `SELECT count(*) FROM captures WHERE created_at < ?`,
-		delete: `DELETE FROM captures WHERE request_id IN (SELECT request_id FROM captures WHERE created_at < ? LIMIT ?)`,
+		detailKey: "captures", pluralLabel: "captures", setting: CapturesDays,
+		countSQL:  `SELECT count(*) FROM captures WHERE created_at < ?`,
+		deleteSQL: `DELETE FROM captures WHERE request_id IN (SELECT request_id FROM captures WHERE created_at < ? LIMIT ?)`,
 	},
 	{
-		detail: "requests", label: "Requests", setting: HistoryDays,
-		count:  `SELECT count(*) FROM requests WHERE started_at < ?`,
-		delete: `DELETE FROM requests WHERE rowid IN (SELECT rowid FROM requests WHERE started_at < ? LIMIT ?)`,
+		detailKey: "requests", pluralLabel: "Requests", setting: HistoryDays,
+		countSQL:  `SELECT count(*) FROM requests WHERE started_at < ?`,
+		deleteSQL: `DELETE FROM requests WHERE rowid IN (SELECT rowid FROM requests WHERE started_at < ? LIMIT ?)`,
 	},
 	{
-		detail: "log_events", label: "log events", setting: LogsDays,
-		count:  `SELECT count(*) FROM log_events WHERE logged_at < ?`,
-		delete: `DELETE FROM log_events WHERE id IN (SELECT id FROM log_events WHERE logged_at < ? LIMIT ?)`,
+		detailKey: "log_events", pluralLabel: "log events", setting: LogsDays,
+		countSQL:  `SELECT count(*) FROM log_events WHERE logged_at < ?`,
+		deleteSQL: `DELETE FROM log_events WHERE id IN (SELECT id FROM log_events WHERE logged_at < ? LIMIT ?)`,
 	},
 	{
-		// An Owner session stops working when revoked or expired; it stays
-		// listed (GET /api/owner-sessions?active=false) as long as log events.
-		detail: "owner_sessions", label: "Owner sessions", setting: LogsDays,
-		count:  `SELECT count(*) FROM owner_sessions WHERE ` + sessionEnded + ` < ?`,
-		delete: `DELETE FROM owner_sessions WHERE rowid IN (SELECT rowid FROM owner_sessions WHERE ` + sessionEnded + ` < ? LIMIT ?)`,
+		detailKey: "owner_sessions", pluralLabel: "Owner sessions", setting: endedOwnerSessionsDays,
+		countSQL:  `SELECT count(*) FROM owner_sessions WHERE ` + sessionEnded + ` < ?`,
+		deleteSQL: `DELETE FROM owner_sessions WHERE rowid IN (SELECT rowid FROM owner_sessions WHERE ` + sessionEnded + ` < ? LIMIT ?)`,
 	},
 }
 
-// sessionEnded is when an Owner session stopped working: revoked or expired,
-// whichever came first.
 const sessionEnded = `min(coalesce(revoked_at, expires_at), expires_at)`
 
 // Job is the hourly retention job.
@@ -100,16 +96,16 @@ func run(ctx context.Context, db *store.DB, dry bool) (jobs.Outcome, error) {
 		cutoff := store.Millis(now.Add(-time.Duration(days) * 24 * time.Hour))
 		var n int64
 		if dry {
-			err = db.QueryRowContext(ctx, k.count, cutoff).Scan(&n)
+			err = db.QueryRowContext(ctx, k.countSQL, cutoff).Scan(&n)
 		} else {
-			n, err = deleteOlder(ctx, db, k.delete, cutoff)
+			n, err = deleteOlder(ctx, db, k.deleteSQL, cutoff)
 		}
-		out.Details[k.detail] = n
-		out.Details[k.detail+"_days"] = days
+		out.Details[k.detailKey] = n
+		out.Details[k.detailKey+"_days"] = days
 		if err != nil {
-			return out, fmt.Errorf("deleting %s: %w", k.label, err)
+			return out, fmt.Errorf("deleting %s: %w", k.pluralLabel, err)
 		}
-		parts = append(parts, fmt.Sprintf("%d %s", n, k.label))
+		parts = append(parts, fmt.Sprintf("%d %s", n, k.pluralLabel))
 	}
 	verb := "Deleted"
 	if dry {
@@ -120,7 +116,6 @@ func run(ctx context.Context, db *store.DB, dry bool) (jobs.Outcome, error) {
 	return out, nil
 }
 
-// deleteOlder deletes in batches until nothing older than cutoff is left.
 func deleteOlder(ctx context.Context, db *store.DB, query string, cutoff int64) (int64, error) {
 	var total int64
 	for {

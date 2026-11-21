@@ -17,7 +17,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// RequestPage is a page of Requests, newest first.
 type RequestPage struct {
 	Requests   []Request `json:"requests"`
 	NextBefore string    `json:"next_before,omitempty" doc:"Pass as before= to read the next older page; absent on the last page."`
@@ -96,7 +95,6 @@ func attempts(ctx context.Context, db *store.DB, id string) ([]Attempt, error) {
 
 const maxLimit = 1000
 
-// Routes returns the Request history routes.
 func Routes(db *store.DB) []api.Route {
 	c := db.Clock()
 	const tag = "Requests"
@@ -203,15 +201,6 @@ func list(call *api.Call, db *store.DB, c clock.Clock) (any, error) {
 	} else if s := q.Get("before"); s != "" {
 		f.add("rowid < coalesce((SELECT rowid FROM requests WHERE id = ?), 0)", s)
 	}
-	// Read the newest change before the page: a change committed in between
-	// then shows up on the next poll instead of never.
-	var head int64
-	if err := db.QueryRowContext(ctx, `SELECT coalesce(max(rev), 0) FROM requests`).Scan(&head); err != nil {
-		return nil, err
-	}
-	if follow {
-		f.add("rev > ? AND rev <= ?", cursor, head)
-	}
 	limit := 100
 	if s := q.Get("limit"); s != "" {
 		n, err := strconv.Atoi(s)
@@ -220,35 +209,46 @@ func list(call *api.Call, db *store.DB, c clock.Clock) (any, error) {
 		}
 		limit = n
 	}
-	order := " ORDER BY rowid DESC LIMIT ?"
-	if follow {
-		order = " ORDER BY rev LIMIT ?"
-	}
-	rows, err := db.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests`+f.clause()+order, slices.Concat(f.args, []any{limit})...)
+	head, page, err := readHeadThenPage(ctx, db, f, follow, cursor, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	p := RequestPage{Requests: []Request{}, Cursor: head}
-	for rows.Next() {
-		r, err := scanRequest(rows)
-		if err != nil {
-			return nil, err
-		}
-		p.Requests = append(p.Requests, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
+	p := RequestPage{Requests: page, Cursor: head}
 	if len(p.Requests) == limit {
 		last := p.Requests[len(p.Requests)-1]
 		if follow {
-			p.Cursor = last.rev // more changes wait; the next call continues from here
+			p.Cursor = last.rev
 		} else {
 			p.NextBefore = last.ID
 		}
 	}
 	return p, nil
+}
+
+func readHeadThenPage(ctx context.Context, db *store.DB, f filter, follow bool, cursor int64, limit int) (int64, []Request, error) {
+	var head int64
+	if err := db.QueryRowContext(ctx, `SELECT coalesce(max(rev), 0) FROM requests`).Scan(&head); err != nil {
+		return 0, nil, err
+	}
+	order := " ORDER BY rowid DESC LIMIT ?"
+	if follow {
+		f = f.and("rev > ? AND rev <= ?", cursor, head)
+		order = " ORDER BY rev LIMIT ?"
+	}
+	rows, err := db.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests`+f.clause()+order, slices.Concat(f.args, []any{limit})...)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	page := []Request{}
+	for rows.Next() {
+		r, err := scanRequest(rows)
+		if err != nil {
+			return 0, nil, err
+		}
+		page = append(page, r)
+	}
+	return head, page, rows.Err()
 }
 
 func parseTime(s string, c clock.Clock) (time.Time, error) {

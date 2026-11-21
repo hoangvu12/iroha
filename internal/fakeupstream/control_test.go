@@ -44,7 +44,6 @@ func TestControlQueuesRepliesAndShowsWhatArrived(t *testing.T) {
 	if code, _ := do(t, "POST", u.URL()+"/messages", "sk-ok", msg); code != 200 {
 		t.Fatalf("after the queue: %d", code)
 	}
-	// A marked key fails whatever is queued.
 	if code, _ := do(t, "POST", u.URL()+"/messages", "sk-demo-fail401", msg); code != 401 {
 		t.Fatalf("marked key: %d", code)
 	}

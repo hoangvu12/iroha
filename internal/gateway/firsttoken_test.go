@@ -8,7 +8,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// holdChunk is r with its chunk i (and those after it) held until release.
 func holdChunk(r testkit.Responder, i int, release <-chan struct{}) testkit.Responder {
 	return func(rec *testkit.Received) testkit.Reply {
 		rep := r(rec)
@@ -17,8 +16,6 @@ func holdChunk(r testkit.Responder, i int, release <-chan struct{}) testkit.Resp
 	}
 }
 
-// openLive sends a streaming body to path and returns the live stream once
-// its headers arrive.
 func openLive(t *testing.T, caller *testkit.Client, path string, body map[string]any) *liveStream {
 	t.Helper()
 	body["stream"] = true
@@ -30,10 +27,6 @@ func openLive(t *testing.T, caller *testkit.Client, path string, body map[string
 	return headers(t, ch)
 }
 
-// Story 75: a stream's time to first token is when the first
-// event carrying generated content arrived, not the Provider's comments,
-// pings, role-only chunk or message_start before it; on passthrough and
-// translated streams alike.
 func TestTimeToFirstTokenIsTheFirstContentEvent(t *testing.T) {
 	srv := testkit.Start(t)
 	chatUp := testkit.NewOpenAIChat(t)
@@ -58,8 +51,6 @@ func TestTimeToFirstTokenIsTheFirstContentEvent(t *testing.T) {
 		t.Fatalf("passthrough: first token %v, attempt %v", msOf(r.FirstByteMs), msOf(r.Attempts[0].FirstByteMs))
 	}
 
-	// Anthropic to a Chat Caller: message_start and content_block_start
-	// carry no token.
 	release = make(chan struct{})
 	claudeUp.Enqueue(holdChunk(claudeUp.Stream("Hi"), 2, release))
 	s = openLive(t, caller, "/providers/claude/v1/chat/completions", chat("sonnet"))
@@ -73,7 +64,6 @@ func TestTimeToFirstTokenIsTheFirstContentEvent(t *testing.T) {
 	}
 }
 
-// msOf renders an optional millisecond count.
 func msOf(p *int64) any {
 	if p == nil {
 		return nil

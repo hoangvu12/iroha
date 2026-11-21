@@ -1,18 +1,11 @@
 import { useSyncExternalStore } from "react";
-import type { Message, Settings, Shape, StreamEvent, ToolCall, ToolCheck } from "./api";
-import { DEFAULT_SETTINGS, normalizeSettings, sendBody, streamTurn } from "./api";
-
-// The chats (ticket 23). Kept in this browser's localStorage, so they
-// survive a reload; nothing about them is configuration, and every turn is
-// also a test Request in Requests (captured), which is the durable record.
-// The store lives outside React so a reply keeps streaming while the panel
-// is closed or the page changes.
+import type { LegacySettings, Message, Settings, Shape, StreamEvent, ToolCall, ToolCheck } from "./api";
+import { DEFAULT_SETTINGS, migrateLegacySettings, sendBody, streamTurn } from "./api";
 
 export type Part =
   | { kind: "text" | "reasoning"; text: string }
   | { kind: "tool"; index: number; id?: string; name: string; args: string };
 
-/** One Request of an assistant turn: the answer, or the follow-up after a tool call. */
 export type Round = {
   requestId?: string;
   parts: Part[];
@@ -28,16 +21,16 @@ export type Turn = UserTurn | AssistantTurn;
 export type Chat = {
   id: string;
   title: string;
-  /** "Opened from dashscope": what the Test button was on. */
   origin?: string;
   createdAt: number;
   updatedAt: number;
   settings: Settings;
   system?: string;
   turns: Turn[];
-  /** Text waiting in the composer (a replayed prompt). */
   draft?: string;
 };
+
+type StoredChat = Omit<Chat, "settings"> & { settings: LegacySettings };
 
 type State = { chats: Chat[]; currentId?: string; running: number };
 
@@ -49,17 +42,12 @@ function load(): State {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
-      const s = JSON.parse(raw) as { chats: Chat[]; currentId?: string };
-      // A reply cut by a reload is not streaming any more.
-      for (const c of s.chats) {
-        c.settings = normalizeSettings(c.settings);
-        for (const t of c.turns) if (t.role === "assistant") for (const r of t.rounds) if (r.status === "streaming") r.status = "stopped";
-      }
-      return { chats: s.chats, currentId: s.currentId, running: 0 };
+      const s = JSON.parse(raw) as { chats: StoredChat[]; currentId?: string };
+      const chats = s.chats.map((c): Chat => ({ ...c, settings: migrateLegacySettings(c.settings) }));
+      for (const c of chats) for (const t of c.turns) if (t.role === "assistant") for (const r of t.rounds) if (r.status === "streaming") r.status = "stopped";
+      return { chats, currentId: s.currentId, running: 0 };
     }
-  } catch {
-    /* storage blocked or corrupt: start empty */
-  }
+  } catch {}
   return { chats: [], running: 0 };
 }
 
@@ -72,12 +60,9 @@ function save() {
   saveTimer = setTimeout(() => {
     saveTimer = undefined;
     try {
-      // Only chats with turns are worth keeping, newest first.
       const chats = state.chats.filter((c) => c.turns.length > 0 || c.id === state.currentId).slice(0, MAX_CHATS);
       localStorage.setItem(KEY, JSON.stringify({ chats, currentId: state.currentId }));
-    } catch {
-      /* full or blocked: the chats live until the tab closes */
-    }
+    } catch {}
   }, 400);
 }
 
@@ -106,7 +91,6 @@ export function updateChat(id: string, fn: (c: Chat) => Chat) {
   set((s) => ({ ...s, chats: s.chats.map((c) => (c.id === id ? { ...fn(c), updatedAt: Date.now() } : c)) }));
 }
 
-/** Start a new chat and make it current. Empty chats are dropped rather than kept in the history. */
 export function newChat(init: Partial<Pick<Chat, "title" | "origin" | "settings" | "system" | "turns" | "draft">> = {}): string {
   const id = newId();
   const now = Date.now();
@@ -141,8 +125,6 @@ export function setSettings(id: string, patch: Partial<Settings>) {
   if (patch.model) rememberModel(patch.model);
 }
 
-// ---- Recently used models ---------------------------------------------------
-
 export function recentModels(): string[] {
   try {
     return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[];
@@ -154,12 +136,16 @@ export function recentModels(): string[] {
 function rememberModel(model: string) {
   try {
     localStorage.setItem(RECENT_KEY, JSON.stringify([model, ...recentModels().filter((m) => m !== model)].slice(0, 12)));
-  } catch {
-    /* not kept */
-  }
+  } catch {}
 }
 
-// ---- Sending ------------------------------------------------------------------
+let lastStartedTestSeq = 0;
+
+export function claimTestStart(seq: number): boolean {
+  if (seq <= lastStartedTestSeq) return false;
+  lastStartedTestSeq = seq;
+  return true;
+}
 
 const running = new Map<string, AbortController>();
 
@@ -171,7 +157,6 @@ export function stop(id: string) {
   running.get(id)?.abort();
 }
 
-/** The text of a round, without reasoning. */
 export function roundText(r: Round): string {
   return r.parts.map((p) => (p.kind === "text" ? p.text : "")).join("");
 }
@@ -180,7 +165,6 @@ export function roundCalls(r: Round): ToolCall[] {
   return r.parts.flatMap((p) => (p.kind === "tool" ? [{ id: p.id, name: p.name, arguments: p.args }] : []));
 }
 
-/** The conversation as POST /api/test takes it. */
 export function messagesOf(turns: Turn[]): Message[] {
   const out: Message[] = [];
   for (const t of turns) {
@@ -227,15 +211,8 @@ function patchRound(chatId: string, turnId: string, index: number, fn: (r: Round
   patchReply(chatId, turnId, (t) => ({ ...t, rounds: t.rounds.map((r, i) => (i === index ? fn(r) : r)) }));
 }
 
-/** Most Requests one reply makes: the answer, then a follow-up for each round of tool calls. */
 export const MAX_ROUNDS = 5;
 
-/**
- * Send text as the next user turn and stream the reply. With test tools
- * on, a reply that calls tools is followed by another Request carrying
- * Iroha's results, whose answer joins the same reply; it goes on while the
- * model keeps calling, up to MAX_ROUNDS Requests.
- */
 export async function send(chatId: string, text: string) {
   const chat = state.chats.find((c) => c.id === chatId);
   if (!chat || running.has(chatId) || !chat.settings.model) return;
@@ -271,7 +248,6 @@ export async function send(chatId: string, text: string) {
       if (!done || res.error || settings.tools.length === 0 || roundCalls(done).length === 0) break;
     }
   } catch {
-    // Stopped: keep what arrived.
     patchReply(chatId, reply.id, (t) => ({ ...t, rounds: t.rounds.map((r) => (r.status === "streaming" ? { ...r, status: "stopped" } : r)) }));
   } finally {
     running.delete(chatId);

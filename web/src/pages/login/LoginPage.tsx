@@ -5,7 +5,6 @@ import { Button } from "@/ui/Button";
 import { Field, PasswordInput } from "@/ui/Input";
 import { LoginLayout } from "./LoginLayout";
 
-/** C13. Shown at any address while signed out; the page asked for opens after sign-in. */
 export function LoginPage({ notice }: { notice?: string }) {
   const signIn = useSignIn();
   const [password, setPassword] = useState("");

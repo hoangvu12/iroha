@@ -13,14 +13,6 @@ const { Root, Handle } = createParts(rowOrder, { root: "div", handle: "button" }
 
 type OrderState = { order: string[]; moving: string | null; dragging: boolean };
 
-/**
- * Rows put in order by a handle (UI SDK core `createReorder`): wrap the table
- * and render its rows in `order` (the order shown while a row moves), with a
- * `RowHandle` in each. `value` is the saved order of row keys; only a drop calls
- * `onValueChange`. The row being moved is tinted and lifted; while a pointer
- * drags it, it follows the pointer and the rows it passes glide aside (see
- * `useRowGlide`).
- */
 export function RowOrder({
   label,
   value,
@@ -29,10 +21,8 @@ export function RowOrder({
   children,
   className,
 }: {
-  /** Names the list for agents and screen readers ("Order of fast's members"). */
   label: string;
   value: string[];
-  /** `moved` is the row that was picked up and dropped (none for a move from code, like an agent's). */
   onValueChange: (value: string[], moved?: string) => void;
   itemLabel?: (key: string) => string | undefined;
   children: (state: { order: string[]; moving: string | null }) => ReactNode;
@@ -40,7 +30,6 @@ export function RowOrder({
 }) {
   const help = useId();
   const root = useRef<HTMLDivElement>(null);
-  // The draft is gone by the time the drop reports, so remember which row was up.
   const held = useRef<string | null>(null);
   const glide = useRef<GlideState>({ tops: new WeakMap(), drag: null, settling: null });
   return (
@@ -55,12 +44,10 @@ export function RowOrder({
         onValueChange(v, moved);
       }}
       itemLabel={itemLabel}
-      // Where a pointer took a row: what the row follows once the drag starts.
       onPointerDownCapture={(e) => {
         const row = e.target instanceof Element && e.target.closest(HANDLE) ? rowOf(e.target.closest(HANDLE)!) : null;
         glide.current.press = row ? { row, y: e.clientY, top: row.offsetTop, at: e.clientY } : undefined;
       }}
-      // The move that starts a drag arrives before the drag does.
       onPointerMoveCapture={(e) => {
         if (glide.current.press) glide.current.press.at = e.clientY;
       }}
@@ -80,7 +67,6 @@ export function RowOrder({
   );
 }
 
-/** Keeps `held` on the row that is up (none once it drops or goes back). */
 function Held({ state, held }: { state: { moving: string | null }; held: RefObject<string | null> }) {
   useEffect(() => {
     held.current = state.moving;
@@ -89,22 +75,16 @@ function Held({ state, held }: { state: { moving: string | null }; held: RefObje
 }
 
 const HANDLE = '[aria-roledescription="drag handle"]';
-/** The row a handle moves: DataTable's row (`data-row-id`), else its own box. */
 const rowOf = (handle: Element) => (handle.closest("[data-row-id]") ?? handle) as HTMLElement;
 
 type Drag = { row: HTMLElement; y: number; top: number; at: number };
 type GlideState = {
-  /** Each row's place in the layout (offsetTop, untransformed) when last seen. */
   tops: WeakMap<Element, number>;
-  /** The press that may become a drag, and where the pointer is since. */
   press?: Drag;
-  /** The row a pointer drags: where the pointer took it (`y`, the row at `top`) and where it is now (`at`). */
   drag: Drag | null;
-  /** The row just dropped, settling into its slot on the next layout. */
   settling: HTMLElement | null;
 };
 
-/** How far a row is drawn from its layout place right now (an inline offset or a running glide). */
 function offsetOf(row: HTMLElement): number {
   const t = getComputedStyle(row).transform;
   if (!t || t === "none") return 0;
@@ -116,21 +96,10 @@ function offsetOf(row: HTMLElement): number {
   return ty ? Number.parseFloat(ty[1]) : 0;
 }
 
-/** The held row's offset that keeps it under the pointer, wherever the list has put it. */
 const follow = (d: Drag) => {
   d.row.style.transform = `translateY(${d.at - d.y - (d.row.offsetTop - d.top)}px)`;
 };
 
-/**
- * Motion of a pointer reorder (architecture.md "UI motion system", "UI ticket
- * 17"). The held row follows the pointer 1:1 (no transition). Each row the
- * draft order moves glides from where it was drawn to its new place (WAAPI
- * `transform`, `--duration-move`, `--ease-in-out`; from its current offset
- * when it was still moving), all together. On drop or Escape the held row
- * settles from under the pointer into its slot the same way. A keyboard move,
- * a menu's Move and an agent's `move` are instant. Under reduced motion the
- * move token is 0 ms: rows jump, and the held row still follows the pointer.
- */
 function Glide({ root, glide, dragging }: { root: RefObject<HTMLDivElement | null>; glide: RefObject<GlideState>; dragging: boolean }) {
   const g = glide.current;
   if (dragging && !g.drag && g.press) g.drag = g.press;
@@ -139,7 +108,6 @@ function Glide({ root, glide, dragging }: { root: RefObject<HTMLDivElement | nul
     g.drag = null;
   }
 
-  // The pointer, while it drags a row.
   useEffect(() => {
     if (!dragging) return;
     const move = (e: PointerEvent) => {
@@ -152,7 +120,6 @@ function Glide({ root, glide, dragging }: { root: RefObject<HTMLDivElement | nul
     return () => window.removeEventListener("pointermove", move);
   }, [dragging, glide]);
 
-  // After each render: rows the layout moved glide from where they were drawn.
   useLayoutEffect(() => {
     const el = root.current;
     if (!el) return;
@@ -179,9 +146,7 @@ function Glide({ root, glide, dragging }: { root: RefObject<HTMLDivElement | nul
   return null;
 }
 
-/** A row's drag handle, named "Reorder <name>". */
 export function RowHandle({ value, name, ...rest }: { value: string; name: string } & Omit<ComponentProps<typeof Handle>, "value" | "children">) {
-  // A skeleton's sample is drawn away from the RowOrder it belongs to: the same box, no behaviour.
   if (useIsSample()) return <span className={handleClass} />;
   return (
     <Handle value={value} aria-label={`Reorder ${name}`} className={handleClass} {...rest}>

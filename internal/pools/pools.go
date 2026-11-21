@@ -68,7 +68,6 @@ type queryer interface {
 // Store gives the Gateway and the model list what they need of Pools.
 type Store struct{ db *store.DB }
 
-// New returns a Store.
 func New(db *store.DB) *Store { return &Store{db: db} }
 
 // Lookup returns the Pool named exactly name; ok is false when there is none.
@@ -104,10 +103,9 @@ func (s *Store) All(ctx context.Context) ([]Routing, error) {
 	return out, nil
 }
 
-// row is a Pool as read, with its members' Provider IDs.
 type row struct {
 	Pool
-	maker       string // the Owner's
+	ownerMaker  string
 	providerIDs []string
 }
 
@@ -125,14 +123,13 @@ const poolColumns = `id, name, maker, max_attempts, first_byte_seconds, created_
 func scanPool(r interface{ Scan(...any) error }) (row, error) {
 	var p row
 	var created int64
-	if err := r.Scan(&p.ID, &p.Name, &p.maker, &p.Budget.MaxAttempts, &p.Budget.FirstByteSeconds, &created); err != nil {
+	if err := r.Scan(&p.ID, &p.Name, &p.ownerMaker, &p.Budget.MaxAttempts, &p.Budget.FirstByteSeconds, &created); err != nil {
 		return p, err
 	}
 	p.CreatedAt = store.FromMillis(created)
 	return p, nil
 }
 
-// readPool reads one Pool with its members; sql.ErrNoRows when absent.
 func readPool(ctx context.Context, q queryer, id string) (row, error) {
 	p, err := scanPool(q.QueryRowContext(ctx, `SELECT `+poolColumns+` FROM pools WHERE id = ?`, id))
 	if err != nil {
@@ -187,8 +184,8 @@ func withMembers(ctx context.Context, q queryer, p row) (row, error) {
 	if err := rows.Err(); err != nil {
 		return p, err
 	}
-	p.Maker, p.MakerGuessed = p.maker, false
-	if p.maker == "" {
+	p.Maker, p.MakerGuessed = p.ownerMaker, false
+	if p.ownerMaker == "" {
 		p.Maker = GuessMaker(p.Name)
 		for i := 0; p.Maker == "" && i < len(p.Members); i++ {
 			p.Maker = GuessMaker(p.Members[i].Model)
@@ -232,7 +229,6 @@ func Names(ctx context.Context, q audit.Querier, ids []string) (map[string]strin
 	return out, nil
 }
 
-// makers maps the start of a model name to its maker, for Pool logos.
 var makers = []struct{ prefix, maker string }{
 	{"claude", "anthropic"},
 	{"gpt", "openai"}, {"chatgpt", "openai"}, {"o1", "openai"}, {"o3", "openai"}, {"o4", "openai"}, {"codex", "openai"},

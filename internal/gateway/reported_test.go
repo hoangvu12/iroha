@@ -7,16 +7,11 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// MOD-06: the model the upstream says served it (a dated snapshot here) is
-// recorded on the Attempt as reported_model, for every Endpoint Shape,
-// passed through and translated, buffered and streamed. The Caller still
-// sees the name it asked for.
 func TestTheAttemptRecordsTheModelTheUpstreamSaysServedIt(t *testing.T) {
 	const snapshot = "gpt-x-2026-01-01"
 	srv := testkit.Start(t)
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// Each Caller route, as a body for model m, streamed or not.
 	type route struct {
 		name string
 		send func(stream bool) *testkit.Response

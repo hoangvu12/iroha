@@ -1,6 +1,7 @@
 package pools_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/hoangvu12/iroha/internal/pools"
@@ -47,14 +48,15 @@ func TestPoolsAreCreatedByNameAuditedAndRevertible(t *testing.T) {
 		p.Maker != "zhipuai" || !p.MakerGuessed || p.Budget != (pools.Budget{}) {
 		t.Fatalf("created = %+v", created)
 	}
-	// Create-or-update by name: the same call again changes nothing.
 	var again pools.PoolResult
-	srv.Admin.Post("/api/pools", body).Expect(200).JSON(&again)
+	if e := srv.Admin.Post("/api/pools", map[string]any{"name": "GLM-4.6"}).Expect(409).Err(); e.Code != "name_taken" || !strings.Contains(e.Hint, "PUT /api/pools/glm-4.6") {
+		t.Fatalf("a second create = %+v", e)
+	}
+	srv.Admin.Put("/api/pools/glm-4.6", body).Expect(200).JSON(&again)
 	if again.Outcome != "unchanged" || again.AuditEntry != "" || again.Pool.ID != p.ID {
 		t.Fatalf("again = %+v", again)
 	}
 
-	// Reorder and switch a member off; a dry run changes nothing.
 	reorder := map[string]any{"members": []any{
 		map[string]any{"provider": "chutes", "model": "zai-org/GLM-4.6"},
 		map[string]any{"provider": "zai", "model": "glm-4.6", "enabled": false}}}
@@ -70,7 +72,6 @@ func TestPoolsAreCreatedByNameAuditedAndRevertible(t *testing.T) {
 	if edited.Outcome != "updated" || order(edited.Pool) != "chutes/zai-org/GLM-4.6,zai/glm-4.6(off)" {
 		t.Fatalf("edited = %+v", edited)
 	}
-	// Audited, and the revert restores the order and the switch.
 	var entries struct {
 		Entries []struct{ ID, Action string } `json:"entries"`
 	}
@@ -84,7 +85,6 @@ func TestPoolsAreCreatedByNameAuditedAndRevertible(t *testing.T) {
 		t.Fatalf("after revert = %+v", got)
 	}
 
-	// Budget and maker are the Owner's to set.
 	var tuned pools.PoolResult
 	srv.Admin.Patch("/api/pools/glm-4.6", map[string]any{"budget": map[string]any{"max_attempts": 5, "first_byte_seconds": 90}, "maker": "z-ai"}).Expect(200).JSON(&tuned)
 	if tuned.Pool.Budget != (pools.Budget{MaxAttempts: 5, FirstByteSeconds: 90}) || tuned.Pool.Maker != "z-ai" || tuned.Pool.MakerGuessed {
@@ -92,7 +92,6 @@ func TestPoolsAreCreatedByNameAuditedAndRevertible(t *testing.T) {
 	}
 	srv.Admin.Patch("/api/pools/glm-4.6", map[string]any{"budget": map[string]any{"first_byte_seconds": 96}}).Expect(400)
 
-	// Deleting is audited too, and revertible.
 	var deleted pools.PoolResult
 	srv.Admin.Delete("/api/pools/glm-4.6").Expect(200).JSON(&deleted)
 	srv.Admin.Get("/api/pools/glm-4.6").Expect(404)

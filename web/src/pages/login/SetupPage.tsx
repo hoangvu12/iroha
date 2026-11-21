@@ -7,11 +7,6 @@ import { LoginLayout } from "./LoginLayout";
 
 const MIN = 8;
 
-/**
- * First visit: choose the Owner password. An Admin Token proves the person
- * setting it runs this Iroha, so whoever reaches a new install first cannot
- * claim it. The UI then signs in with the new password.
- */
 export function SetupPage() {
   const setUp = useSetUpPassword();
   const [token, setToken] = useState("");

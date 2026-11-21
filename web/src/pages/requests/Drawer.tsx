@@ -19,18 +19,12 @@ import { CapturedView } from "./Captured";
 import { RequestDetails } from "./Details";
 import { SAMPLE_REQUEST } from "./samples";
 
-/** True when a key press belongs to a text field or a menu, list or dialog. */
 function busyTarget(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
   if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return true;
   return popupOpen();
 }
 
-/**
- * The Request sheet (C04, C21, C26): Details, Attempts and Captured tabs, the
- * tab in the URL. Opened from the Requests feed as the first sheet, ↑ and ↓
- * (or k and j) step through the feed's loaded rows while it is on top.
- */
 export function RequestSheet({ record, index, top }: SheetBodyProps<"request">) {
   const { id } = record;
   const tab: RequestTab = record.tab ?? "details";
@@ -43,7 +37,6 @@ export function RequestSheet({ record, index, top }: SheetBodyProps<"request">) 
   const at = index === 0 ? rows.findIndex((x) => x.id === id) : -1;
   const prev = at > 0 ? rows[at - 1] : undefined;
   const next = at >= 0 && at < rows.length - 1 ? rows[at + 1] : undefined;
-  // ↑/↓ land on a Request already loaded, so the sheet's content swaps at once.
   usePrefetchRequests(top ? [prev, next] : [], { captures: tab === "captured" });
   const step = (to: string) => sheets.replace(index, { kind: "request", id: to, tab: record.tab });
   const setTab = (t: RequestTab) => sheets.replace(index, { ...record, tab: t === "details" ? undefined : t });
@@ -69,7 +62,6 @@ export function RequestSheet({ record, index, top }: SheetBodyProps<"request">) 
       start={
         at >= 0 && (
           <>
-            {/* Focusable while disabled: a tooltip needs a trigger keyboard users can reach. */}
             <IconButton icon={ChevronUp} label="Newer Request (↑)" bordered size="sm" className="size-8" disabled={!prev} focusableWhenDisabled onClick={() => prev && step(prev.id)} />
             <IconButton icon={ChevronDown} label="Older Request (↓)" bordered size="sm" className="mr-1 size-8" disabled={!next} focusableWhenDisabled onClick={() => next && step(next.id)} />
           </>
@@ -92,7 +84,6 @@ export function RequestSheet({ record, index, top }: SheetBodyProps<"request">) 
     <>
       {bar}
       <SheetBody>
-        {/* Opened from the feed, the row seeds it and no skeleton shows; from a link, the Details tab is measured. */}
         {!r && <DialogTitle className="sr-only">{`Request ${id}`}</DialogTitle>}
         <Skeleton data={r} sample={SAMPLE_REQUEST} id="request-drawer" label="Loading Request">
           {(r) => (

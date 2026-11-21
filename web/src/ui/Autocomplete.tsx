@@ -9,11 +9,8 @@ import { cn } from "./cn";
 import { popupClass } from "./popup";
 import { ScrollArea } from "./ScrollArea";
 
-// Most suggestions drawn at once; typing narrows the rest.
 const SHOWN = 200;
 
-// A text field that suggests values but takes any text. Inside a Field it
-// takes the Field's label.
 export function Autocomplete({
   value,
   onValueChange,

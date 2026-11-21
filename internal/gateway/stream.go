@@ -7,45 +7,23 @@ import (
 	"time"
 
 	"github.com/hoangvu12/iroha/internal/api"
-	"github.com/hoangvu12/iroha/internal/clock"
 )
 
-// A streaming Caller never waits in silence. Proxies between Iroha and the
-// Caller (Cloudflare cuts at 100 s, Bun and nginx idle limits) close quiet
-// connections, so:
-//
-//   - When no upstream answer has arrived StreamCommitAfter after the
-//     Request arrived, Iroha commits the response: 200 and stream headers,
-//     then a keep-alive. From then on the status cannot change, so a later
-//     failure (every Attempt failed, the budget ran out, the stream broke,
-//     Iroha shut down) is sent as an error event in the Caller's Shape,
-//     carrying the same code, hint and Attempt summary as the HTTP error.
-//   - While the stream is open, a keep-alive goes out whenever nothing was
-//     written for KeepAliveEvery: before the first upstream byte and during
-//     pauses mid-stream alike.
-//
-// Before commitment failures keep their HTTP status. Non-stream Requests
-// are committed only once an upstream answer began and its body is late
-// (pad.go); their first-byte budget stays under 100 s.
+// Cloudflare answers 524 when the origin stays silent past its Proxy Read
+// Timeout: 100 s for years, 125 s by default today
+// (https://developers.cloudflare.com/fundamentals/reference/connection-limits/).
 const (
 	StreamCommitAfter = 10 * time.Second
 	KeepAliveEvery    = 15 * time.Second
 )
 
-// streamShape frames Iroha's own events on a stream in one Caller Shape.
-// Each Shape the Gateway serves streams in sets one as shapeSpec.stream
-// (shapes.go).
 type streamShape interface {
-	// keepAlive is an event the Shape's clients ignore.
 	keepAlive() []byte
-	// errorEvent is the last event of a stream that failed after the
-	// response was committed.
 	errorEvent(e *api.Error, requestID string) []byte
 }
 
-// anthropicStream: Anthropic's own ping event keeps the stream alive (the
-// SDKs ignore it); an error is Anthropic's error event, which the SDKs
-// raise as an API error. No message_stop follows it.
+// The Anthropic SDKs skip ping events and raise an error event as an API
+// error.
 type anthropicStream struct{}
 
 func (anthropicStream) keepAlive() []byte {
@@ -56,9 +34,6 @@ func (anthropicStream) errorEvent(e *api.Error, requestID string) []byte {
 	return append(append([]byte("event: error\ndata: "), compactJSON(anthropicError(e, requestID))...), "\n\n"...)
 }
 
-// anthropicError is Anthropic's error envelope extended with Iroha's code,
-// hint, the Request ID and the details. error.type is Anthropic's type for
-// the status, which the SDKs map to their error classes.
 func anthropicError(e *api.Error, requestID string) map[string]any {
 	inner := map[string]any{
 		"type":       anthropicErrorType(e.Status),
@@ -97,9 +72,8 @@ func anthropicErrorType(status int) string {
 	return "invalid_request_error"
 }
 
-// openAIChatStream: SSE comments keep the stream alive; an error is a data
-// event holding the OpenAI error envelope, which the OpenAI SDKs raise as
-// an API error. No [DONE] follows it: the answer did not complete.
+// SSE clients skip comments. The OpenAI SDKs raise a data event holding an
+// error object as an API error.
 type openAIChatStream struct{}
 
 func (openAIChatStream) keepAlive() []byte { return []byte(": keep-alive\n\n") }
@@ -108,8 +82,6 @@ func (openAIChatStream) errorEvent(e *api.Error, requestID string) []byte {
 	return append(append([]byte("data: "), compactJSON(openAIError(e, requestID))...), "\n\n"...)
 }
 
-// openAIError is the OpenAI error envelope extended with Iroha's hint, the
-// Request ID and the details.
 func openAIError(e *api.Error, requestID string) map[string]any {
 	inner := map[string]any{
 		"message":    e.Message,
@@ -133,93 +105,25 @@ func compactJSON(v any) []byte {
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 }
 
-// keepAlive runs the keeper of a streaming Request until the returned stop
-// is called: it commits the response at StreamCommitAfter if nothing was
-// written yet, then sends a keep-alive after every KeepAliveEvery of
-// silence. Every write to the Caller goes through x.mu, so keep-alives
-// never land inside a relayed event.
-func (x *exchange) keepAlive() (stop func()) {
-	frame := specOf(x.rec.ShapeIn).stream
-	t := x.g.clock.NewTimer(StreamCommitAfter - clock.Since(x.g.clock, x.start))
-	quit, done := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(done)
-		defer t.Stop()
-		for {
-			select {
-			case <-quit:
-				return
-			case <-t.C():
-			}
-			if !x.tick(t, frame) {
-				return
-			}
-		}
-	}()
-	return func() { close(quit); <-done }
+func (o *callerOutput) commitStreamAt(at time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.keepersStopped || o.commit != nil {
+		return
+	}
+	o.commit = newAlarm(o.clock, at.Sub(o.clock.Now()), o.commitStream)
 }
 
-// tick is one wake-up of the keeper. It re-arms t before writing, so once a
-// keep-alive reached the Caller the next one is already scheduled. It
-// reports false when the keeper has nothing more to do.
-func (x *exchange) tick(t clock.Timer, frame streamShape) bool {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if x.ended || (x.wrote && !x.streaming) {
-		return false // answered, or a non-stream answer is being written
+func (o *callerOutput) commitStream() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.keepersStopped || o.wrote || o.ended {
+		return
 	}
-	now := x.g.clock.Now()
-	if !x.wrote {
-		t.Reset(KeepAliveEvery)
-		h := x.w.Header()
-		h.Set("Content-Type", "text/event-stream")
-		h.Set("Cache-Control", "no-cache")
-		x.w.WriteHeader(http.StatusOK)
-		x.wrote, x.streaming, x.committed = true, true, true
-		x.sendLocked(frame.keepAlive())
-		return true
-	}
-	if due := x.lastWrite.Add(KeepAliveEvery); now.Before(due) {
-		t.Reset(due.Sub(now))
-		return true
-	}
-	t.Reset(KeepAliveEvery)
-	x.sendLocked(frame.keepAlive()) // a failed write is noticed by the relay
-	return true
-}
-
-// send writes b to the Caller and flushes it.
-func (x *exchange) send(b []byte) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	return x.sendLocked(b)
-}
-
-func (x *exchange) sendLocked(b []byte) error {
-	x.lastWrite = x.g.clock.Now()
-	if _, err := x.w.Write(b); err != nil {
-		return err
-	}
-	if f, ok := x.w.(http.Flusher); ok {
-		f.Flush()
-	}
-	return nil
-}
-
-// setHeader sets a response header unless the status line went out (a
-// committed stream keeps its headers).
-func (x *exchange) setHeader(key, value string) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if !x.wrote {
-		x.w.Header().Set(key, value)
-	}
-}
-
-// isCommitted reports whether Iroha committed the response before any
-// upstream answer.
-func (x *exchange) isCommitted() bool {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	return x.committed
+	h := o.w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	o.w.WriteHeader(http.StatusOK)
+	o.wrote, o.streaming, o.committed = true, true, true
+	_ = o.sendLocked(specOrChat(o.shape).stream.keepAlive())
 }

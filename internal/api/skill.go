@@ -10,19 +10,11 @@ import (
 	"strings"
 )
 
-// The served skill is the files in skill/ in name order (hand-written
-// guidance; add a numbered file per topic, e.g. 50_deploy.md), followed by
-// any extra sections, followed by a route reference generated from the
-// route table.
-//
 //go:embed skill/*.md
 var skillFiles embed.FS
 
-// Section is extra generated skill text, such as the list of log event kinds.
 type Section func() string
 
-// AddDocs registers GET /skill.md and GET /api/openapi.json, both generated
-// on each request from the router's current route table.
 func (rt *Router) AddDocs(version string, sections ...Section) {
 	rt.Add(
 		Route{
@@ -45,7 +37,6 @@ func (rt *Router) AddDocs(version string, sections ...Section) {
 	)
 }
 
-// Skill renders the skill document.
 func Skill(routes []Route, version string, sections ...Section) string {
 	var b strings.Builder
 	names, _ := fs.Glob(skillFiles, "skill/*.md")
@@ -111,7 +102,6 @@ func routeReference(routes []Route) string {
 	return b.String()
 }
 
-// bodyFields lists the top-level JSON fields of a request body type.
 func bodyFields(v any) string {
 	t := reflect.TypeOf(v)
 	for t.Kind() == reflect.Pointer {

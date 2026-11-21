@@ -6,10 +6,6 @@ import { ChatPanelProvider, useChatActions, useChatPanel } from "./chat-panel";
 import { ChatSheet } from "./ChatSheet";
 import { useNavShortcuts } from "./shortcuts";
 
-// The chat slot slides in and out when a pointer opened or closed it, and
-// is there at once for the C key, Full page and Back to the side panel
-// (architecture.md "UI motion system": never animate keyboard actions).
-
 function Harness() {
   useNavShortcuts();
   const chat = useChatPanel();
@@ -42,8 +38,6 @@ function renderShell() {
 
 const sheet = () => screen.queryByRole("complementary", { name: "Chat" });
 
-// A transition that runs until the test ends it, so a closing sheet has
-// something to wait for (jsdom has no real ones).
 let endTransitions = () => {};
 beforeEach(() => {
   let end = () => {};
@@ -63,7 +57,6 @@ test("a pointer opens the sheet from its starting style, which then lifts", asyn
   const aside = sheet()!;
   expect(aside).not.toBeNull();
   expect(aside.hasAttribute("data-instant")).toBe(false);
-  // animateIn marks the first frame, then removes the mark so the slide runs.
   await waitFor(() => expect(aside.hasAttribute("data-starting-style")).toBe(false));
 });
 
@@ -117,7 +110,6 @@ test("the C key closing it from inside returns focus to where it was opened", as
   );
   const test = screen.getByRole("button", { name: "Test acme" });
   await user.click(test);
-  // Focus moves into the sheet (its Close button), then C closes it at once.
   screen.getByRole("button", { name: "Close" }).focus();
   await user.keyboard("c");
   expect(sheet()).toBeNull();
@@ -143,9 +135,7 @@ test("opening again while it leaves turns it back without remounting", async () 
   expect(sheet()).toBe(aside);
   expect(aside.hasAttribute("data-ending-style")).toBe(false);
   expect(aside.hasAttribute("inert")).toBe(false);
-  // No new starting style: the running transition turns back from where it is.
   expect(aside.hasAttribute("data-starting-style")).toBe(false);
-  // The cancelled exit never unmounts it.
   endTransitions();
   await new Promise((r) => setTimeout(r, 20));
   expect(sheet()).toBe(aside);
@@ -164,7 +154,6 @@ test("C while it slides out snaps it back open", async () => {
   renderShell();
   await user.click(screen.getByRole("button", { name: "Chat" }));
   await user.click(screen.getByRole("button", { name: "Close" }));
-  // Focus left the inert sheet; the key goes to the page.
   (document.activeElement as HTMLElement | null)?.blur();
   await user.keyboard("c");
   const aside = sheet()!;

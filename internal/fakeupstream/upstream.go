@@ -1,8 +1,3 @@
-// Package fakeupstream is a programmable fake Provider for one Shape: a
-// real HTTP server on localhost that records every request and answers from
-// a queue of Responders. It needs no testing.TB, so the dev launcher
-// (cmd/iroha-dev) runs the same fakes the tests use; internal/testkit wraps
-// it with helpers that fail the test.
 package fakeupstream
 
 import (
@@ -23,40 +18,30 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// Upstream is a programmable fake Provider speaking one Shape. It records
-// every request it receives and answers inference calls from a queue of
-// Responders, then from a default (a short text reply in its Shape).
-//
-//	up := fakeupstream.New(shape.OpenAIChat, clock.Real{})
-//	defer up.Close()
-//	up.Enqueue(up.Error(429, "slow down").Header("Retry-After", "30"), up.Text("hello"))
-//	... point an Endpoint at up.URL() ...
-//	got := up.Last()  // what Iroha sent: headers, body, model
 type Upstream struct {
-	Shape shape.Shape
-	clock clock.Clock // Received.At and reply delays
-	srv   *httptest.Server
-	ctl   atomic.Bool // answers ControlPath (EnableControl)
+	Shape          shape.Shape
+	clock          clock.Clock
+	srv            *httptest.Server
+	controlEnabled atomic.Bool
 
 	mu       sync.Mutex
 	queue    []Responder
 	fallback Responder
-	custom   map[string]Responder // "METHOD /path"
+	custom   map[string]Responder
 	models   []string
 	usage    Usage
-	served   string // the model answers name; empty: the one requested
+	served   string
 	received []*Received
-	arrived  chan struct{} // closed and replaced on every request
+	arrived  chan struct{}
 	seq      int
 
-	written atomic.Int64 // reply body bytes written so far (Written)
+	written atomic.Int64
 }
 
 // Usage is the token usage a fake reports. Input counts every prompt
 // token; CacheRead of them were read from the cache (0: no cache fields).
 type Usage struct{ Input, Output, CacheRead int }
 
-// Received is one request the fake got.
 type Received struct {
 	Method string
 	Path   string
@@ -64,19 +49,17 @@ type Received struct {
 	Header http.Header
 	Body   []byte
 	Model  string // from the JSON body, or the Gemini URL path
-	Stream bool   // the request asked for a stream
+	Stream bool
 	At     time.Time
 	// Seq is 1 for the first request this fake received, 2 for the next...
 	Seq int
 }
 
-// Fataler is the part of testing.TB the decoding helpers need.
 type Fataler interface {
 	Helper()
 	Fatalf(format string, args ...any)
 }
 
-// JSON decodes the received body into v, failing the test on error.
 func (r *Received) JSON(t Fataler, v any) {
 	t.Helper()
 	if err := json.Unmarshal(r.Body, v); err != nil {
@@ -84,7 +67,6 @@ func (r *Received) JSON(t Fataler, v any) {
 	}
 }
 
-// Map decodes the received body as a JSON object.
 func (r *Received) Map(t Fataler) map[string]any {
 	t.Helper()
 	var m map[string]any
@@ -92,7 +74,6 @@ func (r *Received) Map(t Fataler) map[string]any {
 	return m
 }
 
-// Bearer returns the token of the Authorization header, or "".
 func (r *Received) Bearer() string {
 	h := r.Header.Get("Authorization")
 	if len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
@@ -101,10 +82,8 @@ func (r *Received) Bearer() string {
 	return ""
 }
 
-// Responder decides the Reply to a received request.
 type Responder func(r *Received) Reply
 
-// Reply is what a fake sends back.
 type Reply struct {
 	Status int // default 200
 	Header http.Header
@@ -120,14 +99,12 @@ type Reply struct {
 	Disconnect bool
 }
 
-// Chunk is one piece of a streamed body.
 type Chunk struct {
 	Data  []byte
-	Delay time.Duration   // wait (on the fake's clock) before this chunk
-	Wait  <-chan struct{} // hold this chunk until closed
+	Delay time.Duration // wait (on the fake's clock) before this chunk
+	Wait  <-chan struct{}
 }
 
-// Header returns a Responder that also sets a response header.
 func (rs Responder) Header(key, value string) Responder {
 	return func(r *Received) Reply {
 		rep := rs(r)
@@ -144,7 +121,6 @@ func (rs Responder) After(d time.Duration) Responder {
 	return func(r *Received) Reply { rep := rs(r); rep.Delay = d; return rep }
 }
 
-// HoldUntil returns a Responder that holds its reply until ch is closed.
 func (rs Responder) HoldUntil(ch <-chan struct{}) Responder {
 	return func(r *Received) Reply { rep := rs(r); rep.Wait = ch; return rep }
 }
@@ -155,7 +131,6 @@ func (rs Responder) ThenDisconnect() Responder {
 	return func(r *Received) Reply { rep := rs(r); rep.Disconnect = true; return rep }
 }
 
-// JSON replies with status and v encoded as JSON.
 func JSON(status int, v any) Responder {
 	body, err := json.Marshal(v)
 	if err != nil {
@@ -164,7 +139,6 @@ func JSON(status int, v any) Responder {
 	return Raw(status, "application/json", string(body))
 }
 
-// Raw replies with status, content type and body exactly.
 func Raw(status int, contentType, body string) Responder {
 	return func(*Received) Reply {
 		return Reply{Status: status, Header: http.Header{"Content-Type": {contentType}}, Body: []byte(body)}
@@ -183,12 +157,10 @@ func SSE(events ...string) Responder {
 	}
 }
 
-// Hang never replies; the request ends only when the caller gives up.
 func Hang() Responder {
 	return func(*Received) Reply { return Reply{Wait: make(chan struct{})} }
 }
 
-// Drop closes the connection without any response.
 func Drop() Responder {
 	return func(*Received) Reply { return Reply{Disconnect: true} }
 }
@@ -204,7 +176,7 @@ func New(sh shape.Shape, c clock.Clock) *Upstream {
 
 // Close stops the fake, ending held replies first.
 func (u *Upstream) Close() {
-	u.srv.CloseClientConnections() // ends held replies so Close does not wait on them
+	u.srv.CloseClientConnections()
 	u.srv.Close()
 }
 
@@ -250,7 +222,6 @@ func (u *Upstream) Enqueue(rs ...Responder) {
 	u.queue = append(u.queue, rs...)
 }
 
-// Default replaces the Responder used when the queue is empty.
 func (u *Upstream) Default(r Responder) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -265,7 +236,6 @@ func (u *Upstream) Handle(method, path string, r Responder) {
 	u.custom[method+" "+path] = r
 }
 
-// SetModels sets what the Shape's model-list route returns.
 func (u *Upstream) SetModels(ids ...string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -281,7 +251,6 @@ func (u *Upstream) SetServedModel(model string) {
 	u.served = model
 }
 
-// servedModel is the model a reply to r names.
 func (u *Upstream) servedModel(r *Received) string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -291,14 +260,10 @@ func (u *Upstream) servedModel(r *Received) string {
 	return r.Model
 }
 
-// SetUsage sets the token usage reported by Text and Stream replies, with
-// no cache reads.
 func (u *Upstream) SetUsage(input, output int) {
 	u.SetUsageWith(Usage{Input: input, Output: output})
 }
 
-// SetUsageWith sets the whole usage reported by Text and Stream replies,
-// cache reads included.
 func (u *Upstream) SetUsageWith(us Usage) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -314,7 +279,6 @@ func (u *Upstream) Reset() {
 	u.custom = map[string]Responder{}
 }
 
-// Queued is how many Enqueued Responders are still waiting.
 func (u *Upstream) Queued() int {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -328,7 +292,6 @@ func (u *Upstream) Requests() []*Received {
 	return append([]*Received(nil), u.received...)
 }
 
-// Count is the number of requests received.
 func (u *Upstream) Count() int {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -366,7 +329,7 @@ func (u *Upstream) Await(ctx context.Context, n int) *Received {
 }
 
 func (u *Upstream) serve(w http.ResponseWriter, req *http.Request) {
-	if u.ctl.Load() && strings.HasPrefix(req.URL.Path, ControlPath+"/") {
+	if u.controlEnabled.Load() && strings.HasPrefix(req.URL.Path, ControlPath+"/") {
 		u.control(w, req)
 		return
 	}
@@ -380,7 +343,7 @@ func (u *Upstream) serve(w http.ResponseWriter, req *http.Request) {
 	u.received = append(u.received, rec)
 	close(u.arrived)
 	u.arrived = make(chan struct{})
-	responder := u.pick(rec)
+	responder := u.pickLocked(rec)
 	u.mu.Unlock()
 
 	u.write(w, req.Context(), responder(rec))
@@ -392,9 +355,8 @@ func (u *Upstream) serve(w http.ResponseWriter, req *http.Request) {
 // stops this count growing once the buffers between them are full.
 func (u *Upstream) Written() int64 { return u.written.Load() }
 
-// pick chooses the Responder; u.mu is held.
-func (u *Upstream) pick(r *Received) Responder {
-	if u.ctl.Load() {
+func (u *Upstream) pickLocked(r *Received) Responder {
+	if u.controlEnabled.Load() {
 		if rs, ok := u.markedFailure(r); ok {
 			return rs
 		}
@@ -509,14 +471,13 @@ func (u *Upstream) write(w http.ResponseWriter, ctx context.Context, rep Reply) 
 		if flusher != nil {
 			flusher.Flush()
 		}
-		written.Add(int64(len(c.Data))) // counted once flushed to the connection
+		written.Add(int64(len(c.Data)))
 	}
 	if rep.Disconnect {
 		panic(http.ErrAbortHandler)
 	}
 }
 
-// pause waits d and then wait, returning false if the caller went away.
 func (u *Upstream) pause(ctx context.Context, d time.Duration, wait <-chan struct{}) bool {
 	if d > 0 {
 		t := u.clock.NewTimer(d)
@@ -537,8 +498,7 @@ func (u *Upstream) pause(ctx context.Context, d time.Duration, wait <-chan struc
 	return true
 }
 
-// compactJSON marshals v without HTML escaping.
-func compactJSON(v any) string {
+func marshalUnescaped(v any) string {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)

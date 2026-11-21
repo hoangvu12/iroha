@@ -24,7 +24,7 @@ func main() {
 		return
 	}
 	if err != nil {
-		for _, line := range strings.Split(err.Error(), "\n") { // one line per bad value
+		for _, line := range strings.Split(err.Error(), "\n") {
 			fmt.Fprintln(os.Stderr, "iroha:", line)
 		}
 		os.Exit(2)

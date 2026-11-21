@@ -1,16 +1,3 @@
-// Package jobs runs Iroha's background work: a few named jobs, each on a
-// schedule measured on the injected clock, each run logged (kind job.run)
-// and stored, and each runnable by hand through /api/jobs (with a dry run).
-//
-// A job is a function and a schedule:
-//
-//	runner.Add(jobs.Job{
-//		Name: "retention", Description: "...", Schedule: jobs.Every(time.Hour),
-//		Run: func(ctx context.Context, dryRun bool) (jobs.Outcome, error) { ... },
-//	})
-//
-// Runs of one job never overlap. A job that must act per Provider at
-// different times (the daily model refresh) runs often and does what is due.
 package jobs
 
 import (
@@ -30,19 +17,11 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Schedule says when a job runs next.
 type Schedule interface {
-	// Next is when the job should next start, given when it last started
-	// (the zero time when it never ran, or not since its runs were stored)
-	// and now. A time not after now means at once.
 	Next(last, now time.Time) time.Time
-	// String describes the schedule for people ("every 1h0m0s").
 	String() string
 }
 
-// Every runs a job every d. A job that never ran first runs d after
-// startup (so a start never causes a burst of work); one whose last run is
-// overdue runs at startup.
 func Every(d time.Duration) Schedule { return every(d) }
 
 type every time.Duration
@@ -60,35 +39,24 @@ func (e every) Next(last, now time.Time) time.Time {
 
 func (e every) String() string { return "every " + time.Duration(e).String() }
 
-// Outcome is what a successful run reports.
 type Outcome struct {
-	// Summary is one line for people: "Deleted 120 Requests and 3,400 log events".
-	Summary string
-	// Details are the run's figures; each becomes an attribute of the job.run
-	// event and is returned by the API.
-	Details map[string]any
-	// Provider links the job.run event to a Provider (handle), when the run
-	// concerned one.
+	Summary  string
+	Details  map[string]any
 	Provider string
 }
 
-// Job is one kind of background work.
 type Job struct {
-	Name        string // short, e.g. retention
+	Name        string
 	Description string
 	Schedule    Schedule
-	// Run does the work. With dryRun it reports what it would do and
-	// changes nothing. ctx ends when Iroha stops.
-	Run func(ctx context.Context, dryRun bool) (Outcome, error)
+	Run         func(ctx context.Context, dryRun bool) (Outcome, error)
 }
 
-// Triggers of a run.
 const (
 	TriggerSchedule = "schedule"
 	TriggerManual   = "manual"
 )
 
-// Run is one run of a job as stored and returned by the API.
 type Run struct {
 	ID         int64          `json:"id,omitempty" doc:"Absent on a dry run, which is not stored."`
 	Job        string         `json:"job"`
@@ -103,10 +71,8 @@ type Run struct {
 	Error      string         `json:"error,omitempty" doc:"Why the run failed."`
 }
 
-// keepRuns is how many stored runs each job keeps.
 const keepRuns = 100
 
-// Runner runs jobs on their schedules.
 type Runner struct {
 	db    *store.DB
 	log   *slog.Logger
@@ -121,21 +87,20 @@ type Runner struct {
 }
 
 type entry struct {
-	job Job
-	run sync.Mutex // held while the job runs; runs never overlap
+	job   Job
+	run   sync.Mutex
+	fired chan struct{}
 
 	mu      sync.Mutex
-	pending int // runs started or waiting for the one in progress
+	pending int
 	next    time.Time
 }
 
-// NewRunner returns a Runner with no jobs.
 func NewRunner(db *store.DB, log *slog.Logger) *Runner {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Runner{db: db, log: log, clock: db.Clock(), byName: map[string]*entry{}, ctx: ctx, cancel: cancel}
 }
 
-// Add registers a job. Call it before Start; it panics on a duplicate name.
 func (r *Runner) Add(j Job) {
 	if j.Name == "" || j.Schedule == nil || j.Run == nil {
 		panic("jobs: a job needs a name, a schedule and a Run function")
@@ -146,13 +111,11 @@ func (r *Runner) Add(j Job) {
 	if _, ok := r.byName[j.Name]; ok {
 		panic(fmt.Sprintf("jobs: job %q added twice", j.Name))
 	}
-	e := &entry{job: j}
+	e := &entry{job: j, fired: make(chan struct{}, 1)}
 	r.order = append(r.order, e)
 	r.byName[j.Name] = e
 }
 
-// Start schedules every job. Each job's first timer exists when Start
-// returns, so a test can advance a fake clock right after.
 func (r *Runner) Start(ctx context.Context) error {
 	if r.started {
 		return nil
@@ -164,16 +127,13 @@ func (r *Runner) Start(ctx context.Context) error {
 		if err := r.db.QueryRowContext(ctx, `SELECT max(started_at) FROM job_runs WHERE job = ?`, e.job.Name).Scan(&last); err != nil {
 			return fmt.Errorf("jobs: reading the last run of %s: %w", e.job.Name, err)
 		}
-		next := e.job.Schedule.Next(store.NullMillis(last), now)
-		e.setNext(next)
-		t := r.clock.NewTimer(next.Sub(now))
+		t := r.arm(e, e.job.Schedule.Next(store.NullMillis(last), now).Sub(now))
 		r.wg.Add(1)
 		go r.loop(e, t)
 	}
 	return nil
 }
 
-// Stop cancels running jobs and waits for every job goroutine to end.
 func (r *Runner) Stop() {
 	r.cancel()
 	r.wg.Wait()
@@ -186,64 +146,55 @@ func (r *Runner) loop(e *entry, t clock.Timer) {
 		case <-r.ctx.Done():
 			t.Stop()
 			return
-		case <-t.C():
+		case <-e.fired:
 		}
-		// The job counts as running from the timer firing until the loop
-		// waits again with nothing due, so readers of the API (and tests
-		// after advancing a fake clock) never see it idle with a run owed.
-		e.mu.Lock()
-		e.pending++
-		e.mu.Unlock()
-		for due := true; due; {
-			now := r.clock.Now()
-			d := e.job.Schedule.Next(now, now).Sub(now)
-			// The next timer exists before the run starts, so time
-			// advanced during a run is not lost.
-			t = r.clock.NewTimer(d)
-			e.mu.Lock()
-			e.next = r.clock.Now().Add(d)
-			e.pending++
-			e.mu.Unlock()
-			r.run(r.ctx, e, TriggerSchedule, false)
-			select {
-			case <-t.C():
-				due = r.ctx.Err() == nil
-			default:
-				due = false
-			}
+		if r.ctx.Err() != nil {
+			return
 		}
-		e.done()
+		t = r.startNextPeriod(e)
+		r.run(r.ctx, e, TriggerSchedule, false)
+		e.markSettled()
 	}
 }
 
-func (e *entry) setNext(t time.Time) {
+func (r *Runner) startNextPeriod(e *entry) clock.Timer {
+	now := r.clock.Now()
+	return r.arm(e, e.job.Schedule.Next(now, now).Sub(now))
+}
+
+func (r *Runner) arm(e *entry, d time.Duration) clock.Timer {
 	e.mu.Lock()
-	e.next = t
+	e.next = r.clock.Now().Add(d)
+	e.mu.Unlock()
+	return r.clock.AfterFunc(d, func() {
+		e.markOwed()
+		e.fired <- struct{}{}
+	})
+}
+
+func (e *entry) markOwed() {
+	e.mu.Lock()
+	e.pending++
 	e.mu.Unlock()
 }
 
-func (e *entry) done() {
+func (e *entry) markSettled() {
 	e.mu.Lock()
 	e.pending--
 	e.mu.Unlock()
 }
 
-// RunNow runs the named job at once, waiting for a run in progress to end
-// first, and returns the run.
 func (r *Runner) RunNow(name string, dryRun bool) (Run, error) {
 	e, ok := r.byName[name]
 	if !ok {
 		return Run{}, notFound(name)
 	}
-	e.mu.Lock()
-	e.pending++
-	e.mu.Unlock()
+	e.markOwed()
+	defer e.markSettled()
 	return r.run(r.ctx, e, TriggerManual, dryRun), nil
 }
 
-// run runs e once; the caller has counted it in e.pending.
 func (r *Runner) run(ctx context.Context, e *entry, trigger string, dry bool) Run {
-	defer e.done()
 	e.run.Lock()
 	defer e.run.Unlock()
 
@@ -278,7 +229,7 @@ func (r *Runner) run(ctx context.Context, e *entry, trigger string, dry bool) Ru
 	for k, v := range out.Details {
 		switch k {
 		case logs.KindKey, logs.RequestKey, logs.ProviderKey, "job", "trigger", "dry_run", "outcome", "duration_ms", "summary", "error":
-			continue // a job's figures never override the event's own fields
+			continue
 		}
 		attrs = append(attrs, k, v)
 	}
@@ -293,7 +244,6 @@ func (r *Runner) run(ctx context.Context, e *entry, trigger string, dry bool) Ru
 	return run
 }
 
-// call runs the job, turning a panic into a failure.
 func call(ctx context.Context, j Job, dry bool) (out Outcome, err error) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -350,7 +300,6 @@ func (r *Runner) runs(ctx context.Context, name string, limit int) ([]Run, error
 	return out, rows.Err()
 }
 
-// JobView is a job as the API returns it.
 type JobView struct {
 	Name        string     `json:"name"`
 	Description string     `json:"description"`
@@ -361,7 +310,6 @@ type JobView struct {
 	Runs        []Run      `json:"runs,omitempty" doc:"The latest runs, newest first (on GET /api/jobs/{job} only)."`
 }
 
-// JobList is the response of GET /api/jobs.
 type JobList struct {
 	Jobs []JobView `json:"jobs"`
 }
@@ -396,7 +344,6 @@ func notFound(name string) *api.Error {
 		WithDetails(map[string]string{"resource": "job", "ref": name})
 }
 
-// Routes returns the jobs routes.
 func Routes(r *Runner) []api.Route {
 	const tag = "Jobs"
 	return []api.Route{

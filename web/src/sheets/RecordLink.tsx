@@ -10,14 +10,8 @@ export { rec } from "./records";
 export type { SheetRecord } from "./records";
 
 export const recordLinkClass = "group/rl inline-flex min-w-0 max-w-full items-center gap-2 rounded-sm text-fg";
-// A quiet underline says "this opens"; it darkens on hover. Long names truncate.
 const textClass = "min-w-0 truncate underline decoration-border-strong underline-offset-[3px] group-hover/rl:decoration-fg";
 
-/**
- * A record's name that opens its sheet beside the page (or above the sheet
- * it sits in). A real link: its href is the URL with that sheet open, so
- * Ctrl/⌘-click and middle-click open it in a new tab.
- */
 export const RecordLink = forwardRef<
   HTMLAnchorElement,
   {
@@ -26,9 +20,7 @@ export const RecordLink = forwardRef<
     className?: string;
     "aria-label"?: string;
     title?: string;
-    /** Search params the link removes: the modal dialog it sits in, when the URL holds it (`["key"]`), so the sheet replaces the dialog and Back brings it back. */
     drop?: string[];
-    /** Styled by `className` alone (a link that looks like a button), with no underline. */
     bare?: boolean;
   }
 >(function RecordLink({ record, children, className, drop, bare, ...rest }, ref) {

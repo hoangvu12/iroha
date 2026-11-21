@@ -11,10 +11,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// The global model list (ticket 12): every <handle>/<model> a Gateway Key
-// may use, with metadata, from one query over every Provider. Ticket 18 adds
-// the Pools the key may use to the same list.
-
 func (s *Store) globalRoute() api.Route {
 	return api.Route{
 		Method: http.MethodGet, Path: "/v1/models", Tag: "Gateway", Auth: api.AuthCaller,
@@ -42,14 +38,13 @@ func (s *Store) globalList(c *api.Call) (any, error) {
 	return CallerModelList{Object: "list", Data: data}, nil
 }
 
-// globalProvider is one Provider of the global list being built.
 type globalProvider struct {
 	handle  string
 	created int64
 	brand   string
-	entries map[string]entryRow // by model
-	visible []string            // in model order
-	allowed bool                // the Caller's scope names it
+	entries map[string]entryRow
+	visible []string
+	allowed bool
 }
 
 type entryRow struct {
@@ -57,9 +52,6 @@ type entryRow struct {
 	reported, overrides, external, externalBrand string
 }
 
-// CallerModels lists what caller may use on the global routes, qualified
-// as <handle>/<model>, sorted, with metadata. One query reads every
-// Provider's entries.
 func (s *Store) CallerModels(ctx context.Context, caller gatewaykeys.Caller) ([]CallerModel, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.handle, p.created_at, p.models_dev_brand,
 			m.model, m.added, m.hidden, m.reported, m.overrides, m.external, m.external_brand,
@@ -84,14 +76,12 @@ func (s *Store) CallerModels(ctx context.Context, caller gatewaykeys.Caller) ([]
 		}
 		p := byID[id]
 		if p == nil {
-			// Every enabled Provider is read: a Pool's metadata comes from its
-			// first member, whatever Providers the key may use directly.
 			p = &globalProvider{handle: handle, created: created, brand: brand, entries: map[string]entryRow{}, allowed: caller.AllowsProvider(id)}
 			byID[id] = p
 			order = append(order, id)
 		}
 		if model == nil {
-			continue // a Provider with an empty list
+			continue
 		}
 		p.entries[*model] = entryRow{hidden: *hidden, reported: *reported, overrides: *overrides, external: *external, externalBrand: *externalBrand}
 		if (*added || discovered) && !*hidden {
@@ -135,9 +125,6 @@ func (s *Store) CallerModels(ctx context.Context, caller gatewaykeys.Caller) ([]
 	return out, nil
 }
 
-// callerPools lists the Pools caller may use, by name, each with the
-// metadata of its first switched-on member on an enabled Provider (else
-// its first member; unknown facts when that Provider is not enabled).
 func (s *Store) callerPools(ctx context.Context, caller gatewaykeys.Caller, byID map[string]*globalProvider) ([]CallerModel, error) {
 	out := []CallerModel{}
 	if s.pools == nil {
@@ -169,7 +156,6 @@ func (s *Store) callerPools(ctx context.Context, caller gatewaykeys.Caller, byID
 	return out, nil
 }
 
-// firstMember is the member a Pool's metadata comes from.
 func firstMember(pl pools.Routing, byID map[string]*globalProvider) (pools.RoutingMember, bool) {
 	for _, m := range pl.Members {
 		if m.Enabled && byID[m.ProviderID] != nil {

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useEffectEvent, useMemo, useState } from "react";
 import { ChevronDown, History, KeyRound, LockKeyhole, Monitor, RotateCcw, User } from "lucide-react";
 import { revertEntry } from "@/api/audit";
 import { isApiError } from "@/api/client";
@@ -21,18 +21,8 @@ import { ChangedName, EntryChanges, RevertNote } from "./Changes";
 import { clockTime, dayLabel } from "./format";
 import { SAMPLE_AUDIT_ENTRIES } from "./samples";
 
-// Settings → Audit Entries (C29) on the shared DataTable (UI ticket 08): every
-// change, newest first, in numbered pages; a row shows its before and after
-// under it, and Revert sits in the row. The filters live in the URL
-// (?q=&actor=&resource=), so other pages can link to a filtered history.
-// The API reads older entries from a cursor (`before`), so each page of the
-// table is one page of the API, read once the page before it is; the total
-// isn't known until the last page is. Columns don't sort: the server's order
-// (newest first) is the only one a cursor can page.
-
 type Labels = Map<string, ResourceOption>;
 
-/** Entries that start a new day on the page, which show the day over their time. */
 const DayStarts = createContext<Set<string>>(new Set());
 const LabelsOf = createContext<Labels>(new Map());
 
@@ -57,7 +47,6 @@ const columns = col.columns([
   }),
 ]);
 
-/** Settings → Audit Entries (C29): every change, newest first, with Revert on the row. */
 export function AuditEntriesTab() {
   const phone = useIsPhone();
   const { params, setParam, setParams } = useUrlParams();
@@ -66,7 +55,8 @@ export function AuditEntriesTab() {
   const [text, setText] = useState(params.get("q") ?? "");
   const q = useDebounced(text.trim(), 250);
 
-  useEffect(() => setParam("q", q), [q]); // eslint-disable-line react-hooks/exhaustive-deps
+  const searchFor = useEffectEvent((q: string) => setParam("q", q));
+  useEffect(() => searchFor(q), [q]);
 
   const [pagination, setPagination] = useTablePaging("audit-entries");
   const filter: EntryFilter = { q, actor, resource };
@@ -76,7 +66,6 @@ export function AuditEntriesTab() {
   const actorLabel = (filters.data?.actors ?? []).find((a) => a.filter === actor)?.name ?? actor;
   const resourceLabel = labels.get(resource)?.plural ?? resource.replace(/_/g, " ");
 
-  // A new filter starts again on page 1 (the table does that for the search itself).
   const filterKey = `${actor}\n${resource}`;
   const [lastFilter, setLastFilter] = useState(filterKey);
   if (lastFilter !== filterKey) {
@@ -84,18 +73,15 @@ export function AuditEntriesTab() {
     if (pagination.pageIndex !== 0) setPagination((p) => ({ ...p, pageIndex: 0 }));
   }
 
-  // Page N of the table is page N of the API: read it when it's asked for.
   const pages = entries.data?.pages ?? [];
   const wanted = pagination.pageIndex;
   const { hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage } = entries;
   useEffect(() => {
     if (wanted >= pages.length && hasNextPage && !isFetchingNextPage && !isPlaceholderData) void fetchNextPage();
   }, [wanted, pages.length, hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage]);
-  // Until it lands the page before stays, dimmed.
   const shownIndex = Math.min(wanted, Math.max(0, pages.length - 1));
   const rows = entries.data ? (pages[shownIndex]?.entries ?? []) : undefined;
   const loaded = pages.reduce((n, p) => n + p.entries.length, 0);
-  // Pages past the last one read are one page more while the API has older entries.
   const rowCount = loaded + (hasNextPage ? pagination.pageSize : 0);
 
   const dayStarts = useMemo(() => {
@@ -205,7 +191,6 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-/** The time; the first entry of each day on the page shows the day over it. */
 function When({ entry }: { entry: AuditEntry }) {
   const first = useContext(DayStarts).has(entry.id);
   return (
@@ -238,10 +223,8 @@ function Target({ entry }: { entry: AuditEntry }) {
   );
 }
 
-/** Under an opened row: what changed, before and after, and what Revert would do; on phones Revert too. */
 function Details({ entry, labels, phone }: { entry: AuditEntry; labels: Labels; phone: boolean }) {
   return (
-    // Enters like a row (UI ticket 20): a row's shift and a fade, never its height (the rows under it move down at once).
     <div className={cn("flex flex-col gap-4 pt-1 md:ml-[140px] md:max-w-[720px]", riseIn)}>
       <EntryChanges entry={entry} labels={labels} />
       <RevertNote entry={entry} />
@@ -254,7 +237,6 @@ function Details({ entry, labels, phone }: { entry: AuditEntry; labels: Labels; 
   );
 }
 
-/** Phones: what changed and when, then who and on what (C31). */
 function EntryLine({ entry }: { entry: AuditEntry }) {
   const target = targetOf(entry);
   const first = useContext(DayStarts).has(entry.id);
@@ -289,11 +271,6 @@ function ActorName({ actor }: { actor: Actor }) {
   );
 }
 
-/**
- * What an entry changed, as one name: the record when there is one, the
- * shared parent when several children of one Provider changed
- * ("dashscope/team-1", "dashscope/team-2" -> dashscope), else the first.
- */
 type TargetOf = { id: string; name: string; resource: string; parent: boolean; more: number };
 
 function targetOf(e: AuditEntry): TargetOf | undefined {
@@ -305,7 +282,6 @@ function targetOf(e: AuditEntry): TargetOf | undefined {
   return { id: c[0].id, name: c[0].name, resource: c[0].resource, parent: false, more: c.length - 1 };
 }
 
-/** The changed record's name, a link to its sheet when it has one (UI ticket 11). */
 function TargetName({ t }: { t: TargetOf }) {
   return (
     <span className="flex min-w-0 items-baseline">
@@ -342,7 +318,6 @@ function TargetIcon({ resource, name }: { resource: string; name: string }) {
   return <LogoTile name={name} size={28} />;
 }
 
-/** "Created Admin Token huy" shows as "Created Admin Token", with huy in its own column. */
 function what(e: AuditEntry, target?: { name: string }) {
   if (target && e.changes.length === 1 && e.summary.endsWith(" " + target.name)) return e.summary.slice(0, -target.name.length - 1);
   return e.summary;
@@ -358,12 +333,7 @@ function revertError(e: unknown): string {
   return e.hint ? `${e.message} ${e.hint}` : e.message;
 }
 
-/**
- * Revert: the result (with Undo, which puts the change back) shows in its place, a failure under it.
- * Named "Revert <summary>" so each row's button is its own for agents.
- */
 function RevertControl({ entry }: { entry: AuditEntry }) {
-  // A revert can change any record, so everything showing configuration refreshes (UI ticket 32).
   const invalidate = useRefreshConfiguration();
   const reverting = useSave({ refresh: invalidate, describe: (e) => `Couldn't revert. ${revertError(e)}` });
   if (reverting.done) return <SaveStatus save={reverting} className="whitespace-nowrap" />;
@@ -374,7 +344,6 @@ function RevertControl({ entry }: { entry: AuditEntry }) {
         Can't be reverted
       </span>
     );
-  // Reverting a create deletes what it made: that asks first, naming what goes (UI ticket 21).
   const goes = entry.changes.filter((c) => c.op === "create");
   if (goes.length)
     return (
@@ -383,7 +352,6 @@ function RevertControl({ entry }: { entry: AuditEntry }) {
         body={`${goes.length === 1 ? goes[0].name : goes.map((c) => c.name).join(", ")} ${goes.length === 1 ? "was" : "were"} made by this change and ${goes.length === 1 ? "goes" : "go"} with it. Undo brings ${goes.length === 1 ? "it" : "them"} back.`}
         confirmLabel="Revert and delete"
         onConfirm={async () => {
-          // A failure shows in the confirm dialog; once it closes, the result shows in this row like any revert.
           try {
             const res = await revertEntry(entry.id);
             await invalidate();

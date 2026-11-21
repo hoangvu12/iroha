@@ -9,8 +9,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Stats summarises the Requests matching a filter (the stats row above the
-// Requests feed).
 type Stats struct {
 	Requests          int          `json:"requests" doc:"Requests matching the filters, in progress included."`
 	InProgress        int          `json:"in_progress"`
@@ -24,7 +22,6 @@ type Stats struct {
 	Groups            []StatsGroup `json:"groups,omitempty" doc:"With group_by: one row per group, most Requests first (at most 500)."`
 }
 
-// Tokens are summed token counts.
 type Tokens struct {
 	Input          int64 `json:"input" doc:"Every prompt token, cache reads and writes included."`
 	Output         int64 `json:"output"`
@@ -35,9 +32,6 @@ type Tokens struct {
 	Total          int64 `json:"total" doc:"input + output."`
 }
 
-// StatsGroup is one group of GET /api/requests/stats?group_by=. Only the
-// fields of the dimensions grouped by are set; one a Request has no value
-// for (no key served it, say) is left out.
 type StatsGroup struct {
 	Provider      string  `json:"provider,omitempty" doc:"group_by=provider or upstream_key: the Provider's handle."`
 	UpstreamKeyID string  `json:"upstream_key_id,omitempty" doc:"group_by=upstream_key: the key that served the Requests."`
@@ -49,7 +43,6 @@ type StatsGroup struct {
 	Tokens        Tokens  `json:"tokens"`
 }
 
-// groupBy are the group_by values and the columns each groups by.
 var groupBy = map[string][]string{
 	"provider":     {"provider_handle"},
 	"upstream_key": {"upstream_key_id"},
@@ -59,7 +52,6 @@ var groupBy = map[string][]string{
 
 const maxGroups = 500
 
-// parseGroupBy reads the repeatable group_by parameter, in the order given.
 func parseGroupBy(vals []string) ([]string, error) {
 	var out []string
 	for _, v := range vals {
@@ -73,7 +65,6 @@ func parseGroupBy(vals []string) ([]string, error) {
 	return out, nil
 }
 
-// tokenSums are the sums of a Stats or StatsGroup, scanned by Tokens.dest.
 const tokenSums = `coalesce(sum(cache_read_tokens > 0), 0), coalesce(sum(input_tokens), 0), coalesce(sum(output_tokens), 0),
 	coalesce(sum(cache_read_tokens), 0), coalesce(sum(cache_write_tokens), 0), coalesce(sum(cache_write_long_tokens), 0), coalesce(sum(reasoning_tokens), 0)`
 
@@ -109,10 +100,8 @@ func stats(ctx context.Context, db *store.DB, f filter, dims []string) (Stats, e
 	return s, err
 }
 
-// groups sums the Requests of f per group of dims. The names beside the
-// grouped IDs (a key's name and Provider, a Caller's Gateway Key) are the
-// group's latest Request's: SQLite takes bare columns from the row that the
-// query's one max() picked.
+// SQLite takes bare columns from the row that the query's one max()
+// picked.
 func groups(ctx context.Context, db *store.DB, f filter, dims []string) ([]StatsGroup, error) {
 	var cols []string
 	for _, d := range dims {
@@ -164,8 +153,6 @@ func groups(ctx context.Context, db *store.DB, f filter, dims []string) ([]Stats
 	return out, rows.Err()
 }
 
-// median of col over the rows of f that have it; nil when none do. An even
-// count averages the two middle values.
 func median(ctx context.Context, db *store.DB, f filter, col string) (*int64, error) {
 	f = f.and(col + " IS NOT NULL")
 	var n int64
@@ -193,8 +180,6 @@ func median(ctx context.Context, db *store.DB, f filter, col string) (*int64, er
 	return &m, nil
 }
 
-// FilterOptions lists the values the Request filters can take in a time
-// window, most used first, so a filter menu offers only what exists.
 type FilterOptions struct {
 	Callers   []CallerOption `json:"callers"`
 	Providers []Option       `json:"providers"`
@@ -202,7 +187,6 @@ type FilterOptions struct {
 	Models    []Option       `json:"models"`
 }
 
-// CallerOption is one Caller seen in the window.
 type CallerOption struct {
 	Name         string `json:"name" doc:"Pass as caller=."`
 	Kind         string `json:"kind" enum:"gateway_key,test"`
@@ -210,7 +194,6 @@ type CallerOption struct {
 	Requests     int    `json:"requests"`
 }
 
-// Option is one filter value and how many Requests have it.
 type Option struct {
 	Name     string `json:"name"`
 	Requests int    `json:"requests"`

@@ -32,6 +32,5 @@ test("the sample a sheet's skeleton is measured from does not name the sheet", a
     </SheetBody>,
   );
   const sheet = await screen.findByRole("dialog", { name: "Request req_9" });
-  // The sample's title would share the sheet's title id: one title only.
   expect(document.querySelectorAll(`[id="${sheet.getAttribute("aria-labelledby")}"]`)).toHaveLength(1);
 });

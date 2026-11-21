@@ -2,10 +2,6 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { api, seg } from "@/api/client";
 import type { AuditResult, BulkResult } from "@/api/types";
 
-// Types and hooks of the Gateway Keys page. They mirror the Go types in
-// internal/gatewaykeys (GET /api/gateway-keys), and read the Providers,
-// Model Pools and model lists the scope picker offers.
-
 export type ScopeProvider = { provider: string; models?: string[] };
 export type Scope = { all: boolean; providers?: ScopeProvider[]; pools?: string[] };
 
@@ -19,7 +15,6 @@ export type GatewayKey = {
   created_at: string;
   revoked_at?: string;
   last_used_at?: string;
-  /** The key's own Requests of the last 24 hours (test Requests sent as it are not counted). */
   recent_requests: number;
 };
 
@@ -40,12 +35,11 @@ export const keys = {
   models: (provider: string, q: string) => ["gateway-keys", "models", provider, q] as const,
 };
 
-/** Every Gateway Key, revoked ones included, oldest first. */
 export function useGatewayKeys() {
   return useQuery({
     queryKey: keys.list,
     queryFn: ({ signal }) => api.get<{ gateway_keys: GatewayKey[] }>("/api/gateway-keys", { signal }).then((r) => r.gateway_keys),
-    refetchInterval: 30_000, // last used and recent Requests move on their own
+    refetchInterval: 30_000,
   });
 }
 
@@ -59,13 +53,8 @@ export function useGatewayKey(ref: string) {
   });
 }
 
-/**
- * After any change (or its Undo) every list and key page refetches, and so do the other places
- * listing Gateway Keys or their scopes: the chat's Send as and model choices, a Pool's Members tab.
- */
 export function useInvalidateKeys() {
   const qc = useQueryClient();
-  // Resolves once the refetches are in, so an inline result shows on fresh data.
   return () =>
     Promise.all(
       [keys.all, ["audit-entries"], ["providers-page", "gateway-keys"], ["test-models"]].map((k) => qc.invalidateQueries({ queryKey: k })),
@@ -89,7 +78,6 @@ export function useUpdateKey() {
   });
 }
 
-/** Edits many keys (by name or ID) in one change and one Audit Entry; fields an item leaves out stay as that key has them (UI ticket 30). */
 export const editKeys = (items: { key: string; capture?: boolean }[]) => api.post<BulkResult<GatewayKey>>("/api/gateway-keys/bulk/update", { items });
 
 export function useRevokeKey() {
@@ -108,7 +96,6 @@ export function useDeleteKey() {
   });
 }
 
-/** Providers a scope can name: every unarchived one, by handle. */
 export function useProviderOptions() {
   return useQuery({
     queryKey: keys.providers,
@@ -131,10 +118,6 @@ export function usePoolOptions() {
 
 export const MODEL_PAGE = 200;
 
-/**
- * A Provider's visible models matching q, a page at a time. Search runs on
- * the server, so a Provider with thousands of models costs one small page.
- */
 export function useProviderModels(provider: string | undefined, q: string) {
   return useInfiniteQuery({
     queryKey: keys.models(provider ?? "", q),
@@ -153,7 +136,6 @@ export function useProviderModels(provider: string | undefined, q: string) {
 
 type Setting = { name: string; value: number };
 
-/** retention.captures_days, for "kept for N days". */
 export function useCaptureDays() {
   return useQuery({
     queryKey: ["settings"],

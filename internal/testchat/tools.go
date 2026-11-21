@@ -5,30 +5,22 @@ import (
 	"time"
 )
 
-// The test tools (UI ticket 29): made-up tools a test can offer, each
-// answered by Iroha with a plausible result when the conversation comes
-// back with a call to it. Nothing is fetched or looked up anywhere.
-
-// ToolInfo is one test tool as GET /api/test/tools lists it.
 type ToolInfo struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description" doc:"One line, as the model sees it."`
 	Parameters  json.RawMessage `json:"parameters" doc:"The JSON schema of the arguments, as offered to the model."`
 }
 
-// ToolList is the answer of GET /api/test/tools.
 type ToolList struct {
 	Tools []ToolInfo `json:"tools"`
 }
 
-// tool is a test tool and how Iroha answers a call to it.
 type tool struct {
 	name, description string
 	params            obj
 	answer            func(args map[string]any, now time.Time) obj
 }
 
-// ToolName is the tool tool_check offers on its own.
 const ToolName = "get_weather"
 
 func str(desc string) obj { return obj{{"type", "string"}, {"description", desc}} }
@@ -37,7 +29,6 @@ func params(required []any, props ...kv) obj {
 	return obj{{"type", "object"}, {"properties", obj(props)}, {"required", required}}
 }
 
-// tools in the order the chat lists them.
 var tools = []tool{
 	{
 		name: ToolName, description: "Get the current weather in a city.",
@@ -80,7 +71,6 @@ func toolNamed(name string) *tool {
 	return nil
 }
 
-// ToolNames lists every test tool's name.
 func ToolNames() []string {
 	out := make([]string, len(tools))
 	for i, t := range tools {
@@ -89,7 +79,6 @@ func ToolNames() []string {
 	return out
 }
 
-// Tools lists the test tools.
 func Tools() ToolList {
 	out := ToolList{Tools: make([]ToolInfo, len(tools))}
 	for i, t := range tools {

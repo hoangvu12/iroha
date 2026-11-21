@@ -21,32 +21,26 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// KindChange is logged after every committed Audit Entry.
 var KindChange = logs.NewKind("config.change", "Iroha's configuration changed: Audit Entry ID, action, actor and summary (never before/after values).")
 
-// DryRun documents the dry_run query parameter. Put it in the Query of
-// every mutating route; Mutate, Bulk and revert read it.
+// Put DryRun in the Query of every mutating route.
 var DryRun = api.Param{
 	Name: "dry_run", Type: "boolean",
 	Description: "true: run the change, report exactly what would change, and write nothing.",
 }
 
-// MaxBulkItems caps one bulk call.
 const MaxBulkItems = 1000
 
-// Trail writes and reads Audit Entries and runs audited mutations.
 type Trail struct {
 	db    *store.DB
 	clock clock.Clock
 	log   *slog.Logger
 }
 
-// New returns a Trail.
 func New(db *store.DB, log *slog.Logger) *Trail {
 	return &Trail{db: db, clock: db.Clock(), log: log}
 }
 
-// Change is one record an Audit Entry (or a dry run) changed.
 type Change struct {
 	Resource string          `json:"resource" doc:"Resource name, e.g. admin_token."`
 	ID       string          `json:"id"`
@@ -57,7 +51,6 @@ type Change struct {
 	After    json.RawMessage `json:"after" doc:"The record after the change; null when it was deleted. Secrets are masked."`
 }
 
-// Outcomes of one mutation or bulk item, from its primary record.
 const (
 	OutcomeCreated   = "created"
 	OutcomeUpdated   = "updated"
@@ -65,8 +58,7 @@ const (
 	OutcomeUnchanged = "unchanged"
 )
 
-// Result is the audit part of every mutation response. Resource responses
-// embed it next to the record.
+// Resource responses embed Result next to the record.
 type Result struct {
 	DryRun     bool     `json:"dry_run" doc:"true when nothing was written."`
 	Outcome    string   `json:"outcome" enum:"created,updated,deleted,unchanged" doc:"What happened to the record addressed (or would have, on a dry run)."`
@@ -74,8 +66,8 @@ type Result struct {
 	Changes    []Change `json:"changes" doc:"Every record changed, with before and after."`
 }
 
-// Mutation is one audited change in progress. Handlers make their writes
-// on Tx and call Track before touching each record.
+// Mutation handlers make their writes on Tx and call Track before touching
+// each record.
 type Mutation struct {
 	Ctx    context.Context
 	Tx     *sql.Tx
@@ -84,7 +76,7 @@ type Mutation struct {
 	Now    time.Time
 
 	trail        *Trail
-	tracked      []*tracked // current item
+	tracked      []*tracked
 	irreversible string
 	summary      string
 	action, verb string
@@ -97,11 +89,9 @@ type tracked struct {
 	beforeName string
 }
 
-// Track records the current state of record id of r as its before-state.
-// Call it before writing the record, including before inserting a new one
-// (its before is then "absent"). Track every record the change touches,
-// children included (a deleted Provider's keys), parents before children.
-// Tracking a record twice is harmless.
+// Call Track before writing the record, including before inserting a new
+// one. Track every record the change touches, children included, parents
+// before children. Tracking a record twice is harmless.
 func (m *Mutation) Track(r Tracker, id string) error {
 	for _, t := range m.tracked {
 		if t.r.resourceName() == r.resourceName() && t.id == id {
@@ -116,22 +106,18 @@ func (m *Mutation) Track(r Tracker, id string) error {
 	return nil
 }
 
-// Irreversible marks the change as impossible to revert and says why (for
-// example "Revoked Admin Tokens never work again; create a new one.").
+func (m *Mutation) Act(action, verb string) { m.action, m.verb = action, verb }
+
 func (m *Mutation) Irreversible(reason string) { m.irreversible = reason }
 
-// Summarize replaces the generated one-line summary of the Audit Entry.
 func (m *Mutation) Summarize(s string) { m.summary = s }
 
-// stored is a change as stored: whole snapshots, unmasked.
 type stored struct {
 	r             Tracker
 	id, name      string
 	before, after json.RawMessage
 }
 
-// collect loads every tracked record's after-state and returns the records
-// that changed, in tracking order.
 func (m *Mutation) collect() ([]stored, string, error) {
 	var out []stored
 	outcome := OutcomeUnchanged
@@ -167,7 +153,6 @@ func outcomeOf(before, after json.RawMessage) string {
 	}
 }
 
-// IsDryRun reads ?dry_run= of the call.
 func IsDryRun(c *api.Call) (bool, error) {
 	s := c.Query("dry_run")
 	if s == "" {
@@ -180,15 +165,12 @@ func IsDryRun(c *api.Call) (bool, error) {
 	return v, nil
 }
 
-// errDryRun rolls back a dry run's transaction.
 var errDryRun = errors.New("dry run")
 
-// Mutate runs fn as one audited change in one transaction. action is the
-// machine name of the change ("admin_token.revoke") and verb its past tense
-// for the generated summary ("Revoked"). On a dry run fn runs fully and is
-// rolled back. When something changed, one Audit Entry is written. The
-// success status becomes 201 when the primary (first tracked) record was
-// created.
+// Mutate takes action as the change's machine name ("admin_token.revoke")
+// and verb as its past tense for the summary ("Revoked"). On a dry run fn
+// runs fully and is rolled back. The status becomes 201 when the first
+// tracked record was created.
 func (tr *Trail) Mutate(c *api.Call, action, verb string, fn func(m *Mutation) error) (Result, error) {
 	dry, err := IsDryRun(c)
 	if err != nil {
@@ -228,12 +210,10 @@ func (tr *Trail) Mutate(c *api.Call, action, verb string, fn func(m *Mutation) e
 	return res, nil
 }
 
-// BulkRequest is the body of every bulk route.
 type BulkRequest[T any] struct {
 	Items []T `json:"items" doc:"The items; each succeeds or fails on its own."`
 }
 
-// BulkItem is the result of one item of a bulk call.
 type BulkItem[T any] struct {
 	Index   int        `json:"index" doc:"Position of the item in the request, from 0."`
 	OK      bool       `json:"ok"`
@@ -243,7 +223,6 @@ type BulkItem[T any] struct {
 	Changes []Change   `json:"changes"`
 }
 
-// BulkResult is the response of every bulk route.
 type BulkResult[T any] struct {
 	DryRun     bool          `json:"dry_run" doc:"true when nothing was written."`
 	AuditEntry string        `json:"audit_entry,omitempty" doc:"ID of the one Audit Entry covering every applied item; absent on a dry run or when nothing changed."`
@@ -252,8 +231,7 @@ type BulkResult[T any] struct {
 	Items      []BulkItem[T] `json:"items"`
 }
 
-// ItemKey is the check every bulk/update item starts with: it must name the
-// record it changes in "key". example is a name shown in the hint.
+// ItemKey's example is a name shown in the hint.
 func ItemKey(key, example string) error {
 	if strings.TrimSpace(key) == "" {
 		return api.BadRequest(`Name the key in each item: {"key": "`+example+`", ...}.`, "An item has no key.")
@@ -261,11 +239,9 @@ func ItemKey(key, example string) error {
 	return nil
 }
 
-// Bulk runs fn for each item in one transaction, each item inside its own
-// savepoint: an item that returns an *api.Error is rolled back and reported,
-// and the rest still apply. Any other error aborts the whole call. One Audit
-// Entry covers every applied item. The response is 200 even when items fail;
-// read "failed".
+// Bulk rolls back and reports an item whose fn returns an *api.Error below
+// 500, and the rest still apply. Any other error aborts the whole call. The
+// response is 200 even when items fail.
 func Bulk[In, Out any](tr *Trail, c *api.Call, action, verb string, items []In, fn func(m *Mutation, in In) (Out, error)) (BulkResult[Out], error) {
 	dry, err := IsDryRun(c)
 	if err != nil {
@@ -283,11 +259,14 @@ func Bulk[In, Out any](tr *Trail, c *api.Call, action, verb string, items []In, 
 	err = tr.db.Tx(ctx, func(tx *sql.Tx) error {
 		m := tr.begin(c, tx, dry, action, verb)
 		var all []stored
+		var acted [2]string
+		mixed := false
 		for i, in := range items {
 			if _, err := tx.ExecContext(ctx, `SAVEPOINT bulk_item`); err != nil {
 				return err
 			}
 			m.tracked = nil
+			m.Act(action, verb)
 			irreversible := m.irreversible
 			out, err := fn(m, in)
 			var changes []stored
@@ -310,12 +289,25 @@ func Bulk[In, Out any](tr *Trail, c *api.Call, action, verb string, items []In, 
 			} else {
 				item.OK, item.Outcome, item.Result, item.Changes = true, outcome, &out, views(changes)
 				all = append(all, changes...)
+				if len(changes) > 0 {
+					switch acted[0] {
+					case "":
+						acted = [2]string{m.action, m.verb}
+					case m.action:
+					default:
+						mixed = true
+					}
+				}
 				res.Succeeded++
 			}
 			if _, err := tx.ExecContext(ctx, `RELEASE bulk_item`); err != nil {
 				return err
 			}
 			res.Items = append(res.Items, item)
+		}
+		m.Act(action, verb)
+		if acted[0] != "" && !mixed {
+			m.Act(acted[0], acted[1])
 		}
 		if dry {
 			return errDryRun
@@ -337,8 +329,6 @@ func Bulk[In, Out any](tr *Trail, c *api.Call, action, verb string, items []In, 
 	return res, nil
 }
 
-// merge folds several changes of one record (two bulk items touching it)
-// into one, keeping the first before and the last after.
 func merge(in []stored) []stored {
 	var out []stored
 	at := map[string]int{}
@@ -364,7 +354,6 @@ type committed struct {
 	actor               api.Actor
 }
 
-// write stores one Audit Entry for changes (nothing when there are none).
 func (m *Mutation) write(changes []stored, revertOf string) (*committed, error) {
 	if len(changes) == 0 {
 		return nil, nil
@@ -412,8 +401,6 @@ func nullJSON(b json.RawMessage) any {
 	return string(b)
 }
 
-// generatedSummary is "Revoked Admin Token agent-1" or "Revoked 3 Admin
-// Tokens" (by the first change's resource).
 func generatedSummary(verb string, changes []stored) string {
 	if verb == "" {
 		verb = "Changed"
@@ -437,7 +424,6 @@ func generatedSummary(verb string, changes []stored) string {
 
 func (r *Resource[T]) labels() (string, string) { return r.Label, r.Plural }
 
-// views turns stored changes into API views with secrets masked.
 func views(in []stored) []Change {
 	out := make([]Change, 0, len(in))
 	for _, s := range in {
@@ -480,7 +466,6 @@ func changedFields(before, after json.RawMessage) []string {
 	return out
 }
 
-// mask replaces secret fields with "…" and their last four characters.
 func mask(snap json.RawMessage, secrets []string) json.RawMessage {
 	if snap == nil || len(secrets) == 0 {
 		return snap
@@ -501,7 +486,6 @@ func mask(snap json.RawMessage, secrets []string) json.RawMessage {
 	return b
 }
 
-// MaskSecret shows only the last four characters of a secret.
 func MaskSecret(s string) string {
 	if len(s) <= 8 {
 		return "…"
@@ -509,10 +493,7 @@ func MaskSecret(s string) string {
 	return "…" + s[len(s)-4:]
 }
 
-// matches reports whether current still equals a stored snapshot, comparing
-// only the fields the stored snapshot has (fields added to a resource after
-// the entry was written do not count as a change).
-func matches(storedSnap, current json.RawMessage) bool {
+func matchesStoredFields(storedSnap, current json.RawMessage) bool {
 	if storedSnap == nil || current == nil {
 		return storedSnap == nil && current == nil
 	}

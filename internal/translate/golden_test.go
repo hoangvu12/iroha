@@ -19,27 +19,18 @@ import (
 
 var update = flag.Bool("update", false, "rewrite the golden files from the current output")
 
-// goldenCase is one recorded exchange (testdata/golden/<name>.in.json): a
-// Caller's request in one Shape, the Endpoint's answer in another, whole
-// and streamed. The bodies follow recorded traffic (v1's test fixtures and
-// the Providers' documented wire examples).
 type goldenCase struct {
-	From      shape.Shape     `json:"from"`
-	To        shape.Shape     `json:"to"`
-	Model     string          `json:"model"`
-	WireModel string          `json:"wire_model"`
-	Request   json.RawMessage `json:"request"`
-	// Answer is the Endpoint's whole answer, if the case has one.
-	Answer json.RawMessage `json:"answer"`
-	// Stream is the data of each upstream server-sent event, in order.
+	From         shape.Shape       `json:"from"`
+	To           shape.Shape       `json:"to"`
+	Model        string            `json:"model"`
+	WireModel    string            `json:"wire_model"`
+	Request      json.RawMessage   `json:"request"`
+	Answer       json.RawMessage   `json:"answer"`
 	Stream       []json.RawMessage `json:"stream"`
 	IncludeUsage bool              `json:"include_usage"`
-	// CallerStream: the Caller asked for a stream in its URL (Gemini's
-	// :streamGenerateContent), which its body cannot say.
+	// Gemini says it streams in the URL (:streamGenerateContent), not the body.
 	CallerStream bool `json:"caller_stream"`
-	// Caching is what the Gateway asks translation to add for the prompt
-	// cache (prompt caching 03); absent: nothing, as before.
-	Caching struct {
+	Caching      struct {
 		Markers        caching.Markers `json:"markers"`
 		PromptCacheKey string          `json:"prompt_cache_key"`
 		Fields         bool            `json:"fields"`
@@ -48,10 +39,6 @@ type goldenCase struct {
 
 var now = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// TestGolden translates every recorded case and compares the request sent
-// upstream, the answer and the stream the Caller gets with
-// testdata/golden/<name>.golden. Run with -update to rewrite them after a
-// deliberate change (or a RelayKit upgrade), then read the diff.
 func TestGolden(t *testing.T) {
 	inputs, err := filepath.Glob(filepath.Join("testdata", "golden", "*.in.json"))
 	if err != nil || len(inputs) == 0 {
@@ -88,13 +75,12 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// output is what one case produced.
 type output struct {
-	request []byte // the body sent upstream
-	answer  []byte // the Caller's whole answer
-	stream  []byte // the Caller's stream
-	// randomIDs: RelayKit names answers and tool calls from Gemini with
-	// random UUIDs, written as <uuid>.
+	request []byte
+	answer  []byte
+	stream  []byte
+	// RelayKit names answers and tool calls from Gemini with random UUIDs,
+	// written as <uuid>.
 	randomIDs bool
 }
 
@@ -143,7 +129,6 @@ func run(t *testing.T, gc goldenCase) output {
 		}
 	}
 	if gc.Stream != nil {
-		// A stream is its own Attempt: a fresh Translation of the same request.
 		tr, _ := translate.New(gc.From, gc.To, opts)
 		if _, err := tr.Request(ctx, gc.Request, gc.WireModel); err != nil {
 			t.Fatal(err)
@@ -156,7 +141,7 @@ func run(t *testing.T, gc goldenCase) output {
 		for _, ev := range gc.Stream {
 			data := []byte(ev)
 			var s string
-			if json.Unmarshal(ev, &s) == nil { // a non-JSON payload such as [DONE]
+			if json.Unmarshal(ev, &s) == nil {
 				data = []byte(s)
 			}
 			out, err := st.Event(ctx, data)
@@ -174,8 +159,6 @@ func run(t *testing.T, gc goldenCase) output {
 	return o
 }
 
-// checkInvariants asserts what every translation owes the Caller, whatever
-// the golden file says.
 func checkInvariants(t *testing.T, gc goldenCase, o output) {
 	t.Helper()
 	for what, b := range map[string][]byte{"request": o.request, "answer": o.answer, "stream": o.stream} {
@@ -240,8 +223,6 @@ func checkInvariants(t *testing.T, gc goldenCase, o output) {
 		}
 	case shape.OpenAIResponses:
 		checkResponsesStream(t, gc, o.stream)
-		// The stream closes with the usage the whole answer reports (research
-		// prompt-caching 1.4: cached_tokens was 0 on the stream only).
 		if o.answer != nil {
 			blocks := strings.Split(strings.TrimSpace(string(o.stream)), "\n\n")
 			_, data, _ := strings.Cut(blocks[len(blocks)-1], "\ndata: ")
@@ -277,10 +258,6 @@ func checkInvariants(t *testing.T, gc goldenCase, o output) {
 	}
 }
 
-// checkResponsesStream: a Responses stream runs from response.created to
-// response.completed, each event named by its type and numbered in order,
-// every response object naming Iroha's id and the Caller's model, and every
-// message's text accumulated through a content part as the SDKs expect.
 func checkResponsesStream(t *testing.T, gc goldenCase, stream []byte) {
 	t.Helper()
 	blocks := strings.Split(strings.TrimSpace(string(stream)), "\n\n")
@@ -325,7 +302,6 @@ func checkResponsesStream(t *testing.T, gc goldenCase, stream []byte) {
 	}
 }
 
-// parseSSE returns the data of each event.
 func parseSSE(b []byte) []string {
 	var out []string
 	for _, block := range strings.Split(strings.TrimSpace(string(b)), "\n\n") {

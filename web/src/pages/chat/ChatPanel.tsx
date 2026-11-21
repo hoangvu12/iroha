@@ -20,42 +20,26 @@ import { createPickerController, ModelTile, PickerPopover, PickerTrigger } from 
 import { Reply } from "./Reply";
 import { SnippetDialog } from "./SnippetDialog";
 import type { Chat } from "./store";
-import { currentChat, deleteChat, isRunning, newChat, openChat, send, setSettings, stop, useChatState } from "./store";
+import { claimTestStart, currentChat, deleteChat, isRunning, newChat, openChat, send, setSettings, stop, useChatState } from "./store";
 import { startFor } from "./targets";
 import { callAToolChip, ToolsButton } from "./tools";
 
-// The shared test chat (C15-C17, C23, C27, C33): one chat at a time, no
-// tabs; earlier chats in the title's dropdown; every setting behind the
-// composer's model button. The shell renders <ChatPanel mode="sheet" /> on
-// the right and /chat renders <ChatPanel mode="page" /> (phones, Expand).
-
-// The press (`@utility press`, styles/index.css) for the panel's own buttons,
-// which aren't ui/Button: the starter chips (the Tools button, tools.tsx, has it too).
 const pressClass = "press";
-// Send/Stop: the same press on the scale only (down on duration-press, back on
-// duration-release, never for a key). Its colour flips as the Owner types the
-// first letter or clears the box (a keyboard action), so that stays instant.
 const sendPressClass =
   "transition-[scale] duration-release ease-out active:not-focus-visible:not-data-disabled:scale-(--motion-scale-press) active:not-focus-visible:not-data-disabled:duration-press";
 
-/** The last Test button handled, so remounting the panel does not start its chat again. */
-let handledSeq = 0;
-
 export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
-  // Not useChatPanel: the chat needn't re-render as its sheet opens and closes.
   const panel = { ...useChatActions(), request: useChatRequest() };
   const navigate = useNavigate();
   const phone = useIsPhone();
   const state = useChatState();
   const chat = currentChat(state);
-  // A Test button whose chat couldn't be set up: said at the top of the panel it opened.
   const [setupError, setSetupError] = useState<string>();
   const confirm = useConfirm();
 
   useEffect(() => {
     const { seq, target } = panel.request;
-    if (!target || seq <= handledSeq) return;
-    handledSeq = seq;
+    if (!target || !claimTestStart(seq)) return;
     setSetupError(undefined);
     startFor(target).catch((e) => setSetupError(`Couldn't set up the chat: ${describeError(e)}`));
   }, [panel.request]);
@@ -118,7 +102,6 @@ export function ChatPanel({ mode }: { mode: "sheet" | "page" }) {
               label="Full page"
               size="sm"
               onClick={() => {
-                // A route change: the page takes the panel's place at once.
                 panel.close({ instant: true });
                 navigate("/chat");
               }}
@@ -155,7 +138,6 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
   const [picker] = useState(createPickerController);
   const [composer, setComposer] = useState<HTMLDivElement | null>(null);
   const [snippets, setSnippets] = useState(false);
-  // The log follows the reply while it streams, unless the Owner scrolled up.
   const [log] = useState(createScrollAreaController);
   const s = chat.settings;
   const change = (patch: Partial<Settings>) => setSettings(chat.id, patch);
@@ -206,7 +188,6 @@ function ChatBody({ chat, running, wide }: { chat: Chat; running: boolean; wide:
               chat={chat}
               onPrompt={(prompt, patch) => {
                 if (patch) change(patch);
-                // Settings land in the store first; send reads them from there.
                 queueMicrotask(() => submit(prompt));
               }}
             />

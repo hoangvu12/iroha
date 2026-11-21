@@ -35,8 +35,6 @@ func statsOf(t *testing.T, srv *testkit.Server, q string) requests.Stats {
 	return s
 }
 
-// slow sends one chat Request whose upstream answers after d on the fake
-// clock, so it records d as time to first byte and duration.
 func slow(t *testing.T, srv *testkit.Server, up *testkit.Upstream, c *testkit.Client, model string, d time.Duration) {
 	t.Helper()
 	release := make(chan struct{})
@@ -68,8 +66,6 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, up.URL())
 	alice, _ := keyNamed(t, srv, "alice")
-	// "bob0": q also matches Request IDs (a-z, 2-7), and a random ID may
-	// contain "bob" but never "bob0".
 	bob, _ := keyNamed(t, srv, "bob0")
 
 	if s := statsOf(t, srv, ""); s.Requests != 0 || s.MedianDurationMs != nil || s.MedianFirstByteMs != nil {
@@ -88,7 +84,6 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 	if s.Requests != 5 || s.Succeeded != 4 || s.Failed != 1 || s.InProgress != 0 || s.Retried != 0 {
 		t.Fatalf("stats = %+v", s)
 	}
-	// Medians are over succeeded Requests: 1, 2, 3, 4 s -> 2.5 s.
 	if s.MedianDurationMs == nil || *s.MedianDurationMs != 2500 || s.MedianFirstByteMs == nil || *s.MedianFirstByteMs != 2500 {
 		t.Fatalf("medians = %v %v", s.MedianDurationMs, s.MedianFirstByteMs)
 	}
@@ -96,7 +91,6 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 		t.Fatalf("tokens = %+v", s.Tokens)
 	}
 
-	// The same filters narrow the list and the stats alike.
 	for _, tc := range []struct {
 		q        string
 		n, ok    int
@@ -121,8 +115,7 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 			t.Errorf("%s: median %v, want %d", tc.q, s.MedianDurationMs, tc.medianMs)
 		}
 	}
-	// A 500 is retried on the next try; the Request counts as retried and succeeded.
-	srv.SkipShortWaits(time.Second) // the pause before the replay
+	srv.SkipShortWaits(time.Second)
 	up.Enqueue(up.Error(500, "boom"), up.Text("ok"))
 	alice.Post(chatPath, `{"model":"gpt-z","messages":[]}`).Expect(200)
 	if s := statsOf(t, srv, "retried=true"); s.Requests != 1 || s.Retried != 1 || s.Succeeded != 1 {
@@ -138,8 +131,6 @@ func TestStatsDescribeTheRequestsTheSameFiltersList(t *testing.T) {
 	}
 }
 
-// insert records a Request no API can create yet (test Requests from the
-// chat, Pools, retries), so the filters for them can be tested now.
 func insert(t *testing.T, srv *testkit.Server, id, kind, keyID, caller, model, pool string, status, attempts int) {
 	t.Helper()
 	_, err := srv.App.DB().Exec(`INSERT INTO requests (id, started_at, finished_at, state, status, caller_kind, gateway_key_id, caller_name, route, shape_in, model, pool, attempt_count, duration_ms)
@@ -164,7 +155,7 @@ func TestRequestsFilterByTestCallersPoolsAndRetries(t *testing.T) {
 		q    string
 		want int
 	}{
-		{"caller=" + key.ID, 2}, // the key's own traffic, never tests sent as it
+		{"caller=" + key.ID, 2},
 		{"caller=alice", 2},
 		{"caller=" + url.QueryEscape("Test (as alice)"), 1},
 		{"caller_kind=test", 2},
@@ -226,7 +217,6 @@ func TestFollowingTheFeedReturnsOnlyWhatStartedOrChanged(t *testing.T) {
 		t.Fatalf("nothing changed, got %+v", f)
 	}
 
-	// A Request in progress shows up, then again once it finished.
 	release := make(chan struct{})
 	up.Enqueue(up.Text("late").HoldUntil(release))
 	done := make(chan string)
@@ -250,12 +240,10 @@ func TestFollowingTheFeedReturnsOnlyWhatStartedOrChanged(t *testing.T) {
 	}
 	cursor = f.Cursor
 
-	// Filters apply; the cursor still moves past what they leave out.
 	third := alice.Post(chatPath, `{"model":"gpt-x","messages":[]}`).Expect(200).Header.Get("X-Request-Id")
 	if f := page(t, srv, fmt.Sprintf("changed_after=%d&caller=bob", cursor)); len(f.Requests) != 0 || f.Cursor <= cursor {
 		t.Fatalf("filtered = %+v", f)
 	}
-	// A full page hands back the cursor of its last row: the next call continues there.
 	f = page(t, srv, "changed_after=0&limit=2")
 	if len(f.Requests) != 2 || f.Requests[0].ID != first || f.Requests[1].ID != second {
 		t.Fatalf("oldest changes first = %v", ids(f.Requests))

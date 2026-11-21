@@ -10,21 +10,15 @@ import (
 	"github.com/hoangvu12/iroha/internal/translate"
 )
 
-// Conformance with the v1 case catalog (docs/research/v1-case-catalog.md):
-// translation tables between Anthropic Messages and OpenAI Chat.
-
 const (
 	confAnthropicReq = `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"f","input_schema":{"type":"object"}},{"name":"g","input_schema":{"type":"object"}}]}`
 	confChatReq      = `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
 )
 
-// confChunk is one OpenAI Chat stream chunk with one choice.
 func confChunk(delta, finish string) string {
 	return `{"id":"c1","object":"chat.completion.chunk","created":1,"model":"w","choices":[{"index":0,"delta":` + delta + `,"finish_reason":` + finish + `}]}`
 }
 
-// confStream feeds upstream event payloads through a fresh Translation of
-// req and returns the Caller's stream, failing on any error.
 func confStream(t *testing.T, from, to shape.Shape, req string, events ...string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -47,7 +41,6 @@ func confStream(t *testing.T, from, to shape.Shape, req string, events ...string
 	return string(append(out, b...))
 }
 
-// confRequest translates a Caller's request and decodes what goes upstream.
 func confRequest(t *testing.T, from, to shape.Shape, req string) (map[string]any, *translate.Translation) {
 	t.Helper()
 	tr, err := translate.New(from, to, translate.Options{Model: "m", ID: "req_1", Now: now})
@@ -65,7 +58,6 @@ func confRequest(t *testing.T, from, to shape.Shape, req string) (map[string]any
 	return m, tr
 }
 
-// confAnswer translates a whole upstream answer and decodes the Caller's.
 func confAnswer(t *testing.T, from, to shape.Shape, req, answer string) map[string]any {
 	t.Helper()
 	out, err := newTranslation(t, from, to, req).Response(context.Background(), []byte(answer))
@@ -79,11 +71,7 @@ func confAnswer(t *testing.T, from, to shape.Shape, req, answer string) map[stri
 	return m
 }
 
-// REQ-47, REQ-60: stop reasons map both ways, whole and streamed; a reason
-// the Caller's Shape does not know becomes its plain "finished" reason
-// rather than reaching typed SDKs as an unknown value.
 func TestStopReasonsMapBetweenAnthropicAndChatBothWays(t *testing.T) {
-	// Anthropic Endpoint, Chat Caller.
 	for _, tc := range []struct{ stop, finish string }{
 		{"end_turn", "stop"}, {"stop_sequence", "stop"}, {"max_tokens", "length"}, {"tool_use", "tool_calls"},
 		{"refusal", "content_filter"}, {"pause_turn", "length"}, {"mystery_reason", "stop"},
@@ -104,8 +92,6 @@ func TestStopReasonsMapBetweenAnthropicAndChatBothWays(t *testing.T) {
 			t.Errorf("Anthropic %s streamed -> Chat:\n%s", tc.stop, stream)
 		}
 	}
-	// An answer calling tools is tool_calls even when its stop reason says
-	// end_turn.
 	ans := confAnswer(t, shape.OpenAIChat, shape.AnthropicMessages, confChatReq,
 		`{"id":"msg_1","type":"message","role":"assistant","model":"w","stop_reason":"end_turn","content":[{"type":"tool_use","id":"toolu_1","name":"f","input":{}}],"usage":{"input_tokens":1,"output_tokens":1}}`)
 	if got := confObj(confList(ans["choices"])[0])["finish_reason"]; got != "tool_calls" {
@@ -122,7 +108,6 @@ func TestStopReasonsMapBetweenAnthropicAndChatBothWays(t *testing.T) {
 		t.Errorf("Anthropic end_turn after a streamed tool_use -> Chat:\n%s", stream)
 	}
 
-	// Chat Endpoint, Anthropic Caller.
 	for _, tc := range []struct{ finish, stop string }{
 		{"stop", "end_turn"}, {"length", "max_tokens"}, {"tool_calls", "tool_use"}, {"content_filter", "refusal"}, {"mystery_reason", "end_turn"},
 	} {
@@ -139,10 +124,6 @@ func TestStopReasonsMapBetweenAnthropicAndChatBothWays(t *testing.T) {
 	}
 }
 
-// REQ-60: a Chat answer becomes an Anthropic message: unparseable tool
-// arguments become {}, and an answer or tool call without an id gets one
-// (the Caller answers a tool call by its id). REQ-47's reverse: an
-// Anthropic answer without an id gets a chatcmpl- id.
 func TestAnswersWithBadToolArgumentsOrNoIDsStillTranslate(t *testing.T) {
 	ans := confAnswer(t, shape.AnthropicMessages, shape.OpenAIChat, confAnthropicReq,
 		`{"object":"chat.completion","created":1,"model":"w","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[
@@ -160,7 +141,6 @@ func TestAnswersWithBadToolArgumentsOrNoIDsStillTranslate(t *testing.T) {
 		t.Errorf("tool call without an id = %v", second)
 	}
 
-	// Streamed, a tool call without an id gets one as well.
 	stream := confStream(t, shape.AnthropicMessages, shape.OpenAIChat, confAnthropicReq,
 		confChunk(`{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"name":"f","arguments":"{}"}}]}`, "null"),
 		confChunk(`{}`, `"tool_calls"`), "[DONE]")
@@ -175,10 +155,6 @@ func TestAnswersWithBadToolArgumentsOrNoIDsStillTranslate(t *testing.T) {
 	}
 }
 
-// REQ-56 (v1 GAP): a tool_result holding an image keeps it. The text goes
-// in the tool message; the image follows in a user message, since Chat tool
-// messages carry text only. An image-only result says [image] in the tool
-// message.
 func TestToolResultImagesReachAChatModel(t *testing.T) {
 	history := func(result, after string) string {
 		return `{"model":"m","max_tokens":10,"tools":[{"name":"shot","input_schema":{"type":"object"}}],"messages":[
@@ -218,9 +194,6 @@ func TestToolResultImagesReachAChatModel(t *testing.T) {
 	}
 }
 
-// REQ-57: blocks Chat has nowhere to put (thinking, redacted_thinking, a
-// URL document, server tool calls and their results) are dropped, not sent
-// upstream; RelayKit notes the losses it knows of in Diagnostics.
 func TestAnthropicBlocksChatCannotCarryAreDropped(t *testing.T) {
 	sent, tr := confRequest(t, shape.AnthropicMessages, shape.OpenAIChat, `{"model":"m","max_tokens":10,"messages":[
 		{"role":"user","content":[{"type":"text","text":"q"},{"type":"document","source":{"type":"url","url":"https://example.com/a.pdf"}}]},
@@ -249,11 +222,6 @@ func TestAnthropicBlocksChatCannotCarryAreDropped(t *testing.T) {
 	}
 }
 
-// REQ-75 (v1 BUG): two streamed tool calls whose arguments interleave
-// become two tool_use blocks, each with its own start, its own arguments
-// and its own stop; text before closes before them and text after opens a
-// new block. (The blocks overlap in time: the second starts before the
-// first stops. The Anthropic SDKs accumulate by index, so that reads right.)
 func TestTwoInterleavedStreamedToolCallsBecomeTwoBlocks(t *testing.T) {
 	stream := confStream(t, shape.AnthropicMessages, shape.OpenAIChat, confAnthropicReq,
 		confChunk(`{"role":"assistant","content":"Let me "}`, "null"),
@@ -328,10 +296,6 @@ func TestTwoInterleavedStreamedToolCallsBecomeTwoBlocks(t *testing.T) {
 	}
 }
 
-// REQ-80: an OpenAI Chat tool_choice becomes Anthropic's: auto, required ->
-// any, none, a named function -> tool; an unknown value is dropped with a
-// diagnostic. REQ-81: and back: auto, any -> required, none, tool -> a named
-// function.
 func TestToolChoiceMapsBetweenChatAndAnthropicBothWays(t *testing.T) {
 	for _, tc := range []struct{ chat, want string }{
 		{`"auto"`, `{"type":"auto"}`}, {`"required"`, `{"type":"any"}`}, {`"none"`, `{"type":"none"}`},
@@ -364,11 +328,6 @@ func TestToolChoiceMapsBetweenChatAndAnthropicBothWays(t *testing.T) {
 	}
 }
 
-// REQ-83: Anthropic custom tools become Chat functions (input_schema as
-// parameters). Server tools are not turned into functions no one would run
-// (v1 did): web_search becomes Chat's web_search_options, which OpenAI's
-// search models honour (max_uses is lost, with a diagnostic), and a tool
-// Chat cannot host (bash) is dropped with a diagnostic.
 func TestAnthropicServerToolsAreNotSentToChatAsFunctions(t *testing.T) {
 	sent, tr := confRequest(t, shape.AnthropicMessages, shape.OpenAIChat, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"tools":[
 		{"name":"get_weather","description":"Weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}}}},

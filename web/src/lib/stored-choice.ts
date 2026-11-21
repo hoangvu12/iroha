@@ -1,11 +1,5 @@
 import { useState } from "react";
 
-/**
- * One of a few choices, remembered in this browser (`localStorage[key]`): the stored value when
- * it is one of `choices`, else `fallback`. Where storage is refused (a private window, blocked
- * site data) the choice lasts this visit only. For a view or mode the Owner picks (the Rules
- * tab's Table or Flow, the Requests feed's paging).
- */
 export function useStoredChoice<T extends string>(key: string, choices: readonly T[], fallback: T) {
   const [value, setValue] = useState<T>(() => {
     try {
@@ -19,9 +13,7 @@ export function useStoredChoice<T extends string>(key: string, choices: readonly
     setValue(v);
     try {
       localStorage.setItem(key, v);
-    } catch {
-      // Storage refused: the choice lasts this visit only.
-    }
+    } catch {}
   };
   return [value, choose] as const;
 }

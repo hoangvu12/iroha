@@ -11,47 +11,40 @@ var (
 	closeTags = []string{"</think>", "</thinking>", "</budget:thinking>"}
 )
 
-// Phases of a splitter.
+type splitPhase int
+
 const (
-	beforeText = iota // nothing but whitespace yet: a reasoning block may open
+	beforeText splitPhase = iota
 	inReasoning
-	afterReasoning // the answer text: passed on unchanged
+	afterReasoning
 )
 
-// splitter moves a reasoning block that opens one choice's text out of it,
-// fed the text piece by piece as a stream delivers it (a whole answer is one
-// piece). Only a block at the very start is lifted: a tag later in the text
-// is the answer's own (a model explaining the tag, say).
-type splitter struct {
-	phase int
-	// held is text kept back because it may be the start of a tag ("<thi").
-	held string
-	// trim: the block just closed; whitespace before the answer text is dropped.
-	trim bool
+type leadingReasoningSplitter struct {
+	phase                splitPhase
+	maybeTag             string
+	trimSpaceAfterReason bool
 }
 
-// feed takes the next piece of text and returns the reasoning and answer
-// text it holds; acted is false when the piece passes on unchanged as text.
-func (s *splitter) feed(text string) (reasoning, content string, acted bool) {
+func (s *leadingReasoningSplitter) feed(text string) (reasoning, content string, acted bool) {
 	switch s.phase {
 	case afterReasoning:
-		if !s.trim {
+		if !s.trimSpaceAfterReason {
 			return "", text, false
 		}
 		t := strings.TrimLeft(text, " \t\r\n")
 		if t != "" {
-			s.trim = false
+			s.trimSpaceAfterReason = false
 		}
 		return "", t, t != text
 	case inReasoning:
 		return s.inside(text)
 	}
-	buf := s.held + text
-	held := s.held != ""
-	s.held = ""
+	buf := s.maybeTag + text
+	hadMaybeTag := s.maybeTag != ""
+	s.maybeTag = ""
 	rest := strings.TrimLeft(buf, " \t\r\n")
 	if rest == "" {
-		return "", buf, held
+		return "", buf, hadMaybeTag
 	}
 	for _, tag := range openTags {
 		if strings.HasPrefix(rest, tag) {
@@ -62,18 +55,17 @@ func (s *splitter) feed(text string) (reasoning, content string, acted bool) {
 	}
 	for _, tag := range openTags {
 		if len(rest) < len(tag) && strings.HasPrefix(tag, rest) {
-			s.held = buf
+			s.maybeTag = buf
 			return "", "", true
 		}
 	}
 	s.phase = afterReasoning
-	return "", buf, held
+	return "", buf, hadMaybeTag
 }
 
-// inside handles text within the reasoning block.
-func (s *splitter) inside(text string) (reasoning, content string, acted bool) {
-	buf := s.held + text
-	s.held = ""
+func (s *leadingReasoningSplitter) inside(text string) (reasoning, content string, acted bool) {
+	buf := s.maybeTag + text
+	s.maybeTag = ""
 	at, tagLen := -1, 0
 	for _, tag := range closeTags {
 		if i := strings.Index(buf, tag); i >= 0 && (at < 0 || i < at) {
@@ -81,33 +73,28 @@ func (s *splitter) inside(text string) (reasoning, content string, acted bool) {
 		}
 	}
 	if at >= 0 {
-		s.phase, s.trim = afterReasoning, true
+		s.phase, s.trimSpaceAfterReason = afterReasoning, true
 		_, content, _ = s.feed(buf[at+tagLen:])
 		return buf[:at], content, true
 	}
 	if k := partialSuffix(buf, closeTags); k > 0 {
-		s.held = buf[len(buf)-k:]
+		s.maybeTag = buf[len(buf)-k:]
 		buf = buf[:len(buf)-k]
 	}
 	return buf, "", true
 }
 
-// flush returns the text held back at the end of the answer: reasoning
-// inside an unclosed block, answer text otherwise.
-func (s *splitter) flush() (reasoning, content string) {
-	h := s.held
-	s.held = ""
+func (s *leadingReasoningSplitter) flush() (reasoning, content string) {
+	h := s.maybeTag
+	s.maybeTag = ""
 	if s.phase == inReasoning {
 		return h, ""
 	}
 	return "", h
 }
 
-// pending reports whether text is held back.
-func (s *splitter) pending() bool { return s.held != "" }
+func (s *leadingReasoningSplitter) pending() bool { return s.maybeTag != "" }
 
-// partialSuffix is the length of the longest end of text that begins one of
-// tags without completing it.
 func partialSuffix(text string, tags []string) int {
 	best := 0
 	for _, tag := range tags {

@@ -7,11 +7,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// Endpoint refusals (ticket 42): a 413 from a proxy's body limit, or a 404
-// page from a wrong path, belongs to that Endpoint, not to the request. The
-// built-in rules endpoint-body-too-large and endpoint-path-not-found say
-// retry_elsewhere, so another candidate serves and the key is left alone.
-
 const nginx413 = "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx/1.24.0</center>\r\n</body>\r\n</html>\r\n"
 
 func TestAnEndpointRefusalIsServedByAnotherKeyOnAnotherEndpoint(t *testing.T) {
@@ -30,10 +25,9 @@ func TestAnEndpointRefusalIsServedByAnotherKeyOnAnotherEndpoint(t *testing.T) {
 			srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
 			srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "a", "url": a.URL(), "shape": "openai-chat"}).Expect(201)
 			srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"name": "b", "url": b.URL(), "shape": "openai-chat"}).Expect(201)
-			// The plan of the first Request: (ka, a), then (kb, b).
 			srv.Admin.Post("/api/providers/acme/keys", map[string]any{"name": "ka", "secret": "sk-test-a", "endpoints": []string{"a"}}).Expect(201)
 			srv.Admin.Post("/api/providers/acme/keys", map[string]any{"name": "kb", "secret": "sk-test-b", "endpoints": []string{"b"}}).Expect(201)
-			roundRobin(t, srv, "acme") // the assertions follow round-robin key order
+			roundRobin(t, srv, "acme")
 			caller := srv.Client(issue(t, srv, "pi", all))
 			a.Default(tc.reply)
 			b.Default(b.Text("served by b"))

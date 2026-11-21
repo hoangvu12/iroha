@@ -14,10 +14,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/translate"
 )
 
-// Prompt caching 03: what translation adds for the Provider's prompt cache.
-// The golden files hold the whole bodies; these tests say what in them is
-// the point, so a golden update can't quietly lose it.
-
 func golden(t *testing.T, name string) (goldenCase, output) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "golden", name+".in.json"))
@@ -44,8 +40,6 @@ func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
 func asList(v any) []any         { l, _ := v.([]any); return l }
 func asString(v any) string      { s, _ := v.(string); return s }
 
-// REQ-93: markers are added for a Chat Caller, and the write they cause is
-// reported in OpenAI's names.
 func TestMarkersAreAddedOnTheLastToolSystemBlockAndMessage(t *testing.T) {
 	_, o := golden(t, "chat-to-anthropic-cache-markers-added")
 	req := object(t, o.request)
@@ -56,7 +50,6 @@ func TestMarkersAreAddedOnTheLastToolSystemBlockAndMessage(t *testing.T) {
 	if u := asString(asMap(req["metadata"])["user_id"]); u != "u-42" {
 		t.Errorf("metadata.user_id = %q, want the Caller's user", u)
 	}
-	// The write the markers caused reaches the Chat Caller as OpenAI names it.
 	ans := object(t, o.answer)
 	if w := asMap(asMap(ans["usage"])["prompt_tokens_details"])["cache_write_tokens"]; w != float64(2048) {
 		t.Errorf("answer cache_write_tokens = %v: %s", w, o.answer)
@@ -66,14 +59,10 @@ func TestMarkersAreAddedOnTheLastToolSystemBlockAndMessage(t *testing.T) {
 	}
 }
 
-// REQ-109: a Caller's markers survive translation, at most 4 of them, in
-// an order of lifetimes Anthropic accepts.
 func TestCallerMarkersAreKeptClampedToFourWithLongerLifetimesFirst(t *testing.T) {
 	_, o := golden(t, "chat-to-anthropic-caller-markers")
 	req := object(t, o.request)
 	got := strings.Join(testkit.CacheMarkers(t, o.request), ", ")
-	// Six Caller markers: the two earliest (the system blocks, one of them
-	// 1 h) are dropped, and the 1 h marker after 5 min ones becomes 5 min.
 	want := "user:First question=5m, assistant:First answer=5m, user:Second question=5m, user:with a long file=5m"
 	if got != want {
 		t.Errorf("markers %s, want %s", got, want)
@@ -105,8 +94,6 @@ func TestTopOnlyEndpointsGetOneTopLevelMarker(t *testing.T) {
 	}
 }
 
-// REQ-51, REQ-95: the system prompt keeps its marker where the Endpoint
-// honours it, and the cache write comes back as Anthropic names it.
 func TestAnthropicToChatKeepsTheSystemPromptsMarker(t *testing.T) {
 	_, o := golden(t, "anthropic-to-chat-cache-system-marker")
 	req := object(t, o.request)
@@ -149,9 +136,6 @@ func TestDerivedPromptCacheKeyOnlyWhenTheRequestHasNone(t *testing.T) {
 	}
 }
 
-// Toward OpenAI Responses an Anthropic Caller's plain metadata.user_id
-// becomes user, as toward Chat; Claude Code's session is not a user, and no
-// Caching asked adds nothing.
 func TestAnthropicToResponsesMapsAPlainUserID(t *testing.T) {
 	send := func(userID string, c translate.Caching) (map[string]any, []string) {
 		t.Helper()
@@ -179,8 +163,6 @@ func TestAnthropicToResponsesMapsAPlainUserID(t *testing.T) {
 	}
 }
 
-// Translation with no Caching asked adds nothing (the zero value): the
-// golden files of tickets 13-16 are unchanged, and so is this.
 func TestNoCachingAddsNothing(t *testing.T) {
 	gc, _ := golden(t, "chat-to-anthropic-cache-markers-added")
 	tr, err := translate.New(gc.From, gc.To, translate.Options{Model: gc.Model, ID: "r", Now: now})
@@ -196,8 +178,6 @@ func TestNoCachingAddsNothing(t *testing.T) {
 	}
 }
 
-// What Iroha added is listed, so a Provider refusing it can be retried
-// without it.
 func TestAddedNamesWhatIrohaAdded(t *testing.T) {
 	gc, _ := golden(t, "chat-to-anthropic-cache-markers-added")
 	tr, _ := translate.New(gc.From, gc.To, translate.Options{Model: gc.Model, ID: "r", Now: now,
@@ -210,8 +190,6 @@ func TestAddedNamesWhatIrohaAdded(t *testing.T) {
 	}
 }
 
-// A Gemini request naming a cache stored at Google loses that context in
-// any other Shape, so it is refused rather than sent without it.
 func TestGeminiCachedContentIsRefusedInTranslation(t *testing.T) {
 	for _, to := range translate.Targets(shape.Gemini) {
 		tr, _ := translate.New(shape.Gemini, to, translate.Options{Model: "m", ID: "r", Now: now})

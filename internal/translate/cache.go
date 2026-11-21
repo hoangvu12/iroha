@@ -12,44 +12,16 @@ import (
 	"github.com/hoangvu12/iroha/internal/usage"
 )
 
-// Prompt caching across Shapes (prompt caching 03). RelayKit drops cache
-// markers and conversation fields between Shapes; this file puts back what
-// the Endpoint can use, as the Gateway's caching.Policy for it says:
-//
-//   - toward Anthropic Messages: the markers a Chat Caller sends in
-//     OpenRouter's style (on content parts, tools, the request), else
-//     Iroha's own (the last tool, system block and message, or Anthropic's
-//     automatic top-level one); never more than 4 (the earliest dropped),
-//     never a 1 h marker after a 5 min one; and metadata.user_id from the
-//     Caller's user, safety_identifier or prompt_cache_key;
-//   - toward OpenAI Chat from Anthropic: the system prompt's markers where
-//     the Endpoint honours them, or no markers at all;
-//   - toward OpenAI Chat and Responses from Anthropic: the Caller's plain
-//     metadata.user_id as user (Claude Code's session JSON is a session, not
-//     a user);
-//   - toward OpenAI Chat and Responses: a prompt_cache_key derived from the
-//     conversation when the request carries none.
-//
-// The Caller's own markers are never moved or re-derived, only clamped and
-// put in TTL order where Anthropic would otherwise refuse the request.
-
-// Caching is what a Translation adds for the Provider's prompt cache. The
-// zero value adds nothing: the conversion is as before prompt caching 03.
 type Caching struct {
-	Markers caching.Markers
-	// Fields: carry the conversation fields across (user, safety_identifier,
-	// prompt_cache_key <-> metadata.user_id).
-	Fields bool
-	// PromptCacheKey is sent to an OpenAI Endpoint whose request has none
-	// (caching.PromptCacheKey of the conversation); "" sends none.
+	Markers        caching.Markers
+	Fields         bool
 	PromptCacheKey string
 }
 
 // maxMarkers is Anthropic's limit of cache_control markers per request.
 const maxMarkers = 4
 
-// callerFields are the parts of the Caller's raw body this file reads,
-// since RelayKit's request DTOs drop them.
+// RelayKit's request DTOs drop these fields.
 type callerFields struct {
 	User             json.RawMessage `json:"user"`
 	SafetyIdentifier json.RawMessage `json:"safety_identifier"`
@@ -72,12 +44,11 @@ type callerFields struct {
 
 func readCallerFields(body []byte) callerFields {
 	var f callerFields
-	_ = json.Unmarshal(body, &f) // a field of another type reads as absent; decoding the DTO reports bad JSON
+	_ = json.Unmarshal(body, &f)
 	return f
 }
 
-// refuseStored refuses what names state kept at the Provider, which no other
-// Shape can refer to (Responses' stateful fields are refused by RelayKit).
+// RelayKit already refuses Responses' stateful fields.
 func (t *Translation) refuseStored(f callerFields) error {
 	if t.caller.shape == shape.Gemini && (rawString(f.CachedContent) != "" || rawString(f.CachedContent2) != "") {
 		return &Error{
@@ -88,7 +59,6 @@ func (t *Translation) refuseStored(f callerFields) error {
 	return nil
 }
 
-// applyCaching adds what t.o.Caching asks to the converted request m.
 func (t *Translation) applyCaching(m map[string]any, f callerFields) {
 	c := t.o.Caching
 	switch t.endpoint.shape {
@@ -119,8 +89,6 @@ func (t *Translation) applyCaching(m map[string]any, f callerFields) {
 	}
 }
 
-// userFromMetadata sends an Anthropic Caller's plain metadata.user_id as
-// OpenAI's user (Chat and Responses), unless the request already has one.
 func (t *Translation) userFromMetadata(m map[string]any, f callerFields) {
 	if !t.o.Caching.Fields || t.caller.shape != shape.AnthropicMessages || !zero(m["user"]) {
 		return
@@ -147,7 +115,6 @@ func (t *Translation) added(name string) {
 	t.Added = append(t.Added, name)
 }
 
-// bounded is v, or its SHA-256 when longer than n bytes.
 func bounded(v string, n int) string {
 	if len(v) <= n {
 		return v
@@ -173,7 +140,6 @@ func rawString(raw json.RawMessage) string {
 	return s
 }
 
-// rawObject is a raw JSON object as a map; nil for anything else.
 func rawObject(raw json.RawMessage) map[string]any {
 	var m map[string]any
 	if json.Unmarshal(raw, &m) != nil {
@@ -182,19 +148,15 @@ func rawObject(raw json.RawMessage) map[string]any {
 	return m
 }
 
-// --- Toward Anthropic Messages ---
-
-// marker is one cache_control in an Anthropic request, in prompt order.
 type marker struct {
-	holder map[string]any // the block, tool or request holding it
-	top    bool           // the request's automatic marker
+	holder map[string]any
+	top    bool
 }
 
 func (mk marker) cc() map[string]any { return obj(mk.holder["cache_control"]) }
 
-// anthropicMarkers sets the converted request's markers per policy p.
 func (t *Translation) anthropicMarkers(m map[string]any, f callerFields, p caching.Markers) {
-	if p == caching.AsBefore {
+	if p == caching.AsConverted {
 		return
 	}
 	if p == caching.Strip {
@@ -231,8 +193,6 @@ func (t *Translation) anthropicMarkers(m map[string]any, f callerFields, p cachi
 	}
 }
 
-// anthropicMarkerList lists the markers of an Anthropic request in prompt
-// order: tools, system, messages, then the top-level one.
 func anthropicMarkerList(m map[string]any) []marker {
 	var out []marker
 	add := func(h map[string]any) {
@@ -249,7 +209,7 @@ func anthropicMarkerList(m map[string]any) []marker {
 	for _, msg := range list(m["messages"]) {
 		for _, b := range list(obj(msg)["content"]) {
 			add(obj(b))
-			for _, inner := range list(obj(b)["content"]) { // a tool_result's content
+			for _, inner := range list(obj(b)["content"]) {
 				add(obj(inner))
 			}
 		}
@@ -260,10 +220,7 @@ func anthropicMarkerList(m map[string]any) []marker {
 	return out
 }
 
-// clampMarkers keeps at most maxMarkers markers, dropping the earliest
-// (the top-level one is kept: it moves with the conversation), then makes
-// lifetimes non-increasing: Anthropic refuses a 1 h marker after a 5 min
-// one, so such a marker becomes a 5 min one (the cheaper write).
+// Anthropic refuses a 1 h marker after a 5 min one.
 func clampMarkers(m map[string]any) {
 	list := anthropicMarkerList(m)
 	for i := 0; len(list) > maxMarkers && i < len(list); i++ {
@@ -286,9 +243,6 @@ func clampMarkers(m map[string]any) {
 	}
 }
 
-// addBlockMarkers marks the last tool, the last system block and the last
-// block of the last message that can hold a marker, as CLIProxyAPI and
-// LiteLLM do for translated Callers.
 func addBlockMarkers(m map[string]any) {
 	mark := func(h map[string]any) { h["cache_control"] = map[string]any{"type": "ephemeral"} }
 	if tools := list(m["tools"]); len(tools) > 0 {
@@ -324,7 +278,7 @@ func addBlockMarkers(m map[string]any) {
 	}
 }
 
-// markable: Anthropic refuses a marker on thinking blocks and empty text.
+// Anthropic refuses a marker on thinking blocks and empty text.
 func markable(b map[string]any) bool {
 	switch str(b["type"]) {
 	case "", "thinking", "redacted_thinking":
@@ -335,13 +289,8 @@ func markable(b map[string]any) bool {
 	return true
 }
 
-// placeChatMarkers puts the cache_control a Chat Caller wrote in
-// OpenRouter's style (on content parts, on tools, on the request) on the
-// converted Anthropic request, which RelayKit leaves without them. A part's
-// marker goes on the block holding its text: system and developer parts on
-// the system block that took their text, the others on the first block, in
-// order, with that text. A marker on a part with no text (an image) has no
-// block to go to and is left out.
+// RelayKit drops the cache_control a Chat Caller writes in OpenRouter's
+// style (on content parts, tools and the request).
 func placeChatMarkers(m map[string]any, f callerFields) {
 	if cc := rawObject(f.CacheControl); cc != nil {
 		m["cache_control"] = cc
@@ -385,18 +334,15 @@ func placeChatMarkers(m map[string]any, f callerFields) {
 	}
 }
 
-// cursor walks the blocks of the converted messages in order.
 type cursor struct {
 	msgs     []any
 	msg, blk int
 }
 
-// find returns the next block (from the cursor on) whose text, or whose
-// tool_result content, is text, and moves past it.
 func (c *cursor) find(text string) map[string]any {
 	for ; c.msg < len(c.msgs); c.msg, c.blk = c.msg+1, 0 {
 		msg := obj(c.msgs[c.msg])
-		if s, ok := msg["content"].(string); ok && s == text { // a string message: make it a block to mark
+		if s, ok := msg["content"].(string); ok && s == text {
 			b := map[string]any{"type": "text", "text": s}
 			msg["content"] = []any{b}
 			c.blk = 1
@@ -425,13 +371,8 @@ func blockText(v any) string {
 	return sb.String()
 }
 
-// --- Toward OpenAI Chat from Anthropic ---
-
-// chatMarkers keeps (Keep) the markers of an Anthropic Caller's system
-// blocks, which RelayKit flattens into one string, as text parts of the
-// system message (OpenRouter and Qwen honour them there), or removes every
-// marker (Strip). AsBefore leaves RelayKit's result: message parts keep
-// theirs, the system prompt loses its.
+// RelayKit flattens an Anthropic Caller's system blocks into one string;
+// OpenRouter and Qwen honour markers on the system message's text parts.
 func (t *Translation) chatMarkers(m map[string]any, f callerFields, p caching.Markers) {
 	msgs := list(m["messages"])
 	switch p {
@@ -467,11 +408,7 @@ func (t *Translation) chatMarkers(m map[string]any, f callerFields, p caching.Ma
 	}
 }
 
-// --- Cache writes reported to the Caller ---
-
-// cacheUsage is the usage the Endpoint reported so far, in Iroha's one
-// convention (internal/usage), for the cache counts RelayKit's usage
-// conversion leaves out.
+// RelayKit's usage conversion leaves out the cache counts.
 func (t *Translation) cacheUsage() usage.Usage {
 	if t.usage == nil {
 		return usage.Usage{}
@@ -482,11 +419,6 @@ func (t *Translation) cacheUsage() usage.Usage {
 	return usage.Usage{}
 }
 
-// writeCacheUsage puts the cache writes the Endpoint reported in a usage
-// object written in the Caller's Shape: OpenAI's cache_write_tokens for
-// Chat (prompt_tokens_details) and Responses (input_tokens_details);
-// Anthropic's cache_creation_input_tokens, input_tokens then being only the
-// uncached part. Nothing changes when the Endpoint reported no writes.
 func (t *Translation) writeCacheUsage(u map[string]any) {
 	cu := t.cacheUsage()
 	if u == nil || cu.CacheWrite == 0 {

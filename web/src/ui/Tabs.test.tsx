@@ -75,7 +75,6 @@ test("an underline tab row scrolls sideways inside a Scroll Area whose scrollbar
   const list = screen.getByRole("tablist", { name: "Provider sections" });
   const viewport = list.closest('[data-slot="scroll-area-viewport"]') as HTMLElement;
   expect(viewport).not.toBeNull();
-  // A Scrollbar part is what makes UI SDK hide the browser's own bars.
   expect(viewport.style.scrollbarWidth).toBe("none");
   const bar = viewport.parentElement!.querySelector('[data-slot="scroll-area-scrollbar"]')!;
   expect(bar.getAttribute("data-orientation")).toBe("horizontal");

@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-// Clock tells the time and makes timers.
 type Clock interface {
 	Now() time.Time
-	// NewTimer fires once after d.
 	NewTimer(d time.Duration) Timer
-	// NewTicker fires every d until stopped.
 	NewTicker(d time.Duration) Ticker
+	// AfterFunc calls fn once d has passed, like time.AfterFunc; the Timer's
+	// C is nil and its Stop reports whether fn was stopped before it ran.
+	AfterFunc(d time.Duration, fn func()) Timer
 }
 
 // Timer mirrors time.Timer behind an interface.
@@ -33,7 +33,6 @@ type Ticker interface {
 	Stop()
 }
 
-// Since is c.Now().Sub(t).
 func Since(c Clock, t time.Time) time.Duration { return c.Now().Sub(t) }
 
 // After returns a channel that receives the time once d has passed on c.
@@ -102,6 +101,9 @@ type Real struct{}
 func (Real) Now() time.Time                   { return time.Now() }
 func (Real) NewTimer(d time.Duration) Timer   { return realTimer{time.NewTimer(d)} }
 func (Real) NewTicker(d time.Duration) Ticker { return realTicker{time.NewTicker(d)} }
+func (Real) AfterFunc(d time.Duration, fn func()) Timer {
+	return realTimer{time.AfterFunc(d, fn)}
+}
 
 type realTimer struct{ t *time.Timer }
 

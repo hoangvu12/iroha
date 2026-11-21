@@ -1,11 +1,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { Shape } from "@/pages/requests/api";
-
-// The test chat's calls (ticket 23): POST /api/test streams one turn in the
-// chosen Shape, GET /api/test/models searches what can be picked, GET
-// /api/test/snippets writes curl, Python and TypeScript for the settings.
-// Types mirror internal/testchat.
+import { asList, asObject, asString, numberOr, optionalString, stringOr } from "@/pages/requests/json";
 
 export type { Shape };
 export type Reasoning = "off" | "low" | "medium" | "high";
@@ -18,37 +14,29 @@ export const SHAPES: { value: Shape; label: string }[] = [
 ];
 export const shapeLabel = (s: Shape) => SHAPES.find((x) => x.value === s)?.label ?? s;
 
-/** Everything the composer's model button sets. */
 export type Settings = {
-  /** A Pool name or <provider>/<model>; "" before one is picked. */
   model: string;
   shape: Shape;
-  /** Pinned Upstream Key name (the model's Provider). */
   upstreamKey?: string;
-  /** Pinned Endpoint name. */
   endpoint?: string;
-  /** Gateway Key name to send as. */
   as?: string;
   reasoning: Reasoning;
-  /** Test tools offered (GET /api/test/tools names), in the list's order; [] offers none. */
   tools: string[];
 };
 
 export const DEFAULT_SETTINGS: Settings = { model: "", shape: "openai-chat", reasoning: "off", tools: [] };
 
-/** The tool tool_check used to offer on its own. */
 export const WEATHER_TOOL = "get_weather";
 
-/** Settings as saved by any version: chats from before ticket 29 had `toolCheck` (get_weather alone). */
-export function normalizeSettings(s: Settings & { toolCheck?: boolean }): Settings {
-  const { toolCheck, ...rest } = s;
-  return { ...rest, tools: Array.isArray(s.tools) ? s.tools : toolCheck ? [WEATHER_TOOL] : [] };
+export type LegacySettings = Omit<Settings, "tools"> & { tools?: string[]; toolCheck?: boolean };
+
+export function migrateLegacySettings(s: LegacySettings): Settings {
+  const { toolCheck, tools, ...rest } = s;
+  return { ...rest, tools: Array.isArray(tools) ? tools : toolCheck ? [WEATHER_TOOL] : [] };
 }
 
-/** One test tool (GET /api/test/tools). */
 export type TestTool = { name: string; description: string; parameters: unknown };
 
-/** The test tools a send can offer; they never change while Iroha runs. */
 export function useTestTools(enabled = true) {
   return useQuery({
     queryKey: ["test-tools"],
@@ -59,13 +47,11 @@ export function useTestTools(enabled = true) {
   });
 }
 
-/** The Provider handle of a model, or undefined for a Pool. */
 export function providerOf(model: string): string | undefined {
   const i = model.indexOf("/");
   return i > 0 ? model.slice(0, i) : undefined;
 }
 
-/** The model without its Provider handle. */
 export function bareModel(model: string): string {
   const i = model.indexOf("/");
   return i > 0 ? model.slice(i + 1) : model;
@@ -82,13 +68,11 @@ export type ModelChoices = {
   pools: ModelChoice[];
   providers: { provider: string; matched: number; models: ModelChoice[] }[];
   truncated: boolean;
-  /** With prefer naming a Provider: the model to start a test of it with. */
   suggested?: string;
 };
 
 export type Snippets = { url: string; curl: string; python: string; typescript: string; key_env: boolean };
 
-/** Searches what can be picked; `prefer` (a `<handle>/` or a Pool) is listed first. */
 export function useModelChoices(q: string, as: string | undefined, prefer?: string, enabled = true) {
   return useQuery({
     queryKey: ["test-models", q, as ?? "", prefer ?? ""],
@@ -121,28 +105,22 @@ export function useSnippets(s: Settings, prompt: string, enabled: boolean) {
   });
 }
 
-/** The model to start a chat opened from a Provider with: the one it served most lately, else its first listed. */
 export async function suggestedModelOf(handle: string): Promise<string | undefined> {
   const r = await api.get<ModelChoices>("/api/test/models", { query: { prefer: `${handle}/`, limit: 1 } });
   return r.suggested || undefined;
 }
 
-/** What the model search lists first: the picked model's Provider (`<handle>/`) or Pool. */
 export function preferOf(model: string): string | undefined {
   if (!model) return undefined;
   const p = providerOf(model);
   return p ? `${p}/` : model;
 }
 
-/** The first Pool or model a Gateway Key may use. */
 export async function firstModelFor(as: string): Promise<string | undefined> {
   const r = await api.get<ModelChoices>("/api/test/models", { query: { as, limit: 1 } });
   return r.pools[0]?.id ?? r.providers[0]?.models[0]?.id;
 }
 
-// ---- Sending one turn ------------------------------------------------------
-
-/** What a streamed answer says, whatever its Shape. */
 export type StreamEvent =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
@@ -152,7 +130,6 @@ export type StreamEvent =
 
 export type SendResult = { requestId?: string; status: number; error?: string };
 
-/** The body POST /api/test takes. */
 export function sendBody(s: Settings, system: string | undefined, messages: Message[]) {
   return {
     model: s.model,
@@ -168,10 +145,6 @@ export function sendBody(s: Settings, system: string | undefined, messages: Mess
   };
 }
 
-/**
- * Send one turn and read the answer as it streams. Resolves when the answer
- * ends; a failure before streaming (an error envelope) resolves with error.
- */
 export async function streamTurn(body: ReturnType<typeof sendBody>, shape: Shape, on: (e: StreamEvent) => void, signal: AbortSignal): Promise<SendResult> {
   let res: Response;
   try {
@@ -190,17 +163,13 @@ export async function streamTurn(body: ReturnType<typeof sendBody>, shape: Shape
   const type = res.headers.get("content-type") ?? "";
   if (!type.includes("text/event-stream")) {
     if (res.ok) return { requestId, status: res.status };
-    // The Shape's error envelope; or, before anything was sent (unknown
-    // pin, revoked Gateway Key), the admin one with a hint.
     let message = `Iroha answered ${res.status}.`;
     let hint = "";
     try {
       const e = JSON.parse(await res.text())?.error;
       if (typeof e?.message === "string") message = e.message;
       if (!requestId && typeof e?.hint === "string") hint = e.hint;
-    } catch {
-      /* not JSON */
-    }
+    } catch {}
     return { requestId, status: res.status, error: hint ? `${message} ${hint}` : message };
   }
   const reader = res.body!.getReader();
@@ -219,9 +188,7 @@ export async function streamTurn(body: ReturnType<typeof sendBody>, shape: Shape
       if (line.startsWith(": iroha-tool-check ")) {
         try {
           wrap({ kind: "tool_check", check: JSON.parse(line.slice(19)) });
-        } catch {
-          /* not ours */
-        }
+        } catch {}
       } else if (line.startsWith("event:")) event = line.slice(6).trim();
       else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
     }
@@ -230,9 +197,7 @@ export async function streamTurn(body: ReturnType<typeof sendBody>, shape: Shape
     if (payload === "[DONE]") return;
     try {
       read(event, JSON.parse(payload), wrap);
-    } catch {
-      /* a keep-alive or something unreadable */
-    }
+    } catch {}
   };
   for (;;) {
     const { value, done } = await reader.read();
@@ -248,66 +213,83 @@ export async function streamTurn(body: ReturnType<typeof sendBody>, shape: Shape
   return { requestId, status: res.status, error: failed };
 }
 
-type J = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Reader = (event: string, json: unknown, on: (e: StreamEvent) => void) => void;
 
-/** One event reader per Shape, each turning that Shape's events into StreamEvents. */
-function shapeReader(shape: Shape) {
+function shapeReader(shape: Shape): Reader {
   switch (shape) {
     case "openai-chat":
-      return (_event: string, j: J, on: (e: StreamEvent) => void) => {
-        if (j.error) return on({ kind: "error", message: j.error.message ?? "The stream failed." });
-        for (const c of j.choices ?? []) {
-          const d = c.delta ?? {};
+      return (_event, json, on) => {
+        const j = asObject(json);
+        if (!j) return;
+        if (j.error) return on({ kind: "error", message: stringOr(asObject(j.error)?.message, "The stream failed.") });
+        for (const c of asList(j.choices)) {
+          const d = asObject(asObject(c)?.delta) ?? {};
           const r = d.reasoning_content ?? d.reasoning;
           if (typeof r === "string" && r) on({ kind: "reasoning", text: r });
           if (typeof d.content === "string" && d.content) on({ kind: "text", text: d.content });
-          for (const t of d.tool_calls ?? []) on({ kind: "tool", index: t.index ?? 0, id: t.id, name: t.function?.name, args: t.function?.arguments });
+          for (const t of asList(d.tool_calls)) {
+            const call = asObject(t) ?? {};
+            const fn = asObject(call.function);
+            on({ kind: "tool", index: numberOr(call.index, 0), id: optionalString(call.id), name: optionalString(fn?.name), args: optionalString(fn?.arguments) });
+          }
         }
       };
     case "openai-responses": {
       const items: Record<string, number> = {};
-      return (event: string, j: J, on: (e: StreamEvent) => void) => {
-        const type = j.type ?? event;
+      return (event, json, on) => {
+        const j = asObject(json);
+        if (!j) return;
+        const type = stringOr(j.type, event);
         switch (type) {
           case "response.output_text.delta":
-            return on({ kind: "text", text: j.delta ?? "" });
+            return on({ kind: "text", text: asString(j.delta) });
           case "response.reasoning_summary_text.delta":
           case "response.reasoning_text.delta":
-            return on({ kind: "reasoning", text: j.delta ?? "" });
+            return on({ kind: "reasoning", text: asString(j.delta) });
           case "response.output_item.added":
-          case "response.output_item.done":
-            if (j.item?.type === "function_call") {
-              const index = (items[j.item.id ?? j.item.call_id] ??= Object.keys(items).length);
-              on({ kind: "tool", index, id: j.item.call_id, name: j.item.name, args: j.item.arguments, replace: type === "response.output_item.done" });
+          case "response.output_item.done": {
+            const item = asObject(j.item);
+            if (item?.type === "function_call") {
+              const index = (items[String(item.id ?? item.call_id)] ??= Object.keys(items).length);
+              on({ kind: "tool", index, id: optionalString(item.call_id), name: optionalString(item.name), args: optionalString(item.arguments), replace: type === "response.output_item.done" });
             }
             return;
+          }
           case "error":
-            return on({ kind: "error", message: j.error?.message ?? j.message ?? "The stream failed." });
+            return on({ kind: "error", message: stringOr(asObject(j.error)?.message, stringOr(j.message, "The stream failed.")) });
           case "response.failed":
-            return on({ kind: "error", message: j.response?.error?.message ?? "The response failed." });
+            return on({ kind: "error", message: stringOr(asObject(asObject(j.response)?.error)?.message, "The response failed.") });
         }
       };
     }
     case "anthropic-messages":
-      return (event: string, j: J, on: (e: StreamEvent) => void) => {
-        const type = j.type ?? event;
-        if (type === "error") return on({ kind: "error", message: j.error?.message ?? "The stream failed." });
-        if (type === "content_block_start" && j.content_block?.type === "tool_use")
-          return on({ kind: "tool", index: j.index ?? 0, id: j.content_block.id, name: j.content_block.name });
+      return (event, json, on) => {
+        const j = asObject(json);
+        if (!j) return;
+        const type = stringOr(j.type, event);
+        if (type === "error") return on({ kind: "error", message: stringOr(asObject(j.error)?.message, "The stream failed.") });
+        const block = asObject(j.content_block);
+        if (type === "content_block_start" && block?.type === "tool_use")
+          return on({ kind: "tool", index: numberOr(j.index, 0), id: optionalString(block.id), name: optionalString(block.name) });
         if (type === "content_block_delta") {
-          const d = j.delta ?? {};
-          if (d.type === "text_delta") on({ kind: "text", text: d.text ?? "" });
-          else if (d.type === "thinking_delta") on({ kind: "reasoning", text: d.thinking ?? "" });
-          else if (d.type === "input_json_delta") on({ kind: "tool", index: j.index ?? 0, args: d.partial_json ?? "" });
+          const d = asObject(j.delta) ?? {};
+          if (d.type === "text_delta") on({ kind: "text", text: asString(d.text) });
+          else if (d.type === "thinking_delta") on({ kind: "reasoning", text: asString(d.thinking) });
+          else if (d.type === "input_json_delta") on({ kind: "tool", index: numberOr(j.index, 0), args: asString(d.partial_json) });
         }
       };
     case "gemini": {
       let calls = 0;
-      return (_event: string, j: J, on: (e: StreamEvent) => void) => {
-        if (j.error) return on({ kind: "error", message: j.error.message ?? "The stream failed." });
-        for (const c of j.candidates ?? [])
-          for (const p of c.content?.parts ?? []) {
-            if (p.functionCall) on({ kind: "tool", index: calls++, id: p.functionCall.id, name: p.functionCall.name, args: JSON.stringify(p.functionCall.args ?? {}), replace: true });
+      return (_event, json, on) => {
+        const j = asObject(json);
+        if (!j) return;
+        if (j.error) return on({ kind: "error", message: stringOr(asObject(j.error)?.message, "The stream failed.") });
+        for (const c of asList(j.candidates))
+          for (const part of asList(asObject(asObject(c)?.content)?.parts)) {
+            const p = asObject(part);
+            if (!p) continue;
+            const fc = asObject(p.functionCall);
+            if (fc) on({ kind: "tool", index: calls++, id: optionalString(fc.id), name: optionalString(fc.name), args: JSON.stringify(fc.args ?? {}), replace: true });
             else if (typeof p.text === "string" && p.text) on({ kind: p.thought ? "reasoning" : "text", text: p.text });
           }
       };

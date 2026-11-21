@@ -14,9 +14,6 @@ function skulletCSS() {
   return [...document.querySelectorAll("style")].map((s) => s.textContent ?? "").join("\n");
 }
 
-// UI ticket 26: Skullet's in-sequence reveal measures every piece of the content
-// between animations it starts, so a big table's reveal took a long task (1-2 s
-// at 4x CPU). Content of many pieces crossfades whole instead.
 const ctx = (o: Partial<RevealContext>): RevealContext => ({
   content: document.createElement("div"),
   reveal: document.createElement("div"),
@@ -49,7 +46,6 @@ test("skeletons still wait 150 ms before they show", () => {
 });
 
 test("skeletons are drawn in Iroha's tokens and follow Iroha's theme, not the OS", () => {
-  // The OS asks for dark; the Owner chose light in Settings.
   const original = window.matchMedia;
   vi.stubGlobal("matchMedia", (query: string) => ({ ...original(query), matches: query.includes("dark") }));
   localStorage.setItem("iroha.theme", "light");

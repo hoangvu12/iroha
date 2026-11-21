@@ -39,8 +39,6 @@ func TestTheOwnerSetsAPasswordOnFirstVisitThenSignsInFor30Days(t *testing.T) {
 	if e := srv.Anon.Post("/api/session", map[string]any{"password": "whatever-123"}).Expect(409).Err(); e.Code != "owner_password_not_set" || !strings.Contains(e.Hint, "PUT /api/owner-password") {
 		t.Fatalf("sign-in before setup: %+v", e)
 	}
-	// Setting the password needs an Admin Token, so whoever reaches a new
-	// Iroha first cannot claim it.
 	if e := srv.Anon.Put("/api/owner-password", map[string]any{"password": "correct horse"}).Expect(401).Err(); e.Code != "admin_token_missing" {
 		t.Fatalf("anonymous setup: %+v", e)
 	}
@@ -87,7 +85,6 @@ func TestTheOwnerSetsAPasswordOnFirstVisitThenSignsInFor30Days(t *testing.T) {
 		}
 	}
 
-	// The session survives a restart and lasts exactly 30 days.
 	srv.Restart()
 	srv.Clock.Advance(30*24*time.Hour - time.Second)
 	owner.Get("/api/whoami").Expect(200)
@@ -122,7 +119,6 @@ func TestTheSessionActsAsTheOwnerInAuditEntries(t *testing.T) {
 	if len(page.Entries) != 1 || page.Entries[0].ID != created.AuditEntry {
 		t.Fatalf("actor=Owner: %+v", page.Entries)
 	}
-	// The Owner reverts it like an agent would.
 	owner.Post("/api/audit-entries/"+created.AuditEntry+"/revert", nil).Expect(200)
 	srv.Admin.Get("/api/admin-tokens/agent-1").Expect(404)
 }
@@ -139,7 +135,6 @@ func TestSessionsAreListedAndRevokedThroughTheAPI(t *testing.T) {
 		t.Fatalf("sessions as seen from the phone = %+v", list)
 	}
 
-	// An agent revokes the phone's session: irreversible, audited.
 	var res session.OwnerSessionResult
 	srv.Admin.Post("/api/owner-sessions/"+phoneStatus.Session.ID+"/revoke", nil).Expect(200).JSON(&res)
 	if res.Outcome != "updated" || res.OwnerSession.Active || res.AuditEntry == "" {
@@ -157,18 +152,16 @@ func TestSessionsAreListedAndRevokedThroughTheAPI(t *testing.T) {
 		t.Fatalf("active sessions = %+v", list)
 	}
 
-	// Sign out ends the session and deletes the cookie.
 	r := laptop.Delete("/api/session").Expect(204)
 	if ck := r.Cookie(session.CookieName); ck == nil || ck.MaxAge >= 0 {
 		t.Fatalf("sign-out cookie = %+v", ck)
 	}
 	laptop.Get("/api/whoami").Expect(401)
-	srv.Anon.Delete("/api/session").Expect(204) // without a session too
+	srv.Anon.Delete("/api/session").Expect(204)
 	if n := len(srv.Logs("kind=owner.logout")); n != 1 {
 		t.Fatalf("logout events = %d", n)
 	}
 
-	// Bulk revoke.
 	a, sa := signIn(t, srv, testkit.OwnerPassword)
 	_, sb := signIn(t, srv, testkit.OwnerPassword)
 	var bulk audit.BulkResult[session.OwnerSession]
@@ -212,7 +205,6 @@ func TestChangingThePasswordSignsOutEveryOtherSession(t *testing.T) {
 	if entry.Summary != "Changed the Owner password" || entry.Revertible {
 		t.Fatalf("entry = %+v", entry)
 	}
-	// An Admin Token resets it without the old one and signs out everyone.
 	srv.Admin.Put("/api/owner-password", map[string]any{"password": "reset by an agent"}).Expect(200)
 	laptop.Get("/api/whoami").Expect(401)
 }
@@ -231,9 +223,6 @@ func TestManyWrongPasswordsLockSignInForAWhile(t *testing.T) {
 	signIn(t, srv, testkit.OwnerPassword)
 }
 
-// AUTH-05: a stored password hash that no longer parses never lets anyone
-// in; sign-in answers a 500 that is logged as http.error, sets no cookie, and
-// the Owner (or an agent) recovers by setting the password again.
 func TestACorruptedPasswordHashRefusesSignInAndIsLogged(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Admin.Put("/api/owner-password", map[string]any{"password": testkit.OwnerPassword}).Expect(201)
@@ -260,8 +249,6 @@ func TestACorruptedPasswordHashRefusesSignInAndIsLogged(t *testing.T) {
 	signIn(t, srv, "a fresh password")
 }
 
-// AUTH-08: only the SHA-256 of a session's secret is stored; the cookie's
-// value is in no column.
 func TestSessionSecretsAreStoredOnlyAsTheirHash(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Admin.Put("/api/owner-password", map[string]any{"password": testkit.OwnerPassword}).Expect(201)
@@ -307,9 +294,6 @@ func TestSessionSecretsAreStoredOnlyAsTheirHash(t *testing.T) {
 	}
 }
 
-// AUTH-09: the cookie is Secure when the browser reached Iroha over HTTPS,
-// read from the first X-Forwarded-Proto value when proxies list several;
-// over plain HTTP it is not, so local use still works.
 func TestTheSessionCookieIsSecureBehindHTTPSProxies(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Admin.Put("/api/owner-password", map[string]any{"password": testkit.OwnerPassword}).Expect(201)
@@ -334,20 +318,15 @@ func TestTheSessionCookieIsSecureBehindHTTPSProxies(t *testing.T) {
 			t.Errorf("X-Forwarded-Proto %q: cookie = %+v, want Secure %v", tc.proto, ck, tc.secure)
 			continue
 		}
-		// Signing out deletes the cookie with the same attributes.
 		out := c.WithCookie(ck).Delete("/api/session").Expect(204).Cookie(session.CookieName)
 		if out == nil || out.Secure != tc.secure || out.MaxAge >= 0 {
 			t.Errorf("X-Forwarded-Proto %q: sign-out cookie = %+v", tc.proto, out)
 		}
 	}
-	// A plain-HTTP session works.
 	signedIn, _ := signIn(t, srv, testkit.OwnerPassword)
 	signedIn.Get("/api/whoami").Expect(200)
 }
 
-// AUTH-17, RED-02: refusals of the login and password routes never echo the
-// password sent, whether the body is malformed, of the wrong type, or the
-// password too short.
 func TestLoginRefusalsNeverEchoThePassword(t *testing.T) {
 	srv := testkit.Start(t)
 	const secret = "hunter2-password"
@@ -361,7 +340,6 @@ func TestLoginRefusalsNeverEchoThePassword(t *testing.T) {
 			t.Errorf("%s: the password is echoed: %s", what, r.Body)
 		}
 	}
-	// Before a password exists, and after.
 	check("short password", srv.Admin.Put("/api/owner-password", map[string]any{"password": "abc1234"}), 400)
 	srv.Admin.Put("/api/owner-password", map[string]any{"password": testkit.OwnerPassword}).Expect(201)
 	check("short password, again", srv.Admin.Put("/api/owner-password", map[string]any{"password": "abc1234"}), 400)
@@ -396,6 +374,6 @@ func TestAnotherSiteCannotChangeIrohaWithTheOwnersCookie(t *testing.T) {
 	if e := cross.Post("/api/admin-tokens", map[string]any{"name": "evil"}).Expect(403).Err(); e.Code != "cross_site_request" {
 		t.Fatalf("cross-site change: %+v", e)
 	}
-	cross.Get("/api/whoami").Expect(200) // reads are harmless
+	cross.Get("/api/whoami").Expect(200)
 	owner.WithHeader("Sec-Fetch-Site", "same-origin").Post("/api/admin-tokens", map[string]any{"name": "fine"}).Expect(201)
 }

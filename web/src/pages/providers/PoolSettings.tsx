@@ -12,7 +12,6 @@ import { calls, errorText, useRefresh } from "./api";
 import { SettingsCard, SettingsRow } from "./controls";
 import { LogoInput } from "./LogoField";
 
-/** A Pool's settings: name, logo (a maker or a website), budget, and deleting it. */
 export function PoolSettingsTab({ pool }: { pool: Pool }) {
   const refresh = useRefresh();
   const navigate = useNavigate();
@@ -21,7 +20,6 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
   const [attempts, setAttempts] = useState(pool.budget.max_attempts ? String(pool.budget.max_attempts) : "");
   const [firstByte, setFirstByte] = useState(pool.budget.first_byte_seconds ? String(pool.budget.first_byte_seconds) : "");
   const [deleting, setDeleting] = useState(false);
-  // Each setting shows its result where it was changed, a failure under its row.
   const naming = useSave({ describe: errorText });
   const makerSave = useSave({ refresh, describe: errorText });
   const budgetSave = useSave({ refresh, describe: errorText });
@@ -38,7 +36,6 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
     naming.run(async () => {
       const res = await calls.updatePool(pool.name, { name: to });
       refresh();
-      // Toast: the page moves to the Pool's new address and loads it again, so this field is gone.
       notifyChange(`${pool.name} renamed to ${to}`, res, { onUndone: refresh });
       navigate(`/providers/pools/${seg(to)}/settings`, { replace: true });
     }, { quiet: true });
@@ -143,7 +140,6 @@ export function PoolSettingsTab({ pool }: { pool: Pool }) {
         onConfirm={async () => {
           const res = await calls.deletePool(pool.name);
           refresh();
-          // Toast: the page navigates to the Providers list; Undo after a delete.
           notifyChange(`${pool.name} deleted`, res, { onUndone: refresh });
           navigate("/providers");
         }}

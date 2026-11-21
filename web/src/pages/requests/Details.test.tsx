@@ -18,7 +18,6 @@ test("Tokens shows what was read from and written to the Provider's cache", () =
   expect(fact("Input")).toBe("5,512");
   expect(fact("Cache read")).toBe("4,000");
   expect(fact("Cache write")).toBe("1,500");
-  // Writes kept for the longer lifetime cost more; shown only when the Provider split them.
   expect(fact("Long-lived cache write")).toBe("1,000");
 });
 

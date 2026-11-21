@@ -1,5 +1,5 @@
 import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { animateIn } from "@ui-sdk/core";
 import { ArrowDown, ArrowUp, ChevronRight, MoreHorizontal } from "lucide-react";
 import {
@@ -56,25 +56,11 @@ import { ErrorState, type FilterChip, NoResults } from "./States";
 
 export type { ColumnFiltersState, PaginationState, RowSelectionState, SortingState, ColumnVisibilityState as VisibilityState, RowData } from "@tanstack/react-table";
 
-// The one table of the app (spec "One data table"): a semantic <table> driven by
-// TanStack Table v9, with UI SDK parts for its controls. How to use it, for
-// every table: docs/agents/architecture.md, "UI ticket 06".
-
-/** What a column may say about how it is drawn. */
 export type DataColumnMeta = {
-  /** Width class on the header cell: "w-[24%]", "w-10". */
   width?: string;
-  /** Right-aligned, tabular figures (numbers). */
   align?: "right";
-  /** Classes on each body cell. */
   className?: string;
-  /** Name of a header that isn't plain text (for "Sort by …"). */
   label?: string;
-  /**
-   * This cell opens the row: its content is wrapped in a button named
-   * "Open <row name>" that calls `onRowClick`, so the keyboard and agents can open
-   * the row. Only for plain text cells (never around a link or button).
-   */
   opens?: boolean;
 };
 
@@ -95,13 +81,9 @@ export const dataTableFeatures = tableFeatures({
 });
 export type DataTableFeatures = typeof dataTableFeatures;
 
-/** The column helper for a DataTable of `T`: `const col = columnsFor<UpstreamKey>()`, then `col.columns([col.accessor(...), col.display(...)])` at module scope. */
 export const columnsFor = <T extends RowData>() => createColumnHelper<DataTableFeatures, T>();
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type DataColumn<T extends RowData> = ColumnDef<DataTableFeatures, T, any>;
+export type DataColumn<T extends RowData> = ColumnDef<DataTableFeatures, T, unknown>;
 export type DataRow<T extends RowData> = Row<DataTableFeatures, T>;
-
-// ---- Page size, remembered per table ----
 
 export const PAGE_SIZES = [25, 50, 100];
 const sizeKey = (id: string) => `iroha:table:${id}:page-size`;
@@ -118,16 +100,9 @@ function readPageSize(id: string, sizes: number[]): number {
 function writePageSize(id: string, size: number) {
   try {
     localStorage.setItem(sizeKey(id), String(size));
-  } catch {
-    // Storage refused (private window, blocked site data): the choice lasts this visit only.
-  }
+  } catch {}
 }
 
-/**
- * Pagination state with the page size remembered for this table. DataTable uses it
- * for client pages; a server-paged table calls it itself, puts the state in its
- * query key and passes it as `paging={{ mode: "server", pagination, onPaginationChange, rowCount }}`.
- */
 export function useTablePaging(id: string, sizes: number[] = PAGE_SIZES) {
   const [pagination, setState] = useState<PaginationState>(() => ({ pageIndex: 0, pageSize: readPageSize(id, sizes) }));
   const setPagination = useCallback(
@@ -143,118 +118,76 @@ export function useTablePaging(id: string, sizes: number[] = PAGE_SIZES) {
 }
 
 export type DataTablePaging =
-  /** Numbered pages over the loaded rows (the default). */
   | { mode: "pages"; sizes?: number[] }
-  /** Numbered pages the server cuts: `data` is the current page, `rowCount` all rows the filters match. */
   | { mode: "server"; pagination: PaginationState; onPaginationChange: (u: Updater<PaginationState>) => void; rowCount: number; sizes?: number[] }
-  /**
-   * One growing list: `onLoadMore` runs when its end scrolls into view (or "Load more" is pressed).
-   * `newRowsLabel` makes it live: rows arriving on top don't move the view while the reader is
-   * scrolled down or pointing at a row, and a pill with this text ("3 new") goes back to the top.
-   */
   | { mode: "infinite"; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void; moreLabel?: string; newRowsLabel?: (count: number) => string }
-  /** Every row at once (short, fixed lists). */
   | { mode: "none" };
 
 export type BulkSelection<T> = {
-  /** Row IDs selected, on every page. */
   ids: string[];
-  /** The selected rows that are loaded (all of them, unless the server pages). */
   rows: T[];
   clear: () => void;
 };
 
 export type DataTableCounts = {
-  /** Rows the search and filters match (server: `rowCount`). */
   shown: number;
-  /** Rows loaded before filtering. */
   total: number;
-  /** 1-based range on this page. */
   from: number;
   to: number;
 };
 
 export type DataTableProps<T extends RowData> = {
-  /** Stable name: remembers the page size (`iroha:table:<id>:page-size`) and the skeleton's shape (`table:<id>`, `:phone`). */
   id: string;
-  /** Names the table and its scroller ("Upstream Keys"); "Loading <label>" while loading. */
   label: string;
-  /** Built with `columnsFor<T>()`, at module scope or memoised. */
   columns: DataColumn<T>[];
-  /** The rows; `undefined` while loading (pass `query.data`). */
   data: T[] | undefined;
-  /** A page's worth of typical rows the skeleton is measured from (module constant). */
   sample: T[];
   getRowId: (row: T) => string;
-  /** The row's name in its controls: "Select team-1", "More for team-1", "Open team-1". */
   rowName: (row: T) => string;
 
-  /** A failed load: shows `ErrorState` with Try again (only while there is no data to show). */
   error?: unknown;
   errorTitle?: string;
   onRetry?: () => void;
-  /** Shown when there are no rows at all (EmptyState with its one action). */
   empty?: ReactNode;
-  /** Filters in force, as chips over "No <label> match"; `onClearFilters` is its Clear filters. */
   filterChips?: FilterChip[];
   onClearFilters?: () => void;
-  /** Title of the default NoResults: "No keys match". */
   noResultsTitle?: string;
-  /** Replaces the default NoResults. */
   noResults?: ReactNode;
 
-  /** Search box and filters, above the table; the bulk bar takes its place while rows are selected. */
   toolbar?: ReactNode;
-  /** The search text (controlled; the page owns the box, often in the URL). */
   search?: string;
-  /** Whether a row matches the search; default: any text column contains it. */
   searchFn?: (row: T, needle: string) => boolean;
-  /** Column filters (controlled): `[{ id: "state", value: "cooling" }]`, matched by each column's `filterFn`. */
   columnFilters?: ColumnFiltersState;
-  /** Search and filters are already applied by the server. */
   manualFiltering?: boolean;
 
-  /** Sorting (controlled with `onSortingChange`, e.g. from the URL), or `defaultSorting` to start from. */
   sorting?: SortingState;
   onSortingChange?: (s: SortingState) => void;
   defaultSorting?: SortingState;
-  /** The server sorts: rows come in order. */
   manualSorting?: boolean;
-  /** Hidden columns by ID (`{ key: false }`). */
   columnVisibility?: ColumnVisibilityState;
 
-  /** Row selection with a bulk-action bar: what the bar shows besides "N selected" and Clear selection. While anything is selected, a row click selects (UI ticket 25). */
   bulk?: (sel: BulkSelection<T>) => ReactNode;
-  /** Selection, if the page must own it; otherwise the table does. */
   selection?: RowSelectionState;
   onSelectionChange?: (s: RowSelectionState) => void;
 
-  /** The last cell of each row: usually `<RowMenu>`; may hold a Switch beside it. */
   rowActions?: (row: T) => ReactNode;
-  /** Clicking a row (not one of its controls) opens it; in select mode (rows selected) it toggles the row instead. Mark the name column `meta: { opens: true }` for the keyboard, and the way in while selecting. */
   onRowClick?: (row: T) => void;
   rowTone?: (row: T) => "danger" | undefined;
-  /** The row open beside the table (its sheet): highlighted, `aria-current`, and scrolled into view when it changes. */
   activeRowId?: string;
-  /** Expandable rows: what shows under a row once its chevron is pressed. */
   renderExpanded?: (row: T) => ReactNode;
 
-  /** Phones (< 768 px): the row as two lines (C31). Without it phones get the table, scrolling sideways. */
   phoneRow?: (row: T) => ReactNode;
-  /** Phones: controls that stay on the row beside it (a row's Switch), even when the row opens on a tap. */
   phoneActions?: (row: T) => ReactNode;
 
   paging?: DataTablePaging;
-  /** Line under the table, left of the pages: "42 keys". */
   footer?: (counts: DataTableCounts) => ReactNode;
-  /** The rows are the previous query's while the next loads (`isPlaceholderData`): dimmed, no skeleton. */
   dimmed?: boolean;
 };
 
 const EMPTY_FILTERS: ColumnFiltersState = [];
 const NO_PAGING: PaginationState = { pageIndex: 0, pageSize: Number.MAX_SAFE_INTEGER };
 
-// Clicks on a row's own controls, or inside a popup rendered in place in it, don't open the row.
+// UI SDK popups render in place, so their clicks bubble through the row.
 const OWN_TARGET = "button, a, input, textarea, select, label, [role=menuitem], [role=checkbox], [role=switch], [popover], dialog, [data-slot$='-content']";
 
 export function DataTable<T extends RowData>(props: DataTableProps<T>) {
@@ -272,12 +205,13 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     onRowClick,
     renderExpanded,
     phoneRow,
+    selection,
+    onSelectionChange,
   } = props;
   const phone = useIsPhone() && !!phoneRow;
   const loading = data === undefined;
   const rows = data ?? sample;
 
-  // Sorting: controlled or own.
   const [ownSorting, setOwnSorting] = useState<SortingState>(props.defaultSorting ?? []);
   const sorting = props.sorting ?? ownSorting;
   const onSortingChange = (u: Updater<SortingState>) => {
@@ -286,21 +220,19 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     else setOwnSorting(next);
   };
 
-  // Selection: controlled or own.
   const [ownSelection, setOwnSelection] = useState<RowSelectionState>({});
-  const rowSelection = props.selection ?? ownSelection;
+  const rowSelection = selection ?? ownSelection;
   const setSelection = useCallback(
     (u: Updater<RowSelectionState>) => {
-      if (props.onSelectionChange) props.onSelectionChange(typeof u === "function" ? u(props.selection ?? {}) : u);
+      if (onSelectionChange) onSelectionChange(typeof u === "function" ? u(selection ?? {}) : u);
       else setOwnSelection(u);
     },
-    [props.onSelectionChange, props.selection], // eslint-disable-line react-hooks/exhaustive-deps
+    [onSelectionChange, selection],
   );
-  const [selecting, setSelecting] = useState(false); // phones: checkboxes shown
+  const [selecting, setSelecting] = useState(false);
 
   const [expanded, setExpanded] = useState<ExpandedState>({});
 
-  // Pages: client pages keep their own state (page size remembered), server pages the page's.
   const sizes = paging.mode === "pages" || paging.mode === "server" ? (paging.sizes ?? PAGE_SIZES) : PAGE_SIZES;
   const [ownPaging, setOwnPaging] = useTablePaging(id, sizes);
   const pagination = paging.mode === "server" ? paging.pagination : paging.mode === "pages" ? ownPaging : NO_PAGING;
@@ -346,30 +278,33 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     getRowCanExpand: () => !!renderExpanded,
   });
 
-  // A new search, filter or sort starts again on page 1.
   const query = JSON.stringify([search, props.columnFilters ?? [], sorting]);
   const lastQuery = useRef(query);
+  const backToFirstPage = useEffectEvent(() => {
+    if (pagination.pageIndex !== 0) setPagination((p) => ({ ...p, pageIndex: 0 }));
+  });
   useEffect(() => {
     if (lastQuery.current === query) return;
     lastQuery.current = query;
-    if (pagination.pageIndex !== 0) setPagination((p) => ({ ...p, pageIndex: 0 }));
-  }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
+    backToFirstPage();
+  }, [query]);
 
   const pageCount = paging.mode === "pages" || paging.mode === "server" ? Math.max(1, table.getPageCount()) : 1;
-  // A page left empty (rows deleted, filtered away) shows the last page instead.
   useEffect(() => {
     if (!loading && paging.mode !== "infinite" && pagination.pageIndex > pageCount - 1) setPagination((p) => ({ ...p, pageIndex: pageCount - 1 }));
-  }, [loading, pageCount, pagination.pageIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, paging.mode, pageCount, pagination.pageIndex, setPagination]);
 
-  // Forget selected rows that are gone (deleted, renamed); a server-paged table can't know.
-  useEffect(() => {
-    if (!data || paging.mode === "server" || props.selection) return;
-    const ids = new Set(data.map(getRowId));
+  const dropSelectionGoneFrom = useEffectEvent((rows: T[]) => {
+    if (paging.mode === "server" || selection) return;
+    const ids = new Set(rows.map(getRowId));
     setOwnSelection((s) => {
       const kept = Object.keys(s).filter((k) => ids.has(k));
       return kept.length === Object.keys(s).length ? s : Object.fromEntries(kept.map((k) => [k, true]));
     });
-  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    if (data) dropSelectionGoneFrom(data);
+  }, [data]);
 
   const selectedIds = Object.keys(rowSelection).filter((k) => rowSelection[k]);
   const selectedCount = selectedIds.length;
@@ -381,13 +316,10 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const filteredRows = table.getFilteredRowModel().rows;
   const shown = paging.mode === "server" ? paging.rowCount : filteredRows.length;
   const pageRows = table.getRowModel().rows;
-  // Many rows arriving over the skeleton: a screenful comes with the reveal, the rest right after (UI ticket 26).
   const shownRows = useRevealRows(pageRows, loading);
-  // Rows the server filtered can be none because of the filters; loaded rows filtered here can't.
   const serverFiltered = !!props.manualFiltering || paging.mode === "server";
   const filtered = serverFiltered && (search.trim() !== "" || (props.columnFilters?.length ?? 0) > 0 || (props.filterChips?.length ?? 0) > 0);
 
-  // ---- States in place of the table ----
   let state: ReactNode;
   if (props.error && !data) state = <ErrorState title={props.errorTitle ?? `Couldn't load ${label}`} error={props.error} onRetry={props.onRetry} />;
   else if (data && data.length === 0 && !filtered) state = props.empty ?? null;
@@ -395,7 +327,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     state = props.noResults ?? (props.onClearFilters ? <NoResults title={props.noResultsTitle ?? "Nothing matches"} filters={props.filterChips} onClear={props.onClearFilters} /> : null);
   const showToolbar = loading || (data && data.length > 0) || filtered;
 
-  // ---- Toolbar or bulk bar ----
   const selectedRows = bulk ? table.getSelectedRowModel().rows.map((r) => r.original) : [];
   const canSelectMore = bulk && paging.mode === "pages" && table.getIsAllPageRowsSelected() && filteredRows.some((r) => !r.getIsSelected());
   const barContent =
@@ -422,7 +353,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
       </>
     ) : undefined;
 
-  // ---- The table ----
   const extraCols = (bulk ? 1 : 0) + (renderExpanded ? 1 : 0) + (rowActions ? 1 : 0);
   const colCount = table.getVisibleLeafColumns().length + extraCols;
   const allPage = table.getIsAllPageRowsSelected();
@@ -430,10 +360,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
 
   const toggleRow = (row: DataRow<T>, on: boolean, event?: Event) =>
     row.getToggleSelectedHandler()({ target: { checked: on }, shiftKey: (event as MouseEvent | undefined)?.shiftKey ?? false });
-  // Select mode (UI ticket 25): while any row is selected, a click on a row (not its own
-  // controls) toggles it and Shift+click selects a range. The name's Open button and the row
-  // menu still open the row. Keys are left to each control (Space and Enter press a button or
-  // follow a link); the keyboard picks a row with its box.
   const selectMode = !!bulk && selectedCount > 0;
   const rowPress = (row: DataRow<T>, click: (() => void) | undefined) => (e: ReactMouseEvent<HTMLElement>) => {
     const own = (e.target as Element).closest(`${OWN_TARGET}, [data-select-cell]`);
@@ -441,17 +367,14 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     if (selectMode) toggleRow(row, !row.getIsSelected(), e.nativeEvent);
     else click?.();
   };
-  // Shift+click in select mode picks a range, not the text in between.
   const noTextRange = (e: ReactMouseEvent) => {
     if (selectMode && e.shiftKey) e.preventDefault();
   };
-  /** The checkbox's whole cell is its hit area: a press beside the box toggles the row (Shift: a range). */
   const selectCell = (toggle: (e: ReactMouseEvent) => void) => (e: ReactMouseEvent<HTMLElement>) => {
     const own = (e.target as Element).closest(OWN_TARGET);
     if (own && e.currentTarget.contains(own)) return;
     toggle(e);
   };
-  // A click on a row opens it; a table of expandable rows that open nothing shows the row's details instead.
   const rowClick = (row: DataRow<T>): (() => void) | undefined =>
     onRowClick ? () => onRowClick(row.original) : renderExpanded ? () => row.toggleExpanded() : undefined;
   const expandButton = (row: DataRow<T>, name: string) => {
@@ -468,13 +391,11 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     );
   };
 
-  // ---- Live rows (infinite with newRowsLabel) and the open row ----
-  // The rows are found under this root when needed: refs inside the Skeleton don't hold.
+  // Found under this root when needed: refs inside Skullet's Skeleton don't hold.
   const rootRef = useRef<HTMLDivElement>(null);
   const newRowsLabel = paging.mode === "infinite" ? paging.newRowsLabel : undefined;
   const hold = useHoldView({ enabled: !!newRowsLabel && !loading && state === undefined, ids: pageRows.map((r) => r.id), root: rootRef });
   const pill = newRowsLabel ? <NewRowsPill count={hold.newAbove} label={newRowsLabel} onPress={hold.toTop} /> : null;
-  // Stepping through rows from the sheet (↑/↓) keeps the open row in view.
   const active = props.activeRowId;
   useEffect(() => {
     if (!active || loading) return;
@@ -482,7 +403,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
     el?.scrollIntoView?.({ block: "nearest" });
   }, [active, loading, phone, shownRows.length]);
 
-  // Rows added or removed after an action enter and leave; only tables holding all their rows (server pages and the live feed don't).
   const rowMotion = useRowMotion({ data, getRowId, enabled: (paging.mode === "pages" || paging.mode === "none") && !props.dimmed, root: rootRef });
   const recordRow = (rowId: string, index: number, layout: "table" | "list", node: ReactElement) =>
     loading || layout !== (phone ? "list" : "table") ? node : rowMotion.record(rowId, index, node, layout);
@@ -519,7 +439,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
           ))}
         </thead>
         <tbody data-rows="">
-          {/* One flat list keyed by row ID, so a row arriving on top doesn't remount the rows under it; rows leaving are put back where they were. */}
           {rowMotion.withLeaving(shownRows.map((row, index) => {
             const r = row.original;
             const name = rowName(r);
@@ -560,7 +479,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
               </tr>),
               open && renderExpanded ? (
                 <tr key={`${row.id}:details`} data-selected={selected || undefined} className="border-b border-border last:border-b-0 data-selected:bg-selected">
-                  {/* Fades in as it opens; the rows under it move down at once (rows never animate height). */}
                   <td colSpan={colCount} className="px-1.5 pb-4 transition-opacity duration-fade ease-out starting:opacity-0">
                     {renderExpanded(r)}
                   </td>
@@ -576,7 +494,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   const showChecks = !!bulk && (selecting || selectedCount > 0);
   const list = phoneRow && (
     <>
-      {/* Sticks to the top of the page while the list scrolls under it. */}
       {pill && <div className="pointer-events-none sticky top-3 z-[2] flex h-0 justify-center">{pill}</div>}
       <ul data-rows="" aria-label={label} className={cn("divide-y divide-border border-y border-border", props.dimmed && dimClass)}>
         {rowMotion.withLeaving(shownRows.map((row, index) => {
@@ -597,7 +514,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
             >
               {showChecks && <Checkbox label={`Select ${name}`} checked={selected} onChange={(on, ev) => toggleRow(row, on, ev)} className="ml-1" />}
               {showChecks ? (
-                // The checkbox is the control; a tap anywhere on the row toggles it too.
                 <div className="flex min-w-0 flex-1 cursor-pointer items-center gap-3" onClick={() => toggleRow(row, !selected)}>
                   {content}
                 </div>
@@ -606,7 +522,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
                   {content}
                 </SdkButton>
               ) : renderExpanded ? (
-                // The chevron is the control; a tap on the row shows its details too.
                 <div
                   className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
                   onClick={(e) => {
@@ -651,7 +566,6 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
               list
             ) : (
               <>
-                {/* The "N new" pill floats over the rows in view, under the header stuck to the top of the page. */}
                 {pill && (
                   <div className="sticky top-0 z-[2] h-0">
                     <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">{pill}</div>
@@ -666,12 +580,9 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
       )}
       {data && state === undefined && (props.footer || pages) && (
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3 text-[13px] text-fg-muted">
-          {/* Wraps onto its own line before it gets narrower than this. */}
           <div className="min-w-[min(100%,18rem)] flex-1">{props.footer?.(counts)}</div>
           {pages && (
-            // Many pages on a phone: the pager wraps under the size box rather than pushing the page sideways.
             <div className="flex max-w-full flex-wrap items-center gap-3">
-              {/* The Select is w-full; its box sets the width (cn has no tailwind-merge). */}
               <div className="w-[150px] md:w-[128px]">
                 <Select
                   aria-label="Rows per page"
@@ -690,24 +601,13 @@ export function DataTable<T extends RowData>(props: DataTableProps<T>) {
   );
 }
 
-// A row entering after an action rises by shift-sm and fades in; one leaving fades only (architecture.md "UI motion system").
 const rowClass =
   "transition-[opacity,translate] duration-list-in ease-out data-starting-style:translate-y-(--motion-shift-sm) data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-list-out";
-// The previous query's rows dim only once the next is slow, so a fast answer never flickers; they come back at once.
 const dimClass = "opacity-60 transition-opacity duration-fade ease-out delay-(--duration-fade)";
 const thClass = "h-10 px-1.5 text-[13px] font-normal text-fg-muted";
 const tdClass = "h-12 px-1.5 align-middle";
 
-/**
- * The table's scroller (UI ticket 25). The page scrolls the rows: the table is as
- * tall as its rows (numbered pages keep it bounded) and this only scrolls sideways,
- * for tables wider than the page. A sideways scroller would make a sticky header
- * stick to it rather than to the page, so the header (`.table-head`) follows the
- * page with a scroll-driven animation instead (`styles/index.css`, "Table header"):
- * from where the table's top passes the window's top, it moves down with the
- * scroll, at most `--table-stick-end` (the table's height less the header's, kept
- * here). Its own component, so its ref holds inside the Skeleton.
- */
+/** Its own component, so its ref holds inside Skullet's Skeleton. */
 function TableScroller({ label, children }: { label: string; children: ReactNode }) {
   const viewport = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -728,13 +628,6 @@ function TableScroller({ label, children }: { label: string; children: ReactNode
   );
 }
 
-/**
- * The toolbar, or the bulk bar in its place while rows are selected. The bar
- * rises in; when the selection clears it fades out where it was (showing what
- * it said, inert) while the toolbar fades back in under it, in the same cell:
- * one crossfade (architecture.md "UI ticket 16"). Its own component, so the
- * exit ending re-renders only this, not the table.
- */
 function BarSlot({ bar, count, toolbar }: { bar: ReactNode | undefined; count: number; toolbar: ReactNode | undefined }) {
   const exit = useLeaving<ReactNode, HTMLDivElement>(bar);
   const shownCount = useRef(count);
@@ -763,7 +656,6 @@ function BarSlot({ bar, count, toolbar }: { bar: ReactNode | undefined; count: n
           aria-hidden={exit.leaving || undefined}
           role="group"
           className={cn(
-            // Both sit at the top of the shared cell: a taller (wrapped) bar leaving doesn't move the toolbar under it.
             "col-start-1 row-start-1 flex min-h-9 flex-wrap items-center gap-2 self-start",
             "transition-[opacity,translate] duration-list-in ease-out starting:translate-y-(--motion-shift) starting:opacity-0",
             "data-ending-style:opacity-0 data-ending-style:duration-list-out",
@@ -821,11 +713,6 @@ function BodyCell<T extends RowData>({ cell, name, onOpen, render }: { cell: Cel
   );
 }
 
-/**
- * "3 new" (live tables, UI ticket 18): rises into place like the bulk bar and fades out where it is.
- * Kept mounted and switched by `data-shown`, so it can leave with what it said; while hidden it is
- * inert and hidden from readers. The translate snaps back only once the fade is done.
- */
 function NewRowsPill({ count, label, onPress }: { count: number; label: (n: number) => string; onPress: () => void }) {
   const last = useRef(count);
   if (count > 0) last.current = count;
@@ -854,8 +741,6 @@ function LoadMore({ paging }: { paging: Extract<DataTablePaging, { mode: "infini
   const ref = useRef<HTMLDivElement>(null);
   const latest = useRef(paging);
   latest.current = paging;
-  // Observed again after each load: an observer reports only changes, and a load
-  // that leaves the end in view (short pages, a tall screen) changes nothing.
   useEffect(() => {
     const el = ref.current;
     if (!el || paging.loadingMore || typeof IntersectionObserver === "undefined") return;
@@ -864,7 +749,6 @@ function LoadMore({ paging }: { paging: Extract<DataTablePaging, { mode: "infini
         const p = latest.current;
         if (e.isIntersecting && p.hasMore && !p.loadingMore) p.onLoadMore();
       },
-      // The page scrolls the rows (UI ticket 25): watched against the window.
       { root: null, rootMargin: "240px 0px" },
     );
     io.observe(el);
@@ -880,7 +764,6 @@ function LoadMore({ paging }: { paging: Extract<DataTablePaging, { mode: "infini
   );
 }
 
-/** A row's ⋯ menu, named "More for <name>"; `copy` shows a copy made from one of its items (useCopy). */
 export function RowMenu({ name, children, copy }: { name: string; children: ReactNode; copy?: CopyState }) {
   return (
     <Menu>

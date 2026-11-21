@@ -10,23 +10,24 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// chatCodec is OpenAI Chat Completions.
-var chatCodec = &codec{
-	shape:       shape.OpenAIChat,
-	format:      types.RelayFormatOpenAI,
-	request:     func() any { return &dto.GeneralOpenAIRequest{} },
+var chatShape = shapeFormat{shape.OpenAIChat, types.RelayFormatOpenAI}
+
+var chatEndpoint = &endpointCodec{
+	shapeFormat: chatShape,
 	answer:      func() any { return &dto.OpenAITextResponse{} },
 	event:       func() any { return &dto.ChatCompletionsStreamResponse{} },
-	setModel:    func(req any, model string) { req.(*dto.GeneralOpenAIRequest).Model = model },
-	readFormat:  readChatFormat,
 	writeFormat: writeChatFormat,
 
-	prepareRequest: func(req map[string]any, t *Translation) {
-		tools := list(req["tools"])
-		for _, tool := range tools {
-			t.names.reserve(str(obj(obj(tool)["function"])["name"]))
+	declaredTools: func(req map[string]any) []string {
+		var names []string
+		for _, tool := range list(req["tools"]) {
+			names = append(names, str(obj(obj(tool)["function"])["name"]))
 		}
-		for _, tool := range tools {
+		return names
+	},
+
+	prepareRequest: func(req map[string]any, t *Translation) {
+		for _, tool := range list(req["tools"]) {
 			rename(obj(obj(tool)["function"]), "name", t.names.safe)
 		}
 		for _, msg := range list(req["messages"]) {
@@ -39,13 +40,11 @@ var chatCodec = &codec{
 			}
 		}
 		rename(obj(obj(req["tool_choice"])["function"]), "name", t.names.safe)
-		// A Responses Caller's store (keep the response at the Provider)
-		// means something else in Chat, where it is off by default; strict
-		// Providers refuse the field.
+		// Strict Chat Providers refuse store, which a Responses Caller may
+		// send.
 		delete(req, "store")
 		if req["stream"] == true {
-			// Usage is recorded for every Request, and the converter needs
-			// it to report usage in the Caller's Shape.
+			// OpenAI streams usage only when include_usage is set.
 			opts := obj(req["stream_options"])
 			if opts == nil {
 				opts = map[string]any{}
@@ -66,7 +65,7 @@ var chatCodec = &codec{
 			} `json:"choices"`
 		}
 		if json.Unmarshal(data, &v) != nil {
-			return upstreamEvent{feed: true} // the converter reports it
+			return upstreamEvent{feed: true}
 		}
 		if len(v.Error) > 0 && string(v.Error) != "null" {
 			return upstreamEvent{err: chatError(v.Error)}
@@ -79,6 +78,13 @@ var chatCodec = &codec{
 		}
 		return ev
 	},
+}
+
+var chatCaller = &callerCodec{
+	shapeFormat: chatShape,
+	request:     func() any { return &dto.GeneralOpenAIRequest{} },
+	setModel:    func(req any, model string) { req.(*dto.GeneralOpenAIRequest).Model = model },
+	readFormat:  readChatFormat,
 
 	tidyAnswer: func(m map[string]any, t *Translation, u *dto.Usage) {
 		m["model"] = t.o.Model
@@ -92,6 +98,7 @@ var chatCodec = &codec{
 		if u != nil {
 			m["usage"] = chatUsage(u)
 		}
+		t.writeCacheUsage(obj(m["usage"]))
 		for _, c := range list(m["choices"]) {
 			restoreChatCalls(obj(obj(c)["message"]), t)
 			if c := obj(c); c["finish_reason"] != nil {
@@ -103,13 +110,10 @@ var chatCodec = &codec{
 	newWriter: func(t *Translation, o StreamOptions) streamWriter { return &chatWriter{t: t, o: o} },
 }
 
-// chatFinishReasons are the finish reasons the OpenAI SDKs know.
 var chatFinishReasons = map[string]bool{"stop": true, "length": true, "tool_calls": true, "content_filter": true, "function_call": true}
 
-// chatFinish is the finish reason a Chat Caller gets: one it knows, and
-// tool_calls when the answer called tools but its Provider said it ended
-// its turn (Anthropic's end_turn after tool_use blocks), since clients run
-// tools only on tool_calls.
+// Clients run tools only on tool_calls, but Anthropic can say end_turn
+// after tool_use blocks.
 func chatFinish(v any, called bool) any {
 	v = knownReason(v, chatFinishReasons, "stop")
 	if called && v == "stop" {
@@ -118,7 +122,6 @@ func chatFinish(v any, called bool) any {
 	return v
 }
 
-// chatError reads an OpenAI error envelope's inner object.
 func chatError(raw json.RawMessage) *UpstreamError {
 	var e struct {
 		Message string `json:"message"`
@@ -135,8 +138,6 @@ func chatError(raw json.RawMessage) *UpstreamError {
 	return &UpstreamError{Type: typ, Message: e.Message}
 }
 
-// chatUsage is RelayKit's usage as OpenAI reports it, without new-api's
-// billing fields.
 func chatUsage(u *dto.Usage) map[string]any {
 	m := usageMap(u)
 	out := pick(m, "prompt_tokens", "completion_tokens", "total_tokens")
@@ -149,23 +150,18 @@ func chatUsage(u *dto.Usage) map[string]any {
 	return out
 }
 
-// restoreChatCalls gives the tool calls of a message or delta the Caller's names.
 func restoreChatCalls(msg map[string]any, t *Translation) {
 	for _, call := range list(msg["tool_calls"]) {
 		rename(obj(obj(call)["function"]), "name", t.names.original)
 	}
 }
 
-// chatWriter writes chat.completion.chunk events. Every chunk carries the
-// answer's id, the Caller's model and one created time; usage arrives once,
-// in a last chunk with no choices, when the Caller asked for it; chunks
-// that say nothing are dropped; [DONE] ends a complete stream.
 type chatWriter struct {
 	t      *Translation
 	o      StreamOptions
 	id     string
 	sent   bool
-	called bool // a delta called a tool
+	called bool
 }
 
 func (w *chatWriter) write(m map[string]any) []byte {
@@ -206,7 +202,6 @@ func (w *chatWriter) write(m map[string]any) []byte {
 	return w.frame(m)
 }
 
-// saysSomething reports whether a delta carries anything but empty text.
 func saysSomething(delta map[string]any) bool {
 	for k, v := range delta {
 		if k == "role" || v == nil || v == "" {

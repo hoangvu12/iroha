@@ -6,10 +6,6 @@ import { CHAT_WIDTH } from "@/app/ChatSheet";
 import { rec, RecordLink } from "./RecordLink";
 import { loadedSheet, renderWithSheets } from "./test-iroha";
 
-// UI ticket 15: how the stack moves (architecture.md "UI motion system",
-// Sheet recipe). jsdom runs no transitions, so these read what the CSS is
-// given: the state attributes and the recipe's classes on the real markup.
-
 afterEach(() => vi.unstubAllGlobals());
 
 const where = () => screen.getByRole("status", { name: "Location" }).textContent;
@@ -50,7 +46,6 @@ test("a sheet enters and leaves by the Sheet recipe: translate on the drawer cur
     "data-ending-style:[--sheet-move:var(--duration-sheet-out)]",
   ])
     expect(cls).toContain(part);
-  // Only tokens: no typed durations or curves.
   expect(cls).not.toMatch(/duration-\d|ease-\[|cubic-bezier|transition-all/);
 });
 
@@ -104,7 +99,6 @@ test("a record of the same kind takes that sheet's place: same element, nothing 
   await user.click(await within(provider).findByRole("link", { name: "team-5" }));
   const key = await loadedSheet("Upstream Key team-5");
 
-  // Another key from the Provider's list: the key sheet shows it in place.
   await user.click(within(provider).getByRole("link", { name: "team-6" }));
   expect(key.hasAttribute("data-starting-style")).toBe(false);
   await waitFor(() => expect(where()).toBe("/page?sheet=provider:acme&sheet=key:acme/team-6"));
@@ -126,11 +120,9 @@ test("an older sheet pushed wholly off screen stays painted until it has slid aw
   const provider = await loadedSheet("Provider acme");
   await user.click(await within(provider).findByRole("link", { name: "team-5" }));
   await loadedSheet("Upstream Key team-5");
-  // jsdom is 1024 px wide: two 540 px sheets fill it, the Request is off screen.
   const away = screen.getByRole("dialog", { name: "Request fast", hidden: true });
   expect(away.hasAttribute("data-away")).toBe(true);
   expect(away.hasAttribute("inert")).toBe(true);
-  // Hidden only after the slide: visibility waits for the move (0 s under reduced motion).
   expect(away.className).toContain("visibility_0s_linear_var(--sheet-hide)");
   expect(away.className).toContain("data-away:invisible");
   expect(away.className).toContain("data-away:[--sheet-hide:var(--sheet-move)]");
@@ -142,13 +134,14 @@ test("the chat opening moves the sheets aside with it by translate (never `right
   const provider = await loadedSheet("Provider acme");
   expect(style(provider, "--sheet-shift")).toBe("0px");
 
-  // A pointer: the chat starts sliding a frame after it mounts (animateIn), and the sheets start with it.
   act(() => screen.getByRole("button", { name: "Chat" }).click());
+  const chat = screen.getByRole("complementary", { name: "Chat" });
+  expect(chat.hasAttribute("data-starting-style")).toBe(true);
   expect(style(provider, "--sheet-shift")).toBe("0px");
   await waitFor(() => expect(style(provider, "--sheet-shift")).toBe(`${CHAT_WIDTH}px`));
+  expect(chat.hasAttribute("data-starting-style")).toBe(false);
   expect(style(provider, "right")).toBe("0px");
   expect(provider.getAttribute("data-motion")).toBe("in");
-  // Beside the chat, a sheet entering or leaving is clipped at the chat's edge, so it slides out from under it.
   expect(provider.hasAttribute("data-beside")).toBe(true);
   expect(provider.className).toContain("data-beside:data-top:data-starting-style:[clip-path:inset(0_var(--motion-sheet-offset)_0_0)]");
 

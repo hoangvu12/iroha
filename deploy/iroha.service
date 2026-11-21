@@ -1,6 +1,3 @@
-# systemd unit for Iroha. deploy.sh renders the @NAME@ values
-# (--print-unit shows the result; --install-unit installs it as
-# /etc/systemd/system/<service>.service).
 [Unit]
 Description=Iroha Gateway
 Documentation=http://@ADDR@/skill.md

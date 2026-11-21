@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { Activity, ChevronDown, Columns3, ListFilter } from "lucide-react";
 import { PageHeader } from "@/app/PageHeader";
@@ -39,16 +39,9 @@ import { useArrivals } from "./arrivals";
 import { rec, RecordLink } from "@/sheets/RecordLink";
 import { COLUMNS, type ColumnId, type FilterKey, RANGES, type RequestsUrl, STATUSES, useRequestsUrl } from "./url-state";
 
-/**
- * How the feed pages. "live" (spec "Pagination", the default): new Requests come in
- * on top and older ones load as you scroll. "pages": numbered pages with a page
- * size, if the Owner prefers them (live rows then push the rows down a page). The
- * Owner picks it in the View menu; this browser remembers it, like page sizes.
- */
 export type FeedPaging = "live" | "pages";
 const PAGINGS: readonly FeedPaging[] = ["live", "pages"];
 
-/** The Owner's choice of paging, remembered in this browser (where storage is refused, for this visit). */
 const useFeedPaging = () => useStoredChoice("iroha:requests:paging", PAGINGS, "live");
 
 const PAGING_CHOICES: { value: FeedPaging; label: string }[] = [
@@ -56,7 +49,6 @@ const PAGING_CHOICES: { value: FeedPaging; label: string }[] = [
   { value: "pages", label: "Numbered pages" },
 ];
 
-/** Requests (C03, C04, C32): stats for the current filters and the live feed on the DataTable; a row opens the Request sheet. `paging` overrides the Owner's choice (tests). */
 export function RequestsFeed({ paging: forced }: { paging?: FeedPaging }) {
   const url = useRequestsUrl();
   const phone = useIsPhone();
@@ -69,7 +61,6 @@ export function RequestsFeed({ paging: forced }: { paging?: FeedPaging }) {
   const pages = feed.pages;
   const rows = feed.rows;
   const loaded = pages.data ? rows : undefined;
-  // The Request sheet (the first of the sheet stack) seeds from these rows and steps through them.
   useLendRequestRows(rows);
 
   const chips = filterChips(url, options.data);
@@ -77,11 +68,13 @@ export function RequestsFeed({ paging: forced }: { paging?: FeedPaging }) {
   const columnVisibility = useMemo(() => Object.fromEntries([...url.hidden].map((id) => [id, false])), [url.hidden]);
   const loadOlder = () => void pages.fetchNextPage();
 
-  // Stepping (↓) onto the last loaded row loads the older ones, so ↓ keeps going.
   const last = rows[rows.length - 1]?.id;
+  const loadOlderUnlessLoading = useEffectEvent(() => {
+    if (!pages.isFetchingNextPage) loadOlder();
+  });
   useEffect(() => {
-    if (url.selected && url.selected === last && pages.hasNextPage && !pages.isFetchingNextPage) loadOlder();
-  }, [url.selected, last, pages.hasNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (url.selected && url.selected === last && pages.hasNextPage) loadOlderUnlessLoading();
+  }, [url.selected, last, pages.hasNextPage]);
 
   const numbered = useNumberedPages(paging === "pages", loaded, pages, stats.data?.requests, JSON.stringify(url.query));
   const tablePaging: DataTablePaging = numbered
@@ -95,7 +88,6 @@ export function RequestsFeed({ paging: forced }: { paging?: FeedPaging }) {
         newRowsLabel: (n) => `${n} new`,
       };
 
-  // Requests that arrived live enter and flash once (arrivals.ts).
   const box = useRef<HTMLDivElement>(null);
   useArrivals(box, feed.added);
 
@@ -122,7 +114,6 @@ export function RequestsFeed({ paging: forced }: { paging?: FeedPaging }) {
         </div>
       )}
 
-      {/* A filter change keeps the rows shown (dimmed) until the new ones arrive: no skeleton over data. */}
       <div ref={box}>
         <DataTable
           id="requests"
@@ -155,7 +146,6 @@ export function RequestsFeed({ paging: forced }: { paging?: FeedPaging }) {
   );
 }
 
-/** "Showing 200 of 12,840 Requests" while older ones are still to load; "12,840 Requests" once all are. */
 function countLine(shown: number, total: number | undefined, numbered: boolean): string {
   const of = total ?? shown;
   const noun = of === 1 ? "Request" : "Requests";
@@ -165,14 +155,8 @@ function countLine(shown: number, total: number | undefined, numbered: boolean):
 
 type FeedPages = ReturnType<typeof useRequestFeed>["pages"];
 
-/**
- * Numbered pages over the feed: the API pages by cursor (`before`), so a page
- * further on loads the older Requests it needs first; the rows shown stay (dimmed)
- * until it has them. Null in live mode.
- */
 function useNumberedPages(on: boolean, loaded: RequestRecord[] | undefined, pages: FeedPages, total: number | undefined, query: string) {
   const [pagination, setPagination] = useTablePaging("requests");
-  // New filters start again on page 1.
   const lastQuery = useRef(query);
   useEffect(() => {
     if (lastQuery.current === query) return;
@@ -183,9 +167,10 @@ function useNumberedPages(on: boolean, loaded: RequestRecord[] | undefined, page
   const start = pagination.pageIndex * pagination.pageSize;
   const end = start + pagination.pageSize;
   const waiting = on && !!loaded && loaded.length < end && !!pages.hasNextPage;
+  const { isFetchingNextPage, fetchNextPage } = pages;
   useEffect(() => {
-    if (waiting && !pages.isFetchingNextPage) void pages.fetchNextPage();
-  }, [waiting, pages.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (waiting && !isFetchingNextPage) void fetchNextPage();
+  }, [waiting, isFetchingNextPage, fetchNextPage]);
 
   const shown = useRef<RequestRecord[] | undefined>(undefined);
   if (!on) return null;
@@ -251,7 +236,6 @@ function StatsRow({ stats, phone }: { stats: Stats; phone: boolean }) {
 
 const pctOr = (share: number | undefined) => (share === undefined ? "–" : formatPercent(share));
 
-/** What the cached share is made of: "1,000 of 4,000 input tokens read from the cache; 600 written to it". */
 function cachedTitle(t: Stats["tokens"]): string | undefined {
   if (cachedShare(t) === undefined) return undefined;
   const read = cacheReadText(t);
@@ -282,10 +266,10 @@ function Toolbar({
 }) {
   const [text, setText] = useState(url.filters.q ?? "");
   const q = useDebounced(text.trim(), 250);
-  useEffect(() => {
+  const searchFor = useEffectEvent((q: string) => {
     if (q !== (url.filters.q ?? "")) url.setFilter("q", q || undefined);
-  }, [q]); // only when the typed text settles
-  // Clearing filters elsewhere (chips, Clear filters) empties the box.
+  });
+  useEffect(() => searchFor(q), [q]);
   useEffect(() => {
     if (!url.filters.q) setText((t) => (t.trim() ? "" : t));
   }, [url.filters.q]);
@@ -360,7 +344,6 @@ function Toolbar({
   );
 }
 
-/** Live feed or numbered pages (spec "Pagination": the Owner may prefer pages). */
 function PagingChoice({ paging, onPaging }: { paging: FeedPaging; onPaging: (p: FeedPaging) => void }) {
   return (
     <MenuRadioGroup label="Load Requests" value={paging} onValueChange={(v) => onPaging(v as FeedPaging)}>
@@ -417,7 +400,6 @@ function FilterMenu({
           ))}
         </MenuRadioGroup>
         {!options && (
-          // Rows shaped like the Callers, outside the group so they never take focus.
           <Skeleton data={undefined} sample={SAMPLE_CALLERS} label="Loading Callers">
             {(callers) =>
               callers.map((c) => (
@@ -479,7 +461,6 @@ function FilterMenu({
           </MenuRadioGroup>
         </SubMenu>
       )}
-      {/* Phones have no View menu: the paging choice sits here, like Time. */}
       {phone && (
         <SubMenu label="Load Requests" value={paging === "pages" ? "Numbered pages" : "Live"}>
           <PagingChoice paging={paging} onPaging={onPaging} />
@@ -495,11 +476,6 @@ function FilterMenu({
   );
 }
 
-/**
- * The Caller filter as the Owner reads it. `caller=` also takes a Gateway
- * Key's ID (a key's Requests count links so, to keep Requests sent under an
- * earlier name): that shows as the key's name from the filter options.
- */
 function callerName(caller: string | undefined, options?: FilterOptions): string | undefined {
   if (!caller || !options) return caller;
   return (options.callers.find((c) => c.name === caller) ?? options.callers.find((c) => c.gateway_key_id === caller))?.name ?? caller;
@@ -519,7 +495,6 @@ function filterChips(url: RequestsUrl, options?: FilterOptions) {
   return chips;
 }
 
-/** "Nothing from Test (as zeron-fleet) failed in the last 24 hours." */
 function noResultsLine(url: RequestsUrl, options?: FilterOptions): string {
   const f = { ...url.filters, caller: callerName(url.filters.caller, options) };
   const parts = ["Nothing"];
@@ -562,11 +537,9 @@ function Empty({ url }: { url: RequestsUrl }) {
 const dash = <span className="text-fg-subtle">–</span>;
 const col = columnsFor<RequestRecord>();
 
-/** What each column shows; one fact per cell. */
 const cells: Record<ColumnId, (r: RequestRecord) => ReactNode> = {
   time: (r) => clock(r.started_at),
   status: (r) => <StatusCell r={r} />,
-  // Names of records are links to their sheets (UI ticket 11); a click on one opens it, not the Request.
   caller: (r) =>
     r.caller.gateway_key_id ? (
       <span className="flex max-w-[200px]" title={r.caller.name}>
@@ -579,13 +552,11 @@ const cells: Record<ColumnId, (r: RequestRecord) => ReactNode> = {
     ),
   model: (r) => (
     <span className="inline-flex max-w-[260px] items-center gap-2">
-      {/* A Pool is named by the model the Caller asked for. */}
       {r.pool ? (
         <RecordLink record={rec.pool(r.pool)} className="font-medium" title={r.model}>
           {r.model}
         </RecordLink>
       ) : r.provider && r.wire_model ? (
-        // Asked of a Provider straight: the model it was sent as has a sheet (UI ticket 33).
         <RecordLink record={rec.model(r.provider, r.wire_model)} className="font-medium" title={r.model}>
           {r.model}
         </RecordLink>
@@ -621,11 +592,8 @@ const cells: Record<ColumnId, (r: RequestRecord) => ReactNode> = {
 
 const cellClass: Partial<Record<ColumnId, string>> = { time: "font-mono text-[13px] text-fg-muted", key: "font-mono text-[13px] text-fg-muted" };
 
-// The column whose cell is the row's "Open Request <id>" button (keyboard, agents): the first one shown that holds plain text
-// (never one with a record's link in it: a link can't sit inside a button).
 const OPENERS: ColumnId[] = ["time", "status", "shape", "duration", "first_token", "attempts", "input", "output"];
 
-/** The feed's columns; `hidden` (the URL's ?hide=) only moves the Open button to a column still shown. */
 function feedColumns(hidden: Set<string>): DataColumn<RequestRecord>[] {
   const opens = OPENERS.find((id) => !hidden.has(id));
   return col.columns(
@@ -644,7 +612,6 @@ function feedColumns(hidden: Set<string>): DataColumn<RequestRecord>[] {
   );
 }
 
-/** A Request on a phone (C32): status, model and time; then the Caller, retries and the Provider. */
 function PhoneRow({ r }: { r: RequestRecord }) {
   const tone = statusTone(r.status, r.state);
   return (

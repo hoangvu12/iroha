@@ -7,7 +7,6 @@ import { Input } from "@/ui/Input";
 import { LogoTile } from "@/ui/LogoTile";
 import { errorText } from "./api";
 
-/** Debounced value, for previews that fetch. */
 function useDebounced<T>(v: T, ms = 400): T {
   const [d, setD] = useState(v);
   useEffect(() => {
@@ -17,14 +16,6 @@ function useDebounced<T>(v: T, ms = 400): T {
   return d;
 }
 
-/**
- * The Logo field of the Provider and Pool Settings tabs: the input with the
- * logo it finds in a tile, looked up as you type (debounced), and a line
- * under it saying whether one was found, before anything is saved.
- * `fallback` is what an empty field stands for (the guessed domain or
- * maker); `previewUrl` gives the lookup URL for a value, or undefined when
- * the value asks for the letter (a Provider's "none").
- */
 export function LogoInput({
   label,
   name,
@@ -36,7 +27,6 @@ export function LogoInput({
   placeholder,
   invalid,
 }: {
-  /** Saving it failed (the error shows under the row). */
   invalid?: boolean;
   label: string;
   name: string;
@@ -62,10 +52,8 @@ export function LogoInput({
 
   const pending = target !== shown || (!!src && (check.isPending || check.isPlaceholderData));
   const refused = !pending && !!src && isApiError(check.error) && check.error.status === 400;
-  // The tile keeps the last logo found while the next one is looked up.
   const lastFound = useRef<string | undefined>(undefined);
   if (!pending) lastFound.current = src && check.data === true ? src : undefined;
-  // Motion: each logo found after the first drawing fades into the tile (a new key mounts it).
   const tileKey = lastFound.current ?? "letter";
   const firstTile = useRef(tileKey);
   const fades = useRef(false);

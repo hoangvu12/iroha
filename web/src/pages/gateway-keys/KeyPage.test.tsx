@@ -9,9 +9,6 @@ import { Toaster } from "@/ui/toast";
 import type { GatewayKey } from "./api";
 import { KeyPage } from "./KeyPage";
 
-// The Gateway Key page saves inline: a rename and the capture switch show
-// their result where they were changed, never in a toast (UI ticket 04).
-
 const agent = createAgent();
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -94,7 +91,6 @@ test("the capture switch shows its new state at once and its result beside it", 
   expect(JSON.parse(String(init?.body))).toEqual({ capture: true });
   await waitFor(() => expect(sw.hasAttribute("aria-busy")).toBe(false));
   expect(sw.getAttribute("aria-checked")).toBe("true");
-  // The switch undoes itself: no Undo beside it.
   expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
   noToast();
 });

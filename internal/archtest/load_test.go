@@ -17,21 +17,17 @@ import (
 
 const module = "github.com/hoangvu12/iroha"
 
-// source is one non-test Go file of the module.
 type source struct {
-	dir  string // package directory relative to the module root, slash-separated: "internal/clock"
-	rel  string // file path relative to the module root: "internal/clock/clock.go"
+	dir  string
+	rel  string
 	fset *token.FileSet
 	file *ast.File
 }
 
-// pos is "file:line" of n, for failure messages.
 func (s *source) pos(n ast.Node) string {
 	return fmt.Sprintf("%s:%d", s.rel, s.fset.Position(n.Pos()).Line)
 }
 
-// importName is the name f uses for the import path p ("" when f does not
-// import it; "_" or "." for blank and dot imports).
 func (s *source) importName(p string) string {
 	for _, im := range s.file.Imports {
 		if v, _ := strconv.Unquote(im.Path.Value); v == p {
@@ -44,7 +40,6 @@ func (s *source) importName(p string) string {
 	return ""
 }
 
-// imports lists the import paths of the file with their positions.
 func (s *source) imports() map[string]*ast.ImportSpec {
 	out := map[string]*ast.ImportSpec{}
 	for _, im := range s.file.Imports {
@@ -54,8 +49,6 @@ func (s *source) imports() map[string]*ast.ImportSpec {
 	return out
 }
 
-// selectors calls fn for every pkg.Name selector in the file where pkg is
-// the name the file gives the import path p.
 func (s *source) selectors(p string, fn func(sel *ast.SelectorExpr)) {
 	name := s.importName(p)
 	if name == "" || name == "_" || name == "." {
@@ -79,7 +72,6 @@ var (
 	srcErr   error
 )
 
-// root is the module root (the directory holding go.mod).
 func root(t *testing.T) string {
 	t.Helper()
 	rootOnce.Do(func() {
@@ -105,8 +97,6 @@ func root(t *testing.T) string {
 	return rootDir
 }
 
-// sources parses every non-test Go file of the module, skipping the web UI,
-// testdata, docs and hidden directories.
 func sources(t *testing.T) []*source {
 	t.Helper()
 	r := root(t)
@@ -150,13 +140,10 @@ func sources(t *testing.T) []*source {
 	return srcs
 }
 
-// inDir reports whether dir is d or below it.
 func inDir(dir, d string) bool {
 	return dir == d || strings.HasPrefix(dir, d+"/")
 }
 
-// enclosing is the name of the top-level function holding n in s ("" at
-// package level), used to key allow-list entries.
 func (s *source) enclosing(n ast.Node) string {
 	for _, d := range s.file.Decls {
 		if d.Pos() <= n.Pos() && n.End() <= d.End() {
@@ -185,7 +172,6 @@ func recvName(e ast.Expr) string {
 	return "?"
 }
 
-// violation formats one failure: where, which rule, what to do instead.
 func violation(t *testing.T, where, rule, fix string) {
 	t.Helper()
 	t.Errorf("%s: %s\n\tfix: %s", where, rule, fix)

@@ -11,14 +11,8 @@ import (
 	"time"
 )
 
-// ControlPath is where a fake started with EnableControl takes orders over
-// HTTP, for a process that cannot call its Go methods (an agent driving
-// cmd/iroha-dev with curl). The routes are listed by GET ControlPath/ and in
-// ControlHelp.
 const ControlPath = "/_fake"
 
-// Replies are the names ReplyNamed knows, for help texts. Any HTTP status
-// from 400 to 599 also names the Shape's error envelope with that status.
 var Replies = map[string]string{
 	"ok":     "a short text answer in the fake's Shape (streamed when the request asks)",
 	"429":    "429 with Retry-After (retry_after seconds, default 30): the key goes cooling",
@@ -37,12 +31,10 @@ var Replies = map[string]string{
 // EnableControl makes the fake answer ControlPath routes and refuse
 // Upstream Keys whose secret holds "fail<status>" (for example
 // sk-demo-fail401) with that status, before any queued reply.
-func (u *Upstream) EnableControl() { u.ctl.Store(true) }
+func (u *Upstream) EnableControl() { u.controlEnabled.Store(true) }
 
-// ControlURL is the base of the control routes.
 func (u *Upstream) ControlURL() string { return u.srv.URL + ControlPath }
 
-// ControlHelp describes the control routes, relative to ControlURL.
 var ControlHelp = map[string]string{
 	"GET /":                    "this help, the fake's Shape, queued replies and requests received",
 	"POST /next?reply=NAME":    "queue a reply for the next inference request; count=N queues it N times; status, message, code, ms, retry_after tune it",
@@ -54,7 +46,6 @@ var ControlHelp = map[string]string{
 
 var failMarker = regexp.MustCompile(`fail([45]\d\d)`)
 
-// credential is the Upstream Key the request carried, in any auth style.
 func credential(r *Received) string {
 	if b := r.Bearer(); b != "" {
 		return b
@@ -67,7 +58,6 @@ func credential(r *Received) string {
 	return r.Query.Get("key")
 }
 
-// markedFailure is the reply for a key whose secret holds fail<status>.
 func (u *Upstream) markedFailure(r *Received) (Responder, bool) {
 	m := failMarker.FindStringSubmatch(credential(r))
 	if m == nil {
@@ -148,7 +138,6 @@ func (rs Responder) ThenCut(n int) Responder {
 	}
 }
 
-// ReceivedView is a received request as GET /_fake/requests shows it.
 type ReceivedView struct {
 	Seq    int               `json:"seq"`
 	At     time.Time         `json:"at"`
@@ -184,7 +173,7 @@ func (u *Upstream) control(w http.ResponseWriter, req *http.Request) {
 	reply := func(status int, v any) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		enc := json.NewEncoder(w) // compact: bodies stay byte for byte as received
+		enc := json.NewEncoder(w)
 		enc.SetEscapeHTML(false)
 		_ = enc.Encode(v)
 	}

@@ -1,10 +1,5 @@
 import { createController, createViewport, css, definePrimitive, live } from "@ui-sdk/core";
 
-// A pan-and-zoom frame for the route views, built on UI SDK core's
-// createViewport (it ships no canvas component). Drag empty space or use the
-// wheel to pan; Ctrl/⌘ + wheel or a pinch zooms; + − 0 when the frame is
-// focused. The frame clips, so no scrollbar ever shows.
-
 export function createCanvasController() {
   return createController<{ zoomIn: () => void; zoomOut: () => void; reset: () => void }>();
 }
@@ -52,7 +47,6 @@ export const canvas = definePrimitive({
         keydown: (event, { api }) => {
           if (!field(event.target)) api.viewport.keydown(event as KeyboardEvent);
         },
-        // The frame clips instead of scrolling, so a card reached with Tab is panned into view.
         focusin: (event, { el, api }) => {
           const t = event.target;
           if (el && t instanceof Element && t !== el && t.closest('[data-slot="canvas-world"]'))

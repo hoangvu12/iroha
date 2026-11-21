@@ -12,12 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// REQ-68, TIME-10: Iroha reads an upstream stream only as fast as the Caller
-// reads its answer. The fake streams 48 MiB while the Caller reads nothing:
-// what the fake manages to write stops growing well short of the whole (the
-// buffers between them fill and the relay blocks on its write), so memory
-// stays bounded. Once the Caller reads, it gets the whole stream. Passed
-// through and translated (OpenAI Chat Endpoint, Anthropic Caller).
 func TestASlowCallerSlowsTheUpstreamRead(t *testing.T) {
 	const (
 		events    = 1536
@@ -27,7 +21,7 @@ func TestASlowCallerSlowsTheUpstreamRead(t *testing.T) {
 		name, path string
 		body       map[string]any
 		header     string
-		last       string // the Caller's stream ends with this
+		last       string
 	}{
 		{"passthrough", chatPath, map[string]any{"model": "gpt-x", "stream": true, "messages": []any{map[string]any{"role": "user", "content": "hi"}}},
 			"Authorization", "data: [DONE]"},
@@ -40,7 +34,7 @@ func TestASlowCallerSlowsTheUpstreamRead(t *testing.T) {
 			addProvider(t, srv, "acme", up.URL(), "sk-test-one")
 			secret := issue(t, srv, "slow-reader", all)
 
-			piece := strings.Repeat("x", eventSize-150) // each event about eventSize bytes
+			piece := strings.Repeat("x", eventSize-150)
 			chunk := func(delta, finish any) string {
 				b, _ := json.Marshal(map[string]any{"id": "chatcmpl-big", "object": "chat.completion.chunk", "created": 1767225600, "model": "gpt-x",
 					"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}})
@@ -76,13 +70,11 @@ func TestASlowCallerSlowsTheUpstreamRead(t *testing.T) {
 				t.Fatalf("status %d", resp.StatusCode)
 			}
 
-			// The Caller reads nothing: the fake's progress stalls.
 			stalled := settle(up.Written)
 			if stalled > int64(total)/3 {
 				t.Fatalf("the fake wrote %d of %d bytes while the Caller read nothing", stalled, total)
 			}
 
-			// Now the Caller reads: the whole stream arrives, and the fake finished.
 			got, err := io.ReadAll(resp.Body)
 			if err != nil {
 				t.Fatalf("reading the answer after %d bytes: %v", len(got), err)
@@ -101,8 +93,6 @@ func TestASlowCallerSlowsTheUpstreamRead(t *testing.T) {
 	}
 }
 
-// settle polls n until it has not changed for 300 ms (at most 10 s in all)
-// and returns its value.
 func settle(n func() int64) int64 {
 	last, since := n(), time.Now()
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {

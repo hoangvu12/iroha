@@ -35,17 +35,22 @@ function Where() {
   return <output aria-label="Where">{l.pathname + l.search}</output>;
 }
 
-function renderList(url = "/providers") {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof globalThis.fetch>(async (u) => {
-      const path = String(u);
-      if (path.startsWith("/api/providers")) return answer({ providers: PROVIDERS });
-      if (path.startsWith("/api/pools")) return answer({ pools: POOLS });
-      if (path.startsWith("/api/overview")) return answer(OVERVIEW);
-      return new Response("{}", { status: 404 });
-    }),
-  );
+const taken = (message: string) =>
+  new Response(JSON.stringify({ error: { code: "name_taken", message, hint: "Pick another name, or update it with PUT." } }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  });
+
+function renderList(url = "/providers", post?: (path: string) => Response) {
+  const fetch = vi.fn<typeof globalThis.fetch>(async (u, init) => {
+    const path = String(u);
+    if (post && init?.method === "POST") return post(path);
+    if (path.startsWith("/api/providers")) return answer({ providers: PROVIDERS });
+    if (path.startsWith("/api/pools")) return answer({ pools: POOLS });
+    if (path.startsWith("/api/overview")) return answer(OVERVIEW);
+    return new Response("{}", { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetch);
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={[url]}>
@@ -57,7 +62,35 @@ function renderList(url = "/providers") {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return fetch;
 }
+
+const requests = (fetch: ReturnType<typeof renderList>) => fetch.mock.calls.map(([u, init]) => `${init?.method ?? "GET"} ${String(u)}`);
+
+test("Add Provider creates only: the server's refusal of a taken handle shows on the Handle field", async () => {
+  const user = userEvent.setup();
+  const fetch = renderList("/providers", () => taken('A Provider named "acme" exists.'));
+  await screen.findByRole("table", { name: "Providers" });
+  await user.click(screen.getByRole("button", { name: "Add Provider" }));
+  const dialog = await screen.findByRole("dialog", { name: "Add Provider" });
+  await user.type(within(dialog).getByRole("textbox", { name: "Handle" }), "acme");
+  await user.click(within(dialog).getByRole("button", { name: "Add Provider" }));
+  expect(await within(dialog).findByText("acme already exists. Pick another handle, or open acme to change it.")).toBeTruthy();
+  expect(requests(fetch).filter((r) => r.includes("/api/providers/") || r.startsWith("POST"))).toEqual(["POST /api/providers"]);
+});
+
+test("New Pool creates only: the server's refusal of a taken name shows on the Name field", async () => {
+  const user = userEvent.setup();
+  const fetch = renderList("/providers", () => taken('A Model Pool named "fast" exists.'));
+  await screen.findByRole("table", { name: "Model Pools" });
+  await user.click(screen.getByRole("button", { name: "New Pool" }));
+  const dialog = await screen.findByRole("dialog", { name: "New Model Pool" });
+  await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "fast");
+  await user.click(within(dialog).getByRole("button", { name: "Create Pool" }));
+  expect(await within(dialog).findByText("A Model Pool is already named fast. Pick another name, or open fast to change its members.")).toBeTruthy();
+  expect(requests(fetch).filter((r) => r.includes("/api/pools/") || r.startsWith("POST"))).toEqual(["POST /api/pools"]);
+  expect(where()).toBe("/providers");
+});
 
 const rows = (label: string) => within(screen.getByRole("table", { name: label })).getAllByRole("row").slice(1);
 const firstCells = (label: string) => rows(label).map((r) => within(r).getAllByRole("cell")[0].textContent);
@@ -76,7 +109,6 @@ test("Providers come busiest first with archived ones last, and sort by a column
   expect(firstCells("Providers")).toEqual(["busy", "acme", "zeta", "old"].map((h) => expect.stringContaining(h)));
   await user.click(screen.getByRole("button", { name: "Sort by Name" }));
   expect(firstCells("Providers")).toEqual(["acme", "busy", "old", "zeta"].map((h) => expect.stringContaining(h)));
-  // Fewest first; a Provider the overview doesn't name ("–") counts as fewer than none.
   await user.click(screen.getByRole("button", { name: "Sort by Active keys" }));
   expect(firstCells("Providers")).toEqual(["zeta", "old", "acme", "busy"].map((h) => expect.stringContaining(h)));
   expect(screen.getByText("4 Providers")).toBeTruthy();
@@ -120,7 +152,6 @@ test("an agent finds the tables' controls by name and tests a Provider", async (
   const labels = entries.map((e) => e.label);
   for (const l of ["Search Providers", "Sort by Name", "Sort by Requests today", "Sort by Pool name", "Open busy", "Open fast", "Test busy in Chat", "Test fast in Chat"])
     expect(labels, `${l} is missing`).toContain(l);
-  // The two tables' controls never share a name.
   const sorts = labels.filter((l) => l?.startsWith("Sort by"));
   expect(new Set(sorts).size).toBe(sorts.length);
   const run = await agent.act({ steps: [{ ref: "Test busy in Chat", action: "press" }] });

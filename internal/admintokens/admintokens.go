@@ -1,6 +1,6 @@
 // Package admintokens stores Admin Tokens, authenticates admin calls with
 // them, issues the bootstrap token on first start, and serves the
-// /api/admin-tokens routes (the first resource built on package audit).
+// /api/admin-tokens routes.
 package admintokens
 
 import (
@@ -45,7 +45,6 @@ type Store struct {
 	clock clock.Clock
 }
 
-// New returns a Store.
 func New(db *store.DB) *Store { return &Store{db: db, clock: db.Clock()} }
 
 const tokenColumns = `id, name, note, secret, created_at, revoked_at, last_used_at`
@@ -69,12 +68,10 @@ func scanToken(row interface{ Scan(...any) error }) (Token, error) {
 	return t, nil
 }
 
-// byID reads one token; sql.ErrNoRows when absent.
 func byID(ctx context.Context, q audit.Querier, id string) (Token, error) {
 	return scanToken(q.QueryRowContext(ctx, `SELECT `+tokenColumns+` FROM admin_tokens WHERE id = ?`, id))
 }
 
-// BySecret finds a token by its secret.
 func (s *Store) BySecret(ctx context.Context, secret string) (Token, error) {
 	return scanToken(s.db.QueryRowContext(ctx, `SELECT `+tokenColumns+` FROM admin_tokens WHERE secret = ?`, secret))
 }

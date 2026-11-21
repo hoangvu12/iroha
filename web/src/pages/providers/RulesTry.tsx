@@ -9,16 +9,10 @@ import { calls, errorText } from "./api";
 import { appearClass } from "@/ui/motion";
 import { Select } from "./controls";
 
-// Try a failure (UI ticket 34): the Owner types an answer from the Provider and
-// the server says what the live Failure Rules decide for it
-// (POST /api/providers/{p}/rules/classify, the Gateway's own reading and
-// Set.Classify). The Flow view lights the path from the result.
-
 type Example = { label: string; status: string; body: string; headers?: string };
 
 const json = (v: unknown) => JSON.stringify(v, null, 2);
 
-/** One click fills the failure: the common answers a Provider gives. */
 export const EXAMPLES: Example[] = [
   {
     label: "429 cooling",
@@ -43,7 +37,6 @@ export const EXAMPLES: Example[] = [
   },
 ];
 
-/** An Endpoint URL's host, which host-limited rules match on. */
 function hostOf(url: string): string {
   try {
     return new URL(url).hostname;
@@ -52,7 +45,6 @@ function hostOf(url: string): string {
   }
 }
 
-/** "Name: value" lines into headers; lines without a colon are left out. */
 export function parseHeaders(text: string): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   for (const line of text.split("\n")) {
@@ -62,19 +54,13 @@ export function parseHeaders(text: string): Record<string, string> | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
-/** The result in words, as the Owner reads it above the flow. `n` is the matched rule's step number. */
 export function sayResult(c: Classification, n?: number): string {
   if (!c.failure) return "Not a failure: Iroha relays this answer to the Caller; no rule is tried.";
-  // The effects are the server's words (as the rules list shows them); only where a cooling time came from is added.
   const from = c.cooling_from === "response" ? " (the time the response names)" : c.cooling_from === "default" ? " (the default; repeats double it, up to 1 h)" : "";
   const who = !c.rule ? "No rule matches, so the fallback decides" : n ? `Rule ${n}, ${c.rule}, matches` : `Rule ${c.rule} matches`;
   return `${who}. Upstream Key: ${c.key_effect}${from}. Request: ${c.request_effect}.`;
 }
 
-/**
- * The "Try a failure" panel above the flow. It keeps what the Owner typed; `onResult` gets the
- * decision (or undefined once anything is edited, so a stale path never stays lit).
- */
 export function TryFailure({
   handle,
   rules,
@@ -193,11 +179,6 @@ const fieldFrame =
 // 16 px on phones so focusing does not zoom; the code size from md up.
 const codeText = "font-mono text-base leading-6 md:text-[13px] md:leading-5";
 
-/**
- * A code field (ticket 23's highlighting): the text is drawn coloured in a `<pre>` under a
- * transparent textarea with the same box and type, so the caret and selection are the textarea's.
- * The pre sets the height (the textarea fills it), so neither scrolls on its own; the frame scrolls both.
- */
 function CodeField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   const text = cn(codeText, "m-0 whitespace-pre-wrap px-3 py-2 [overflow-wrap:anywhere] [tab-size:2]");
   return (

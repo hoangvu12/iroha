@@ -8,9 +8,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// MOD-39, ticket 41: under per-key discovery a keyless key reads its own
-// list with no credential, beside a keyed key reading its list with its
-// secret; the keyless key's list makes it a carrier like any other.
 func TestPerKeyDiscoveryReadsAKeylessKeysListWithNoCredential(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -43,7 +40,6 @@ func TestPerKeyDiscoveryReadsAKeylessKeysListWithNoCredential(t *testing.T) {
 		t.Fatalf("list = %s", names(l))
 	}
 
-	// The keyless key carries free-model, so it is tried first for it.
 	caller := issue(t, srv, "pi", all)
 	for range 2 {
 		caller.Post("/providers/acme/v1/chat/completions", map[string]any{"model": "free-model", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}).Expect(200)

@@ -14,7 +14,7 @@ func TestTheOverviewCountsKeysModelsAndTrafficPerProviderAndPool(t *testing.T) {
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "acme"}).Expect(201)
 	srv.Admin.Post("/api/providers", map[string]any{"handle": "idle"}).Expect(201)
 	srv.Admin.Post("/api/providers/acme/endpoints", map[string]any{"url": up.URL(), "shape": "openai-chat"}).Expect(201)
-	srv.NoConversationIDs("acme") // the 400 below fails its Request
+	srv.NoConversationIDs("acme")
 	for _, s := range []string{"sk-test-1", "sk-test-2", "sk-test-3"} {
 		srv.Admin.Post("/api/providers/acme/keys", map[string]any{"secret": s}).Expect(201)
 	}
@@ -30,7 +30,6 @@ func TestTheOverviewCountsKeysModelsAndTrafficPerProviderAndPool(t *testing.T) {
 	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "pi", "scope": map[string]any{"all": true}}).Expect(201).JSON(&gk)
 	caller := srv.Client(gk.GatewayKey.Secret)
 
-	// An old Request falls outside the window.
 	caller.Post("/v1/chat/completions", map[string]any{"model": "acme/m1", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}).Expect(200)
 	srv.Clock.Advance(25 * time.Hour)
 	up.Enqueue(up.Error(400, "bad"))
@@ -59,7 +58,6 @@ func TestTheOverviewCountsKeysModelsAndTrafficPerProviderAndPool(t *testing.T) {
 		t.Fatalf("pool quiet = %+v", quiet)
 	}
 
-	// A longer window takes the old Request in.
 	srv.Admin.Get("/api/overview?since=48h").Expect(200).JSON(&ov)
 	if ov.Providers[0].Requests != 4 {
 		t.Fatalf("48h = %+v", ov.Providers[0])

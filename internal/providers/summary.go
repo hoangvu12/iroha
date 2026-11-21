@@ -12,7 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// ProviderSummary answers "what is wrong with this Provider" in one call.
 type ProviderSummary struct {
 	Provider       string             `json:"provider" doc:"Handle of the Provider."`
 	Enabled        bool               `json:"enabled"`
@@ -27,13 +26,11 @@ type ProviderSummary struct {
 	Normalisers    []Normaliser       `json:"normalisers" doc:"The built-in normalisers that rewrite this Provider's requests or answers, chosen by each Endpoint's Shape and host."`
 }
 
-// Normaliser is a built-in normaliser and the Endpoints it applies to.
 type Normaliser struct {
 	normalise.Normaliser
 	Endpoints []string `json:"endpoints" doc:"Names of the Endpoints it applies to."`
 }
 
-// normalisers lists the normalisers applying to any of eps, in built-in order.
 func normalisers(eps []Endpoint) []Normaliser {
 	on := map[string][]string{}
 	for _, e := range eps {
@@ -50,7 +47,6 @@ func normalisers(eps []Endpoint) []Normaliser {
 	return out
 }
 
-// KeyCounts counts Upstream Keys by Key State.
 type KeyCounts struct {
 	Total    int `json:"total"`
 	Active   int `json:"active"`
@@ -60,7 +56,6 @@ type KeyCounts struct {
 	Keyless  int `json:"keyless" doc:"Keys with no secret (keyless keys, counted in their Key State too): they send no credential."`
 }
 
-// count adds k to the counts.
 func (c *KeyCounts) count(k UpstreamKey) {
 	c.Total++
 	switch k.State.State {
@@ -78,7 +73,6 @@ func (c *KeyCounts) count(k UpstreamKey) {
 	}
 }
 
-// CoolingEntry is one current cooling.
 type CoolingEntry struct {
 	UpstreamKey string    `json:"upstream_key" doc:"Name of the key."`
 	Model       string    `json:"model,omitempty" doc:"Set when the key cools only for this model."`
@@ -86,7 +80,6 @@ type CoolingEntry struct {
 	Reason      string    `json:"reason"`
 }
 
-// AttemptStats counts recent Attempts.
 type AttemptStats struct {
 	Since       time.Time `json:"since"`
 	Attempts    int       `json:"attempts"`

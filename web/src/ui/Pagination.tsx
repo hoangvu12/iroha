@@ -15,7 +15,6 @@ const step =
 const link =
   "press inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-[13px] tabular text-fg-muted hover:bg-muted hover:text-fg data-current:bg-muted data-current:font-medium data-current:text-fg";
 
-/** Numbered pages with Previous and Next. `page` is 1-based, like UI SDK's Pagination. */
 export function Pager({
   page,
   pageCount,

@@ -8,25 +8,13 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// The time to first token of a stream (requests.first_byte_ms) is when the
-// first upstream event carrying generated content arrived: text, reasoning
-// or a tool call. Comments, pings, role-only chunks, message_start and the
-// like come before it. It is read in the Endpoint's Shape, so passthrough
-// and translated streams measure the same thing. A stream with no such
-// event falls back to its first event. The first-byte budget is not this:
-// it ends when the upstream's headers arrive.
-
-// tokenEvent reports whether one data payload of a stream in Shape sh
-// carries generated content (shapeSpec.token).
-func tokenEvent(sh shape.Shape, p []byte) bool {
+func carriesContent(sh shape.Shape, p []byte) bool {
 	if len(p) == 0 || p[0] != '{' {
 		return false
 	}
-	return specOf(sh).token(p)
+	return specOrChat(sh).carriesContent(p)
 }
 
-// chatToken: a chunk whose delta holds content, reasoning, a refusal or tool
-// calls (OpenAI Chat, and the relays speaking it).
 func chatToken(p []byte) bool {
 	if !bytes.Contains(p, []byte(`"delta"`)) {
 		return false
@@ -56,8 +44,6 @@ func chatToken(p []byte) bool {
 	return false
 }
 
-// anthropicToken: a content_block_delta (text, thinking, tool input), or the
-// start of a tool-use block, which names the tool.
 func anthropicToken(p []byte) bool {
 	var ev struct {
 		Type         string `json:"type"`
@@ -71,8 +57,6 @@ func anthropicToken(p []byte) bool {
 	return ev.Type == "content_block_delta" || (ev.Type == "content_block_start" && strings.HasSuffix(ev.ContentBlock.Type, "tool_use"))
 }
 
-// responsesToken: any response.*.delta event (output text, reasoning,
-// function call arguments, refusal).
 func responsesToken(p []byte) bool {
 	var ev struct {
 		Type string `json:"type"`
@@ -80,7 +64,6 @@ func responsesToken(p []byte) bool {
 	return json.Unmarshal(p, &ev) == nil && strings.HasPrefix(ev.Type, "response.") && strings.HasSuffix(ev.Type, ".delta")
 }
 
-// geminiToken: a chunk with a part holding text or a function call.
 func geminiToken(p []byte) bool {
 	var ev struct {
 		Candidates []struct {
@@ -105,8 +88,6 @@ func geminiToken(p []byte) bool {
 	return false
 }
 
-// filled reports whether a JSON value holds anything: not absent, null, an
-// empty string, array or object.
 func filled(v json.RawMessage) bool {
 	switch string(bytes.TrimSpace(v)) {
 	case "", "null", `""`, "[]", "{}":

@@ -8,8 +8,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// KEY-14: deleting a Gateway Key never removes its history: its Requests keep
-// the Caller's name and key ID, and caller=<key ID> still finds them.
 func TestDeletingAGatewayKeyKeepsItsRequests(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)

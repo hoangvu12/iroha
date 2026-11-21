@@ -14,9 +14,6 @@ import { PoolMembersTab } from "@/pages/providers/PoolMembers";
 import { PoolRouteTab } from "@/pages/providers/PoolRoute";
 import { loadedSheet, renderWithSheets, routes } from "./test-iroha";
 
-// UI ticket 11: wherever a record names another, the name is a RecordLink
-// that opens its sheet (and whose href is the URL with that sheet open).
-
 afterEach(() => vi.unstubAllGlobals());
 
 const where = () => screen.getByRole("status", { name: "Location" }).textContent;
@@ -54,13 +51,11 @@ test("each Attempt links its Upstream Key, Provider and Endpoint", async () => {
   const user = userEvent.setup();
   renderWithSheets(null, "/requests?sheet=request:req_3/attempts");
   const request = await screen.findByRole("dialog", { name: "Request fast" });
-  // The first Attempt failed, so its facts are open; its key is a link in the card's header too.
   const keys = await within(request).findAllByRole("link", { name: "team-5" });
   expect(keys.length).toBeGreaterThanOrEqual(2);
   expect(hrefOf(keys[0])).toBe("/requests?sheet=request:req_3/attempts&sheet=key:acme/team-5");
   expect(within(request).getAllByRole("link", { name: "main" }).length).toBeGreaterThanOrEqual(1);
   expect(hrefOf(within(request).getAllByRole("link", { name: "acme" })[0])).toBe("/requests?sheet=request:req_3/attempts&sheet=provider:acme");
-  // The header still opens and closes the Attempt.
   const toggle = within(request).getByRole("button", { name: "Attempt 2" });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   await user.click(toggle);
@@ -99,7 +94,6 @@ routes["GET /api/gateway-keys"] = { gateway_keys: [routes["GET /api/gateway-keys
 test("a Pool's route preview links each member's Provider, its Endpoints and its keys", async () => {
   renderWithSheets(<PoolRouteTab name="fast" pool={fastPool} onAdd={() => {}} />, "/providers/pools/fast/route");
   const route = await screen.findByRole("group", { name: "Route of fast" });
-  // The member's card names its Provider as a link; the card selects the member.
   const card = await within(route).findByRole("link", { name: "acme" });
   expect(hrefOf(card)).toBe("/providers/pools/fast/route?sheet=provider:acme");
   expect(within(route).getByRole("button", { name: "Member 1" }).getAttribute("aria-pressed")).toBe("true");
@@ -167,20 +161,15 @@ test("an Audit Entry links the record it changed", async () => {
   expect(hrefOf(within(table).getByRole("link", { name: "acme/team-5" }))).toBe(at + "key:acme/team-5");
   expect(hrefOf(within(table).getByRole("link", { name: "zeron" }))).toBe(at + "gateway-key:gk_1");
   expect(hrefOf(within(table).getByRole("link", { name: "acme/main" }))).toBe(at + "endpoint:acme/main");
-  // Several keys of one Provider: the Provider.
   expect(hrefOf(within(table).getByRole("link", { name: "acme" }))).toBe(at + "provider:acme");
-  // A Model Gap belongs to its Upstream Key.
   expect(hrefOf(within(table).getByRole("link", { name: "acme/team-6/gpt-x" }))).toBe(at + "key:acme/team-6");
-  // An Admin Token has no sheet.
   expect(within(table).queryByRole("link", { name: "ci" })).toBeNull();
 
-  // The opened entry names each record it changed as a link too.
   await user.click(within(table).getByRole("button", { name: /^Show details of 2 keys disabled/ }));
   expect(hrefOf(await within(table).findByRole("link", { name: "acme/team-6" }))).toBe(at + "key:acme/team-6");
 
   await user.click(within(table).getByRole("link", { name: "zeron" }));
   await screen.findByRole("dialog", { name: "Gateway Key zeron" });
-  // Following the link didn't open or close the row.
   expect(within(table).getAllByRole("button", { name: /^Show details of/ }).length).toBe(5);
 });
 
@@ -219,12 +208,10 @@ test("an Upstream Key's sheet links its Endpoints, gaps and Request; following o
   routes["GET /api/providers/acme/keys/team-7"] = team7;
   routes["GET /api/providers/acme/endpoints/intl"] = { ...(routes["GET /api/providers/acme/endpoints/main"] as object), id: "e2", name: "intl" };
 
-  // The old link (?key=) opens the key's sheet (UI ticket 27; it was a dialog).
   const { router } = renderWithSheets(<KeysTab handle="acme" provider={provider} adding={false} setAdding={() => {}} />, "/providers/acme/keys?key=team-7");
   const sheet = await loadedSheet("Upstream Key team-7");
   const intl = await within(sheet).findByRole("link", { name: "intl" });
   await waitFor(() => expect(where()).toBe("/providers/acme/keys?sheet=key:acme/team-7"));
-  // The key's Endpoints and its Endpoint Gaps; the Request that set its state.
   expect(hrefOf(within(sheet).getByRole("link", { name: "main" }))).toBe("/providers/acme/keys?sheet=key:acme/team-7&sheet=endpoint:acme/main");
   expect(hrefOf(intl)).toBe("/providers/acme/keys?sheet=key:acme/team-7&sheet=endpoint:acme/intl");
   expect(hrefOf(within(sheet).getByRole("link", { name: "Open the Request" }))).toBe("/providers/acme/keys?sheet=key:acme/team-7&sheet=request:req_1");
@@ -234,15 +221,11 @@ test("an Upstream Key's sheet links its Endpoints, gaps and Request; following o
   await waitFor(() => expect(where()).toBe("/providers/acme/keys?sheet=key:acme/team-7&sheet=endpoint:acme/intl"));
   expect(sheet.hasAttribute("data-top")).toBe(false);
 
-  // Back closes the Endpoint's sheet; the key's is on top again.
   await router.navigate(-1);
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Endpoint intl" })).toBeNull());
   await waitFor(() => expect(where()).toBe("/providers/acme/keys?sheet=key:acme/team-7"));
   expect(sheet.hasAttribute("data-top")).toBe(true);
 });
-
-// UI ticket 33: a model has a sheet now, so where a record names a model on a
-// Provider (the model sent, a Pool member, a key's Model Gap), it's a link.
 
 test("an Attempt's model sent and the Request's links to the model's sheet", async () => {
   const user = userEvent.setup();
@@ -253,7 +236,6 @@ test("an Attempt's model sent and the Request's links to the model's sheet", asy
   const request = await screen.findByRole("dialog", { name: "Request acme/gpt-fast" });
   expect(hrefOf(await within(request).findByRole("link", { name: "gpt-fast-2" }))).toBe("/requests?sheet=request:req_4&sheet=model:acme/gpt-fast-2");
   await user.click(within(request).getByRole("tab", { name: /Attempts/ }));
-  // A good Attempt starts folded.
   await user.click(await within(request).findByRole("button", { name: "Attempt 1" }));
   const sent = await within(request).findByRole("link", { name: "gpt-fast" });
   expect(hrefOf(sent)).toBe("/requests?sheet=request:req_4/attempts&sheet=model:acme/gpt-fast");
@@ -317,7 +299,6 @@ test("an agent finds an Attempt's toggle and its links by name, and follows one"
   const labels = entries.map((e) => e.label);
   for (const name of ["Attempt 1", "Attempt 2", "team-5", "team-6", "acme", "main"]) expect(labels).toContain(name);
 
-  // The Attempt's header names its key too, so the link is pressed by its ref.
   const link = entries.find((e) => e.label === "team-6")!;
   const result = await agent.act({ steps: [{ ref: link.ref, action: "press" }] });
   expect(result.ok, result.error?.message).toBe(true);

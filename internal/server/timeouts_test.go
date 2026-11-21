@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// A server-wide read, write or idle timeout would cut long streams (a model
-// thinking for minutes); only the request headers are time-limited.
 func TestNoServerWideTimeoutCutsLongStreams(t *testing.T) {
 	s := &Server{log: slog.New(slog.DiscardHandler)}
 	h := s.newHTTPServer()

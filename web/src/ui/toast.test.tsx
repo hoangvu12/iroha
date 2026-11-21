@@ -25,8 +25,7 @@ test("an action on a toast runs and closes it", async () => {
   act(() => void notify.success("Key deleted", { label: "Undo", onClick: undo }));
   await user.click(await screen.findByRole("button", { name: "Undo" }));
   expect(undo).toHaveBeenCalledOnce();
-  // Not UI SDK's announcer region, which keeps the last message read out; and
-  // the toast's exit can outlast waitFor's 1 s default on a busy test run.
+  // UI SDK's announcer keeps the last message read out; the exit can outlast waitFor's 1 s default.
   await waitFor(() => expect(screen.queryByText("Key deleted", { ignore: "script, style, [data-ui-sdk-announcer]" })).toBeNull(), { timeout: 4000 });
 });
 

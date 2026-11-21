@@ -2,10 +2,6 @@ import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
 import { useMediaQuery } from "@/lib/media";
 
-// Light and dark use the same tokens (src/styles/index.css). The Owner's
-// choice is kept in this browser; "system" follows the OS. index.html
-// applies it before the first paint.
-
 export type ThemePref = "system" | "light" | "dark";
 const KEY = "iroha.theme";
 
@@ -21,16 +17,8 @@ function readPref(): ThemePref {
   }
 }
 
-/** The page background (--bg) of each theme: the phone's browser bar takes it (theme-color in index.html). */
 const BAR_COLOUR = { light: "#ffffff", dark: "#0e0e10" } as const;
 
-/**
- * Flips the colours in one step. Hover-coloured parts have a colour
- * transition, so without this they fade 150 ms behind the rest of the page.
- * `theme-switching` (styles/index.css) turns every transition off; the
- * forced style read applies the new colours with it on, and it comes off
- * once a frame has been drawn in the new colours.
- */
 function applyTheme(resolved: "light" | "dark") {
   const html = document.documentElement;
   html.classList.add("theme-switching");
@@ -57,9 +45,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     try {
       if (p === "system") localStorage.removeItem(KEY);
       else localStorage.setItem(KEY, p);
-    } catch {
-      /* private mode: the choice lasts this visit */
-    }
+    } catch {}
   };
 
   return <ThemeContext.Provider value={{ pref, resolved, setPref }}>{children}</ThemeContext.Provider>;

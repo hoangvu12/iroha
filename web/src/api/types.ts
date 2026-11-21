@@ -1,14 +1,9 @@
-// Types shared by every resource of the admin API. They mirror the Go types
-// (and the schemas in GET /api/openapi.json); resource-specific types live
-// next to the page that uses them, or in src/api/<resource>.ts.
-
 export type Actor = {
   kind: "admin_token" | "owner_session";
   id: string;
-  name: string; // Admin Token name, or "Owner"
+  name: string;
 };
 
-/** One record a change touched (audit.Change). */
 export type Change = {
   resource: string;
   id: string;
@@ -19,7 +14,6 @@ export type Change = {
   after: unknown;
 };
 
-/** The audit part of every mutation response (audit.Result). */
 export type AuditResult = {
   dry_run: boolean;
   outcome: "created" | "updated" | "deleted" | "unchanged";

@@ -14,9 +14,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/modelmeta"
 )
 
-// USE-71, USE-43: a models.dev base that never answers is given up after
-// FetchTimeout per file (on the injected clock) and the next base is read,
-// so a lookup never hangs.
 func TestAHungModelsDevBaseIsGivenUpAfterTheFetchTimeout(t *testing.T) {
 	arrived := make(chan string, 4)
 	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

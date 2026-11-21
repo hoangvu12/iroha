@@ -10,7 +10,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// order renders a plan as "key@endpoint:model" items.
 func order(r planner.Result) string {
 	var parts []string
 	for _, c := range r.Candidates {
@@ -189,11 +188,11 @@ func TestKeyStatesExcludeKeys(t *testing.T) {
 	disabled := k("off", func(k *planner.Key) { k.Disabled = true })
 	invalid := k("bad", func(k *planner.Key) { k.Invalid = true })
 	cooling := k("cool", func(k *planner.Key) { k.CoolingUntil = later })
-	cooled := k("was", func(k *planner.Key) { k.CoolingUntil = now.Add(-time.Second) }) // past cooling: usable
+	cooled := k("was", func(k *planner.Key) { k.CoolingUntil = now.Add(-time.Second) })
 	modelCool := k("mc", func(k *planner.Key) { k.ModelCooling = map[string]time.Time{"glm": soon} })
 	ok := k("ok", func(*planner.Key) {})
 	gap := k("gap", func(k *planner.Key) { k.ModelGaps = map[string]time.Time{"glm": later} })
-	oldGap := k("old", func(k *planner.Key) { k.ModelGaps = map[string]time.Time{"glm": now} }) // expired: usable
+	oldGap := k("old", func(k *planner.Key) { k.ModelGaps = map[string]time.Time{"glm": now} })
 
 	cases := []struct {
 		name      string
@@ -218,9 +217,6 @@ func TestKeyStatesExcludeKeys(t *testing.T) {
 			"", "off:disabled gap:model_gap:glm", planner.ModelGap, later},
 		{"cooling beats a Model Gap", []planner.Endpoint{chat}, []planner.Key{gap, modelCool},
 			"", "gap:model_gap:glm mc:cooling_model:glm", planner.Cooling, soon},
-		// FAIL-104: a cooling that ended with no success since puts the key
-		// after keys with no recent refusal; a past cooling for another
-		// model does not.
 		{"keys back from cooling go after the others", []planner.Endpoint{chat},
 			[]planner.Key{cooled, k("mcp", func(k *planner.Key) { k.ModelCooling = map[string]time.Time{"glm": now.Add(-time.Minute)} }), ok,
 				k("oth", func(k *planner.Key) { k.ModelCooling = map[string]time.Time{"other": now.Add(-time.Minute)} })},
@@ -289,8 +285,6 @@ func TestKnownCarriersGoFirstAndOthersStay(t *testing.T) {
 		{"carrying is judged per Endpoint on the wire model", []planner.Endpoint{a, b},
 			[]planner.Key{carrying("k1", "glm"), carrying("k2", "glm-b")}, planner.Fixed(0),
 			"k1@a:glm k2@b:glm-b k1@b:glm-b k2@a:glm"},
-		// FAIL-104: health first, carriers first within each health group,
-		// round-robin kept within each of the four groups.
 		{"healthy keys before carriers back from cooling", []planner.Endpoint{a},
 			[]planner.Key{back(carrying("k1", "glm")), carrying("k2"), carrying("k3", "glm"), back(carrying("k4")),
 				carrying("k5", "glm"), back(carrying("k6", "glm")), carrying("k7")}, planner.Fixed(2),
@@ -321,7 +315,6 @@ func TestAnEndpointGapSkipsTheKeyOnThatEndpointOnly(t *testing.T) {
 		t.Fatalf("skipped = %+v", r.Skipped)
 	}
 
-	// Gapped on every Endpoint it may use, and nothing else to try.
 	ks = keys("k1")
 	ks[0].EndpointGaps = map[string]bool{"ep_b": true, "ep_a": true}
 	p.Keys = ks
@@ -329,7 +322,6 @@ func TestAnEndpointGapSkipsTheKeyOnThatEndpointOnly(t *testing.T) {
 	if r.Empty == nil || r.Empty.Code != planner.NoUsableKey || !strings.Contains(r.Empty.Message, "Endpoint Gap") || len(r.Skipped) != 2 {
 		t.Fatalf("empty = %+v skipped %+v", r.Empty, r.Skipped)
 	}
-	// A disabled key reports disabled, not its gaps.
 	ks[0].Disabled = true
 	r = planner.Plan(planner.Request{Shape: shape.OpenAIChat, Model: "m", Now: time.Now()}, []planner.Provider{p}, planner.Fixed(0))
 	if len(r.Skipped) != 1 || r.Skipped[0].Reason != planner.SkipDisabled {

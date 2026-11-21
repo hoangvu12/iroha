@@ -66,8 +66,6 @@ func readRequest(t *testing.T, srv *testkit.Server, id string) requests.Request 
 	return r
 }
 
-// arrearage is DashScope's answer for an account in arrears: a 400 that the
-// built-in rules read as the request's fault.
 func arrearage() testkit.Responder {
 	return testkit.JSON(400, map[string]any{"code": "Arrearage", "message": "Access denied, please make sure your account is in good standing."})
 }
@@ -92,7 +90,6 @@ func TestBuiltinRulesAreListedOverriddenByNameAndNeverDeleted(t *testing.T) {
 		t.Fatalf("effects: %+v / %+v / %+v", rl, br, inv)
 	}
 
-	// Built-ins cannot be deleted.
 	e := srv.Admin.Delete("/api/rules/rate-limited").Expect(409).Err()
 	if e.Code != "builtin_rule" || !strings.Contains(e.Hint, "/api/rules/rate-limited/disable") {
 		t.Fatalf("delete built-in: %+v", e)
@@ -100,9 +97,8 @@ func TestBuiltinRulesAreListedOverriddenByNameAndNeverDeleted(t *testing.T) {
 	srv.Admin.Delete("/api/rules/nope").Expect(404)
 	srv.Admin.Patch("/api/rules/nope", map[string]any{"enabled": false}).Expect(404)
 
-	// Overriding by name keeps the fields not sent.
 	var over failurerules.RuleResult
-	srv.Admin.Post("/api/rules", map[string]any{"name": "rate-limited", "outcome": "cooling_key", "cooling_seconds": 120}).Expect(200).JSON(&over)
+	srv.Admin.Put("/api/rules/rate-limited", map[string]any{"outcome": "cooling_key", "cooling_seconds": 120}).Expect(200).JSON(&over)
 	r := over.Rule
 	if over.Outcome != "updated" || over.AuditEntry == "" || r.Source != failurerules.SourceOwner || r.Outcome != rules.CoolingKey ||
 		!slices.Equal(r.Status, []string{"429"}) || r.KeyEffect != "Cool 2 min" || r.Overrides == nil || r.Overrides.Outcome != rules.CoolingKeyModel ||
@@ -113,14 +109,11 @@ func TestBuiltinRulesAreListedOverriddenByNameAndNeverDeleted(t *testing.T) {
 		t.Fatalf("changes = %+v", over.Changes)
 	}
 	var again failurerules.RuleResult
-	srv.Admin.Post("/api/rules", map[string]any{"name": "rate-limited", "outcome": "cooling_key"}).Expect(200).JSON(&again)
+	srv.Admin.Put("/api/rules/rate-limited", map[string]any{"name": "rate-limited", "outcome": "cooling_key"}).Expect(200).JSON(&again)
 	if again.Outcome != "unchanged" || again.AuditEntry != "" {
 		t.Fatalf("repeat = %+v", again)
 	}
 
-	// A new rule is tried before the built-ins of its group; rules limited to
-	// a Provider or host (the Owner's first, then the built-in quirks) before
-	// global ones.
 	scoped := 0
 	for _, r := range rules.Builtin {
 		if r.Scoped() {
@@ -146,7 +139,6 @@ func TestBuiltinRulesAreListedOverriddenByNameAndNeverDeleted(t *testing.T) {
 		t.Fatalf("read = %+v", one)
 	}
 
-	// Switching a built-in off keeps it built-in; deleting an override brings the built-in back.
 	var off failurerules.RuleResult
 	srv.Admin.Post("/api/rules/server-error/disable", nil).Expect(200).JSON(&off)
 	if off.Rule.Enabled || off.Rule.Source != failurerules.SourceBuiltin || off.Outcome != "updated" {
@@ -164,13 +156,12 @@ func TestBuiltinRulesAreListedOverriddenByNameAndNeverDeleted(t *testing.T) {
 	}
 	srv.Admin.Get("/api/rules/arrears").Expect(404)
 
-	// Every change wrote an Audit Entry, and reverting one restores the rule.
 	entries := ruleEntries(t, srv)
 	var actions []string
 	for _, e := range entries {
 		actions = append(actions, e.Action)
 	}
-	want := []string{"failure_rule.delete", "failure_rule.delete", "failure_rule.disable", "failure_rule.create", "failure_rule.create", "failure_rule.create"}
+	want := []string{"failure_rule.delete", "failure_rule.delete", "failure_rule.disable", "failure_rule.create", "failure_rule.create", "failure_rule.update"}
 	if !slices.Equal(actions, want) {
 		t.Fatalf("audit actions = %v", actions)
 	}
@@ -192,12 +183,12 @@ func TestBuiltinRulesAreListedOverriddenByNameAndNeverDeleted(t *testing.T) {
 func TestInvalidRulesAreRefusedWithTheReason(t *testing.T) {
 	srv := testkit.Start(t)
 	for _, body := range []map[string]any{
-		{"name": "x", "status": []string{"429"}},                       // no outcome
-		{"name": "x", "outcome": "invalid"},                            // nothing to match
-		{"name": "x", "body": "(", "outcome": "invalid"},               // bad regexp
-		{"name": "x", "status": []string{"6xx"}, "outcome": "invalid"}, // bad status
+		{"name": "x", "status": []string{"429"}},
+		{"name": "x", "outcome": "invalid"},
+		{"name": "x", "body": "(", "outcome": "invalid"},
+		{"name": "x", "status": []string{"6xx"}, "outcome": "invalid"},
 		{"name": "x", "status": []string{"500"}, "outcome": "retry_elsewhere", "cooling_seconds": 5},
-		{"name": "x y", "status": []string{"500"}, "outcome": "retry_elsewhere"}, // bad name
+		{"name": "x y", "status": []string{"500"}, "outcome": "retry_elsewhere"},
 	} {
 		if e := srv.Admin.Post("/api/rules", body).Expect(400).Err(); e.Hint == "" || e.Message == "" {
 			t.Errorf("%v: %+v", body, e)
@@ -208,14 +199,12 @@ func TestInvalidRulesAreRefusedWithTheReason(t *testing.T) {
 		t.Fatalf("unknown provider: %+v", e)
 	}
 
-	// A change of outcome away from cooling clears the cooling fields.
 	srv.Admin.Post("/api/rules", map[string]any{"name": "slow", "status": []string{"429"}, "outcome": "cooling_key", "cooling_seconds": 30}).Expect(201)
 	var res failurerules.RuleResult
 	srv.Admin.Patch("/api/rules/slow", map[string]any{"outcome": "retry_elsewhere"}).Expect(200).JSON(&res)
 	if res.Rule.Outcome != rules.RetryElsewhere || res.Rule.CoolingSeconds != 0 {
 		t.Fatalf("patch = %+v", res.Rule)
 	}
-	// Provider IDs are stored as the handle.
 	var p struct {
 		Provider struct{ ID string } `json:"provider"`
 	}
@@ -230,10 +219,9 @@ func TestRuleChangesApplyToTheNextAttempt(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b", "sk-test-c")
-	srv.NoConversationIDs("acme") // the 400s are judged by the rules alone
+	srv.NoConversationIDs("acme")
 	c := caller(t, srv)
 
-	// Built-in: a 400 is the request's fault.
 	up.Enqueue(arrearage())
 	if e := c.Post(chatPath, chat()).Expect(400).Err(); e.Code != "upstream_rejected" {
 		t.Fatalf("before the rule: %+v", e)
@@ -251,7 +239,6 @@ func TestRuleChangesApplyToTheNextAttempt(t *testing.T) {
 	up.Enqueue(arrearage())
 	c.Post(chatPath, chat()).Expect(400)
 
-	// A revert is a change too.
 	srv.Admin.Post("/api/audit-entries/"+off["audit_entry"].(string)+"/revert", nil).Expect(200)
 	up.Enqueue(arrearage(), up.Text("hello"))
 	resp = c.Post(chatPath, chat()).Expect(200)
@@ -259,7 +246,6 @@ func TestRuleChangesApplyToTheNextAttempt(t *testing.T) {
 		t.Fatalf("after revert: %+v", r.Attempts)
 	}
 
-	// Rules survive a restart.
 	srv.Restart()
 	var v failurerules.RuleView
 	srv.Admin.Get("/api/rules/arrears").Expect(200).JSON(&v)
@@ -273,15 +259,14 @@ func TestDryRunReplaysRecentFailedAttemptsAndHitsAreCounted(t *testing.T) {
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a")
 	addProvider(t, srv, "other", up.URL(), "sk-test-o")
-	srv.NoConversationIDs("acme") // the 400s are judged by the rules alone
+	srv.NoConversationIDs("acme")
 	c := caller(t, srv)
 	for range 3 {
 		up.Enqueue(arrearage())
 		c.Post(chatPath, chat()).Expect(400)
 	}
-	// The 5xx is replayed once on the same key, after a short pause.
 	srv.SkipShortWaits(time.Second)
-	up.Enqueue(up.Error(500, "boom"), up.Error(500, "boom")) // replayed once on the same key
+	up.Enqueue(up.Error(500, "boom"), up.Error(500, "boom"))
 	c.Post(chatPath, chat()).Expect(502)
 	srv.Clock.Advance(time.Minute)
 
@@ -305,26 +290,22 @@ func TestDryRunReplaysRecentFailedAttemptsAndHitsAreCounted(t *testing.T) {
 		ex.After != (failurerules.ReplayDecision{Rule: "arrears", Outcome: rules.Invalid}) {
 		t.Fatalf("example = %+v", ex)
 	}
-	// Nothing was written.
 	srv.Admin.Get("/api/rules/arrears").Expect(404)
 	if n := len(ruleEntries(t, srv)); n != 0 {
 		t.Fatalf("audit entries after a dry run: %d", n)
 	}
-	// A rule limited to another Provider changes nothing here.
 	var elsewhere failurerules.RuleResult
 	srv.Admin.Post("/api/rules?dry_run=true", map[string]any{"name": "arrears", "provider": "other", "code": []string{"arrearage"}, "outcome": "invalid"}).
 		Expect(200).JSON(&elsewhere)
 	if elsewhere.Replay.Changed != 0 || elsewhere.Replay.Attempts != 5 {
 		t.Fatalf("other provider replay = %+v", elsewhere.Replay)
 	}
-	// Disabling a rule replays too.
 	var dis failurerules.RuleResult
 	srv.Admin.Post("/api/rules/bad-request/disable?dry_run=true", nil).Expect(200).JSON(&dis)
 	if dis.Replay.Changed != 3 || dis.Rule.Enabled || dis.Replay.Examples[0].After != (failurerules.ReplayDecision{Outcome: rules.FailRequest}) {
-		t.Fatalf("disable replay = %+v", dis.Replay) // with no rule a 400 still fails the Request
+		t.Fatalf("disable replay = %+v", dis.Replay)
 	}
 
-	// Hits: per rule, on the Provider asked for, within the window.
 	srv.Admin.Post("/api/rules", map[string]any{"name": "other-quota", "provider": "other", "status": []string{"429"}, "outcome": "cooling_key"}).Expect(201)
 	l := list(t, srv, "?provider=acme")
 	if _, ok := find(l, "other-quota"); ok || l.Provider != "acme" {

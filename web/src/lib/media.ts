@@ -12,7 +12,6 @@ export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches, () => false);
 }
 
-/** Phones get the bottom tab bar and full-page chat (C30-C33). Matches Tailwind's md breakpoint. */
 export const PHONE_QUERY = "(max-width: 767px)";
 
 export function useIsPhone(): boolean {

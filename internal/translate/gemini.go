@@ -13,41 +13,29 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// geminiCodec is Gemini generateContent. Its request body names no model
-// and no stream: both are in the URL (models/{model}:generateContent or
-// :streamGenerateContent), which the Gateway builds; Options.Stream tells
-// the translation that a Gemini Caller asked for a stream.
-var geminiCodec = &codec{
-	shape:       shape.Gemini,
-	format:      types.RelayFormatGemini,
-	request:     func() any { return &dto.GeminiChatRequest{} },
+var geminiShape = shapeFormat{shape.Gemini, types.RelayFormatGemini}
+
+var geminiEndpoint = &endpointCodec{
+	shapeFormat: geminiShape,
 	answer:      func() any { return &dto.GeminiChatResponse{} },
 	event:       func() any { return &dto.GeminiChatResponse{} },
-	setModel:    func(any, string) {}, // the model is in the URL path
-	readFormat:  readGeminiFormat,
 	writeFormat: writeGeminiFormat,
-	noteRequest: func(req any, t *Translation) {
-		if tc := req.(*dto.GeminiChatRequest).GenerationConfig.ThinkingConfig; tc != nil && tc.IncludeThoughts != nil {
-			t.thoughts = *tc.IncludeThoughts
+
+	declaredTools: func(req map[string]any) []string {
+		var names []string
+		for _, d := range functionDeclarations(req) {
+			names = append(names, str(d["name"]))
 		}
+		return names
 	},
 
 	prepareRequest: func(req map[string]any, t *Translation) {
 		if tools, ok := req["tools"].([]any); ok && len(tools) == 0 {
 			delete(req, "tools")
 		}
-		var decls []map[string]any
-		for _, tool := range list(req["tools"]) {
-			for _, d := range list(obj(tool)["functionDeclarations"]) {
-				decls = append(decls, obj(d))
-			}
-		}
-		for _, d := range decls {
-			t.names.reserve(str(d["name"]))
-		}
-		for _, d := range decls {
+		for _, d := range functionDeclarations(req) {
 			rename(d, "name", t.names.safe)
-			if v, ok := d["parameters"]; ok && v == nil { // a tool without parameters
+			if v, ok := d["parameters"]; ok && v == nil {
 				delete(d, "parameters")
 			}
 		}
@@ -84,7 +72,7 @@ var geminiCodec = &codec{
 			} `json:"promptFeedback"`
 		}
 		if json.Unmarshal(data, &v) != nil {
-			return upstreamEvent{feed: true} // the converter reports it
+			return upstreamEvent{feed: true}
 		}
 		if v.Error != nil {
 			return upstreamEvent{err: &UpstreamError{Type: v.Error.Status, Message: v.Error.Message}}
@@ -100,12 +88,23 @@ var geminiCodec = &codec{
 		}
 		return ev
 	},
+}
+
+var geminiCaller = &callerCodec{
+	shapeFormat: geminiShape,
+	request:     func() any { return &dto.GeminiChatRequest{} },
+	setModel:    func(any, string) {}, // the model is in the URL path
+	readFormat:  readGeminiFormat,
+	noteRequest: func(req any, t *Translation) {
+		if tc := req.(*dto.GeminiChatRequest).GenerationConfig.ThinkingConfig; tc != nil && tc.IncludeThoughts != nil {
+			t.thoughts = *tc.IncludeThoughts
+		}
+	},
 
 	tidyAnswer: func(m map[string]any, t *Translation, _ *dto.Usage) {
 		tidyGemini(m, t)
-		// What RelayKit's converter from Chat drops: reasoning (as Gemini
-		// sends it: thought parts, only when the Caller asked) and the cached
-		// and reasoning token counts.
+		// RelayKit's converter from Chat drops reasoning and the cached and
+		// reasoning token counts.
 		for _, c := range list(t.chat["choices"]) {
 			c := obj(c)
 			r := str(obj(c["message"])["reasoning_content"])
@@ -125,12 +124,20 @@ var geminiCodec = &codec{
 		}
 	},
 
-	newWriter: func(t *Translation, _ StreamOptions) streamWriter { return &geminiWriter{t: t} },
-	chatHop:   true,
+	newWriter:      func(t *Translation, _ StreamOptions) streamWriter { return &geminiWriter{t: t} },
+	answersViaChat: true,
 }
 
-// fileURIs turns a URL carried through RelayKit (media.go) into a Gemini
-// fileData part, which Gemini fetches itself.
+func functionDeclarations(req map[string]any) []map[string]any {
+	var decls []map[string]any
+	for _, tool := range list(req["tools"]) {
+		for _, d := range list(obj(tool)["functionDeclarations"]) {
+			decls = append(decls, obj(d))
+		}
+	}
+	return decls
+}
+
 func fileURIs(part map[string]any) {
 	in := obj(part["inlineData"])
 	if in == nil {
@@ -148,8 +155,6 @@ func fileURIs(part map[string]any) {
 	part["fileData"] = map[string]any{"mimeType": mt, "fileUri": u}
 }
 
-// guessMIME names the media type of a URL from its file extension; an
-// image part without one is taken for JPEG.
 func guessMIME(raw string) string {
 	p := raw
 	if u, err := url.Parse(raw); err == nil {
@@ -162,10 +167,6 @@ func guessMIME(raw string) string {
 	return "image/jpeg"
 }
 
-// tidyGemini fixes one Gemini answer or stream chunk converted for a Gemini
-// Caller: the Caller's model as modelVersion, the answer's id, the Caller's
-// tool names, a usage object without new-api's billing fields, and no null
-// or empty fields Gemini itself never sends.
 func tidyGemini(m map[string]any, t *Translation) {
 	m["modelVersion"] = t.o.Model
 	if str(m["responseId"]) == "" {
@@ -192,9 +193,6 @@ func tidyGemini(m map[string]any, t *Translation) {
 	}
 }
 
-// geminiUsage is a usageMetadata object as Gemini reports it: the token
-// counts it has, without zero detail counts or new-api's billing fields.
-// Nothing counted at all is no usage.
 func geminiUsage(u map[string]any) map[string]any {
 	out := map[string]any{}
 	for _, k := range []string{"promptTokenCount", "candidatesTokenCount", "totalTokenCount", "thoughtsTokenCount", "cachedContentTokenCount", "toolUsePromptTokenCount"} {
@@ -213,9 +211,8 @@ func geminiUsage(u map[string]any) map[string]any {
 	return out
 }
 
-// geminiUsageFromChat is a Chat usage object as Gemini's usageMetadata:
-// reasoning tokens are Gemini's thoughts, counted apart from the
-// candidates.
+// Gemini counts thoughts apart from the candidates; Chat counts reasoning
+// inside completion_tokens.
 func geminiUsageFromChat(u map[string]any) map[string]any {
 	if u == nil || u["prompt_tokens"] == nil && u["completion_tokens"] == nil {
 		return nil
@@ -236,7 +233,6 @@ func geminiUsageFromChat(u map[string]any) map[string]any {
 	return out
 }
 
-// num reads a JSON number decoded with UseNumber (or a float64).
 func num(v any) int64 {
 	switch n := v.(type) {
 	case json.Number:
@@ -252,21 +248,13 @@ func num(v any) int64 {
 	return 0
 }
 
-// geminiWriter writes Gemini stream chunks as server-sent events, as
-// Gemini answers streamGenerateContent with alt=sse. Chunks that carry
-// nothing (no part, no finish reason, no usage) are dropped. A Gemini
-// stream has no terminator. It reads the Chat chunks the stream was
-// converted from (hop.go): reasoning becomes thought parts, and usage
-// keeps its cached and reasoning counts.
-//
-// The chunk with the finish reason is held until the next one: Chat sends
-// usage in a chunk of its own after the finish, and Gemini Callers expect
-// it on the last chunk with the candidate (an SDK printing chunk.text of a
-// candidate-less chunk prints "None").
+// Chat sends usage in its own chunk after the finish, but Gemini SDKs
+// expect it on the last chunk with the candidate (chunk.text of a
+// candidate-less chunk prints "None"), so the finish chunk is held.
 type geminiWriter struct {
 	t       *Translation
-	usage   map[string]any // the Chat usage seen last
-	pending map[string]any // the finish chunk, held
+	usage   map[string]any
+	pending map[string]any
 }
 
 func (w *geminiWriter) chat(m map[string]any) []byte {
@@ -301,7 +289,7 @@ func (w *geminiWriter) write(m map[string]any) []byte {
 	var out []byte
 	if p := w.pending; p != nil {
 		w.pending = nil
-		if len(list(m["candidates"])) == 0 { // usage after the finish: one chunk
+		if len(list(m["candidates"])) == 0 {
 			if m["usageMetadata"] != nil {
 				p["usageMetadata"] = m["usageMetadata"]
 			}

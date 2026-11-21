@@ -12,26 +12,26 @@ import (
 	"github.com/hoangvu12/iroha/internal/shape"
 )
 
-// anthropicCodec is Anthropic Messages.
-var anthropicCodec = &codec{
-	shape:       shape.AnthropicMessages,
-	format:      types.RelayFormatClaude,
-	request:     func() any { return &dto.ClaudeRequest{} },
+var anthropicShape = shapeFormat{shape.AnthropicMessages, types.RelayFormatClaude}
+
+var anthropicEndpoint = &endpointCodec{
+	shapeFormat: anthropicShape,
 	answer:      func() any { return &dto.ClaudeResponse{} },
 	event:       func() any { return &dto.ClaudeResponse{} },
-	setModel:    func(req any, model string) { req.(*dto.ClaudeRequest).Model = model },
-	readFormat:  readAnthropicFormat,
 	writeFormat: writeAnthropicFormat,
-	rewrite:     searchResultsAsText,
 
-	prepareRequest: func(req map[string]any, t *Translation) {
-		tools := list(req["tools"])
-		for _, tool := range tools {
+	declaredTools: func(req map[string]any) []string {
+		var names []string
+		for _, tool := range list(req["tools"]) {
 			if isCustomTool(obj(tool)) {
-				t.names.reserve(str(obj(tool)["name"]))
+				names = append(names, str(obj(tool)["name"]))
 			}
 		}
-		for _, tool := range tools {
+		return names
+	},
+
+	prepareRequest: func(req map[string]any, t *Translation) {
+		for _, tool := range list(req["tools"]) {
 			if tool := obj(tool); isCustomTool(tool) {
 				rename(tool, "name", t.names.safe)
 			}
@@ -46,7 +46,7 @@ var anthropicCodec = &codec{
 					rename(block, "name", t.names.safe)
 				}
 				urlSources(block)
-				for _, inner := range list(block["content"]) { // a tool_result's content
+				for _, inner := range list(block["content"]) {
 					urlSources(obj(inner))
 				}
 			}
@@ -65,7 +65,7 @@ var anthropicCodec = &codec{
 			} `json:"error"`
 		}
 		if json.Unmarshal(data, &v) != nil {
-			return upstreamEvent{feed: true} // the converter reports it
+			return upstreamEvent{feed: true}
 		}
 		switch v.Type {
 		case "ping":
@@ -79,6 +79,14 @@ var anthropicCodec = &codec{
 		}
 		return upstreamEvent{feed: true}
 	},
+}
+
+var anthropicCaller = &callerCodec{
+	shapeFormat: anthropicShape,
+	request:     func() any { return &dto.ClaudeRequest{} },
+	setModel:    func(req any, model string) { req.(*dto.ClaudeRequest).Model = model },
+	readFormat:  readAnthropicFormat,
+	rewrite:     searchResultsAsText,
 
 	tidyAnswer: func(m map[string]any, t *Translation, _ *dto.Usage) {
 		m["model"] = t.o.Model
@@ -88,6 +96,7 @@ var anthropicCodec = &codec{
 		if u := obj(m["usage"]); u != nil {
 			m["usage"] = anthropicUsage(u)
 		}
+		t.writeCacheUsage(obj(m["usage"]))
 		if _, ok := m["stop_sequence"]; !ok {
 			m["stop_sequence"] = nil
 		}
@@ -105,15 +114,12 @@ var anthropicCodec = &codec{
 	newWriter: func(t *Translation, _ StreamOptions) streamWriter { return &anthropicWriter{t: t} },
 }
 
-// isCustomTool reports whether an Anthropic tool is one the Caller defined
-// (no type, or "custom"), as opposed to a server tool whose name is fixed.
+// Anthropic server tools have a type and a fixed name.
 func isCustomTool(tool map[string]any) bool {
 	typ := str(tool["type"])
 	return tool != nil && (typ == "" || typ == "custom")
 }
 
-// urlSources turns a URL carried through RelayKit (media.go) back into an
-// Anthropic URL source.
 func urlSources(block map[string]any) {
 	src := obj(block["source"])
 	if src == nil || str(src["type"]) != "base64" {
@@ -124,20 +130,16 @@ func urlSources(block map[string]any) {
 	}
 }
 
-// searchResultsAsText turns every search_result block of an Anthropic
-// request (in a message or in a tool_result's content) into a text block
-// naming its title and source, ahead of its text: RelayKit's request DTO
-// cannot hold the block (its source is a string), and no other Shape has
-// one, but the model should still read the RAG context. Citations of it
-// exist only in Anthropic answers, so nothing is lost there. Only the
-// messages are re-encoded; the rest of the body keeps its bytes.
+// RelayKit's request DTO cannot hold a search_result block (its source
+// is a string), so each one becomes a text block before the body is
+// decoded.
 func searchResultsAsText(body []byte) []byte {
 	if !bytes.Contains(body, []byte(`"search_result"`)) {
 		return body
 	}
 	var top map[string]json.RawMessage
 	if json.Unmarshal(body, &top) != nil {
-		return body // decoding reports it
+		return body
 	}
 	dec := json.NewDecoder(bytes.NewReader(top["messages"]))
 	dec.UseNumber()
@@ -204,13 +206,9 @@ func searchResultText(b map[string]any) map[string]any {
 	return out
 }
 
-// anthropicStopReasons are the stop reasons Anthropic's SDKs know.
 var anthropicStopReasons = map[string]bool{"end_turn": true, "max_tokens": true, "stop_sequence": true, "tool_use": true,
 	"pause_turn": true, "refusal": true, "model_context_window_exceeded": true}
 
-// knownReason is a stop or finish reason the Caller's Shape knows: another
-// Shape's reason the converter passed on unmapped becomes def. Absent (nil)
-// stays absent.
 func knownReason(v any, known map[string]bool, def string) any {
 	if s, ok := v.(string); ok && !known[s] {
 		return def
@@ -218,14 +216,10 @@ func knownReason(v any, known map[string]bool, def string) any {
 	return v
 }
 
-// anthropicUsage is a usage object as Anthropic reports it, without
-// new-api's billing fields.
 func anthropicUsage(u map[string]any) map[string]any {
 	return pick(u, "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 }
 
-// anthropicWriter writes Anthropic events with their event names, naming
-// the Caller's model in message_start.
 type anthropicWriter struct{ t *Translation }
 
 func (w *anthropicWriter) write(m map[string]any) []byte {

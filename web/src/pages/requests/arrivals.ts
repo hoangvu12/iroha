@@ -1,20 +1,6 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
 
-// Requests arriving live (UI ticket 18, architecture.md "UI motion system"):
-// the only arrival motion in the app. The rows of one poll that land in view
-// rise by --motion-shift-sm and fade in over --duration-list-in, all together
-// (no stagger), and their background flashes --info-tint back to the row's own
-// colour over --duration-flash. Rows that land out of view (DataTable holds the
-// view while the reader is scrolled down or pointing at the rows) don't enter:
-// each flashes once, the first time it comes into view (the "N new" pill, a
-// scroll), so the reader still sees which are new. Under reduced motion nothing
-// moves: the fade and the colour flash stay.
-//
-// WAAPI, so the values are read from the tokens (once per page). Rows are found
-// under `box` by `data-row-id` (refs inside DataTable's Skeleton don't hold).
-
 // Read once per page: a style read right after rows were added would recompute the page's styles.
-// (Reduced motion is checked on its own each time, so a cached shift is fine.)
 let cached: { listIn: number; flash: number; easing: string; shift: string } | undefined;
 function tokens() {
   if (cached) return cached;
@@ -26,15 +12,12 @@ function tokens() {
     return Number.isFinite(n) ? (v.endsWith("ms") ? n : n * 1000) : 0;
   };
   const t = { listIn: ms("--duration-list-in"), flash: ms("--duration-flash"), easing: token("--ease-out"), shift: token("--motion-shift-sm") };
-  // Only keep values that came from the stylesheet (a test may set them later).
   if (t.flash) cached = t;
   return t;
 }
 
 function inView(el: HTMLElement): boolean {
   const r = el.getBoundingClientRect();
-  // The page scrolls the rows (UI ticket 25); the table's region only scrolls sideways.
-  // Under the table's header (stuck to the window's top once the table's top has passed it), inside the table and the window.
   const scroller = el.closest<HTMLElement>("[role=region]");
   const box = scroller?.getBoundingClientRect();
   const header = scroller?.querySelector("thead")?.getBoundingClientRect().height ?? 0;
@@ -45,7 +28,6 @@ function inView(el: HTMLElement): boolean {
 
 function flash(el: Element) {
   if (!tokens().easing) return;
-  // One keyframe at the start: the end is the row's own background (selected, a failed row's red tint).
   el.animate?.([{ backgroundColor: "var(--info-tint)", offset: 0 }], { duration: tokens().flash, easing: tokens().easing });
 }
 
@@ -54,13 +36,12 @@ export function useArrivals(box: RefObject<HTMLElement | null>, added: Set<strin
   const io = useRef<IntersectionObserver | null>(null);
   useEffect(() => () => io.current?.disconnect(), []);
 
-  // After DataTable's own layout effect has held the view, before the frame is painted.
   useLayoutEffect(() => {
     const fresh = [...added].filter((id) => !seen.current.has(id));
     if (fresh.length === 0) return;
     for (const id of fresh) seen.current.add(id);
     const { listIn, easing, shift } = tokens();
-    if (!easing) return; // no stylesheet, no motion
+    if (!easing) return;
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     for (const id of fresh) {
       const el = box.current?.querySelector<HTMLElement>(`[data-rows] > [data-row-id="${CSS.escape(id)}"]`);
@@ -80,7 +61,6 @@ export function useArrivals(box: RefObject<HTMLElement | null>, added: Set<strin
             flash(e.target);
           }
         },
-        // The implicit root: the window, clipped by the table's sideways scroller.
         { threshold: 0.5 },
       );
       io.current.observe(el);

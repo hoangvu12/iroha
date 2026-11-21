@@ -1,13 +1,3 @@
-// Package failurerules manages Failure Rules through the admin API: the
-// Owner's rules (new ones, overrides of built-ins by name, built-ins switched
-// off) in the failure_rules table, audited as the failure_rule resource; the
-// live rules.Set the Gateway classifies with (Store.Set), reloaded whenever
-// the table changes; hit counts from recorded Attempts; and the replay of
-// recent failed Attempts a dry run reports.
-//
-// The engine itself is internal/rules (pure). A Failure Rule is addressed by
-// its name, which is also its audit record ID, so built-in rules that have
-// no row are records too: they always exist and cannot be deleted.
 package failurerules
 
 import (
@@ -26,10 +16,9 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// Sources of a rule.
 const (
-	SourceBuiltin = "builtin" // shipped with Iroha, unchanged (it may be switched off)
-	SourceOwner   = "owner"   // added by the Owner or an agent, or a built-in overridden
+	SourceBuiltin = "builtin"
+	SourceOwner   = "owner"
 )
 
 type queryer interface {
@@ -37,19 +26,17 @@ type queryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// row is one row of failure_rules.
 type row struct {
 	name    string
 	enabled bool
-	def     *rules.Rule // nil: the built-in rule of this name as shipped
+	def     *rules.Rule
 }
 
-// entry is one rule as it stands now.
 type entry struct {
 	rule    rules.Rule
 	enabled bool
 	source  string
-	builtin *rules.Rule // the shipped rule of this name, if any
+	builtin *rules.Rule
 }
 
 func builtin(name string) (rules.Rule, bool) {
@@ -110,8 +97,6 @@ func decodeDef(name string, def sql.NullString) (*rules.Rule, error) {
 	return &r, nil
 }
 
-// entryOf combines a row (nil: none) with the built-in of its name. ok is
-// false when the name is neither.
 func entryOf(name string, r *row) (entry, bool) {
 	b, isBuiltin := builtin(name)
 	e := entry{enabled: true, source: SourceBuiltin}
@@ -140,10 +125,6 @@ func readEntry(ctx context.Context, q audit.Querier, name string) (entry, bool, 
 	return e, ok, nil
 }
 
-// readEntries lists every rule in the order they are tried: rules limited to
-// a Provider or host first, then the others; within each, the Owner's new
-// rules (in the order added) before the built-ins, an override taking its
-// built-in's place.
 func readEntries(ctx context.Context, q queryer) ([]entry, error) {
 	rows, err := readRows(ctx, q)
 	if err != nil {
@@ -168,7 +149,6 @@ func readEntries(ctx context.Context, q queryer) ([]entry, error) {
 			out = append(out, e)
 		}
 	}
-	// The order Compile uses: scoped rules first, each group stable.
 	slices.SortStableFunc(out, func(a, b entry) int {
 		switch {
 		case a.rule.Scoped() == b.rule.Scoped():
@@ -181,8 +161,6 @@ func readEntries(ctx context.Context, q queryer) ([]entry, error) {
 	return out, nil
 }
 
-// compile builds the Set of the enabled rules, leaving out (and logging)
-// any stored rule this version of Iroha no longer accepts.
 func compile(entries []entry, log *slog.Logger) *rules.Set {
 	rs := make([]rules.Rule, 0, len(entries))
 	for _, e := range entries {
@@ -198,21 +176,17 @@ func compile(entries []entry, log *slog.Logger) *rules.Set {
 		rs = append(rs, e.rule)
 	}
 	set, err := rules.Compile(rs)
-	if err != nil { // names are unique and every rule was validated
+	if err != nil {
 		panic(err)
 	}
 	return set
 }
 
-// snapshot is what an Audit Entry records of a Failure Rule: its definition
-// and whether it is on.
 type snapshot struct {
 	rules.Rule
 	Enabled bool `json:"enabled"`
 }
 
-// Resource is the Failure Rule resource of the audit machinery. The record
-// ID is the rule's name.
 var Resource = audit.Register(&audit.Resource[snapshot]{
 	Name: "failure_rule", Label: "Failure Rule", Plural: "Failure Rules", Path: "/api/rules",
 	Table: "failure_rules", NameColumn: "name",
@@ -229,10 +203,6 @@ var Resource = audit.Register(&audit.Resource[snapshot]{
 	},
 })
 
-// write makes rule name equal to s, or removes the Owner's row when s is nil
-// (a built-in then stands as shipped). A row exists only while the rule
-// differs from the built-in of its name; a built-in only switched off keeps
-// no copy of its definition.
 func write(ctx context.Context, tx *sql.Tx, name string, s *snapshot) error {
 	if s == nil {
 		_, err := tx.ExecContext(ctx, `DELETE FROM failure_rules WHERE name = ?`, name)
@@ -262,7 +232,6 @@ func sameRule(a, b rules.Rule) bool {
 	return string(x) == string(y)
 }
 
-// Store gives the Gateway the Failure Rules in force.
 type Store struct {
 	db  *store.DB
 	log *slog.Logger
@@ -272,15 +241,10 @@ type Store struct {
 	set     *rules.Set
 }
 
-// New returns a Store.
 func New(db *store.DB, log *slog.Logger) *Store {
 	return &Store{db: db, log: log}
 }
 
-// Set returns the Failure Rules in force: the built-ins merged with the
-// Owner's rules, without those switched off. It notices every committed
-// change (API call or revert) through failure_rules_version, so the next
-// Attempt after a change uses it. Pass it as gateway.Options.Rules.
 func (s *Store) Set() *rules.Set {
 	ctx := context.Background()
 	var n int64
@@ -314,7 +278,6 @@ func (s *Store) cached() *rules.Set {
 	return s.set
 }
 
-// notFound is the 404 of a name that is no rule.
 func notFound(name string) *api.Error {
 	return Resource.NotFound(name)
 }

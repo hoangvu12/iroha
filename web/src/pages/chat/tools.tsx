@@ -10,10 +10,6 @@ import { Switch } from "@/ui/Switch";
 import type { Settings, TestTool } from "./api";
 import { useTestTools, WEATHER_TOOL } from "./api";
 
-// The composer's test tools (UI ticket 29): a wrench with the number of tools
-// on, opening a popover with All on / All off and a Switch per tool. The list
-// is Iroha's (GET /api/test/tools); Iroha answers each call and checks it.
-
 type Icon = ComponentType<{ size?: number; className?: string }>;
 
 const ICONS: Record<string, Icon> = {
@@ -25,12 +21,10 @@ const ICONS: Record<string, Icon> = {
   lookup_order: Package,
 };
 
-/** A test tool's icon; a wrench for a name this UI doesn't know. */
 export function toolIcon(name: string): Icon {
   return ICONS[name] ?? Wrench;
 }
 
-// What "Call a tool" asks, per tool: the first tool on that has one.
 const PROMPTS: [string, string][] = [
   [WEATHER_TOOL, "What's the weather in Hanoi right now? Use the tool."],
   ["calculate", "Use the calculate tool: what is (12.5 * 4) / 3 + 2^10?"],
@@ -40,7 +34,6 @@ const PROMPTS: [string, string][] = [
   ["fetch_url", "Fetch https://example.com/docs/getting-started and tell me what it covers."],
 ];
 
-/** The "Call a tool" starter: turns every tool on when none is, and asks for one that is on. */
 export function callAToolChip(on: string[], all: string[]): { prompt: string; patch?: Partial<Settings> } {
   const patch = on.length ? undefined : { tools: all.length ? all : [WEATHER_TOOL] };
   const active = patch?.tools ?? on;
@@ -48,7 +41,6 @@ export function callAToolChip(on: string[], all: string[]): { prompt: string; pa
   return { prompt, patch };
 }
 
-/** The wrench button and its popover. `tools` is what is on; `onChange` gets the new list, in Iroha's order. */
 export function ToolsButton({ tools, onChange }: { tools: string[]; onChange: (tools: string[]) => void }) {
   const n = tools.length;
   return (
@@ -70,7 +62,6 @@ export function ToolsButton({ tools, onChange }: { tools: string[]; onChange: (t
         collisionPadding={8}
         className={cn(
           "flex w-[min(400px,calc(100vw-16px))] max-h-[min(560px,calc(100dvh-160px),var(--available-height))] flex-col overflow-hidden rounded-xl border border-border bg-elevated text-fg shadow-elevated outline-none",
-          // The shared popup recipe: grows from the button, leaves faster; fades only under reduced motion.
           popupMotionClass,
         )}
       >
@@ -90,7 +81,6 @@ const SAMPLE_TOOLS: TestTool[] = [
 function ToolList({ on, onChange }: { on: string[]; onChange: (tools: string[]) => void }) {
   const list = useTestTools();
   const all = list.data?.map((t) => t.name) ?? [];
-  // Kept in Iroha's order, whatever order they were switched on in.
   const set = (name: string, value: boolean) => onChange(all.filter((n) => (n === name ? value : on.includes(n))));
   const allOn = all.length > 0 && all.every((n) => on.includes(n));
   return (

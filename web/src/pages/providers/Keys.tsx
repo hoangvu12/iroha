@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import {
   CircleCheck,
   Copy,
@@ -18,7 +18,7 @@ import { useLocation, useNavigate } from "react-router";
 import { RecordLink, rec } from "@/sheets/RecordLink";
 import { readStack, writeStack } from "@/sheets/records";
 import { useMaybeSheets } from "@/sheets/stack";
-import type { BulkResult } from "@/api/types";
+import type { ApiErrorShape, BulkResult } from "@/api/types";
 import { formatDuration, formatPercent, plural, timeAgo } from "@/lib/format";
 import { useIsPhone } from "@/lib/media";
 import { useUrlParams } from "@/lib/url-state";
@@ -45,27 +45,13 @@ import { Checkbox, KeyStateLabel, Pill, Segmented, Select, shortWait, stateTone,
 import { SAMPLE_KEYS } from "./samples";
 import { KeysBulkEdit } from "./BulkEdits";
 
-// The Keys tab (C01, C11, C20; phones C31): one line per Upstream Key in the
-// shared DataTable, sorted, filtered, searched and paged; selecting keys turns
-// the toolbar into "N selected" with Test, Disable, Edit… (UI ticket 30) and a ⋯ menu. Every bulk
-// action calls the bulk API and shows per-key results when any key failed. Its
-// result (with Undo, an Audit revert) shows where it was asked for: in the
-// selection bar; from a row's menu, which has closed, it toasts. Deletes ask
-// first (UI ticket 21). A row opens the key's sheet, which does the rest
-// (sheets/records/KeySheet.tsx, UI ticket 27).
-// ?q= searches, ?state= filters, ?sort=&dir= sorts; ?key=<name> (an old link) opens the key's sheet.
-// "Cached, 24 h" is each key's cached share (cache read / input) over its Requests of the last day,
-// test Requests left out (prompt caching 01), so the Owner sees which keys get cache hits.
-
 type StateFilter = "all" | "active" | "cooling" | "invalid" | "disabled" | "gaps";
 type Sort = "name" | "state" | "cached" | "used";
 
 const stateOrder = { invalid: 0, cooling: 1, disabled: 2, active: 3 };
 
-/** Cache usage of the last 24 h by key ID (useKeyCache). */
 type KeyCache = Map<string, StatsGroup>;
 
-/** A key's cached share, undefined when it counted no input in the window. */
 const shareOf = (g?: StatsGroup) => cachedShare(g?.tokens);
 
 const col = columnsFor<UpstreamKey>();
@@ -98,7 +84,6 @@ const keyColumns = (cache: KeyCache) => col.columns([
   col.accessor((k) => shareOf(cache.get(k.id)) ?? -1, {
     id: "cached",
     header: "Cached, 24 h",
-    // Best cached first, then keys without Requests in the window, by name.
     sortFn: (a, b) => (shareOf(cache.get(b.original.id)) ?? -1) - (shareOf(cache.get(a.original.id)) ?? -1) || natural(a.original.name, b.original.name),
     meta: { className: "whitespace-nowrap tabular" },
     cell: ({ row }) => <CachedCell g={cache.get(row.original.id)} />,
@@ -106,14 +91,12 @@ const keyColumns = (cache: KeyCache) => col.columns([
   col.accessor((k) => k.last_used_at ?? "", {
     id: "used",
     header: "Last used",
-    // Most recent first, then by name.
     sortFn: (a, b) => (b.original.last_used_at ?? "").localeCompare(a.original.last_used_at ?? "") || natural(a.original.name, b.original.name),
     meta: { className: "whitespace-nowrap tabular" },
     cell: ({ row }) => (row.original.last_used_at ? timeAgo(row.original.last_used_at) : <span className="text-fg-muted">Never</span>),
   }),
 ]);
 
-/** "25.0%", with what it is made of on hover; a dash for a key with no input in the window. */
 function CachedCell({ g }: { g?: StatsGroup }) {
   const share = shareOf(g);
   if (!g || share === undefined) return <span className="text-fg-muted">–</span>;
@@ -154,7 +137,6 @@ export function KeysTab({
   const location = useLocation();
   const navigate = useNavigate();
 
-  // A key opens in its sheet (UI ticket 27); links from when it opened in a dialog (?key=<name>) open the sheet.
   useEffect(() => {
     if (!openKey) return;
     const p = new URLSearchParams(location.search);
@@ -166,8 +148,6 @@ export function KeysTab({
   const [results, setResults] = useState<Results>();
   const [restricting, setRestricting] = useState<string[]>();
   const [busy, setBusy] = useState<string>();
-  // Results of what the selection bar did show in the bar.
-  // `refresh`: its Undo shows the keys as they were back at once.
   const barSave = useSave({ refresh, describe: errorText });
   const emptySave = useSave({ describe: errorText });
   const copied = useCopy();
@@ -178,8 +158,6 @@ export function KeysTab({
   const sorting = useMemo<SortingState>(() => [{ id: sort, desc }], [sort, desc]);
   const columnFilters = useMemo<ColumnFiltersState>(() => (filter === "all" ? [] : [{ id: "state", value: filter }]), [filter]);
 
-  // Runs a change and shows its result at `at` (the bar, the key's dialog);
-  // without one it came from a row's menu, which has closed, so it toasts.
   const perform = async (failure: string, fn: () => Promise<Done | undefined>, busyWith: string, at?: Save) => {
     setBusy(busyWith);
     try {
@@ -187,10 +165,8 @@ export function KeysTab({
       else {
         try {
           const d = await fn();
-          // Toast: the row's menu has closed.
           if (d) toastDone(d, refresh);
         } catch (e) {
-          // Toast: an error with nowhere else to go (the row's menu has closed).
           notify.failure(failure, e);
         }
       }
@@ -234,7 +210,6 @@ export function KeysTab({
       at,
     );
 
-  // Asks first, naming the keys; the rows are gone afterwards, so the result (with Undo) toasts.
   const askDelete = (names: string[]) => {
     const one = names.length === 1;
     confirm.ask({
@@ -246,17 +221,13 @@ export function KeysTab({
       onConfirm: async () => {
         const res = await calls.bulkKeys(handle, "delete", names);
         refresh();
-        // Toast: the confirm dialog has closed and the rows are gone; Undo after a delete.
         reportBulk(res, names, "deleted", setResults, refresh);
-        // A deleted key's sheet closes with it.
         const at = sheets?.stack.findIndex((e) => e.record.kind === "key" && e.record.provider === handle && names.includes(e.record.key)) ?? -1;
         if (at >= 0) sheets?.close(at);
       },
     });
   };
 
-  // A keyless key: no secret, so Iroha sends no key with it. A failure
-  // shows at `at` (the empty state or the Add keys dialog), which stays.
   const addKeyless = (at: Save) => {
     setBusy("keyless");
     void at
@@ -265,7 +236,6 @@ export function KeysTab({
           const res = await calls.addKeylessKey(handle, keylessName(all));
           refresh();
           setAdding(false);
-          // Toast: the empty state (or the Add keys dialog) it came from is gone now.
           notifyChange(res.upstream_key.name === "keyless" ? "Keyless key added" : `Keyless key ${res.upstream_key.name} added`, res, { onUndone: refresh });
         },
         { quiet: true },
@@ -302,7 +272,6 @@ export function KeysTab({
         <Button icon={Pause} onClick={() => void bulk("disable", names, "disabled", barSave)} loading={busy === "disable"} size={phone ? "sm" : "md"}>
           Disable
         </Button>
-        {/* Enabled and Endpoints with mixed values shown (UI ticket 30); it replaces the bulk "Endpoints…", which started from the first key. */}
         <KeysBulkEdit handle={handle} provider={provider} rows={rows} at={barSave} size={phone ? "sm" : "md"} />
         <Menu>
           <MenuIconTrigger icon={MoreHorizontal} label="More actions for the selected keys" bordered copy={copied.state} />
@@ -350,7 +319,6 @@ export function KeysTab({
         onChange={(e) => setParam("q", e.target.value)}
       />
       {phone ? (
-        // The Select is w-full: its box sets the width, so search and filter share a line (C31).
         <div className="w-28 shrink-0">
           <Select<StateFilter>
             aria-label="Show keys"
@@ -384,7 +352,6 @@ export function KeysTab({
         id="provider-keys"
         label="Upstream Keys"
         columns={columns}
-        // The cached column comes from another query: wait for it so nothing fills in later (a failed one shows dashes).
         data={keys.data && !cache.isPending ? keys.data : undefined}
         sample={SAMPLE_KEYS}
         getRowId={(k) => k.id}
@@ -460,7 +427,6 @@ const filterLabel: Record<StateFilter, string> = {
   gaps: "Gaps",
 };
 
-/** A Model Gap or an Endpoint Gap: the key serves, but not everything. */
 const hasGaps = (k: UpstreamKey) => k.model_gaps.length > 0 || k.endpoint_gaps.length > 0;
 
 const counts: Record<Exclude<StateFilter, "all">, (k: UpstreamKey[]) => number> = {
@@ -498,7 +464,6 @@ function GapsPill({ k }: { k: UpstreamKey }) {
   );
 }
 
-/** What a key's row menu and dialog can do; `at` is where the result shows (none: a toast, from a closed menu). */
 type KeyActions = {
   open: (k: UpstreamKey) => void;
   test: (k: UpstreamKey, at?: Save) => void;
@@ -512,7 +477,6 @@ type KeyActions = {
 };
 
 function KeyMenu({ k, actions, multipleEndpoints }: { k: UpstreamKey; actions: KeyActions; multipleEndpoints: boolean }) {
-  // "Copy key" closes the menu, so the trigger it closes back to shows the result.
   const copied = useCopy();
   return (
     <RowMenu name={k.name} copy={copied.state}>
@@ -559,7 +523,6 @@ function KeyMenu({ k, actions, multipleEndpoints }: { k: UpstreamKey; actions: K
   );
 }
 
-/** Phones (C31): a key in two lines. */
 function KeyLine({ k }: { k: UpstreamKey }) {
   return (
     <>
@@ -575,12 +538,9 @@ function KeyLine({ k }: { k: UpstreamKey }) {
   );
 }
 
-// ---- Results of bulk actions ----
-
 export type ResultRow = { name: string; ok: boolean; text: ReactNode; tone?: "green" | "red" | "gray" };
 export type Results = { title: string; summary: string; rows: ResultRow[] };
 
-/** A bulk change's result (with its Audit Entry for Undo); shows per-key results when any key failed. */
 function bulkDone(res: BulkResult<UpstreamKey>, items: string[], past: string, show: (r: Results) => void): Done | undefined {
   const n = res.succeeded;
   const what = `${n} key${n === 1 ? "" : "s"}`;
@@ -599,10 +559,8 @@ function bulkDone(res: BulkResult<UpstreamKey>, items: string[], past: string, s
   return { message: items.length === 1 && res.failed === 0 ? `${items[0]} ${past}` : `${what} ${past}`, entry: res.audit_entry };
 }
 
-/** A bulk change whose place is gone (a dialog that closed): its toast. */
 export function reportBulk(res: BulkResult<UpstreamKey>, items: string[], past: string, show: (r: Results) => void, refresh: () => void) {
   const d = bulkDone(res, items, past, show);
-  // Toast: the dialog it came from (a confirm, the Endpoints dialog) has closed, so the result has no place left.
   if (d) toastDone(d, refresh);
 }
 
@@ -652,7 +610,6 @@ export function ResultsDialog({ results, onClose }: { results?: Results; onClose
         </Button>
       }
     >
-      {/* No scroll box: the dialog scrolls as a page (UI ticket 28). */}
       <div className="rounded-lg border border-border">
         <ul className="divide-y divide-border">
           {results?.rows.map((r) => (
@@ -668,9 +625,11 @@ export function ResultsDialog({ results, onClose }: { results?: Results; onClose
   );
 }
 
-// ---- Add keys (C11) ----
+function heldBy(e?: ApiErrorShape): string | undefined {
+  if (e?.code !== "upstream_key_duplicate") return undefined;
+  return (e.details as { upstream_key?: string } | undefined)?.upstream_key;
+}
 
-/** The first free name for a keyless key: keyless, keyless-2, ... */
 function keylessName(keys: UpstreamKey[]): string {
   const taken = new Set(keys.map((k) => k.name));
   if (!taken.has("keyless")) return "keyless";
@@ -679,7 +638,6 @@ function keylessName(keys: UpstreamKey[]): string {
   return `keyless-${n}`;
 }
 
-/** Keys pasted one per line (or separated by spaces or commas), deduplicated. */
 function parseKeys(text: string): string[] {
   const seen = new Set<string>();
   for (const t of text.split(/[\s,;]+/)) {
@@ -713,7 +671,6 @@ function AddKeysDialog({
   const [error, setError] = useState<string>();
   const secrets = useMemo(() => parseKeys(text), [text]);
 
-  // Dry run: which keys are new, which the Provider already holds, which are refused.
   useEffect(() => {
     if (!open || secrets.length === 0) return setPreview(undefined);
     let live = true;
@@ -744,12 +701,15 @@ function AddKeysDialog({
   };
 
   const current = preview && preview.secrets === secrets ? preview : undefined;
-  const rows = current?.res?.items.map((it) => ({
-    secret: secrets[it.index],
-    name: it.result?.name,
-    kind: !it.ok ? "error" : it.outcome === "created" ? "new" : "existing",
-    error: it.error?.message,
-  }));
+  const rows = current?.res?.items.map((it) => {
+    const holder = heldBy(it.error);
+    return {
+      secret: secrets[it.index],
+      name: it.result?.name ?? holder,
+      kind: holder ? "existing" : !it.ok ? "error" : it.outcome === "created" ? "new" : "existing",
+      error: it.error?.message,
+    };
+  });
   const fresh = rows?.filter((r) => r.kind === "new").length ?? 0;
 
   const submit = async () => {
@@ -763,13 +723,11 @@ function AddKeysDialog({
       );
       refresh();
       const added = res.items.filter((it) => it.ok && it.outcome === "created").map((it) => it.result?.name ?? "");
-      // Toast: the dialog closes once the keys are in.
       notifyChange(`${added.length} key${added.length === 1 ? "" : "s"} added`, res, { onUndone: refresh });
       close(false);
       if (testAfter && added.length) {
         const t = await calls.testKeys(handle, added);
         refresh();
-        // Toast: a background test finishing after the dialog closed.
         if (t.failed === 0) notify.success(`All ${added.length} new key${added.length === 1 ? "" : "s"} passed the test`);
         else onResults(testResults(t, added));
       }
@@ -818,11 +776,8 @@ function AddKeysDialog({
           </div>
           {current?.error && <p className="border-t border-border px-4 py-2.5 text-[14px] text-danger-text">{current.error}</p>}
           {rows && (
-            // Keeps its own scroll while the dialog scrolls as a page (UI ticket 28): a paste can be
-            // hundreds of keys, and the switch and Add button below must stay a short scroll away.
             <ScrollArea className="border-t border-border" viewportClassName="max-h-[240px]">
               <ul className="divide-y divide-border">
-                {/* Pasted keys are deduplicated, so each secret is one row. */}
                 {rows.map((r) => (
                   <li key={r.secret} className="flex items-center gap-3 px-4 py-2 text-[14px]">
                     <Mono className="w-20 shrink-0 text-fg-muted">{maskSecret(r.secret)}</Mono>
@@ -860,8 +815,6 @@ function AddKeysDialog({
   );
 }
 
-// ---- Endpoints a key may use ----
-
 export function EndpointsDialog({
   handle,
   provider,
@@ -883,13 +836,12 @@ export function EndpointsDialog({
   const [error, setError] = useState<string>();
   const eps = provider?.endpoints ?? [];
 
-  useEffect(() => {
-    if (!names) return;
+  const startFromFirstKey = useEffectEvent((names: string[]) => {
     setError(undefined);
-    // Start from what the first key allows.
-    const first = keys.get(names[0]);
-    setChosen(new Set(first?.endpoints ?? []));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setChosen(new Set(keys.get(names[0])?.endpoints ?? []));
+  });
+  useEffect(() => {
+    if (names) startFromFirstKey(names);
   }, [names]);
 
   const save = async () => {
@@ -903,11 +855,9 @@ export function EndpointsDialog({
         names.map((name) => ({ name, endpoints: list.length === eps.length ? [] : list })),
       );
       refresh();
-      // Toast: the dialog closes on Save.
       reportBulk(res, names, list.length && list.length < eps.length ? `limited to ${list.join(", ")}` : "allowed on every Endpoint", onResults, refresh);
       onClose();
     } catch (e) {
-      // The dialog stays open, so the failure shows in it.
       setError(errorText(e));
     } finally {
       setPending(false);
@@ -960,8 +910,6 @@ export function EndpointsDialog({
     </Dialog>
   );
 }
-
-// ---- One key: its sheet (sheets/records/KeySheet.tsx) ----
 
 export function CoolingRow({ provider, model, reason, until }: { provider: string; model: string; reason: string; until: string }) {
   const left = Math.max(0, Math.round((new Date(until).getTime() - Date.now()) / 1000));

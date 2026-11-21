@@ -63,7 +63,6 @@ test("a header sorts its column: aria-sort says which way, a second press turns 
   expect(nameHeader.getAttribute("aria-sort")).toBe("descending");
   expect(names()).toEqual(["cherry", "banana", "apple"]);
 
-  // Keyboard: focus the Weight header's button and press Enter.
   screen.getByRole("button", { name: "Sort by Weight" }).focus();
   await user.keyboard("{Enter}");
   expect(screen.getByRole("columnheader", { name: /Weight/ }).getAttribute("aria-sort")).toBe("ascending");
@@ -151,8 +150,6 @@ test("a row click opens the row, its Open button does too, and its controls and 
   expect(opened).toHaveBeenCalledTimes(2);
 });
 
-// ---- Select mode (UI ticket 25) ----
-
 function SelectableFruits(p: Partial<DataTableProps<Fruit>> & { opened: (name: string) => void; ate?: (name: string) => void }) {
   const { opened, ate = () => {}, ...rest } = p;
   return (
@@ -185,7 +182,6 @@ test("select mode: once a row is selected, a click anywhere on a row toggles it 
   expect(checked("apple")).toBe("false");
   expect(opened).not.toHaveBeenCalled();
 
-  // The last one unselected leaves select mode: a click opens again.
   await user.click(within(bodyRows()[1]).getByText("yellow"));
   expect(screen.queryByRole("group", { name: /selected/ })).toBeNull();
   await user.click(within(bodyRows()[2]).getByText("8"));
@@ -244,13 +240,11 @@ test("select mode: buttons and links keep their own Space and Enter; Space on th
     col.display({ id: "where", header: "Where", cell: ({ row }) => <a href={`#${row.original.name}`} onClick={linked}>Shop of {row.original.name}</a> }),
   ]);
   render(<SelectableFruits opened={opened} columns={withLink} />);
-  // Outside select mode Space presses the Open button as usual.
   screen.getByRole("button", { name: "Open cherry" }).focus();
   await user.keyboard(" ");
   expect(opened).toHaveBeenLastCalledWith("cherry");
 
   await user.click(screen.getByRole("checkbox", { name: "Select apple" }));
-  // In select mode too: Space and Enter on Open open the row, and select nothing.
   screen.getByRole("button", { name: "Open banana" }).focus();
   await user.keyboard(" ");
   expect(opened).toHaveBeenLastCalledWith("banana");
@@ -258,13 +252,11 @@ test("select mode: buttons and links keep their own Space and Enter; Space on th
   await user.keyboard("{Enter}");
   expect(opened).toHaveBeenCalledTimes(3);
   expect(checked("banana")).toBe("false");
-  // Space on a link does what it does on a page (scrolls), not select the row; Enter follows it.
   screen.getByRole("link", { name: "Shop of banana" }).focus();
   await user.keyboard(" ");
   expect(checked("banana")).toBe("false");
   await user.keyboard("{Enter}");
   expect(linked).toHaveBeenCalledTimes(1);
-  // The keyboard way to pick a row is its box.
   screen.getByRole("checkbox", { name: "Select banana" }).focus();
   await user.keyboard(" ");
   expect(checked("banana")).toBe("true");
@@ -423,7 +415,6 @@ test("a long table is as tall as its rows: its scroller only scrolls sideways, a
   render(<Fruits data={many(100)} paging={{ mode: "none" }} />);
   expect(bodyRows()).toHaveLength(100);
   const region = screen.getByRole("region", { name: "Fruit" });
-  // Nothing caps its height, and its header travels the table's height less its own while the page passes it.
   expect(region.className).not.toMatch(/max-h-/);
   expect(region.style.getPropertyValue("--table-stick-end")).toBe(`${100 * 48}px`);
 });
@@ -442,7 +433,6 @@ test("loading shows the skeleton, an error shows Try again, no rows shows the em
   expect(screen.queryByRole("table")).toBeNull();
 });
 
-// UI ticket 26: a click on a skeleton's row opened a sheet for the sample record.
 test("the skeleton's sample rows open nothing: no row, Open button, row menu or checkbox reacts", async () => {
   const opened = vi.fn();
   const menu = vi.fn();
@@ -475,16 +465,12 @@ test("the skeleton's sample rows open nothing: no row, Open button, row menu or 
   expect(screen.queryByRole("button", { name: /Clear selection/ })).toBeNull();
 });
 
-// UI ticket 26: a hundred rows replacing a skeleton were one long task (render,
-// Skullet's reveal and its copy of the rows); the first screenful comes with the
-// reveal and the rest are added right after, in a transition.
 test("many rows arriving over a skeleton: a screenful comes with the reveal, the rest right after", async () => {
   const footer = ({ shown }: { shown: number }) => `${shown} fruit`;
   const { rerender } = render(<Fruits data={undefined} paging={{ mode: "none" }} footer={footer} />);
   rerender(<Fruits data={many(100)} paging={{ mode: "none" }} footer={footer} />);
   expect(bodyRows()).toHaveLength(30);
   expect(names().slice(0, 3)).toEqual(["fruit-001", "fruit-002", "fruit-003"]);
-  // The footer counts every row from the start.
   expect(screen.getByText("100 fruit")).toBeTruthy();
   await waitFor(() => expect(bodyRows()).toHaveLength(100));
 });
@@ -621,13 +607,6 @@ test("an agent sorts, selects, opens a row's menu and pages", async () => {
   expect(bodyRows()).toHaveLength(30);
 });
 
-// ---- Live rows (ticket 09) ----
-
-/**
- * Lays rows out as a browser would on a page that scrolls (UI ticket 25): the table starts 100 px
- * down the page, its header (40 px) sticks to the top of the window, rows are 48 px, and the
- * page's scrollTop moves them.
- */
 function layOut() {
   const box = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 800, width: 800, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
@@ -651,7 +630,6 @@ afterEach(() => {
 const live = (data: Fruit[]) => (
   <Fruits data={data} defaultSorting={[]} paging={{ mode: "infinite", hasMore: false, loadingMore: false, onLoadMore: () => {}, newRowsLabel: (n) => `${n} new` }} />
 );
-/** The n newest arrivals, newest first: new-(n-1) … new-0. */
 const arrived = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `new-${n - 1 - i}`, name: `new-${n - 1 - i}`, colour: "blue", weight: 0 }));
 
 test("the open row is marked current", () => {
@@ -666,13 +644,12 @@ test("live rows: the page scrolled down, rows arriving on top keep the view stil
   const user = userEvent.setup();
   const rows = many(40);
   const { rerender } = render(live(rows));
-  scrollPage(580); // fruit-011 just under the header stuck at the top of the window
+  scrollPage(580);
   rerender(live([...arrived(2), ...rows]));
   expect(page().scrollTop).toBe(580 + 2 * 48);
   expect(screen.getByRole("button", { name: "2 new" })).toBeTruthy();
   rerender(live([...arrived(3), ...rows]));
   expect(page().scrollTop).toBe(580 + 3 * 48);
-  // Back to the first row: the table's top at the top of the window, its first row under the header.
   await user.click(screen.getByRole("button", { name: "3 new" }));
   expect(page().scrollTop).toBe(100);
   expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
@@ -693,7 +670,7 @@ test("live rows: at the top they come in on top; with the pointer over the rows 
   const user = userEvent.setup();
   const rows = many(40);
   const { rerender } = render(live(rows));
-  scrollPage(100); // the table's top at the window's top, its first row in view under the header
+  scrollPage(100);
   rerender(live([...arrived(1), ...rows]));
   expect(page().scrollTop).toBe(100);
   expect(names()[0]).toBe("new-0");
@@ -703,7 +680,6 @@ test("live rows: at the top they come in on top; with the pointer over the rows 
   rerender(live([...arrived(2), ...rows]));
   expect(page().scrollTop).toBe(148);
   expect(screen.getByRole("button", { name: "1 new" })).toBeTruthy();
-  // Scrolling back to the first row shows them: the pill goes.
   scrollPage(100);
   await waitFor(() => expect(screen.queryByRole("button", { name: "1 new" })).toBeNull());
 });
@@ -716,7 +692,6 @@ test("infinite: a load that leaves the end in view loads again, until there is n
       constructor(cb: (e: { isIntersecting: boolean }[]) => void) {
         this.cb = cb;
       }
-      // A real observer reports where the target is as soon as it observes it: here, always in view.
       observe() {
         this.cb([{ isIntersecting: true }]);
       }

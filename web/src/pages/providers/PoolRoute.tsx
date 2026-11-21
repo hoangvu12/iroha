@@ -18,12 +18,6 @@ import { shapeLabel, SHAPES, useRoutePreview } from "./api";
 import { PoolTile, ProviderTile, Select, skipText, toneText } from "./controls";
 import { SAMPLE_PREVIEW } from "./samples";
 
-// The Pool's Route tab (C19): GET /api/route-preview drawn as a chain of
-// cards on a dotted canvas, refreshed every few seconds: where a Request for
-// the Pool would go right now. The selected card's details sit beside it.
-// The order of members and of each member's keys is the order the next
-// Request makes its Attempts in (internal/gateway preview_next_test.go).
-
 type Node = { kind: "start" } | { kind: "member"; position: number } | { kind: "end" };
 
 const pill: Record<Tone, string> = {
@@ -42,7 +36,6 @@ export function readiness(m: PreviewMember): { text: string; tone: Tone } {
   return { text: m.keys ? "None ready" : "No keys", tone: "red" };
 }
 
-/** The card selected when the Owner picked none: the first member tried, else the End. */
 function firstNode(pv: RoutePreview): Node {
   const first = pv.members.find((m) => m.planned);
   return first ? { kind: "member", position: first.position } : { kind: "end" };
@@ -73,14 +66,13 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
   const current: Node | undefined = selected ?? (pv && firstNode(pv));
   const is = (n: Node) => !!current && current.kind === n.kind && (n.kind !== "member" || (current.kind === "member" && current.position === n.position));
 
-  // The chain of cards for a preview: the live one, or the sample its skeleton is measured from.
   const chainOf = (pv: RoutePreview) => {
     const planned = pv.members.filter((m) => m.planned);
     const off = pv.members.filter((m) => !m.planned);
     const chain: ReactNode[] = [];
     chain.push(
       <Card key="start" selected={is({ kind: "start" })} onSelect={() => setSelected({ kind: "start" })} label="Start">
-        <PoolTile name={name} version={pool?.maker} size={36} />
+        <PoolTile name={name} cacheKey={pool?.maker} size={36} />
         <CardText small="A Caller asks for" big={name} />
         <Tag>Start</Tag>
       </Card>,
@@ -139,9 +131,6 @@ export function PoolRouteTab({ name, pool, onAdd }: { name: string; pool?: Pool;
   const dots = { backgroundImage: "radial-gradient(var(--border-strong) 1px, transparent 1px)", backgroundSize: "20px 20px" };
 
   const live = (
-    // Over the canvas it stays one row at any width, so it never reaches the Start card: the note
-    // truncates first. On phones it sits above the chain and wraps. (Select is w-full inside, so
-    // the box around it sets its width.)
     <div className={cn("flex items-center gap-2", phone && "flex-wrap")}>
       <span className="inline-flex h-8 min-w-0 items-center gap-2 rounded-full border border-border bg-bg px-3 text-[14px] shadow-sm">
         <StatusDot tone={preview.isError ? "red" : "green"} />
@@ -195,11 +184,9 @@ function Card({
   label: string;
   dashed?: boolean;
 }) {
-  // The whole card is the button that selects it; a record's name on it is a link of its own, above it.
   return (
     <div
       className={cn(
-        // Selection and hover change colour and ring only (duration-hover); a card doesn't scale on press.
         "relative flex w-[min(400px,calc(100vw-48px))] items-center gap-3 rounded-xl border bg-bg px-4 py-3 text-left shadow-sm transition-[box-shadow,border-color] duration-hover ease-[ease]",
         dashed && "border-dashed bg-bg/70 shadow-none",
         selected ? "border-info ring-2 ring-info/30" : "border-border hover:border-border-strong",
@@ -226,7 +213,6 @@ function CardText({ small, big, muted }: { small: string; big: ReactNode; muted?
   );
 }
 
-/** A member's Provider on its card: a link to its sheet, above the card's button. */
 function ProviderName({ handle }: { handle: string }) {
   return (
     <RecordLink record={rec.provider(handle)} className="relative">
@@ -243,7 +229,6 @@ export function IconTile({ children }: { children: ReactNode }) {
   return <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-bg text-fg-muted">{children}</span>;
 }
 
-/** The line between two cards; `short` for a long chain (the Rules flow). */
 export function Connector({ label, short }: { label?: string; short?: boolean }) {
   return (
     <div className="flex flex-col items-center" aria-hidden>
@@ -305,7 +290,7 @@ function SidePanel({ pv, pool, node, onClose }: { pv: RoutePreview; pool?: Pool;
   if (node.kind === "start")
     return (
       <div className="p-6">
-        <Header icon={<PoolTile name={name} version={pool?.maker} size={40} />} title={name} subtitle="Model Pool" onClose={onClose} />
+        <Header icon={<PoolTile name={name} cacheKey={pool?.maker} size={40} />} title={name} subtitle="Model Pool" onClose={onClose} />
         <p className="mt-6 text-[15px] text-fg-muted">
           A Caller sends {name} as the model, in the {shapeLabel(pv.shape)} Shape. Iroha tries the members top to bottom, each member's ready keys in order.
         </p>

@@ -7,13 +7,6 @@ import type { Attempt, RequestRecord } from "./api";
 import { AttemptList } from "./Attempts";
 import { SAMPLE_ATTEMPTS, SAMPLE_REQUEST } from "./samples";
 
-// The Attempts tab's cards (UI ticket 18): each opens and closes on the
-// collapse recipe (UI SDK Collapsible, architecture.md "UI motion system"), its
-// chevron turns on the same tokens, the first failed one is open on first paint
-// (no animation), and stepping to another Request (↑/↓ in the sheet) swaps the
-// cards at once with that Request's own default. jsdom has no Tailwind, so
-// this reads the classes on the real markup.
-
 const agent = createAgent();
 
 const ok: Attempt = SAMPLE_ATTEMPTS[0];
@@ -72,7 +65,6 @@ test("an Attempt's response headers fold on the collapse recipe (the shared Disc
   expect(headers.getAttribute("aria-expanded")).toBe("true");
   const block = headers.closest("[data-slot=collapsible]")!.querySelector("pre")!;
   expect(block.textContent).toBe("retry-after: 30");
-  // Highlighted: each header's name is a key.
   expect(block.querySelector('[data-token="key"]')?.textContent).toBe("retry-after");
 });
 

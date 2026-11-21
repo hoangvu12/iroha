@@ -5,13 +5,6 @@ import (
 	"sort"
 )
 
-// reassembleResponses turns OpenAI Responses stream events into the one
-// response object the stream described. A stream that reached
-// response.completed (or .incomplete, .failed) carries that object whole;
-// otherwise the latest response object seen gets the output built from the
-// item events: items as added, their text, reasoning summaries and call
-// arguments continued by the deltas, replaced by output_item.done. An error
-// event is kept as the response's error.
 func reassembleResponses(payloads [][]byte) ([]byte, bool) {
 	var resp map[string]any
 	final := false
@@ -96,8 +89,6 @@ func at(i *int) int {
 	return *i
 }
 
-// entry returns element i of the list item[key], growing the list with
-// parts of type typ as needed.
 func entry(item map[string]any, key string, i int, typ string) map[string]any {
 	l, _ := item[key].([]any)
 	for len(l) <= i {

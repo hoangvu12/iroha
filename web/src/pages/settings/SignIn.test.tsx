@@ -8,10 +8,6 @@ import type { OwnerSession } from "@/api/session";
 import { Toaster } from "@/ui/toast";
 import { SignInTab } from "./SignIn";
 
-// Settings â†’ Sign-in: the signed-in browsers on the shared DataTable (UI
-// ticket 08), signing out asking first, and every control with a name of its
-// own (agents match labels by word: "Sign out" would also match "Sign out Firefox on Linux").
-
 let approve = false;
 const agent = createAgent({ allow: (step) => !step.confirm || approve });
 const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -102,7 +98,6 @@ test("an agent finds every Sign-in control by a name of its own, and needs a per
   const labels = entries.map((e) => e.label ?? "");
   for (const l of ["Change password…", "Sign out this browser", "Sign out Firefox on Linux…", "Sign out Safari on iPhone…", "Sign out the other browsers…", "Sort by Browser"])
     expect(labels, `${l} is missing`).toContain(l);
-  // No name is the start of another, so a ref never matches two controls.
   for (const a of labels) for (const b of labels) if (a !== b) expect(b.startsWith(a + " "), `"${a}" is part of "${b}"`).toBe(false);
 
   const out = { steps: [{ ref: "Sign out Firefox on Linux…", action: "press" }, { ref: "Sign out Firefox on Linux?", action: "press", args: ["Sign it out"] }] };

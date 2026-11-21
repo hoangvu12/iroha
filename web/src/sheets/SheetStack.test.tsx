@@ -40,7 +40,7 @@ test("Provider then Upstream Key: two sheets side by side, newest focused; Escap
   await user.keyboard("{Escape}");
   await waitFor(() => expect(sheets()).toHaveLength(1));
   await waitFor(() => expect(where()).toBe("/page?sheet=provider:acme"));
-  expect(router.state.historyAction).toBe("POP"); // closing went Back, so Forward reopens it
+  expect(router.state.historyAction).toBe("POP");
   expect(historyBefore).toBe("PUSH");
   expect(document.activeElement).toBe(within(providerSheet).getByRole("link", { name: "team-5" }));
   expect(providerSheet.getAttribute("data-depth")).toBe("0");
@@ -75,7 +75,6 @@ test("a shared link opens its whole stack, the top sheet focused", async () => {
   await waitFor(() => expect(top.contains(document.activeElement)).toBe(true));
   expect(top.hasAttribute("data-top")).toBe(true);
 
-  // Nothing opened these sheets in this page load: closing the top one moves focus into the one now on top.
   await userEvent.setup().keyboard("{Escape}");
   await waitFor(() => expect(sheets()).toHaveLength(1));
   expect(document.activeElement).toBe(screen.getByRole("dialog", { name: "Provider acme" }));
@@ -87,12 +86,10 @@ test("opening a record already open focuses it; opening from a lower sheet close
   const keySheet = await screen.findByRole("dialog", { name: "Upstream Key team-5" });
   const providerSheet = screen.getByRole("dialog", { name: "Provider acme" });
 
-  // The key's "Upstream Key of acme" link names a Provider already open: no duplicate, the key sheet closes.
   await user.click(await within(keySheet).findByRole("link", { name: "acme" }));
   await waitFor(() => expect(sheets()).toHaveLength(1));
   await waitFor(() => expect(where()).toBe("/page?sheet=provider:acme"));
 
-  // From the Provider (now top) open team-5, then from the Provider (lower) open team-6: team-5 closes first.
   await user.click(await within(providerSheet).findByRole("link", { name: "team-5" }));
   await screen.findByRole("dialog", { name: "Upstream Key team-5" });
   await user.click(within(providerSheet).getByRole("link", { name: "team-6" }));

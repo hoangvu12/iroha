@@ -12,9 +12,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// heldBody is r with its status and headers sent at once and its body held
-// until release is closed (a Provider that answers its headers early and
-// then generates for minutes, as OpenRouter does on non-stream calls).
 func heldBody(r testkit.Responder, release <-chan struct{}) testkit.Responder {
 	return func(rec *testkit.Received) testkit.Reply {
 		rep := r(rec)
@@ -24,7 +21,6 @@ func heldBody(r testkit.Responder, release <-chan struct{}) testkit.Responder {
 	}
 }
 
-// liveBody is a non-stream answer read byte by byte as it arrives.
 type liveBody struct {
 	t     *testing.T
 	resp  *http.Response
@@ -32,8 +28,6 @@ type liveBody struct {
 	seen  []byte
 }
 
-// openAnswer sends a non-stream Chat Completions Request; the response
-// arrives on the returned channel once its headers do.
 func openAnswer(t *testing.T, caller *testkit.Client) <-chan *liveBody {
 	t.Helper()
 	ch := make(chan *liveBody, 1)
@@ -83,7 +77,6 @@ func noAnswerYet(t *testing.T, ch <-chan *liveBody) {
 	}
 }
 
-// expectByte reads the next byte, waiting up to 10 s real time.
 func (b *liveBody) expectByte(want byte) {
 	b.t.Helper()
 	select {
@@ -100,7 +93,6 @@ func (b *liveBody) expectByte(want byte) {
 	}
 }
 
-// rest reads to the end of the body.
 func (b *liveBody) rest() []byte {
 	b.t.Helper()
 	deadline := time.After(10 * time.Second)
@@ -117,11 +109,6 @@ func (b *liveBody) rest() []byte {
 	}
 }
 
-// TIME-01 (story 19): a non-stream Request whose upstream sends its headers
-// and then takes longer than Cloudflare's 100 s to write the body still
-// reaches the Caller: Iroha commits 200 + JSON once the answer is late and
-// keeps the connection busy with JSON whitespace until the body arrives,
-// which follows byte for byte.
 func TestALateNonStreamAnswerIsCommittedAndPaddedWithWhitespace(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -146,7 +133,6 @@ func TestALateNonStreamAnswerIsCommittedAndPaddedWithWhitespace(t *testing.T) {
 	if b.resp.StatusCode != 200 || b.resp.Header.Get("Content-Type") != "application/json" || b.resp.Header.Get("X-Request-Id") == "" {
 		t.Fatalf("committed with %d %v", b.resp.StatusCode, b.resp.Header)
 	}
-	// Past Cloudflare's 100 s, one newline per KeepAliveEvery of silence.
 	pads := 0
 	for elapsed := gateway.AnswerCommitAfter; elapsed < 120*time.Second; elapsed += gateway.KeepAliveEvery {
 		if err := srv.Clock.BlockUntilDue(ctx, testkit.Epoch.Add(elapsed+gateway.KeepAliveEvery)); err != nil {
@@ -176,9 +162,6 @@ func TestALateNonStreamAnswerIsCommittedAndPaddedWithWhitespace(t *testing.T) {
 	}
 }
 
-// After the commit, a late answer that turns out to be an error moves on to
-// the next key as before; when nothing serves, the failure is the JSON
-// error body in the Caller's Shape, under the 200 already sent.
 func TestFailuresAfterANonStreamCommitMoveOnThenArriveAsAJSONErrorBody(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -205,7 +188,6 @@ func TestFailuresAfterANonStreamCommitMoveOnThenArriveAsAJSONErrorBody(t *testin
 		t.Fatalf("answer %q: %v", got, err)
 	}
 
-	// The only key's body breaks off after the commit.
 	srv.Admin.Post("/api/providers/acme/keys/key-2/disable", nil).Expect(200)
 	release = make(chan struct{})
 	up.Enqueue(heldBody(testkit.Raw(200, "application/json", `{"id":"x","choi`), release).ThenDisconnect())
@@ -229,8 +211,6 @@ func TestFailuresAfterANonStreamCommitMoveOnThenArriveAsAJSONErrorBody(t *testin
 	}
 }
 
-// An answer whose body follows its headers within AnswerGrace is never
-// committed early: it keeps the Provider's status line and bytes.
 func TestANonStreamAnswerArrivingInTimeIsNotPadded(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)

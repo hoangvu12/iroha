@@ -84,8 +84,6 @@ test("loading makes the button busy and unpressable; disabled is unpressable", a
 });
 
 test("buttons, icon buttons and button-styled links press down with the motion tokens, unless disabled or pending", () => {
-  // jsdom can't apply :active, so this pins the `press` utility (styles/index.css,
-  // pinned in motion.test.ts); the browser check sees it move.
   render(
     <>
       <Button>Save</Button>

@@ -1,7 +1,3 @@
-// The records a sheet can show, and how the open stack sits in the URL:
-// one repeated `sheet` param per sheet, oldest first
-// (/requests?range=24h&sheet=request:req_01&sheet=provider:acme&sheet=key:acme/team-5).
-
 export type RequestTab = "details" | "attempts" | "captured";
 
 export type SheetRecord =
@@ -11,13 +7,11 @@ export type SheetRecord =
   | { kind: "endpoint"; provider: string; endpoint: string }
   | { kind: "gateway-key"; key: string }
   | { kind: "pool"; name: string }
-  // UI ticket 33: a model of a Provider's list (its ID may hold slashes), and a Failure Rule as it applies to a Provider.
   | { kind: "model"; provider: string; model: string }
   | { kind: "rule"; provider: string; rule: string };
 
 export type SheetKind = SheetRecord["kind"];
 
-/** Shorthands for links: `rec.key("acme", "team-5")`. */
 export const rec = {
   request: (id: string): SheetRecord => ({ kind: "request", id }),
   provider: (handle: string): SheetRecord => ({ kind: "provider", handle }),
@@ -29,7 +23,6 @@ export const rec = {
   rule: (provider: string, rule: string): SheetRecord => ({ kind: "rule", provider, rule }),
 };
 
-/** "Upstream Key", for titles and names. */
 export const kindLabel: Record<SheetKind, string> = {
   request: "Request",
   provider: "Provider",
@@ -41,7 +34,6 @@ export const kindLabel: Record<SheetKind, string> = {
   rule: "Failure Rule",
 };
 
-/** The record's own name: "req_01", "acme", "team-5". */
 export function recordName(r: SheetRecord): string {
   switch (r.kind) {
     case "request":
@@ -64,7 +56,6 @@ export function recordName(r: SheetRecord): string {
 
 const TABS: RequestTab[] = ["details", "attempts", "captured"];
 
-/** The record's identity in the stack (a Request's tab is not part of it). */
 export function recordKey(r: SheetRecord): string {
   switch (r.kind) {
     case "request":
@@ -98,7 +89,6 @@ function decode(s: string): SheetRecord | undefined {
   if (!rest) return undefined;
   const slash = rest.indexOf("/");
   const head = slash < 0 ? rest : rest.slice(0, slash);
-  // Everything after the Provider: a key's or model's name keeps its own slashes.
   const tail = slash < 0 ? "" : rest.slice(slash + 1);
   switch (kind) {
     case "request": {
@@ -123,7 +113,6 @@ function decode(s: string): SheetRecord | undefined {
   return undefined;
 }
 
-/** The stack a URL's search holds. `?request=<id>` (links from before the stack) opens that Request's sheet. */
 export function readStack(search: string): SheetRecord[] {
   const p = new URLSearchParams(search);
   const listed = p.getAll("sheet");
@@ -143,7 +132,6 @@ export function readStack(search: string): SheetRecord[] {
   return out;
 }
 
-/** `search` with its sheets replaced by `stack` (and the old `request` param dropped). */
 export function writeStack(search: string, stack: SheetRecord[]): string {
   const p = new URLSearchParams(search);
   p.delete("sheet");

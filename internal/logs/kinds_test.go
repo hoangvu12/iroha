@@ -8,8 +8,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// Every kind of event the spec names is registered, listed in the served
-// skill, and readable through the logs API by its Request and Provider.
 func TestEveryEventKindIsDocumentedAndLinkable(t *testing.T) {
 	srv := testkit.Start(t)
 	skill := srv.Anon.Get("/skill.md").Expect(200).Text()
@@ -20,7 +18,6 @@ func TestEveryEventKindIsDocumentedAndLinkable(t *testing.T) {
 		}
 	}
 
-	// The shared kinds that later work emits keep their links.
 	log := srv.App.Logger()
 	for _, k := range []logs.EventKind{logs.KindRuleMatch, logs.KindKeyState, logs.KindModelGap, logs.KindDiscovery, logs.KindJobRun} {
 		log.Warn("example", logs.Kind(k), logs.Request("req_x"), logs.Provider("acme"), "upstream_key", "key-1")

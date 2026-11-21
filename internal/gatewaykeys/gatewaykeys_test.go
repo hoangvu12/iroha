@@ -38,7 +38,6 @@ func TestGatewayKeysAreIssuedReadableScopedAndRevoked(t *testing.T) {
 		t.Fatal("the change shows the whole secret")
 	}
 
-	// A scope names Providers by handle or ID and answers with handles.
 	var friend gatewaykeys.GatewayKeyResult
 	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "friend", "scope": map[string]any{"providers": []any{
 		map[string]any{"provider": acme.Provider.ID, "models": []string{"glm-4.6", " glm-4.6 ", "kimi-k2"}},
@@ -49,7 +48,6 @@ func TestGatewayKeysAreIssuedReadableScopedAndRevoked(t *testing.T) {
 		sc.Providers[1].Provider != "other" || sc.Providers[1].Models != nil {
 		t.Fatalf("scope = %+v", sc)
 	}
-	// Readable by name or ID, any time.
 	for _, ref := range []string{"friend", friend.GatewayKey.ID} {
 		var got gatewaykeys.GatewayKey
 		srv.Admin.Get("/api/gateway-keys/" + ref).Expect(200).JSON(&got)
@@ -57,9 +55,11 @@ func TestGatewayKeysAreIssuedReadableScopedAndRevoked(t *testing.T) {
 			t.Fatalf("read %s = %+v", ref, got)
 		}
 	}
-	// Repeating the create is safe; a new scope updates it.
 	var again, narrowed gatewaykeys.GatewayKeyResult
-	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "friend"}).Expect(200).JSON(&again)
+	if e := srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "friend", "scope": map[string]any{"all": true}}).Expect(409).Err(); e.Code != "name_taken" {
+		t.Fatalf("second issue = %+v", e)
+	}
+	srv.Admin.Put("/api/gateway-keys/friend", map[string]any{"name": "friend"}).Expect(200).JSON(&again)
 	if again.Outcome != "unchanged" || again.GatewayKey.Secret != friend.GatewayKey.Secret {
 		t.Fatalf("repeat = %+v", again)
 	}
@@ -67,7 +67,6 @@ func TestGatewayKeysAreIssuedReadableScopedAndRevoked(t *testing.T) {
 	if narrowed.Outcome != "updated" || len(narrowed.GatewayKey.Scope.Providers) != 1 {
 		t.Fatalf("patch = %+v", narrowed)
 	}
-	// Scope changes are revertible.
 	srv.Admin.Post("/api/audit-entries/"+narrowed.AuditEntry+"/revert", nil).Expect(200)
 	var reverted gatewaykeys.GatewayKey
 	srv.Admin.Get("/api/gateway-keys/friend").Expect(200).JSON(&reverted)
@@ -75,7 +74,6 @@ func TestGatewayKeysAreIssuedReadableScopedAndRevoked(t *testing.T) {
 		t.Fatalf("after revert = %+v", reverted.Scope)
 	}
 
-	// Revoke: permanent, and the name is not issued again.
 	var revoked gatewaykeys.GatewayKeyResult
 	srv.Admin.Post("/api/gateway-keys/friend/revoke", nil).Expect(200).JSON(&revoked)
 	if !revoked.GatewayKey.Revoked || revoked.AuditEntry == "" {
@@ -93,7 +91,6 @@ func TestGatewayKeysAreIssuedReadableScopedAndRevoked(t *testing.T) {
 		t.Fatalf("active = %+v", list)
 	}
 
-	// Bulk issue and revoke.
 	var bulk struct{ Succeeded, Failed int }
 	srv.Admin.Post("/api/gateway-keys/bulk", map[string]any{"items": []any{
 		map[string]any{"name": "a", "scope": map[string]any{"all": true}}, map[string]any{"name": "b"},
@@ -107,8 +104,6 @@ func TestGatewayKeysAreIssuedReadableScopedAndRevoked(t *testing.T) {
 	}
 }
 
-// KEY-13: revoking twice is harmless (unchanged, no second Audit Entry), and
-// a revoked key cannot be edited back to life.
 func TestARevokedGatewayKeyStaysRevokedAndCannotBeEdited(t *testing.T) {
 	srv := testkit.Start(t)
 	srv.Admin.Post("/api/gateway-keys", map[string]any{"name": "friend", "scope": map[string]any{"all": true}}).Expect(201)
@@ -133,7 +128,7 @@ func TestARevokedGatewayKeyStaysRevokedAndCannotBeEdited(t *testing.T) {
 	}
 	var entries struct{ Entries []struct{ ID string } }
 	srv.Admin.Get("/api/audit-entries?record=friend").Expect(200).JSON(&entries)
-	if len(entries.Entries) != 2 { // the create and the one revoke
+	if len(entries.Entries) != 2 {
 		t.Fatalf("audit entries = %+v", entries.Entries)
 	}
 	var k gatewaykeys.GatewayKey
@@ -146,9 +141,6 @@ func TestARevokedGatewayKeyStaysRevokedAndCannotBeEdited(t *testing.T) {
 	}
 }
 
-// KEY-15: last_used_at says when a key last authenticated, to the minute: it
-// is absent before use, set by a successful authentication, not by refused
-// ones, and written at most once a minute.
 func TestLastUsedIsRecordedOnSuccessfulUseToTheMinute(t *testing.T) {
 	srv := testkit.Start(t)
 	var issued gatewaykeys.GatewayKeyResult
@@ -164,7 +156,6 @@ func TestLastUsedIsRecordedOnSuccessfulUseToTheMinute(t *testing.T) {
 	}
 	friend := srv.Client(issued.GatewayKey.Secret)
 
-	// A wrong key is refused and touches nothing.
 	srv.Client(issued.GatewayKey.Secret + "x").Get("/v1/models").Expect(401)
 	if at := lastUsed(); at != nil {
 		t.Fatalf("last used after a refused key = %v", at)
@@ -173,7 +164,6 @@ func TestLastUsedIsRecordedOnSuccessfulUseToTheMinute(t *testing.T) {
 	if at := lastUsed(); at == nil || !at.Equal(testkit.Epoch) {
 		t.Fatalf("last used after a call = %v, want %v", at, testkit.Epoch)
 	}
-	// Within the minute it is not rewritten.
 	srv.Clock.Advance(59 * time.Second)
 	friend.Get("/v1/models").Expect(200)
 	if at := lastUsed(); !at.Equal(testkit.Epoch) {
@@ -184,7 +174,6 @@ func TestLastUsedIsRecordedOnSuccessfulUseToTheMinute(t *testing.T) {
 	if at := lastUsed(); !at.Equal(testkit.Epoch.Add(time.Minute)) {
 		t.Fatalf("last used a minute later = %v", at)
 	}
-	// After revoking, its uses are refused and no longer recorded.
 	srv.Admin.Post("/api/gateway-keys/friend/revoke", nil).Expect(200)
 	srv.Clock.Advance(time.Hour)
 	friend.Get("/v1/models").Expect(401)

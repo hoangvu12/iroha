@@ -16,7 +16,6 @@ import (
 
 const tag = "Test"
 
-// ModelChoices is the answer of GET /api/test/models.
 type ModelChoices struct {
 	Total     int              `json:"total" doc:"Pools and models the caller may use, before the search."`
 	Matched   int              `json:"matched" doc:"How many match q."`
@@ -26,7 +25,6 @@ type ModelChoices struct {
 	Suggested string           `json:"suggested,omitempty" doc:"With prefer naming a Provider: the model to start a test of it with (<provider>/<model>), the one it served most in the last 7 days, else its first listed. Ignores q and limit."`
 }
 
-// ModelChoice is one Pool or Provider model the chat can send to.
 type ModelChoice struct {
 	ID              string   `json:"id" doc:"The name to send: a Pool name or <provider>/<model>."`
 	Model           string   `json:"model" doc:"The Pool name, or the model on its Provider."`
@@ -36,15 +34,12 @@ type ModelChoice struct {
 	Maker           string   `json:"maker,omitempty" doc:"Pools: the model's maker."`
 }
 
-// ProviderChoice is one Provider's matching models.
 type ProviderChoice struct {
 	Provider string        `json:"provider" doc:"Provider handle."`
 	Matched  int           `json:"matched" doc:"Models of this Provider matching q (models may hold fewer when the answer was truncated)."`
 	Models   []ModelChoice `json:"models"`
 }
 
-// Routes are the test chat's read routes: the model picker's search and
-// the snippets. Sending is POST /api/test (the Gateway's TestRoutes).
 func Routes(ms *models.Store, keys *gatewaykeys.Store, db *store.DB) []api.Route {
 	return []api.Route{
 		{
@@ -177,7 +172,6 @@ func boolParam(c *api.Call, name string, def bool) (bool, error) {
 	return v, nil
 }
 
-// BaseURL is the scheme and host a request reached Iroha at.
 func BaseURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
@@ -190,10 +184,8 @@ func BaseURL(r *http.Request) string {
 	return scheme + "://" + host
 }
 
-// suggestWindow is how far back suggested counts what a Provider served.
 const suggestWindow = 7 * 24 * time.Hour
 
-// suggest is the model of handle (in all) served most, else its first; "" when the caller may use none of it.
 func suggest(all []models.CallerModel, handle string, served map[string]int) string {
 	best, most := "", 0
 	for _, m := range all {
@@ -208,8 +200,6 @@ func suggest(all []models.CallerModel, handle string, served map[string]int) str
 	return best
 }
 
-// ordered is all with the preferred Provider's models (prefer "<handle>/...")
-// first, or the preferred Pool first; otherwise all as it is (Pools first).
 func ordered(all []models.CallerModel, prefer string) []models.CallerModel {
 	if prefer == "" {
 		return all
@@ -235,8 +225,6 @@ func ordered(all []models.CallerModel, prefer string) []models.CallerModel {
 	return out
 }
 
-// search filters the caller's models by q, Pools first unless prefer
-// names a Provider (see ordered).
 func search(all []models.CallerModel, q string, limit int, prefer string) ModelChoices {
 	words := strings.Fields(strings.ToLower(q))
 	out := ModelChoices{Total: len(all), Pools: []ModelChoice{}, Providers: []ProviderChoice{}}

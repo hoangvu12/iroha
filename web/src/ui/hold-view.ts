@@ -1,23 +1,10 @@
-import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
-// Keeps a live list still while rows arrive above what the reader is looking at
-// (DataTable's infinite mode with `newRowsLabel`, the Requests feed).
-//
-// Under `root`, the element marked `data-rows` holds the rows, each with
-// `data-row-id`. The scroller is the page: tables grow with their rows and the
-// page scrolls them (UI ticket 25), with a table's header stuck to the top of
-// the window. Elements are found when needed, not kept in refs: the table sits
-// inside a Skeleton, which replaces refs on what it renders.
-//
-// Held: the reader has scrolled away from the first row, or the pointer is over
-// the rows. Then, when new rows come in on top, the scroller moves by their
-// height, so the row the reader was on stays where it was, and `newAbove`
-// counts them for the "N new" pill. At the top with the pointer away, rows come
-// in on top as before. Back at the top, the count clears.
+// Elements are found under `root` when needed, not kept in refs: refs inside Skullet's Skeleton don't hold.
 
 type Snapshot = { id: string; top: number; held: boolean };
 
-export function useHoldView({ enabled, ids, root }: { enabled: boolean; /** The row IDs in their order, top first. */ ids: string[]; root: RefObject<HTMLElement | null> }) {
+export function useHoldView({ enabled, ids, root }: { enabled: boolean; ids: string[]; root: RefObject<HTMLElement | null> }) {
   const [newAbove, setNewAbove] = useState(0);
   const snap = useRef<Snapshot | null>(null);
   const pointerIn = useRef(false);
@@ -26,12 +13,10 @@ export function useHoldView({ enabled, ids, root }: { enabled: boolean; /** The 
   const parts = useCallback(() => {
     const rows = root.current?.querySelector<HTMLElement>("[data-rows]") ?? null;
     const els = [...(rows?.children ?? [])].filter((e): e is HTMLElement => e instanceof HTMLElement && e.hasAttribute("data-row-id"));
-    // The top of what the reader sees: under the table's header stuck to the top of the window (phones' lists have none).
     const visibleTop = rows?.closest("table")?.tHead?.getBoundingClientRect().height ?? 0;
     return { rows, els, visibleTop, target: (document.scrollingElement ?? document.documentElement) as HTMLElement };
   }, [root]);
 
-  /** Remembers the first row in view and where it is. */
   const snapshot = useCallback(() => {
     const { els, visibleTop } = parts();
     if (!enabled || els.length === 0) {
@@ -44,7 +29,6 @@ export function useHoldView({ enabled, ids, root }: { enabled: boolean; /** The 
     if (atTop) setNewAbove(0);
   }, [enabled, parts]);
 
-  // Follow the reader: the page's scroll, the pointer, resizes.
   useEffect(() => {
     if (!enabled) return;
     const box = root.current;
@@ -80,7 +64,7 @@ export function useHoldView({ enabled, ids, root }: { enabled: boolean; /** The 
   }, [enabled, root, parts, snapshot]);
 
   const key = ids.join("\n");
-  useLayoutEffect(() => {
+  const holdAcrossNewIds = useEffectEvent(() => {
     const prev = lastIds.current;
     lastIds.current = ids;
     const s = snap.current;
@@ -96,14 +80,13 @@ export function useHoldView({ enabled, ids, root }: { enabled: boolean; /** The 
         if (added > 0) setNewAbove((n) => n + added);
       }
     }
-    if (enabled && prev.length > 0 && !ids.some((id) => prev.includes(id))) setNewAbove(0); // a different list (filters changed)
+    if (enabled && prev.length > 0 && !ids.some((id) => prev.includes(id))) setNewAbove(0);
     snapshot();
-  }, [key, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  });
+  useLayoutEffect(() => holdAcrossNewIds(), [key, enabled]);
 
-  /** Back to the first row (the pill). */
   const toTop = useCallback(() => {
     const { els, visibleTop, target } = parts();
-    // The first row just under the header (a table's top at the window's top), or 16 px down on a phone's list.
     if (els[0]) target.scrollTop += els[0].getBoundingClientRect().top - (visibleTop || 16);
     setNewAbove(0);
     snapshot();

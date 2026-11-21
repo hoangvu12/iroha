@@ -10,8 +10,6 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// pool creates or replaces a Model Pool through the admin API; members are
-// provider, model pairs.
 func pool(t *testing.T, srv *testkit.Server, name string, extra map[string]any, pairs ...string) {
 	t.Helper()
 	var ms []any
@@ -22,7 +20,7 @@ func pool(t *testing.T, srv *testkit.Server, name string, extra map[string]any, 
 	for k, v := range extra {
 		body[k] = v
 	}
-	srv.Admin.Post("/api/pools", body).OK()
+	srv.Admin.Put("/api/pools/"+name, body).OK()
 }
 
 func TestAPoolFailsOverDownItsMembersAndEchoesItsName(t *testing.T) {
@@ -33,7 +31,6 @@ func TestAPoolFailsOverDownItsMembersAndEchoesItsName(t *testing.T) {
 	pool(t, srv, "glm-4.6", nil, "zai", "glm-4.6", "chutes", "zai-org/GLM-4.6")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// The first member's only key is refused: the second member serves.
 	zai.Enqueue(zai.Error(429, "slow down"))
 	chutes.Enqueue(chutes.Text("hi"))
 	resp := caller.Post("/v1/chat/completions", chatBody("glm-4.6")).Expect(200)
@@ -46,12 +43,10 @@ func TestAPoolFailsOverDownItsMembersAndEchoesItsName(t *testing.T) {
 		r.Attempts[0].Provider != "zai" || r.Attempts[0].WireModel != "glm-4.6" || r.Attempts[1].Provider != "chutes" || r.Summary == "" {
 		t.Fatalf("request = %+v", r)
 	}
-	// The feed filters on it.
 	if !strings.Contains(srv.Admin.Get("/api/requests?pool=glm-4.6").Expect(200).Text(), id) {
 		t.Fatalf("pool filter misses %s", id)
 	}
 
-	// Streamed, each chunk names the Pool.
 	st := chatBody("glm-4.6")
 	st["stream"] = true
 	for _, e := range caller.Post("/v1/chat/completions", st).Expect(200).Events() {
@@ -59,12 +54,10 @@ func TestAPoolFailsOverDownItsMembersAndEchoesItsName(t *testing.T) {
 			t.Fatalf("chunk = %s", e.Data)
 		}
 	}
-	// zai's key cools for the model, so it was skipped without an Attempt.
 	if zai.Count() != 1 || chutes.Count() != 2 {
 		t.Fatalf("calls: zai %d, chutes %d", zai.Count(), chutes.Count())
 	}
 
-	// Reordering applies to the next Request.
 	srv.Clock.Advance(2 * time.Minute)
 	pool(t, srv, "glm-4.6", nil, "chutes", "zai-org/GLM-4.6", "zai", "glm-4.6")
 	caller.Post("/v1/chat/completions", chatBody("glm-4.6")).Expect(200)
@@ -87,7 +80,6 @@ func TestAPoolSharesOneBudgetAcrossItsMembers(t *testing.T) {
 	pool(t, srv, "p", map[string]any{"budget": map[string]any{"max_attempts": 2}}, "a", "m", "b", "m", "c", "m")
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// Two Attempts in all, whichever members they were on.
 	a.Enqueue(a.Error(500, "boom"))
 	b.Enqueue(b.Error(500, "boom"))
 	var e callerError
@@ -96,8 +88,6 @@ func TestAPoolSharesOneBudgetAcrossItsMembers(t *testing.T) {
 		t.Fatalf("error = %+v; c called %d times", e.Error, c.Count())
 	}
 
-	// One time budget: the Pool's 20 s run out on the first member, and the
-	// next member is not tried.
 	srv.Admin.Patch("/api/pools/p", map[string]any{"budget": map[string]any{"max_attempts": 0, "first_byte_seconds": 20}}).OK()
 	a.Enqueue(testkit.Hang())
 	done := make(chan *testkit.Response, 1)
@@ -129,7 +119,6 @@ func TestSwitchedOffAndUnusableMembersAreNotTried(t *testing.T) {
 	if a.Count() != 0 || b.Count() != 1 {
 		t.Fatalf("calls: a %d, b %d", a.Count(), b.Count())
 	}
-	// A disabled Provider, a hidden model: nothing left to plan.
 	srv.Admin.Patch("/api/providers/b", map[string]any{"enabled": false}).OK()
 	resp := caller.Post("/v1/chat/completions", chatBody("p")).Expect(503)
 	e := resp.Err()
@@ -158,14 +147,11 @@ func TestGatewayKeyScopesNamePoolsAndRefuseOthersUniformly(t *testing.T) {
 	pool(t, srv, "q", nil, "b", "m")
 	srv.Admin.Post("/api/providers/a/models", map[string]any{"model": "m", "metadata": map[string]any{"context_length": 200000}}).Expect(201)
 
-	// A key that may use Pool p only: served by its member a, though a is
-	// not in the key's Providers.
 	onlyP := srv.Client(issue(t, srv, "friend", map[string]any{"pools": []string{"p"}}))
 	onlyP.Post("/v1/chat/completions", chatBody("p")).Expect(200)
 	if e := onlyP.Post("/v1/chat/completions", chatBody("a/m")).Expect(403).Err(); e.Code != "provider_not_allowed" {
 		t.Fatalf("a/m = %+v", e)
 	}
-	// A Pool outside the scope and one that does not exist look the same.
 	out := onlyP.Post("/v1/chat/completions", chatBody("q")).Expect(400).Err()
 	none := onlyP.Post("/v1/chat/completions", chatBody("nope")).Expect(400).Err()
 	if out.Code != "invalid_model_id" || strings.ReplaceAll(out.Message, `"q"`, `"nope"`) != none.Message || out.Hint != none.Hint {
@@ -175,7 +161,6 @@ func TestGatewayKeyScopesNamePoolsAndRefuseOthersUniformly(t *testing.T) {
 		t.Fatalf("an out-of-scope Pool reached its member")
 	}
 
-	// The scope reads back with names; unknown Pools are refused.
 	var key struct {
 		Scope struct{ Pools []string }
 	}
@@ -184,13 +169,10 @@ func TestGatewayKeyScopesNamePoolsAndRefuseOthersUniformly(t *testing.T) {
 		t.Fatalf("scope = %+v", key.Scope)
 	}
 	srv.Admin.Patch("/api/gateway-keys/friend", map[string]any{"scope": map[string]any{"pools": []string{"nope"}}}).Expect(404)
-	// A Pool a key names cannot be deleted from under it.
 	if e := srv.Admin.Delete("/api/pools/p").Expect(409).Err(); e.Code != "pool_in_use" || !strings.Contains(e.Message, "friend") {
 		t.Fatalf("delete = %+v", e)
 	}
 
-	// /v1/models lists the Pool with its first member's metadata, and
-	// nothing the key may not use.
 	var list struct {
 		Data []struct {
 			ID            string
@@ -207,7 +189,7 @@ func TestGatewayKeyScopesNamePoolsAndRefuseOthersUniformly(t *testing.T) {
 	for _, m := range list.Data {
 		ids = append(ids, m.ID)
 	}
-	if strings.Join(ids, ",") != "p,q" { // a's model was never listed, only described
+	if strings.Join(ids, ",") != "p,q" {
 		t.Fatalf("models = %v", ids)
 	}
 }
@@ -250,8 +232,6 @@ func TestTheRoutePreviewPlansLikeLiveTrafficAndSendsNothing(t *testing.T) {
 		map[string]any{"provider": "siliconflow", "model": "zai-org/GLM-4.6", "enabled": false}}}).Expect(201)
 	caller := srv.Client(issue(t, srv, "pi", all))
 
-	// key-1 cools for glm-4.6 (key-2 answers), key-2 is then disabled. The
-	// prompt is empty, so there is no conversation and keys go round-robin.
 	zai.Enqueue(zai.Error(429, "slow down").Header("Retry-After", "40"), zai.Text("hi"))
 	caller.Post("/v1/chat/completions", map[string]any{"model": "glm-4.6", "messages": []any{}}).Expect(200)
 	srv.Admin.Post("/api/providers/zai/keys/key-2/disable", nil).OK()
@@ -289,7 +269,6 @@ func TestTheRoutePreviewPlansLikeLiveTrafficAndSendsNothing(t *testing.T) {
 		t.Fatalf("member 3 = %+v", m3)
 	}
 
-	// A provider/model, and the refusal a Gateway Key would get.
 	pv = preview("model=chutes/zai-org/GLM-4.6&shape=anthropic-messages")
 	if len(pv.Members) != 1 || !pv.Members[0].Planned || pv.Members[0].Model != "zai-org/GLM-4.6" || !pv.Members[0].Candidates[0].Translated {
 		t.Fatalf("provider preview = %+v", pv)
@@ -304,7 +283,6 @@ func TestTheRoutePreviewPlansLikeLiveTrafficAndSendsNothing(t *testing.T) {
 		t.Fatalf("as narrow, in scope = %+v", pv)
 	}
 
-	// Every member cooling or off: the members still show, with the refusal.
 	srv.Admin.Post("/api/providers/zai/keys/key-3/disable", nil).OK()
 	srv.Admin.Post("/api/providers/chutes/keys/key-1/disable", nil).OK()
 	pv = preview("model=glm-4.6")

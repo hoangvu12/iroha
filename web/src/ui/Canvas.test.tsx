@@ -5,7 +5,6 @@ import { beforeAll, expect, test } from "vitest";
 import { Canvas } from "./Canvas";
 
 const agent = createAgent();
-// jsdom loads no stylesheet: the motion token the glide times itself by.
 beforeAll(() => document.documentElement.style.setProperty("--duration-move", "250ms"));
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
 
@@ -78,8 +77,6 @@ test("an agent finds every control by name and can zoom", async () => {
   expect(level()).toBe("120%");
 });
 
-// Motion (UI ticket 17): a press on a zoom button, or on a card, glides the
-// world (duration-move, ease-in-out); the wheel, a pan and the keys stay 1:1.
 test("a zoom button glides the world; the wheel and a pan drop the glide at once; + - 0 never glide", async () => {
   const user = userEvent.setup();
   render(<Route />);

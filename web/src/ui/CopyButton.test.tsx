@@ -18,7 +18,7 @@ afterEach(() => {
 
 const setup = () => userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
-/** What UI SDK's live regions read out last (they fill in after 100 ms). */
+/** UI SDK's live regions fill in 100 ms after an announcement. */
 async function announced() {
   await act(() => vi.advanceTimersByTimeAsync(150));
   return [...document.querySelectorAll("[data-ui-sdk-announcer]")].map((r) => r.textContent).filter(Boolean);
@@ -36,10 +36,8 @@ test("a copy button copies its value and says Copied in place, then goes back", 
   expect(button.textContent).toBe("Copy");
   await user.click(button);
   expect(await navigator.clipboard.readText()).toBe("gk_secret");
-  // The copy resolves after the click, so its render can come a moment later.
   await waitFor(() => expect(button.textContent).toBe("Copied"));
   expect(button.getAttribute("data-copy")).toBe("copied");
-  // The result is read out, not toasted.
   expect(await announced()).toContain("Gateway Key copied");
   expect(document.querySelector("[data-slot=toast]")).toBeNull();
   act(() => void vi.advanceTimersByTime(COPIED_MS));
@@ -47,7 +45,6 @@ test("a copy button copies its value and says Copied in place, then goes back", 
   expect(button.hasAttribute("data-copy")).toBe(false);
 });
 
-/** jsdom lays nothing out: give every element the width of its text (7 px a letter) and record width animations. */
 function measureByText() {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     const width = (this.textContent ?? "").length * 7;
@@ -55,7 +52,6 @@ function measureByText() {
   });
   const animate = vi.fn((..._args: Parameters<Element["animate"]>) => ({ cancel() {} }) as Animation);
   Object.defineProperty(HTMLElement.prototype, "animate", { value: animate, configurable: true, writable: true });
-  // The motion tokens as the production build writes them (minified: ".2s", not "200ms").
   document.documentElement.style.setProperty("--duration-indicator", ".2s");
   document.documentElement.style.setProperty("--ease-out", "cubic-bezier(.23, 1, .32, 1)");
   return animate;
@@ -71,7 +67,6 @@ test("at rest the button holds just Copy: nothing keeps the width of Copied", as
   render(<CopyButton value="gk_secret" what="Gateway Key" />);
   const button = screen.getByRole("button", { name: "Copy the Gateway Key" });
   expect(button.textContent).toBe("Copy");
-  // No hidden "Copied" reserving space (the gap the Owner saw), no fixed width.
   expect(button.querySelector("[data-reserve]")).toBeNull();
   for (const el of button.querySelectorAll<HTMLElement>("*")) expect(el.style.width).toBe("");
 });

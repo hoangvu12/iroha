@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# End-to-end test of deploy/deploy.sh against a local Docker container that
-# plays the server (systemd + sshd, see server.Dockerfile). Never touches a
-# real server: the target is 127.0.0.1 on a port Docker maps to the
-# container. Needs Docker, bash, ssh, scp, ssh-keygen and Go.
-#
-#   bash deploy/test/e2e.sh            # KEEP_CONTAINER=1 leaves it running
-#
-# Covers: password login refused even when the server allows it, --check,
-# first deploy with --install-unit as root, deploy as the restricted iroha
-# user, database backup and data surviving a deploy, graceful stop logged as
-# drained, rollback after a binary that crashes (and damages the database)
-# and after one that never becomes ready, a failing first deploy, a failed
-# rollback (exit 11), refusing a wrong binary before any change, and pruning
-# backups.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -36,7 +22,7 @@ trap cleanup EXIT
 
 pass() { printf 'PASS  %s\n' "$*"; }
 bad() { printf 'FAIL  %s\n' "$*"; FAILS=$((FAILS + 1)); }
-check() { # check DESCRIPTION COMMAND...
+check() {
 	local d=$1
 	shift
 	if "$@"; then pass "$d"; else bad "$d"; fi
@@ -45,7 +31,6 @@ on_server() { docker exec "$NAME" bash -c "$1"; }
 ready_version() { on_server "curl -fsS http://127.0.0.1:8080/readyz" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p'; }
 backups() { on_server "find /opt/iroha/backups -mindepth 1 -maxdepth 1 -type d | wc -l"; }
 
-# deploy NAME ARGS...: run deploy.sh, keep its output in $OUT and code in $CODE.
 deploy() {
 	local label=$1
 	shift
@@ -71,25 +56,26 @@ on_server 'install -m 600 -o iroha -g iroha /tmp/key.pub /home/iroha/.ssh/author
 for _ in $(seq 60); do on_server 'systemctl is-active --quiet ssh' && break; sleep 1; done
 KEY="$WORK/deploy_key"
 
-# Test binaries for the failure paths. ExecStart is
-# "iroha --data-dir DIR --addr ADDR", so $2 is the data directory.
-cat >"$WORK/crash" <<'EOF'
-#!/bin/sh
+fake_binary() {
+	{
+		printf '#!/bin/sh\n'
+		printf '%s\n' 'data_dir() { while [ $# -gt 0 ]; do if [ "$1" = --data-dir ]; then printf "%s" "$2"; return; fi; shift; done; }'
+		cat
+	} >"$WORK/$1"
+}
+fake_binary crash <<'EOF'
 [ "$1" = --version ] && { echo broken-crash; exit 0; }
-printf 'IROHA-E2E-DAMAGE' >> "$2/iroha.db"   # a migration gone wrong
+printf 'IROHA-E2E-DAMAGE' >> "$(data_dir "$@")/iroha.db"
 exit 1
 EOF
-cat >"$WORK/hang" <<'EOF'
-#!/bin/sh
+fake_binary hang <<'EOF'
 [ "$1" = --version ] && { echo broken-hang; exit 0; }
-exec sleep 100000                            # alive but never ready
+exec sleep 100000
 EOF
-cat >"$WORK/wrong" <<'EOF'
-#!/bin/sh
+fake_binary wrong <<'EOF'
 echo something-else
 EOF
 
-# 1. Passwords are never used, even though this server accepts them.
 check "server under test accepts password login" on_server 'sshd -T 2>/dev/null | grep -qx "passwordauthentication yes"'
 deploy "unknown key is refused without a prompt" --user iroha --identity "$WORK/stranger_key" --check
 check "unknown key: exit 1" [ "$CODE" = 1 ]
@@ -97,21 +83,17 @@ check "unknown key: says SSH keys are required" has "only uses SSH keys"
 deploy "password flag is refused" --password hunter2
 check "password flag: exit 2" [ "$CODE" = 2 ]
 
-# 2. --check reports what is missing and changes nothing.
 deploy "check before the unit exists" --user iroha --identity "$KEY" --check
 check "check without unit: exit 1 with a hint" bash -c "[ $CODE = 1 ] && printf '%s' \"\$0\" | grep -q 'deploy once with --install-unit'" "$OUT"
 deploy "check as root with --install-unit" --user root --identity "$KEY" --check --install-unit
 check "check as root: exit 0" [ "$CODE" = 0 ]
 
-# 3. A failing first deploy has nothing to go back to: it leaves no binary,
-# no database and the service stopped.
 deploy "failing first deploy" --user root --identity "$KEY" --install-unit --binary "$WORK/crash" --version broken-crash --timeout 6
 check "failing first deploy: exit 10" [ "$CODE" = 10 ]
 check "failing first deploy: says nothing was restored" has "IROHA_DEPLOY rolled_back version=broken-crash restored=none"
 check "failing first deploy: service stopped, nothing left behind" \
 	on_server '! systemctl is-active --quiet iroha && [ ! -e /opt/iroha/iroha ] && [ ! -e /opt/iroha/iroha.db ]'
 
-# 4. First deploy, as root, installing the unit.
 deploy "first deploy" --user root --identity "$KEY" --install-unit --version e2e-1
 check "first deploy: exit 0" [ "$CODE" = 0 ]
 check "first deploy: reports the version" has "IROHA_DEPLOY deployed version=e2e-1 previous=none"
@@ -125,7 +107,6 @@ whoami_ok() { on_server "curl -fsS -o /dev/null -H 'Authorization: Bearer $TOKEN
 check "bootstrap Admin Token works" whoami_ok
 check "deploy output never shows the Admin Token" bash -c "! printf '%s' \"\$0\" | grep -q iroha_admin_" "$OUT"
 
-# 5. Normal deploy as the restricted user: backup, drain, data kept.
 deploy "second deploy as iroha" --user iroha --identity "$KEY" --version e2e-2
 check "second deploy: exit 0" [ "$CODE" = 0 ]
 check "second deploy: reports versions" has "IROHA_DEPLOY deployed version=e2e-2 previous=e2e-1"
@@ -136,7 +117,6 @@ check "backup holds database, previous binary and version" \
 check "data survives a deploy (old Admin Token still works)" whoami_ok
 check "the stop drained in-flight requests" on_server 'journalctl -u iroha -o cat | grep "\"kind\":\"shutdown\"" | tail -1 | grep -q "\"drained\":true"'
 
-# 6. A binary that crashes and damages the database is rolled back.
 deploy "crashing release" --user iroha --identity "$KEY" --binary "$WORK/crash" --version broken-crash --timeout 15
 check "crash: exit 10" [ "$CODE" = 10 ]
 check "crash: reports the rollback" has "IROHA_DEPLOY rolled_back version=broken-crash restored=e2e-2"
@@ -145,20 +125,17 @@ check "crash: database restored from the backup" on_server '! grep -q IROHA-E2E-
 check "crash: data intact (Admin Token works)" whoami_ok
 check "crash: failed binary kept for diagnosis" on_server '[ -f /opt/iroha/.deploy/iroha.failed ]'
 
-# 7. A binary that runs but never becomes ready is rolled back.
 deploy "never-ready release" --user iroha --identity "$KEY" --binary "$WORK/hang" --version broken-hang --timeout 8
 check "hang: exit 10" [ "$CODE" = 10 ]
 check "hang: reports the rollback" has "IROHA_DEPLOY rolled_back version=broken-hang restored=e2e-2"
 check "hang: previous release serving again" [ "$(ready_version)" = e2e-2 ]
 
-# 8. A binary that does not report the expected version changes nothing.
 BEFORE=$(backups)
 deploy "wrong binary" --user iroha --identity "$KEY" --binary "$WORK/wrong" --version e2e-x
 check "wrong binary: exit 1" [ "$CODE" = 1 ]
 check "wrong binary: service untouched" [ "$(ready_version)" = e2e-2 ]
 check "wrong binary: no backup taken" [ "$(backups)" = "$BEFORE" ]
 
-# 9. Old backups are pruned to --keep.
 check "backups accumulated before pruning ($BEFORE)" [ "$BEFORE" -ge 4 ]
 deploy "deploy with --keep 2" --user iroha --identity "$KEY" --version e2e-3 --keep 2
 check "keep 2: exit 0" [ "$CODE" = 0 ]
@@ -166,9 +143,6 @@ check "keep 2: two backups left" [ "$(backups)" = 2 ]
 check "keep 2: the newest backup is kept" on_server 'grep -qx e2e-2 "/opt/iroha/backups/$(ls -1 /opt/iroha/backups | sort | tail -1)/version"'
 check "keep 2: serving e2e-3" [ "$(ready_version)" = e2e-3 ]
 
-# 10. A real Iroha built without the UI ("ui": false on /readyz) is refused
-# and rolled back, unless --no-ui says that is intended. It is built from a
-# clean export of HEAD, whose internal/webui/dist holds only the placeholder.
 mkdir -p "$WORK/noui-src"
 (cd "$ROOT" && git archive HEAD) | tar -x -C "$WORK/noui-src" || bad "export HEAD for the no-UI build"
 (cd "$WORK/noui-src" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-X main.version=e2e-noui" \
@@ -181,17 +155,14 @@ deploy "release without the UI, on purpose" --user iroha --identity "$KEY" --bin
 check "no UI with --no-ui: exit 0" [ "$CODE" = 0 ]
 check "no UI with --no-ui: serving e2e-noui" [ "$(ready_version)" = e2e-noui ]
 
-# 11. When the restored release fails too, the script says so (exit 11).
-# "fragile" is a real Iroha that refuses to start once a marker file exists.
 (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-X main.version=e2e-fragile" \
 	-o "$(native "$WORK/fragile-real")" ./cmd/iroha) || bad "build the fragile binary"
 docker cp "$(native "$WORK/fragile-real")" "$NAME:/opt/iroha/.e2e-fragile-real" >/dev/null
 on_server 'chmod 755 /opt/iroha/.e2e-fragile-real'
-cat >"$WORK/fragile" <<'EOF'
-#!/bin/sh
+fake_binary fragile <<'EOF'
 [ "$1" = --version ] && { echo e2e-fragile; exit 0; }
-[ -e "$2/.e2e-break" ] && exit 1
-exec "$2/.e2e-fragile-real" "$@"
+[ -e "$(data_dir "$@")/.e2e-break" ] && exit 1
+exec "$(data_dir "$@")/.e2e-fragile-real" "$@"
 EOF
 deploy "fragile release" --user iroha --identity "$KEY" --binary "$WORK/fragile" --version e2e-fragile
 check "fragile: deployed" [ "$CODE" = 0 ]

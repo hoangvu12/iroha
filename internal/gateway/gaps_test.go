@@ -12,11 +12,9 @@ import (
 	"github.com/hoangvu12/iroha/internal/testkit"
 )
 
-// entitlements makes up refuse some models to some keys the way providers
-// do (404 model_not_found), and serve everything else.
 type entitlements struct {
 	mu      sync.Mutex
-	refused map[string]bool // "<bearer> <model>"
+	refused map[string]bool
 }
 
 func refuse(t *testing.T, up *testkit.Upstream, pairs ...string) *entitlements {
@@ -55,11 +53,10 @@ func TestARefusedModelCreatesAModelGapAndTheKeyKeepsServingOtherModels(t *testin
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b")
-	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
+	roundRobin(t, srv, "acme")
 	caller := srv.Client(issue(t, srv, "pi", all))
 	refuse(t, up, "sk-test-a gpt-x")
 
-	// key-1 is refused gpt-x; key-2 serves it in the same Request.
 	resp := caller.Post(chatPath, chat("gpt-x")).Expect(200)
 	if got := bearers(up, 0); got != "a,b" {
 		t.Fatalf("keys tried = %s", got)
@@ -70,7 +67,6 @@ func TestARefusedModelCreatesAModelGapAndTheKeyKeepsServingOtherModels(t *testin
 		t.Fatalf("attempt 1 = %+v", r.Attempts[0])
 	}
 
-	// The key stays active; the gap is on the key with its reason and expiry.
 	k1 := readKey(t, srv, "key-1")
 	if k1.State.State != "active" || len(k1.ModelGaps) != 1 {
 		t.Fatalf("key-1 = %+v", k1)
@@ -89,7 +85,6 @@ func TestARefusedModelCreatesAModelGapAndTheKeyKeepsServingOtherModels(t *testin
 		t.Fatalf("a Model Gap changed a Key State: %+v", ev)
 	}
 
-	// Visible per Provider: the list and the summary.
 	var list providers.GapList
 	srv.Admin.Get("/api/providers/acme/model-gaps").Expect(200).JSON(&list)
 	if len(list.ModelGaps) != 1 || list.ModelGaps[0].UpstreamKey != "key-1" || list.ModelGaps[0].Model != "gpt-x" {
@@ -105,7 +100,6 @@ func TestARefusedModelCreatesAModelGapAndTheKeyKeepsServingOtherModels(t *testin
 		t.Fatalf("summary = %+v", sum)
 	}
 
-	// gpt-x never reaches key-1 again; other models still do.
 	n := up.Count()
 	for range 4 {
 		caller.Post(chatPath, chat("gpt-x")).Expect(200)
@@ -121,7 +115,6 @@ func TestARefusedModelCreatesAModelGapAndTheKeyKeepsServingOtherModels(t *testin
 		t.Fatalf("a key with a Model Gap stopped serving other models: %s", got)
 	}
 
-	// Still out a second before 24 hours; back after them, logged as expired.
 	srv.Clock.Advance(24*time.Hour - time.Second)
 	n = up.Count()
 	for range 2 {
@@ -185,7 +178,6 @@ func TestModelGapsClearOnKeyTestKeyEditAndByHand(t *testing.T) {
 		}
 	}
 
-	// A key test refused the model renews the gap; a passing test clears every gap of the key.
 	srv.Clock.Advance(time.Hour)
 	var res gateway.KeyTestResult
 	srv.Admin.Post("/api/providers/acme/keys/key-1/test?model=gpt-x", nil).Expect(200).JSON(&res)
@@ -201,7 +193,6 @@ func TestModelGapsClearOnKeyTestKeyEditAndByHand(t *testing.T) {
 		t.Fatalf("cleared by test = %+v", ev[0])
 	}
 
-	// Editing the key (a rename) clears its gaps; enabling or disabling does not.
 	srv.Admin.Post("/api/providers/acme/keys/key-2/disable", nil).Expect(200)
 	srv.Admin.Post("/api/providers/acme/keys/key-2/enable", nil).Expect(200)
 	if gapsOf(readKey(t, srv, "key-2")) != "gpt-x" {
@@ -216,7 +207,6 @@ func TestModelGapsClearOnKeyTestKeyEditAndByHand(t *testing.T) {
 		t.Fatalf("cleared by edit = %+v", ev[0])
 	}
 
-	// By hand: a dry run changes nothing; the clear is audited and revert restores the gap.
 	var cleared providers.UpstreamKeyResult
 	srv.Admin.Post("/api/providers/acme/keys/key-3/clear-model-gaps?dry_run=true", nil).Expect(200).JSON(&cleared)
 	if !cleared.DryRun || cleared.Outcome != "deleted" || len(cleared.Changes) != 1 || gapsOf(readKey(t, srv, "key-3")) != "gpt-x" {
@@ -245,7 +235,6 @@ func TestModelGapsClearOnKeyTestKeyEditAndByHand(t *testing.T) {
 		t.Fatalf("after revert = %+v", k.ModelGaps)
 	}
 
-	// Once cleared, the model reaches the key again.
 	ents.allow("sk-test-a gpt-x")
 	n := up.Count()
 	caller.Post(chatPath, chat("gpt-x")).Expect(200)
@@ -258,11 +247,11 @@ func TestModelGapsClearInBulkForSelectedKeys(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
 	addProvider(t, srv, "acme", up.URL(), "sk-test-a", "sk-test-b", "sk-test-c")
-	roundRobin(t, srv, "acme") // the assertions follow round-robin key order
+	roundRobin(t, srv, "acme")
 	caller := srv.Client(issue(t, srv, "pi", all))
 	refuse(t, up, "sk-test-a gpt-x", "sk-test-b gpt-x", "sk-test-c gpt-x", "sk-test-a gpt-y")
 	caller.Post(chatPath, chat("gpt-x")).Expect(404)
-	for range 3 { // the third starts at key-1
+	for range 3 {
 		caller.Post(chatPath, chat("gpt-y")).Expect(200)
 	}
 	if g := gapsOf(readKey(t, srv, "key-1")); g != "gpt-x,gpt-y" {
@@ -280,22 +269,16 @@ func TestModelGapsClearInBulkForSelectedKeys(t *testing.T) {
 	if ev := srv.Logs("kind=model_gap&provider=acme&since=1m"); len(ev) < 2 || ev[0].Attrs["op"] != "cleared" || ev[1].Attrs["op"] != "cleared" {
 		t.Fatalf("bulk clear events = %+v", ev)
 	}
-	// One revert puts both back.
 	srv.Admin.Post("/api/audit-entries/"+bulk.AuditEntry+"/revert", nil).Expect(200)
 	if a, b := gapsOf(readKey(t, srv, "key-1")), gapsOf(readKey(t, srv, "key-2")); a != "gpt-x,gpt-y" || b != "gpt-x" {
 		t.Fatalf("after revert: key-1 %q key-2 %q", a, b)
 	}
-	// Without a model, every gap of the selected keys goes.
 	srv.Admin.Post("/api/providers/acme/keys/bulk/clear-model-gaps", map[string]any{"items": []string{"key-1"}}).Expect(200).JSON(&bulk)
 	if gapsOf(readKey(t, srv, "key-1")) != "" || len(bulk.Items[0].Changes) != 2 {
 		t.Fatalf("clear all = %+v", bulk)
 	}
 }
 
-// FAIL-66: a refusal scoped to one key and model (Model Gap, model
-// cooling) keeps the key serving other wire models in the same Request: on
-// an Endpoint that renames the Caller's model differently, or a Pool member
-// naming another model.
 func TestAPerModelRefusalLeavesTheKeyForOtherWireModelsInTheSameRequest(t *testing.T) {
 	srv := testkit.Start(t)
 	a, b := testkit.NewOpenAIChat(t), testkit.NewOpenAIChat(t)
@@ -322,8 +305,6 @@ func TestAPerModelRefusalLeavesTheKeyForOtherWireModelsInTheSameRequest(t *testi
 	}
 }
 
-// Spec "Model Gap": cleared on key edit, and changing which Endpoints a key
-// may use is an edit (the same model may be served on the new ones).
 func TestChangingAKeysEndpointRestrictionClearsItsModelGaps(t *testing.T) {
 	srv := testkit.Start(t)
 	up := testkit.NewOpenAIChat(t)
@@ -335,7 +316,6 @@ func TestChangingAKeysEndpointRestrictionClearsItsModelGaps(t *testing.T) {
 		t.Fatalf("gaps = %q", g)
 	}
 
-	// The same restriction again changes nothing.
 	srv.Admin.Patch("/api/providers/acme/keys/key-1", map[string]any{"endpoints": []string{}}).Expect(200)
 	if g := gapsOf(readKey(t, srv, "key-1")); g != "gpt-x" {
 		t.Fatalf("an unchanged restriction cleared gaps: %q", g)

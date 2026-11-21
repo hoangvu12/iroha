@@ -4,10 +4,6 @@ import { patchParams } from "@/lib/url-state";
 import { useSheets } from "@/sheets/stack";
 import type { Query } from "./api";
 
-// Everything the Requests page shows is in its URL, so a view can be
-// bookmarked or sent to someone: filters, time range, hidden columns and
-// the open sheets (/requests?caller=Test%20(as%20zeron-fleet)&status=failed&range=24h&hide=key,shape&sheet=request:req_...).
-
 export const RANGES = [
   { id: "15m", label: "Last 15 minutes", since: "15m", phrase: "in the last 15 minutes" },
   { id: "1h", label: "Last hour", since: "1h", phrase: "in the last hour" },
@@ -42,7 +38,6 @@ export const COLUMNS = [
 ] as const;
 export type ColumnId = (typeof COLUMNS)[number]["id"];
 
-/** The filters chips and menus edit; the time range is separate (it is never "a filter" to clear). */
 export const FILTER_KEYS = ["q", "caller", "provider", "pool", "model", "status"] as const;
 export type FilterKey = (typeof FILTER_KEYS)[number];
 
@@ -60,7 +55,6 @@ export function useRequestsUrl() {
     return f;
   }, [params]);
   const hidden = useMemo(() => new Set((params.get("hide") ?? "").split(",").filter(Boolean)), [params]);
-  // The open Request is the stack's first sheet (spec "Stacked sheets"); ?request=<id> still opens it.
   const sheets = useSheets();
   const first = sheets.stack[0]?.record;
   const selected = first?.kind === "request" ? first.id : undefined;

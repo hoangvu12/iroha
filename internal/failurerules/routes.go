@@ -16,32 +16,25 @@ import (
 	"github.com/hoangvu12/iroha/internal/store"
 )
 
-// RuleView is one Failure Rule as the API shows it: its definition, whether
-// it is on, where it comes from, what it does, and how often it decided.
 type RuleView struct {
 	rules.Rule
-	Enabled   bool        `json:"enabled" doc:"false: the rule is switched off and never matches."`
-	Source    string      `json:"source" enum:"builtin,owner" doc:"builtin: shipped with Iroha and unchanged (it may be switched off). owner: added by the Owner or an agent, or a built-in rule overridden by name."`
-	Overrides *rules.Rule `json:"overrides,omitempty" doc:"For an owner rule with a built-in rule's name: the built-in rule it replaces. DELETE /api/rules/{rule} brings the built-in back."`
-	Order     int         `json:"order" doc:"Position, from 1, in the order rules are tried (among the rules listed): rules limited to a Provider or host first, then the others; the Owner's new rules before the built-ins. The first enabled rule that matches decides."`
-	KeyEffect string      `json:"key_effect" doc:"What a match does to the Upstream Key, in words: Mark invalid, Cool 60 s, Cool until reset (for the model), Record Model Gap for the model, No change."`
-	// BuiltinKeyEffect words Overrides' outcome, so a UI never words it itself.
-	BuiltinKeyEffect string     `json:"builtin_key_effect,omitempty" doc:"With overrides: what the replaced built-in rule did to the Upstream Key, in the words of key_effect."`
-	RequestEffect    string     `json:"request_effect" enum:"Try next key,Return to Caller" doc:"What a match does to the Request."`
-	Hits             int        `json:"hits" doc:"Failed Attempts this rule decided since hits_since (only on the Provider asked for, when there is one)."`
-	LastHitAt        *time.Time `json:"last_hit_at,omitempty" doc:"When it last decided an Attempt within that window."`
+	Enabled          bool        `json:"enabled" doc:"false: the rule is switched off and never matches."`
+	Source           string      `json:"source" enum:"builtin,owner" doc:"builtin: shipped with Iroha and unchanged (it may be switched off). owner: added by the Owner or an agent, or a built-in rule overridden by name."`
+	Overrides        *rules.Rule `json:"overrides,omitempty" doc:"For an owner rule with a built-in rule's name: the built-in rule it replaces. DELETE /api/rules/{rule} brings the built-in back."`
+	Order            int         `json:"order" doc:"Position, from 1, in the order rules are tried (among the rules listed): rules limited to a Provider or host first, then the others; the Owner's new rules before the built-ins. The first enabled rule that matches decides."`
+	KeyEffect        string      `json:"key_effect" doc:"What a match does to the Upstream Key, in words: Mark invalid, Cool 60 s, Cool until reset (for the model), Record Model Gap for the model, No change."`
+	BuiltinKeyEffect string      `json:"builtin_key_effect,omitempty" doc:"With overrides: what the replaced built-in rule did to the Upstream Key, in the words of key_effect."`
+	RequestEffect    string      `json:"request_effect" enum:"Try next key,Return to Caller" doc:"What a match does to the Request."`
+	Hits             int         `json:"hits" doc:"Failed Attempts this rule decided since hits_since (only on the Provider asked for, when there is one)."`
+	LastHitAt        *time.Time  `json:"last_hit_at,omitempty" doc:"When it last decided an Attempt within that window."`
 }
 
-// RuleList is the response of GET /api/rules.
 type RuleList struct {
 	Provider  string     `json:"provider,omitempty" doc:"Handle of the Provider the list was narrowed to."`
 	HitsSince time.Time  `json:"hits_since" doc:"Start of the window hits count over."`
 	Rules     []RuleView `json:"rules" doc:"In the order they are tried, switched-off rules in their place."`
 }
 
-// RuleFields are the changeable fields of a Failure Rule. Fields left out
-// keep their current values (a built-in's, for a new override); send an
-// empty value to clear one.
 type RuleFields struct {
 	Description    *string            `json:"description,omitempty" doc:"What the rule recognises and why it decides as it does."`
 	Provider       *string            `json:"provider,omitempty" doc:"Handle or ID of the only Provider the rule applies to (stored as the handle); empty for every Provider."`
@@ -56,13 +49,11 @@ type RuleFields struct {
 	Enabled        *bool              `json:"enabled,omitempty" doc:"false switches the rule off. Default true for a new rule."`
 }
 
-// CreateRule is the body of POST /api/rules and each item of its bulk.
 type CreateRule struct {
-	Name string `json:"name" doc:"Unique name. The name of a built-in rule overrides it (fields left out keep the built-in's values); the name of an existing owner rule updates it."`
+	Name string `json:"name" doc:"Unique name; a built-in rule's name is in use. On PUT the path names the rule: leave it out or send the same name. PUT with a built-in rule's name overrides it (fields left out keep the built-in's values)."`
 	RuleFields
 }
 
-// RuleResult is the response of a change to one Failure Rule.
 type RuleResult struct {
 	audit.Result
 	Rule   RuleView `json:"rule" doc:"The rule after the change (on a dry run, as it would be); for a deleted owner rule, the rule as it was."`
@@ -75,7 +66,6 @@ var (
 	ruleSince = api.Param{Name: "since", Description: "Start of the window hits count over: RFC 3339, or a duration back from now such as 24h (the default)."}
 )
 
-// Routes returns the Failure Rule routes.
 func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 	h := handlers{tr: tr, db: db}
 	return []api.Route{
@@ -105,8 +95,9 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 		},
 		{
 			Method: http.MethodPost, Path: "/api/rules", Tag: tag,
-			Summary: "Add a Failure Rule, override a built-in one by name, or update the Owner's rule of that name",
-			Description: "Applies to the next Attempt. With dry_run=true the answer also has replay: the most recent failed Attempts (at most 1000, last 7 days) " +
+			Summary: "Add a Failure Rule",
+			Description: "Applies to the next Attempt. A name in use, a built-in rule's included, answers 409 name_taken: PUT /api/rules/{rule} overrides a built-in rule or updates yours. " +
+				"With dry_run=true the answer also has replay: the most recent failed Attempts (at most 1000, last 7 days) " +
 				"classified by the rules as they are and as they would be, with match counts per rule and the Attempts whose decision would change.",
 			Query:   []api.Param{audit.DryRun},
 			Request: CreateRule{}, Response: RuleResult{},
@@ -116,14 +107,14 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 					return nil, err
 				}
 				return h.mutate(c, "failure_rule.create", "Saved", func(m *audit.Mutation) (RuleView, error) {
-					return h.upsert(m, in)
+					return h.create(m, in)
 				})
 			},
 		},
 		{
 			Method: http.MethodPost, Path: "/api/rules/bulk", Tag: tag,
-			Summary:     "Add, override or update many Failure Rules, each by name",
-			Description: "Each item is applied or refused on its own; read failed and each item's error. Dry runs here report changes but no replay; dry-run one rule at a time to replay it.",
+			Summary:     "Add many Failure Rules",
+			Description: "Each item is added or refused on its own (a name in use: 409 name_taken); read failed and each item's error. Dry runs here report changes but no replay; dry-run one rule at a time to replay it.",
 			Query:       []api.Param{audit.DryRun},
 			Request:     audit.BulkRequest[CreateRule]{}, Response: audit.BulkResult[RuleView]{},
 			Handle: func(c *api.Call) (any, error) {
@@ -131,7 +122,39 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 				if err := c.Decode(&in); err != nil {
 					return nil, err
 				}
-				return audit.Bulk(h.tr, c, "failure_rule.create", "Saved", in.Items, h.upsert)
+				return audit.Bulk(h.tr, c, "failure_rule.create", "Saved", in.Items, h.create)
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/rules/{rule}", Tag: tag,
+			Summary:     "Add the Failure Rule of that name, override the built-in one, or update yours",
+			Description: "Answers 201 with a new rule named as the path, or 200 when a rule of that name exists (outcome updated or unchanged): fields sent are applied, the others kept (a built-in rule's values for an override). dry_run=true adds replay, as on POST /api/rules.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     CreateRule{}, Response: RuleResult{},
+			Handle: func(c *api.Call) (any, error) {
+				var in CreateRule
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				return h.mutate(c, "failure_rule.update", "Saved", func(m *audit.Mutation) (RuleView, error) {
+					return h.put(m, c.Path("rule"), in)
+				})
+			},
+		},
+		{
+			Method: http.MethodPut, Path: "/api/rules/bulk", Tag: tag,
+			Summary:     "Add, override or update many Failure Rules, each by name",
+			Description: "Each item is PUT /api/rules/{rule} with the item's name, applied or refused on its own; read failed and each item's error. Dry runs here report changes but no replay.",
+			Query:       []api.Param{audit.DryRun},
+			Request:     audit.BulkRequest[CreateRule]{}, Response: audit.BulkResult[RuleView]{},
+			Handle: func(c *api.Call) (any, error) {
+				var in audit.BulkRequest[CreateRule]
+				if err := c.Decode(&in); err != nil {
+					return nil, err
+				}
+				return audit.Bulk(h.tr, c, "failure_rule.update", "Saved", in.Items, func(m *audit.Mutation, in CreateRule) (RuleView, error) {
+					return h.put(m, in.Name, in)
+				})
 			},
 		},
 		{
@@ -146,7 +169,7 @@ func Routes(tr *audit.Trail, db *store.DB) []api.Route {
 					return nil, err
 				}
 				return h.mutate(c, "failure_rule.update", "Edited", func(m *audit.Mutation) (RuleView, error) {
-					return h.apply(m, c.Path("rule"), in, false)
+					return h.apply(m, c.Path("rule"), in)
 				})
 			},
 		},
@@ -192,7 +215,7 @@ func (h handlers) switchRoute(word string, on bool) api.Route {
 		Response:    RuleResult{},
 		Handle: func(c *api.Call) (any, error) {
 			return h.mutate(c, "failure_rule."+word, verb, func(m *audit.Mutation) (RuleView, error) {
-				return h.apply(m, c.Path("rule"), RuleFields{Enabled: &on}, false)
+				return h.apply(m, c.Path("rule"), RuleFields{Enabled: &on})
 			})
 		},
 	}
@@ -212,7 +235,7 @@ func (h handlers) bulkSwitchRoute(word string, on bool) api.Route {
 				return nil, err
 			}
 			return audit.Bulk(h.tr, c, "failure_rule."+word, verb, in.Items, func(m *audit.Mutation, name string) (RuleView, error) {
-				return h.apply(m, name, RuleFields{Enabled: &on}, false)
+				return h.apply(m, name, RuleFields{Enabled: &on})
 			})
 		},
 	}
@@ -223,7 +246,6 @@ type handlers struct {
 	db *store.DB
 }
 
-// since reads ?since=, default 24 hours back.
 func (h handlers) since(c *api.Call) (time.Time, error) {
 	now := h.db.Clock().Now().UTC()
 	s := c.Query("since")
@@ -268,7 +290,6 @@ func (h handlers) list(c *api.Call) (any, error) {
 	return out, nil
 }
 
-// view is one rule by name with its global order and hits since since.
 func (h handlers) view(ctx context.Context, q queryer, name string, since time.Time) (RuleView, error) {
 	entries, err := readEntries(ctx, q)
 	if err != nil {
@@ -290,8 +311,6 @@ type hit struct {
 	last time.Time
 }
 
-// countHits counts classified Attempts per rule since since, on one
-// Provider when handle is set.
 func countHits(ctx context.Context, q queryer, since time.Time, handle string) (map[string]hit, error) {
 	query := `SELECT rule, count(*), max(started_at) FROM attempts WHERE outcome != '' AND rule != '' AND started_at >= ?`
 	args := []any{store.Millis(since)}
@@ -332,8 +351,6 @@ func viewOf(e entry, order int, h hit) RuleView {
 	return v
 }
 
-// keyEffect words what rule r does to the Upstream Key when it matches: a
-// reset time the response names, else the rule's time, else 60 s.
 func keyEffect(r rules.Rule) string {
 	cool := "60 s"
 	switch {
@@ -345,8 +362,6 @@ func keyEffect(r rules.Rule) string {
 	return rules.KeyEffect(r.Outcome, cool, "")
 }
 
-// providerScope resolves a Provider by handle or ID to its handle and the
-// hosts of its Endpoints.
 func providerScope(ctx context.Context, q queryer, ref string) (string, []string, error) {
 	id, err := providers.Resource.Resolve(ctx, q, ref)
 	if err != nil {
@@ -374,7 +389,6 @@ func providerScope(ctx context.Context, q queryer, ref string) (string, []string
 	return handle, list, rows.Err()
 }
 
-// appliesTo reports whether a rule can match failures of the Provider.
 func appliesTo(r rules.Rule, handle string, hosts []string) bool {
 	if r.Provider != "" && r.Provider != handle {
 		return false
@@ -385,8 +399,6 @@ func appliesTo(r rules.Rule, handle string, hosts []string) bool {
 	return slices.ContainsFunc(hosts, r.MatchesHost)
 }
 
-// mutate runs one audited rule change; on a dry run it also replays recent
-// failed Attempts under the rules before and after the change.
 func (h handlers) mutate(c *api.Call, action, verb string, fn func(m *audit.Mutation) (RuleView, error)) (RuleResult, error) {
 	var out RuleView
 	var rep *Replay
@@ -414,35 +426,56 @@ func (h handlers) mutate(c *api.Call, action, verb string, fn func(m *audit.Muta
 	return RuleResult{Result: res, Rule: out, Replay: rep}, err
 }
 
-// upsert adds the rule named in.Name or changes the existing one.
-func (h handlers) upsert(m *audit.Mutation, in CreateRule) (RuleView, error) {
+func (h handlers) create(m *audit.Mutation, in CreateRule) (RuleView, error) {
 	if err := api.CheckName("name", in.Name); err != nil {
 		return RuleView{}, err
 	}
-	return h.apply(m, in.Name, in.RuleFields, true)
+	if _, ok, err := readEntry(m.Ctx, m.Tx, in.Name); err != nil || ok {
+		if err == nil {
+			err = Resource.Taken(in.Name, in.Name, "/api/rules/"+in.Name)
+		}
+		return RuleView{}, err
+	}
+	return h.save(m, in.Name, snapshot{Rule: rules.Rule{Name: in.Name}, Enabled: true}, in.RuleFields)
 }
 
-// apply changes rule name by f; with create, a name that is no rule yet
-// makes a new one.
-func (h handlers) apply(m *audit.Mutation, name string, f RuleFields, create bool) (RuleView, error) {
+func (h handlers) put(m *audit.Mutation, name string, in CreateRule) (RuleView, error) {
+	if err := audit.CheckPutName("name", name, in.Name, ""); err != nil {
+		return RuleView{}, err
+	}
 	cur, ok, err := readEntry(m.Ctx, m.Tx, name)
 	if err != nil {
 		return RuleView{}, err
 	}
-	s := snapshot{Rule: rules.Rule{Name: name}, Enabled: true}
-	if ok {
-		s = snapshot{Rule: cur.rule, Enabled: cur.enabled}
-	} else if !create {
+	if !ok {
+		m.Act("failure_rule.create", "Saved")
+		in.Name = name
+		return h.create(m, in)
+	}
+	m.Act("failure_rule.update", "Edited")
+	return h.save(m, name, snapshot{Rule: cur.rule, Enabled: cur.enabled}, in.RuleFields)
+}
+
+func (h handlers) apply(m *audit.Mutation, name string, f RuleFields) (RuleView, error) {
+	cur, ok, err := readEntry(m.Ctx, m.Tx, name)
+	if err != nil {
+		return RuleView{}, err
+	}
+	if !ok {
 		return RuleView{}, notFound(name)
+	}
+	return h.save(m, name, snapshot{Rule: cur.rule, Enabled: cur.enabled}, f)
+}
+
+func (h handlers) save(m *audit.Mutation, name string, s snapshot, f RuleFields) (RuleView, error) {
+	if err := m.Track(Resource, name); err != nil {
+		return RuleView{}, err
 	}
 	if err := f.applyTo(m, &s); err != nil {
 		return RuleView{}, err
 	}
 	if err := rules.Validate(s.Rule); err != nil {
 		return RuleView{}, api.BadRequest("Fix the rule as the message says; GET /api/openapi.json describes each field, and /skill.md has examples.", "%s", err.Error())
-	}
-	if err := m.Track(Resource, name); err != nil {
-		return RuleView{}, err
 	}
 	if err := write(m.Ctx, m.Tx, name, &s); err != nil {
 		return RuleView{}, err
@@ -516,8 +549,6 @@ func trimAll(in []string) []string {
 	return out
 }
 
-// remove deletes the Owner's rule of that name; for a built-in name it
-// drops the override so the built-in stands as shipped.
 func (h handlers) remove(m *audit.Mutation, name string) (RuleView, error) {
 	cur, ok, err := readEntry(m.Ctx, m.Tx, name)
 	if err != nil {
@@ -532,7 +563,7 @@ func (h handlers) remove(m *audit.Mutation, name string) (RuleView, error) {
 	}
 	if r == nil {
 		return RuleView{}, api.Conflict("builtin_rule",
-			fmt.Sprintf("Switch it off with POST /api/rules/%s/disable, or override it with POST /api/rules {\"name\": %q, ...}.", name, name),
+			fmt.Sprintf("Switch it off with POST /api/rules/%s/disable, or override it with PUT /api/rules/%s.", name, name),
 			"%q is a built-in Failure Rule; built-in rules cannot be deleted.", name)
 	}
 	if err := m.Track(Resource, name); err != nil {

@@ -2,9 +2,6 @@ import { Check, Minus } from "lucide-react";
 import { Checkbox as SdkCheckbox, CheckboxIndicator } from "@ui-sdk/react/checkbox";
 import { cn } from "./cn";
 
-// "mixed" shows a dash, for a header box over a partly selected list. A
-// press doesn't reach a clickable row around the box. `onChange` gets the
-// press's event too, so a table can read Shift for a range.
 export function Checkbox({
   checked,
   onChange,

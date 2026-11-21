@@ -10,7 +10,6 @@ import (
 func n(v int64) *int64 { return &v }
 func b(v bool) *bool   { return &v }
 
-// js is a Facts as its JSON, for readable comparisons.
 func js(f modelmeta.Facts) string {
 	out, _ := json.Marshal(f)
 	return string(out)

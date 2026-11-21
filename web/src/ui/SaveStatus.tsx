@@ -8,26 +8,16 @@ import { cn } from "./cn";
 import { useLeaving } from "./presence";
 import { notify, notifyChange } from "./toast";
 
-// Results of inline changes show on the control that made them (spec:
-// "Results show where they happened"): a field, a switch, a toolbar or a
-// dialog that stays open. useSave runs the change and keeps its state;
-// SaveStatus shows "Saving…", then the result with Undo when the change wrote
-// a revertible Audit Entry; SaveError shows a failure under the field. A
-// toast is only for results whose place is gone (toastDone).
-
-/** How long a result stays when there is nothing to undo, and when there is. */
 export const DONE_MS = 2500;
 export const UNDO_MS = 6000;
 
 type Action = { label: string; onClick: () => void };
 
-/** A finished change: what to say, the Audit Entry Undo reverts, and an optional second action ("Details"). */
 export type Done = { message: string; entry?: string; tone?: "ok" | "bad"; action?: Action; undone?: boolean };
 
 type RunOptions<R> = {
   message?: string | ((r: R) => string | Done);
   undoable?: boolean;
-  /** Shows no result here: the change's place goes away and `fn` toasts it. */
   quiet?: boolean;
 };
 
@@ -35,21 +25,13 @@ export type Save = {
   pending: boolean;
   done?: Done;
   error?: string;
-  /**
-   * Runs a change; resolves true when it worked. `message` words the result
-   * ("Saved" by default). `undoable: false` drops Undo, for a switch, which
-   * undoes itself.
-   */
   run<R>(fn: () => Promise<R>, opts?: RunOptions<R>): Promise<boolean>;
-  /** Shows a result worked out elsewhere. */
   show(d: Done): void;
   undo(): Promise<void>;
   clear(): void;
-  /** Keeps the result on screen while the pointer or focus is on it. */
   hold(on: boolean): void;
 };
 
-/** "team-6 is taken. Pick another name." (`errorText` from the API client.) */
 export const describeError = errorText;
 
 const entryOf = (r: unknown) => (r && typeof r === "object" && "audit_entry" in r ? (r as { audit_entry?: string }).audit_entry : undefined);
@@ -152,12 +134,7 @@ export function useSave({ refresh, describe = describeError }: { refresh?: () =>
   return { pending, done, error, run, show, undo, clear, hold };
 }
 
-/**
- * The result of a change, next to the control that made it: "Saving…", then
- * "✓ Renamed to team-6  Undo". Renders nothing when idle.
- */
 export function SaveStatus({ save, className, saving = true }: { save: Save; className?: string; saving?: boolean }) {
-  // A result whose time is up fades out where it was; "Saving…" replaces it at once.
   const result = useLeaving<Done, HTMLSpanElement>(save.done);
   if (save.pending && saving && !save.done) return <span className={cn("whitespace-nowrap text-[13px] text-fg-subtle", className)}>Saving…</span>;
   const d = result.shown;
@@ -193,8 +170,7 @@ export function SaveStatus({ save, className, saving = true }: { save: Save; cla
   );
 }
 
-/** A failed change, under the field that made it. */
-export function SaveError({ save, error, className }: { save: Save; /** A problem found before saving (a form check); shown instead of the save's failure. */ error?: string | null; className?: string }) {
+export function SaveError({ save, error, className }: { save: Save; error?: string | null; className?: string }) {
   const text = error || save.error;
   if (!text) return null;
   return (
@@ -204,29 +180,17 @@ export function SaveError({ save, error, className }: { save: Save; /** A proble
   );
 }
 
-/**
- * A result whose place is gone (its menu or dialog closed, the page moved on):
- * the toast, with Undo when it wrote a revertible Audit Entry.
- */
 export function toastDone(d: Done, onUndone?: () => void) {
   if (d.tone === "bad") return notify.error(d.message, d.action);
   if (d.entry && !d.action) return notifyChange(d.message, { audit_entry: d.entry }, { onUndone });
   return notify.success(d.message, d.action);
 }
 
-/**
- * Undo in the footer of a create dialog that stays open on what it made (a new
- * Gateway Key or Admin Token, shown once): reverts the create's Audit Entry,
- * closes the dialog and toasts `deleted`. `save` holds its pending state and a
- * failure (render `<SaveError save={save} />` in the dialog). Nothing without
- * an `entry`.
- */
 export function UndoCreate({ save, entry, name, deleted, onClose }: { save: Save; entry?: string; name: string; deleted: string; onClose: () => void }) {
   if (!entry) return null;
   const undo = async () => {
     if (await save.run(() => revertEntry(entry))) {
       onClose();
-      // Toast: Undo closed the dialog the create showed in, so its result has no place left.
       notify.success(deleted);
     }
   };
